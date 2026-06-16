@@ -1,0 +1,19 @@
+{
+  "task": "tracker_username_bulk_remove_ui_2026_06_16",
+  "scope": "frontend-only /tracker username removal polish",
+  "buttonOrder": ["Remove Offline", "Remove No Data", "Remove All"],
+  "topArea": "bulk action buttons only — no username chips or per-user remove list",
+  "bottomList": "account rows retain status/stats/backpack — no per-row delete buttons",
+  "classification": {
+    "offline": "entryConnectionFreshness(entry) === 'dead' (red status dot source)",
+    "noData": "!hasRenderableTrackerData(resolveEntryPublicSnapshot(entry))",
+    "removeAll": "existing confirmation modal via removeAllModal"
+  },
+  "bundle": {
+    "js": "inventory.81facb7afd4a.js",
+    "css": "inventory.7c5c078802bf.css"
+  },
+  "tests": "site/tests/tracker_username_bulk_remove_2026_06_16.test.js (9/9 pass)",
+  "proofHtml": "site/proofs/tracker_username_bulk_remove_proof.html",
+  "unchanged": ["Roblox Lua", "backend ingest", "upload pipeline", "Cloudflare", "auth/OAuth/APK"]
+}

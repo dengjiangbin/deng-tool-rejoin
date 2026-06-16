@@ -215,12 +215,12 @@ describe('STRICT tracker fix — mobile/APK remove dropdown not clipped (F)', ()
     );
   });
 
-  test('remove dropdown menu has elevated z-index above the table/list', () => {
+  test('bulk username action buttons use scoped classes without dropdown menu z-index', () => {
     const src = readSource();
-    const block = sliceBalanced(src, '.remove-dropdown__menu {', '{', '}');
-    const m = block.match(/z-index:(\d+)/);
-    assert.ok(m, 'menu has a z-index');
-    assert.ok(Number(m[1]) >= 200, `expected high z-index, got ${m[1]}`);
+    assert.match(src, /\.tracker-username-actions \{/);
+    assert.match(src, /\.tracker-username-action-button \{/);
+    assert.match(src, /\.tracker-username-action-button--offline \{/);
+    assert.doesNotMatch(src, /\.remove-dropdown__menu \{/);
   });
 });
 
@@ -268,10 +268,13 @@ describe('STRICT tracker fix — Runic Stone image override (E)', () => {
 });
 
 describe('STRICT tracker fix — regression (H)', () => {
-  test('remove-all option and single remove still present', () => {
+  test('bulk username remove actions and remove-all modal still present', () => {
     const src = readSource();
-    assert.match(src, /data-remove-all="1"/);
-    assert.match(src, /data-remove-key=/);
+    assert.match(src, /id="removeOfflineBtn"/);
+    assert.match(src, /id="removeNoDataBtn"/);
+    assert.match(src, /id="removeAllBtn"/);
+    assert.match(src, /id="removeAllModal"/);
+    assert.doesNotMatch(src, /data-remove-key=/);
   });
 
   test('Ruby Gemstone stat card + mobile 2-col grid retained', () => {

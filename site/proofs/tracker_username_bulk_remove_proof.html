@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tracker username bulk remove proof</title>
+  <link rel="stylesheet" href="../public/assets/inventory.7c5c078802bf.css">
+  <style>
+    body { margin: 0; background: #0b1220; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    .proof-wrap { max-width: 920px; margin: 0 auto; padding: 20px 16px 40px; }
+    .proof-title { font-size: 1.1rem; font-weight: 700; margin: 0 0 6px; }
+    .proof-note { color: #94a3b8; font-size: .85rem; margin: 0 0 18px; line-height: 1.45; }
+    .proof-section { margin-bottom: 28px; }
+    .proof-label { font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #64748b; margin-bottom: 8px; }
+    .proof-badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(34,197,94,.15); color: #86efac; font-size: .72rem; font-weight: 700; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <div class="proof-wrap">
+    <h1 class="proof-title">/tracker username bulk remove UI proof</h1>
+    <p class="proof-note">Top control area shows exactly three bulk buttons in order. No username chips or dropdown list. Bottom account rows keep status and backpack only — no per-row remove buttons.</p>
+
+    <div class="proof-section">
+      <div class="proof-label">Top bulk controls <span class="proof-badge">PASS</span></div>
+      <div class="player-control-bar">
+        <input type="text" placeholder="Enter nickname..." aria-label="Roblox nickname" value="">
+        <button class="btn btn-add" type="button">+ Add</button>
+        <button class="btn btn-multiple" type="button">+ Multiple</button>
+        <div class="tracker-username-actions" aria-label="Bulk username removal">
+          <button type="button" class="tracker-username-action-button tracker-username-action-button--offline" id="removeOfflineBtn">Remove Offline</button>
+          <button type="button" class="tracker-username-action-button tracker-username-action-button--nodata" id="removeNoDataBtn">Remove No Data</button>
+          <button type="button" class="tracker-username-action-button tracker-username-action-button--all tracker-username-action-danger" id="removeAllBtn">Remove All</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="proof-section">
+      <div class="proof-label">Bottom account list (no row delete buttons) <span class="proof-badge">PASS</span></div>
+      <div class="accounts-table-wrap">
+        <table class="accounts-table" aria-label="Account leaderboard">
+          <thead>
+            <tr>
+              <th scope="col" class="col-index">#</th>
+              <th scope="col" class="col-status">Status</th>
+              <th scope="col" class="col-username">Username</th>
+              <th scope="col" class="col-coin">Coins</th>
+              <th scope="col" class="col-total-caught">Caught</th>
+              <th scope="col" class="col-rarest-fish">Rare</th>
+              <th scope="col" class="col-backpack">Backpack</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="accounts-table__index col-index">1</td>
+              <td class="accounts-table__status col-status"><span class="accounts-status"><span class="status-dot live"></span><span class="accounts-status__text">12s</span></span></td>
+              <td class="accounts-table__username col-username">PlayerOnline</td>
+              <td class="accounts-table__stat col-coin coin-value">1,250,000</td>
+              <td class="accounts-table__stat col-total-caught">842</td>
+              <td class="accounts-table__stat col-rare rarest-fish-value">Mythic Koi</td>
+              <td class="col-backpack"><button type="button" class="accounts-table__icon-btn" title="Open inventory">🎒</button></td>
+            </tr>
+            <tr>
+              <td class="accounts-table__index col-index">2</td>
+              <td class="accounts-table__status col-status"><span class="accounts-status"><span class="status-dot dead"></span><span class="accounts-status__text">2h</span></span></td>
+              <td class="accounts-table__username col-username">PlayerOffline</td>
+              <td class="accounts-table__stat col-coin coin-value is-muted">—</td>
+              <td class="accounts-table__stat col-total-caught is-muted">—</td>
+              <td class="accounts-table__stat col-rare rarest-fish-value is-muted">—</td>
+              <td class="col-backpack"><button type="button" class="accounts-table__icon-btn" title="Open inventory">🎒</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

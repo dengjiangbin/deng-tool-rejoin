@@ -65,7 +65,7 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
     assert.match(tpl, /accounts-mobile-card__row-label">Caught/);
     assert.match(tpl, /accounts-mobile-card__row-label">Rare/);
     assert.match(tpl, /data-open-backpack/);
-    assert.match(tpl, /data-remove-account/);
+    assert.doesNotMatch(tpl, /data-remove-account/);
     assert.match(tpl, /id="viewFishGridBtn"[^>]*title="Fish grid"/);
   });
 });

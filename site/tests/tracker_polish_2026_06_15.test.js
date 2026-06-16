@@ -110,10 +110,16 @@ describe('STRICT /tracker polish — Ruby Gemstone stat card (C/G)', () => {
 });
 
 describe('STRICT /tracker polish — remove all usernames (D)', () => {
-  test('remove menu includes a Remove all usernames item', () => {
+  test('bulk username actions include Remove All with confirmation modal', () => {
     const source = readSource();
-    assert.match(source, /data-remove-all="1"/);
-    assert.match(source, /Remove all usernames/);
+    assert.match(source, /id="removeAllBtn"/);
+    assert.match(source, />Remove All</);
+    assert.match(source, /id="removeOfflineBtn"/);
+    assert.match(source, />Remove Offline</);
+    assert.match(source, /id="removeNoDataBtn"/);
+    assert.match(source, />Remove No Data</);
+    assert.doesNotMatch(source, /data-remove-all="1"/);
+    assert.doesNotMatch(source, /remove-dropdown__item/);
   });
 
   test('confirm modal exists with explicit copy and danger action', () => {

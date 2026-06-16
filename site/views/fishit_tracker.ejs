@@ -195,12 +195,10 @@
       <input type="text" id="usernameInput" name="username" placeholder="Enter nickname..." maxlength="20" autocomplete="username" spellcheck="false" aria-label="Roblox nickname" aria-describedby="usernameError" inputmode="text">
       <button class="btn btn-add" id="addBtn" type="button">+ Add</button>
       <button class="btn btn-multiple" id="multipleBtn" type="button">+ Multiple</button>
-      <div class="remove-dropdown">
-        <button class="btn-remove-menu" id="removeMenuBtn" type="button" aria-label="Remove account" aria-haspopup="menu" aria-expanded="false" aria-controls="removeMenu">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
-          <svg class="btn-remove-menu__caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
-        </button>
-        <div class="remove-dropdown__menu" id="removeMenu" role="menu" hidden></div>
+      <div class="tracker-username-actions" aria-label="Bulk username removal">
+        <button type="button" class="tracker-username-action-button tracker-username-action-button--offline" id="removeOfflineBtn">Remove Offline</button>
+        <button type="button" class="tracker-username-action-button tracker-username-action-button--nodata" id="removeNoDataBtn">Remove No Data</button>
+        <button type="button" class="tracker-username-action-button tracker-username-action-button--all tracker-username-action-danger" id="removeAllBtn">Remove All</button>
       </div>
       <div class="username-error" id="usernameError" role="status" aria-live="polite"></div>
     </div>
@@ -300,7 +298,6 @@
             <col class="col-caught">
             <col class="col-rare">
             <col class="col-backpack">
-            <col class="col-actions">
           </colgroup>
           <thead>
             <tr>
@@ -311,7 +308,6 @@
               <th scope="col" class="col-caught col-total-caught" data-col="total-caught"><span class="th-full">Total Caught</span><span class="th-short">Caught</span></th>
               <th scope="col" class="col-rare col-rarest-fish" data-col="rarest-fish"><span class="th-full">Rarest Fish</span><span class="th-short">Rare</span></th>
               <th scope="col" class="col-backpack">Backpack</th>
-              <th scope="col" class="col-actions">Actions</th>
             </tr>
           </thead>
           <tbody id="accountsTableBody"></tbody>

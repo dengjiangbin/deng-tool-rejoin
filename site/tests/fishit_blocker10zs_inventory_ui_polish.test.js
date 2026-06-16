@@ -54,15 +54,16 @@ describe('BLOCKER10ZS inventory UI polish — tabs, search, controls, stats', ()
     assert.doesNotMatch(tpl, />x Remove</);
   });
 
-  test('top player control bar has Add, Multiple, and icon-only remove menu', async () => {
+  test('top player control bar has Add, Multiple, and bulk username remove actions', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
     assert.match(res.text, /placeholder="Enter nickname\.\.\."/);
     assert.match(res.text, /id="addBtn"[^>]*>\+ Add</);
     assert.match(res.text, /id="multipleBtn"[^>]*>\+ Multiple</);
-    assert.match(res.text, /id="removeMenuBtn"/);
-    assert.match(res.text, /class="btn-remove-menu"/);
-    assert.doesNotMatch(res.text, />\s*Remove\s*</);
-    assert.match(res.text, /aria-label="Remove account"/);
+    assert.match(res.text, /class="tracker-username-actions"/);
+    assert.match(res.text, /id="removeOfflineBtn"/);
+    assert.match(res.text, /id="removeNoDataBtn"/);
+    assert.match(res.text, /id="removeAllBtn"/);
+    assert.doesNotMatch(res.text, /id="removeMenuBtn"/);
   });
 
   test('top stats cards include Online / Accounts and Forgotten Fish', async () => {
