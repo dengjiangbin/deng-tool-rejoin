@@ -1,0 +1,38 @@
+{
+  "task": "tracker_frontend_stale_hydration_fix_2026_06_16",
+  "apiProof": {
+    "endpoint": "GET http://127.0.0.1:8791/api/tracker/get-backpack/geptzy392?lite=1",
+    "httpStatus": 200,
+    "snapshotTimestamp": "2026-06-15T18:10:56.703Z",
+    "snapshotAgeMinutes": 658,
+    "leaderstatsPresent": true,
+    "fishCount": 7,
+    "stoneCount": 2,
+    "totemCount": 1,
+    "ownerAccount": "geptzy392",
+    "note": "API returns renderable inventory but snapshot is ~11h old on disk; frontend fix ensures UI renders API/last-good data and rejects stale empty status overwrites."
+  },
+  "frontendRootCause": [
+    "mergePreservedInventorySnapshot treated provenEmptyInventory before row counts and could ignore real fish rows",
+    "status-only account-status merges could overwrite leaderstats while preserving fish but liveSnapshot.playerStats stayed null",
+    "getEntryPlayerStats only read liveSnapshot.playerStats, not lastData.playerStats from get-backpack",
+    "buildLiveSnapshotFromPayload did not resolve inventory via resolveEntryPublicSnapshot",
+    "no timestamp-aware shouldReplaceCurrentSnapshot allowed older empty heartbeats to win timestamps"
+  ],
+  "frontendFix": [
+    "getSnapshotTime/isNewerSnapshot/shouldReplaceCurrentSnapshot/hasRenderableTrackerData",
+    "timestamp-aware merge with STATS_PRESERVE_KEYS",
+    "getEntryPlayerStats + resolveEntryPlayerStatsSource fallback to lastData",
+    "buildLiveSnapshotFromPayload uses resolveEntryPublicSnapshot",
+    "pollUser fetch uses credentials same-origin + no-store"
+  ],
+  "bundle": {
+    "js": "inventory.2e92af6729d3.js",
+    "css": "inventory.d62363e68ab0.css"
+  },
+  "serviceWorker": "none in repo",
+  "bundle": {
+    "js": "inventory.2e92af6729d3.js",
+    "css": "inventory.d62363e68ab0.css"
+  }
+}
