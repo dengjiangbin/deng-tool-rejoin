@@ -132,7 +132,10 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.match(source, /function liveSecondsSinceStatsSuccess/);
     assert.match(source, /function liveSecondsSinceInventorySuccess/);
     assert.match(source, /function formatStatsUploadDurationText/);
-    assert.match(source, /formatPresenceStatusText[\s\S]*liveSecondsSinceStatusSuccess/);
+    // Presence/Status sync text now follows the FRONTEND refresh time (visible
+    // UX timer); the backend status lane stays available via backendPresenceAgeSeconds.
+    assert.match(source, /formatPresenceStatusText[\s\S]*return formatFrontendRefreshAgeText\(entry\)/);
+    assert.match(source, /function backendPresenceAgeSeconds[\s\S]*liveSecondsSinceStatusSuccess/);
     assert.match(source, /formatCaughtActivitySub[\s\S]*formatStatsUploadDurationText/);
     assert.match(source, /formatEntrySyncStatusText[\s\S]*liveSecondsSinceInventorySuccess/);
     assert.match(source, /patchAccountStatusDom[\s\S]*entryConnectionFreshness[\s\S]*formatPresenceStatusText/);
@@ -143,13 +146,15 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.match(source, /inventoryLastSuccessAt/);
   });
 
-  test('page refresh initializes timers from server seconds-since fields', () => {
+  test('page refresh: stats/inventory timers use server seconds-since; presence uses frontend refresh', () => {
     const source = fs.readFileSync(SOURCE_PATH, 'utf8');
     const names = [
       'liveDriftedSeconds',
       'liveSecondsSinceStatusSuccess',
       'liveSecondsSinceStatsSuccess',
       'liveSecondsSinceInventorySuccess',
+      'getEntryFrontendRefreshAgeMs',
+      'formatFrontendRefreshAgeText',
       'formatPresenceStatusText',
       'formatStatsUploadDurationText',
       'formatEntrySyncStatusText',
@@ -200,9 +205,13 @@ describe('tracker upload interval 60s + aio domain regression', () => {
         secondsSinceLastInventorySuccess: 45,
       },
       _uploadStatusFetchedAtMs: Date.now(),
+      _frontendRefreshAt: Date.now() - 3000,
       lastData: {},
     };
-    assert.equal(fns.formatPresenceStatusText(entry), '45s');
+    // Presence/Status sync text follows the FRONTEND receive time (3s ago here),
+    // NOT the 45s-old backend status snapshot.
+    assert.equal(fns.formatPresenceStatusText(entry), '3s');
+    // Stats and inventory lane timers still reflect real server seconds-since.
     assert.equal(fns.formatStatsUploadDurationText(entry), '45s');
     assert.equal(fns.formatEntrySyncStatusText(entry), '45s');
   });
