@@ -80,9 +80,62 @@ async function renameAsyncWithRetry(tmp, target, maxAttempts = 4) {
   throw lastErr;
 }
 
+// Rebuild the account index by scanning the shard files themselves, which are
+// the real source of truth. Used to self-heal when index.json is missing or
+// corrupt so a single bad index file can never permanently block every persist.
+function rebuildIndexFromAccounts() {
+  const rebuilt = { updatedAt: new Date().toISOString(), uidAliases: {}, accounts: {} };
+  let dir;
+  try {
+    dir = accountsDir();
+    if (!fs.existsSync(dir)) return rebuilt;
+  } catch (_) {
+    return rebuilt;
+  }
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.endsWith('.tmp'));
+  } catch (_) {
+    return rebuilt;
+  }
+  for (const f of files) {
+    const full = path.join(dir, f);
+    try {
+      const stat = fs.statSync(full);
+      const txt = fs.readFileSync(full, 'utf8');
+      const row = JSON.parse(txt);
+      const key = (row && (row.usernameKey || row.username))
+        ? String(row.usernameKey || row.username).toLowerCase()
+        : f.slice(0, -5);
+      rebuilt.accounts[key] = {
+        updatedAt: (row && (row.updatedAt || row.lastSeenAt)) || stat.mtime.toISOString(),
+        bytes: Buffer.byteLength(txt, 'utf8'),
+      };
+    } catch (_) {
+      // Skip an individual corrupt/unreadable shard rather than aborting the rebuild.
+    }
+  }
+  return rebuilt;
+}
+
 function readIndexFromDisk() {
   if (!fs.existsSync(indexPath())) return defaultIndex();
-  const raw = JSON.parse(fs.readFileSync(indexPath(), 'utf8'));
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(indexPath(), 'utf8'));
+  } catch (err) {
+    console.warn(
+      '[fishit] sharded index unreadable (%s); quarantining and rebuilding from account shards',
+      err && err.message ? err.message : err,
+    );
+    try {
+      fs.renameSync(indexPath(), `${indexPath()}.corrupt-${Date.now()}`);
+    } catch (_) { /* ignore quarantine failure; rebuild still proceeds */ }
+    const rebuilt = rebuildIndexFromAccounts();
+    // Force the healed index to be written back on the next flush cycle.
+    _indexDirty = true;
+    return rebuilt;
+  }
   return {
     updatedAt: raw.updatedAt || null,
     uidAliases: raw.uidAliases && typeof raw.uidAliases === 'object' ? raw.uidAliases : {},
@@ -92,7 +145,15 @@ function readIndexFromDisk() {
 
 function ensureIndexLoaded() {
   if (_index) return _index;
-  _index = readIndexFromDisk();
+  try {
+    _index = readIndexFromDisk();
+  } catch (err) {
+    // Last-resort guard: never leave _index null, or every saveAccount would
+    // re-read and re-throw forever, silently dropping all uploads.
+    console.warn('[fishit] sharded index load failed hard (%s); using empty index', err && err.message ? err.message : err);
+    _index = defaultIndex();
+  }
+  if (!_index || typeof _index !== 'object') _index = defaultIndex();
   try {
     if (fs.existsSync(indexPath())) {
       _lastIndexMtimeMs = fs.statSync(indexPath()).mtimeMs;
@@ -394,6 +455,16 @@ function invalidateReloadCursorForTests() {
   _lastIndexMtimeMs = 0;
 }
 
+// Drop only the in-memory index/cache (keep on-disk shards) to simulate a fresh
+// process start that must re-read index.json from disk.
+function dropInMemoryIndexForTests() {
+  _index = null;
+  _accountCache = new Map();
+  _dirtyAccounts.clear();
+  _indexDirty = false;
+  _lastIndexMtimeMs = 0;
+}
+
 module.exports = {
   useShardedStorage,
   shardedRoot,
@@ -408,5 +479,7 @@ module.exports = {
   getShardedMetrics,
   resetShardedForTests,
   invalidateReloadCursorForTests,
+  dropInMemoryIndexForTests,
+  rebuildIndexFromAccounts,
   ensureIndexLoaded,
 };
