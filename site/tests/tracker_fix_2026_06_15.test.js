@@ -274,6 +274,7 @@ describe('STRICT tracker fix — regression (H)', () => {
     assert.match(src, /id="removeNoDataBtn"/);
     assert.match(src, /id="removeAllBtn"/);
     assert.match(src, /id="removeAllModal"/);
+    assert.match(src, /data-remove-account/);
     assert.doesNotMatch(src, /data-remove-key=/);
   });
 

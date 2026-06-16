@@ -1,0 +1,28 @@
+{
+  "task": "tracker_denghub2_stale_investigation_2026_06_16",
+  "usernameChecked": "denghub2",
+  "apiEndpoint": "GET https://aio.deng.my.id/api/tracker/get-backpack/denghub2?lite=1",
+  "frontendEndpoint": "GET /api/tracker/get-backpack/denghub2?lite=1&_=<cacheBust>",
+  "httpStatus": 200,
+  "snapshotTimestamp": "2026-06-15T18:11:27.140Z",
+  "snapshotAgeMinutesAtProof": 681,
+  "leaderstatsPresent": true,
+  "fishCount": 17,
+  "itemCount": 17,
+  "stoneCount": 1,
+  "totemCount": 1,
+  "rubyCount": null,
+  "responseSessionKey": "denghub2",
+  "responseUserId": 11033782953,
+  "statusColor": "red",
+  "inventoryDisplayState": "ready",
+  "conclusion": "API returns renderable leaderstats + inventory but snapshot is ~11h old (upload/backend freshness). Frontend must render this payload and must not wipe it during account-status merges. Upload freshness requires loader/backend — out of scope for this frontend pass.",
+  "frontendFixes": [
+    "Always cache-bust get-backpack and account-status fetches",
+    "Never wipe inventory when status-only payload lacks fish/items",
+    "Simplify shouldReplaceCurrentSnapshot to timestamp-based selection",
+    "Restore table Actions column with per-row remove while keeping top bulk buttons"
+  ],
+  "serviceWorker": "none in repo",
+  "localStorageScope": "username list + hide-usernames preference only (not inventory snapshots)"
+}

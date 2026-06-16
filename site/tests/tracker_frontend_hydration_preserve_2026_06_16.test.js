@@ -44,6 +44,34 @@ function extractInventoryHelpers(source) {
   return vm.runInNewContext(script, {}, { filename: 'tracker-hydration-helpers.js' });
 }
 
+const DENGHUB2_API_FIXTURE = {
+  username: 'denghub2',
+  sessionKey: 'denghub2',
+  userId: 11033782953,
+  statusColor: 'red',
+  inventoryDisplayState: 'ready',
+  snapshotComplete: true,
+  hasLeaderstatsSnapshot: true,
+  lastInventoryAt: '2026-06-15T18:11:27.140Z',
+  playerStats: {
+    coins: 92997999,
+    totalCaught: 148707,
+    coinsText: '93M',
+    totalCaughtText: '148.707',
+    rarestFishChance: '1/4M',
+  },
+  liveAccountStats: {
+    coins: 92997999,
+    coinsText: '93M',
+    totalCaught: 148707,
+    totalCaughtText: '148.707',
+    statsProven: true,
+  },
+  fishItems: Array.from({ length: 17 }, (_, i) => ({ name: `Fish ${i + 1}`, quantity: 1 })),
+  stoneItems: [{ name: 'Evolved Enchant Stone', quantity: 1, stoneType: 'Evolved' }],
+  totemItems: [{ name: 'Totem', quantity: 1 }],
+};
+
 describe('tracker frontend hydration preserve (2026-06-16)', () => {
   test('source wires preserve helpers into account-status + poll merge', () => {
     const src = readSource();
@@ -56,6 +84,10 @@ describe('tracker frontend hydration preserve (2026-06-16)', () => {
     assert.match(src, /resolveEntryPublicSnapshot\(offlineEntry, lastData\)/);
     assert.match(src, /getEntryPlayerStats[\s\S]*extractPlayerStatsFromPayload\(entry\.lastData\)/);
     assert.match(src, /pollUser[\s\S]*credentials: 'same-origin'/);
+    assert.match(src, /cache: 'no-store'/);
+    assert.match(src, /params\.set\('_', String\(Date\.now\(\)\)\)/);
+    assert.match(src, /function getFishRows/);
+    assert.match(src, /function getItemRows/);
   });
 
   test('account-status-shaped merge does not wipe fishItems from get-backpack payload', () => {
@@ -158,5 +190,49 @@ describe('tracker frontend hydration preserve (2026-06-16)', () => {
     assert.ok(helpers.hasRenderableTrackerData(merged));
     assert.equal(merged.fishItems.length, 1);
     assert.equal(merged.playerStats.coins, 100);
+  });
+
+  test('denghub2-shaped API snapshot stays renderable after newer stats-only status merge', () => {
+    const helpers = extractInventoryHelpers(readSource());
+    const prior = { ...DENGHUB2_API_FIXTURE };
+    const statusOnly = {
+      username: 'denghub2',
+      statusColor: 'red',
+      accountPresenceLive: false,
+      fishItems: [],
+      stoneItems: [],
+      totemItems: [],
+      liveAccountStats: {
+        coins: 93000000,
+        coinsText: '93M',
+        totalCaught: 148800,
+        totalCaughtText: '148.800',
+        statsProven: true,
+      },
+      lastStatsUploadAt: '2026-06-16T05:30:00.000Z',
+    };
+    const merged = helpers.mergePreservedInventorySnapshot(prior, statusOnly);
+    assert.equal(merged.fishItems.length, 17);
+    assert.equal(merged.stoneItems.length, 1);
+    assert.equal(merged.totemItems.length, 1);
+    assert.equal(merged.lastInventoryAt, prior.lastInventoryAt);
+    assert.ok(helpers.hasRenderableTrackerData(merged));
+  });
+
+  test('fresh denghub2-style API response replaces 10-hour-old local snapshot', () => {
+    const helpers = extractInventoryHelpers(readSource());
+    const oldLocal = {
+      ...DENGHUB2_API_FIXTURE,
+      fishItems: [{ name: 'Stale Fish', quantity: 1 }],
+      lastInventoryAt: '2026-06-15T08:00:00.000Z',
+    };
+    const freshApi = {
+      ...DENGHUB2_API_FIXTURE,
+      lastInventoryAt: '2026-06-16T05:00:00.000Z',
+    };
+    assert.ok(helpers.shouldReplaceCurrentSnapshot(freshApi, oldLocal));
+    const merged = helpers.mergePreservedInventorySnapshot(oldLocal, freshApi);
+    assert.equal(merged.fishItems.length, 17);
+    assert.equal(merged.lastInventoryAt, freshApi.lastInventoryAt);
   });
 });

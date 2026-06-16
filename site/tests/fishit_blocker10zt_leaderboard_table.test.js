@@ -29,7 +29,7 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
     for (const label of [
       'Status', 'Username', 'Coins', 'Total Caught', 'Rarest Fish',
-      'Backpack',
+      'Backpack', 'Actions',
     ]) {
       assert.match(res.text, new RegExp(`>${label}<`));
     }
@@ -39,7 +39,7 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     assert.match(res.text, /data-account-filter="offline"[^>]*>Offline</);
     assert.match(res.text, /id="accountsTableBody"/);
     assert.match(res.text, /data-open-backpack/);
-    assert.doesNotMatch(res.text, /data-remove-account/);
+    assert.match(res.text, /data-remove-account/);
     assert.match(res.text, /function renderAccountsTable/);
     assert.match(res.text, /function formatTableSyncAge/);
     assert.match(res.text, /id="hideUsernamesBtn"/);

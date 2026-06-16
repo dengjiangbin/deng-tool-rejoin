@@ -101,11 +101,13 @@ describe('tracker username bulk remove UI (2026-06-16)', () => {
     assert.ok(allIdx > noDataIdx, 'Remove All must follow Remove No Data');
   });
 
-  test('individual account rows do not expose per-username remove buttons', () => {
+  test('individual table rows keep remove action; mobile cards do not duplicate it', () => {
     const src = readSource();
-    assert.doesNotMatch(src, /data-remove-account/);
-    assert.doesNotMatch(src, /buildAccountRowHtml[\s\S]*col-actions/);
-    assert.doesNotMatch(src, /buildAccountMobileCardHtml[\s\S]*data-remove-account/);
+    const rowFn = src.slice(src.indexOf('function buildAccountRowHtml'), src.indexOf('function renderAccountsTable'));
+    const mobileFn = src.slice(src.indexOf('function buildAccountMobileCardHtml'), src.indexOf('function buildAccountRowHtml'));
+    assert.match(rowFn, /data-remove-account/);
+    assert.match(src, />Actions</);
+    assert.doesNotMatch(mobileFn, /data-remove-account/);
   });
 
   test('compiled JS wires bulk remove handlers and keeps remove-all confirmation modal', () => {
@@ -117,7 +119,7 @@ describe('tracker username bulk remove UI (2026-06-16)', () => {
     assert.match(js, /No offline usernames to remove\./);
     assert.match(js, /No no-data usernames to remove\./);
     assert.doesNotMatch(js, /function updateRemoveMenu/);
-    assert.doesNotMatch(js, /data-remove-account/);
+    assert.match(js, /data-remove-account/);
   });
 
   test('Remove Offline removes only dead/offline entries', () => {
@@ -169,7 +171,22 @@ describe('tracker username bulk remove UI (2026-06-16)', () => {
     assert.match(src, /\.tracker-username-actions \{[\s\S]*?flex-wrap:wrap;/);
   });
 
-  test('GET /tracker renders bulk remove controls without remove dropdown menu', async () => {
+  test('denghub2 with valid API snapshot is not classified as no-data for removal', () => {
+    const h = extractBulkRemoveHelpers(readSource());
+    h.trackers.set('denghub2', {
+      __fresh: 'dead',
+      snap: {
+        fishItems: Array.from({ length: 17 }, (_, i) => ({ name: `Fish ${i + 1}` })),
+        stoneItems: [{ name: 'Stone' }],
+        playerStats: { coinsText: '93M', totalCaughtText: '148.707' },
+        lastInventoryAt: '2026-06-15T18:11:27.140Z',
+      },
+    });
+    const keys = h.collectTrackerRemovalKeys((entry) => h.isTrackerNoDataForRemoval(entry));
+    assert.equal(keys.length, 0);
+  });
+
+  test('GET /tracker renders bulk remove controls and table Actions column', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /id="removeOfflineBtn"/);
     assert.match(res.text, /id="removeNoDataBtn"/);
@@ -178,7 +195,8 @@ describe('tracker username bulk remove UI (2026-06-16)', () => {
     assert.match(res.text, /Remove No Data/);
     assert.match(res.text, /Remove All/);
     assert.doesNotMatch(res.text, /id="removeMenuBtn"/);
-    assert.doesNotMatch(res.text, /data-remove-account/);
+    assert.match(res.text, />Actions</);
+    assert.match(readJs(), /data-remove-account/);
     assert.match(res.text, /id="removeAllModal"/);
   });
 });
