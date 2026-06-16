@@ -157,7 +157,7 @@
 
     <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" aria-label="Live Tracker">
 
-    <% var TTS = (typeof trackerTopSummaryIcons !== 'undefined' && trackerTopSummaryIcons) ? trackerTopSummaryIcons : { online: '/public/img/tracker/online_avatar.png', secret: null, forgotten: null, evolved: null, runic: null }; %>
+    <% var TTS = (typeof trackerTopSummaryIcons !== 'undefined' && trackerTopSummaryIcons) ? trackerTopSummaryIcons : { online: '/public/img/tracker/online_avatar.png', secret: null, forgotten: null, ruby: null, evolved: null, runic: null }; %>
     <div class="inventory-stats tracker-top-summary-grid" id="inventoryStats" aria-label="Inventory summary">
       <div class="tracker-top-summary-card tracker-top-summary-card--online">
         <div class="tracker-top-summary-icon tracker-top-summary-icon--avatar"><img class="tracker-top-summary-img" src="<%= TTS.online %>" alt="Online accounts" decoding="async"></div>
@@ -173,6 +173,11 @@
         <div class="tracker-top-summary-icon"><% if (TTS.forgotten) { %><img class="tracker-top-summary-img" src="<%= TTS.forgotten %>" alt="Forgotten fish" decoding="async"><% } %></div>
         <div class="tracker-top-summary-label">Forgotten Fish</div>
         <div class="tracker-top-summary-value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="1200">0</div>
+      </div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--ruby">
+        <div class="tracker-top-summary-icon"><% if (TTS.ruby) { %><img class="tracker-top-summary-img" src="<%= TTS.ruby %>" alt="Ruby Gemstone" decoding="async"><% } %></div>
+        <div class="tracker-top-summary-label">Ruby Gemstone</div>
+        <div class="tracker-top-summary-value js-count-up" id="statRubyGemstone" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
       <div class="tracker-top-summary-card tracker-top-summary-card--stones">
         <div class="tracker-top-summary-icon"><% if (TTS.evolved) { %><img class="tracker-top-summary-img" src="<%= TTS.evolved %>" alt="Evolved Enchant Stone" decoding="async"><% } %></div>

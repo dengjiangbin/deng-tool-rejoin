@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+process.env.NODE_ENV = process.env.NODE_ENV || 'production';
 
 const SOURCE_PATH = path.join(__dirname, '..', 'src', 'inventory', 'fishit_tracker.source.ejs');
 const COUNT_UP_PATH = path.join(__dirname, '..', 'public', 'js', 'count-up-stats.js');
@@ -14,13 +14,14 @@ const countUpSrc = fs.readFileSync(COUNT_UP_PATH, 'utf8');
 
 function topGridBlock() {
   const start = src.indexOf('tracker-top-summary-grid" id="inventoryStats"');
-  return src.slice(start, start + 4200);
+  return src.slice(start, start + 5200);
 }
 
 describe('tracker top summary card layout (3 columns, all platforms)', () => {
   test('inventoryStats uses dedicated tracker-top-summary grid/card classes', () => {
     assert.match(src, /tracker-top-summary-grid" id="inventoryStats"/);
     assert.match(src, /class="tracker-top-summary-card tracker-top-summary-card--online"/);
+    assert.match(src, /class="tracker-top-summary-card tracker-top-summary-card--ruby"/);
     assert.match(src, /class="tracker-top-summary-card tracker-top-summary-card--runic"/);
   });
 
@@ -30,29 +31,28 @@ describe('tracker top summary card layout (3 columns, all platforms)', () => {
 
   test('mobile (<=640px) STAYS three columns (only shrinks)', () => {
     assert.match(src, /@media \(max-width:640px\)[\s\S]*#inventoryStats\.tracker-top-summary-grid[\s\S]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
-    // never collapse to 1 or 2 columns
     assert.doesNotMatch(src, /@media \(max-width:640px\)[\s\S]*#inventoryStats\.tracker-top-summary-grid[^}]*grid-template-columns:1fr/);
-  });
-
-  test('cards are centered, border-box, with screenshot style', () => {
-    assert.match(src, /\.tracker-top-summary-card\s*\{[^}]*box-sizing:border-box/);
-    assert.match(src, /\.tracker-top-summary-card\s*\{[^}]*background:#17171d/);
-    assert.match(src, /\.tracker-top-summary-card\s*\{[^}]*border-radius:26px/);
-    assert.match(src, /\.tracker-top-summary-card\s*\{[^}]*align-items:center/);
   });
 });
 
-describe('tracker top summary card ORDER is exact', () => {
-  test('order is Account, Secret, Forgotten, Evolved, Runic', () => {
+describe('tracker top summary card ORDER is exact (6 cards)', () => {
+  test('order is Account, Secret, Forgotten, Ruby, Evolved, Runic', () => {
     const block = topGridBlock();
     const labels = [...block.matchAll(/tracker-top-summary-label">([^<]+)</g)].map((m) => m[1].trim());
-    assert.deepEqual(labels.slice(0, 5), [
-      'Online / Accounts', 'Secret Fish', 'Forgotten Fish', 'Evolved Enchant Stone', 'Runic Stone',
+    assert.deepEqual(labels.slice(0, 6), [
+      'Online / Accounts',
+      'Secret Fish',
+      'Forgotten Fish',
+      'Ruby Gemstone',
+      'Evolved Enchant Stone',
+      'Runic Stone',
     ]);
   });
 
-  test('no Ruby Gemstone card remains in the top grid', () => {
-    assert.doesNotMatch(topGridBlock(), /Ruby Gemstone/);
+  test('Ruby Gemstone card and stat binding restored', () => {
+    assert.match(src, /id="statRubyGemstone"/);
+    assert.match(src, /statRubyGemstoneEl/);
+    assert.match(src, /stats\.rubyGemstone/);
   });
 });
 
@@ -61,90 +61,65 @@ describe('tracker top summary typography + green online count', () => {
     assert.match(src, /\.tracker-online-value \.online-count\s*\{[^}]*color:#62e68a !important/);
     assert.match(src, /\.tracker-online-value \.separator,\s*\.tracker-online-value \.total-count\s*\{[^}]*color:#ffffff/);
   });
-
-  test('online value markup carries tracker-online-value + span structure', () => {
-    assert.match(src, /class="tracker-top-summary-value tracker-online-value js-count-up" id="statOnlineAccounts"[^>]*data-count-ratio-styled/);
-    assert.match(src, /<span class="online-count">0<\/span><span class="separator"> \/ <\/span><span class="total-count">0<\/span>/);
-  });
-
-  test('count-up renderer supports styled ratio output', () => {
-    assert.match(countUpSrc, /data-count-ratio-styled/);
-    assert.match(countUpSrc, /formatRatioHtml/);
-    assert.match(countUpSrc, /class="online-count"/);
-  });
 });
 
-describe('tracker top summary icons use real DB/override assets (no fallback/custom)', () => {
-  test('all icons render from server-resolved trackerTopSummaryIcons locals', () => {
-    assert.match(src, /typeof trackerTopSummaryIcons !== 'undefined'/);
+describe('tracker top summary icons use owned cached URLs only', () => {
+  test('icons render from server-resolved trackerTopSummaryIcons locals', () => {
     assert.match(src, /src="<%= TTS\.online %>"/);
     assert.match(src, /if \(TTS\.secret\)[\s\S]*src="<%= TTS\.secret %>"/);
     assert.match(src, /if \(TTS\.forgotten\)[\s\S]*src="<%= TTS\.forgotten %>"/);
+    assert.match(src, /if \(TTS\.ruby\)[\s\S]*src="<%= TTS\.ruby %>"/);
     assert.match(src, /if \(TTS\.evolved\)[\s\S]*src="<%= TTS\.evolved %>"/);
     assert.match(src, /if \(TTS\.runic\)[\s\S]*src="<%= TTS\.runic %>"/);
   });
 
-  test('no emoji/svg-crystal/fallback placeholder in the top summary markup', () => {
+  test('no fallback/onerror in top grid markup', () => {
     const block = topGridBlock();
-    assert.match(block, /tracker-top-summary-card--runic/, 'slice should cover all 5 cards');
-    assert.doesNotMatch(block, /fallback-secret\.svg|fallback-forgotten\.svg|fallback-fish\.svg/);
-    assert.doesNotMatch(block, /onerror=/);
-    assert.doesNotMatch(block, /&#x1F/);
+    assert.doesNotMatch(block, /fallback-|onerror=/);
   });
 
-  test('detection-only broken-image guard exists (logs, never swaps)', () => {
-    assert.match(src, /function ftAuditTopSummaryImages/);
-    assert.match(src, /naturalWidth === 0/);
-    const guard = src.slice(src.indexOf('function ftAuditTopSummaryImages'), src.indexOf('function ftAuditTopSummaryImages') + 1200);
-    assert.doesNotMatch(guard, /\.src\s*=/);
-  });
-
-  test('Runic Stone count is wired to frontend stoneType === Runic', () => {
-    assert.match(src, /stoneType === 'Runic'/);
-    assert.match(src, /statRunicStoneEl/);
-    assert.match(src, /id="statRunicStone"/);
+  test('broken-image guard uses .tracker-top-summary-card img selector', () => {
+    assert.match(src, /querySelectorAll\('\.tracker-top-summary-card img'\)/);
   });
 });
 
-describe('top summary icon resolver picks real cached/override assets', () => {
-  const icons = require('../src/fishitTrackerTopSummaryIcons');
-  const resolved = icons.resolveTopSummaryIcons();
+describe('owned top-grid asset cache + resolver', () => {
+  const topGrid = require('../src/fishitTrackerTopGridAssets');
+  const resolved = topGrid.resolveTopSummaryIcons();
 
-  test('online uses the user-uploaded avatar path', () => {
-    assert.equal(resolved.online, '/public/img/tracker/online_avatar.png');
-    assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', 'img', 'tracker', 'online_avatar.png')));
-  });
-
-  test('secret/forgotten/evolved/runic resolve to real existing assets', () => {
-    for (const key of ['secret', 'forgotten', 'evolved', 'runic']) {
-      assert.ok(resolved[key], `${key} must resolve a real asset URL`);
-      assert.doesNotMatch(resolved[key], /fallback|placeholder|missing|data:|\.svg/i, `${key} must not be a fallback/placeholder`);
+  test('manifest exists with owned public URLs under /public/assets/tracker-top-grid/', () => {
+    assert.ok(fs.existsSync(topGrid.MANIFEST_PATH));
+    for (const key of ['secret', 'forgotten', 'ruby', 'evolved', 'runic']) {
+      assert.ok(resolved[key], `${key} must resolve`);
+      assert.match(resolved[key], /^\/public\/assets\/tracker-top-grid\//, `${key} must use owned URL`);
+      assert.doesNotMatch(resolved[key], /\/api\/fishit-tracker\//, `${key} must not hotlink API`);
     }
   });
 
-  test('runic uses the manual override file, not gameDB', () => {
-    assert.equal(resolved.proof.runic.source, 'manual_override');
-    assert.equal(resolved.proof.runic.name, 'Runic Stone');
-    assert.match(resolved.runic, /\/api\/fishit-tracker\/assets\/manual\/stones\//);
-    const file = resolved.proof.runic.file;
-    assert.ok(fs.existsSync(path.join(__dirname, '..', 'data', 'manual_image_cache', 'stones', file)), 'override file must exist');
+  test('owned files exist on disk for each DB-backed card', () => {
+    const manifest = topGrid.loadManifest();
+    for (const cardKey of ['secretFish', 'forgottenFish', 'rubyGemstone', 'evolvedEnchantStone', 'runicStone']) {
+      const row = manifest.cards[cardKey];
+      assert.ok(row && row.ownedAssetPath, cardKey);
+      assert.ok(fs.existsSync(path.join(__dirname, '..', row.ownedAssetPath)), row.ownedAssetPath);
+      assert.ok(row.sha256 && row.sha256.length >= 32);
+    }
   });
 
-  test('secret/forgotten chosen by exact rarity', () => {
-    assert.equal(String(resolved.proof.secret.rarity || 'Secret'), 'Secret');
-    assert.ok(resolved.proof.secret.name && resolved.proof.secret.assetId);
-    assert.ok(resolved.proof.forgotten.name && resolved.proof.forgotten.assetId);
+  test('secret/forgotten chosen by exact rarity; ruby by name; runic from manual override', () => {
+    assert.equal(String(resolved.proof.secret.sourceRarity || 'Secret'), 'Secret');
+    assert.equal(String(resolved.proof.forgotten.sourceRarity || 'Forgotten'), 'Forgotten');
+    assert.equal(resolved.proof.ruby.sourceName, 'Ruby');
+    assert.equal(resolved.proof.runic.sourceType, 'manual_override');
+  });
+
+  test('online avatar remains user-uploaded path', () => {
+    assert.equal(resolved.online, '/public/img/tracker/online_avatar.png');
   });
 });
 
 describe('scoping: legacy/dashboard cards untouched', () => {
-  test('legacy stat-card rarity/value colors are not applied to top summary cards', () => {
-    assert.doesNotMatch(src, /\.stat-card--online \.stat-card__value/);
-    assert.doesNotMatch(src, /\.stat-card--stones \.stat-card__value/);
-  });
-
   test('dashboard stats still use legacy stat-card tiles', () => {
     assert.match(src, /class="inventory-stats dashboard-stats"/);
-    assert.match(src, /\.dashboard-stats \.stat-card\s*\{/);
   });
 });

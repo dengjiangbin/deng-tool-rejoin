@@ -5,69 +5,121 @@
       "source": "user_uploaded_asset"
     },
     "secret": {
-      "name": "Ancient Lochness Monster",
-      "assetId": "122849883484708",
-      "url": "/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png"
+      "cardKey": "secretFish",
+      "label": "Secret Fish",
+      "sourceName": "Ancient Lochness Monster",
+      "sourceType": "game_db_cache",
+      "sourceRarity": "Secret",
+      "sourceAssetPath": "91e1358b93bd8d98.png",
+      "sourceAssetUrl": "/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
+      "ownedAssetPath": "public/assets/tracker-top-grid/secret-fish.png",
+      "ownedPublicUrl": "/public/assets/tracker-top-grid/secret-fish.png",
+      "sha256": "91e1358b93bd8d98442f395ac2b70fa18c271ddb620b6bfa706f0dd1e36ad7bf",
+      "cachedAt": "2026-06-16T02:29:49.582Z"
     },
     "forgotten": {
-      "name": "Cerulean Dragon",
-      "assetId": "134510300238125",
-      "url": "/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png"
+      "cardKey": "forgottenFish",
+      "label": "Forgotten Fish",
+      "sourceName": "Cerulean Dragon",
+      "sourceType": "game_db_cache",
+      "sourceRarity": "Forgotten",
+      "sourceAssetPath": "a159de70c6ad8f23.png",
+      "sourceAssetUrl": "/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
+      "ownedAssetPath": "public/assets/tracker-top-grid/forgotten-fish.png",
+      "ownedPublicUrl": "/public/assets/tracker-top-grid/forgotten-fish.png",
+      "sha256": "a159de70c6ad8f23e74d5ef73970a8f335704ede139ecd24db559ce57bc1d366",
+      "cachedAt": "2026-06-16T02:29:49.585Z"
+    },
+    "ruby": {
+      "cardKey": "rubyGemstone",
+      "label": "Ruby Gemstone",
+      "sourceName": "Ruby",
+      "sourceType": "game_db_cache",
+      "sourceRarity": null,
+      "sourceAssetPath": "d37e2459b06930b8.png",
+      "sourceAssetUrl": "/api/fishit-tracker/assets/fish/d37e2459b06930b8.png",
+      "ownedAssetPath": "public/assets/tracker-top-grid/ruby-gemstone.png",
+      "ownedPublicUrl": "/public/assets/tracker-top-grid/ruby-gemstone.png",
+      "sha256": "d37e2459b06930b89a04d21009dc1c9621369a5b22970654c79bd54f13c8ca16",
+      "cachedAt": "2026-06-16T02:29:49.592Z"
     },
     "evolved": {
-      "name": "Evolved Enchant Stone",
-      "filename": "stone_558_evolved.png",
-      "url": "/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229"
+      "cardKey": "evolvedEnchantStone",
+      "label": "Evolved Enchant Stone",
+      "sourceName": "Evolved Enchant Stone",
+      "sourceType": "game_db_cache",
+      "sourceRarity": null,
+      "sourceAssetPath": "stone_558_evolved.png",
+      "sourceAssetUrl": "/api/tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
+      "ownedAssetPath": "public/assets/tracker-top-grid/evolved-enchant-stone.png",
+      "ownedPublicUrl": "/public/assets/tracker-top-grid/evolved-enchant-stone.png",
+      "sha256": "71300dfbfd173e1d9c6a1a9c020edf2b07473c3bc6903ba40dee3975579094aa",
+      "cachedAt": "2026-06-16T02:29:49.597Z"
     },
     "runic": {
-      "name": "Runic Stone",
-      "source": "manual_override",
-      "file": "runic_stone_2026_06_15_v2.png",
-      "url": "/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15_v2.png"
+      "cardKey": "runicStone",
+      "label": "Runic Stone",
+      "sourceName": "Runic Stone",
+      "sourceType": "manual_override",
+      "sourceRarity": null,
+      "sourceAssetPath": "runic_stone_2026_06_15_v2.png",
+      "sourceAssetUrl": "/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15_v2.png",
+      "ownedAssetPath": "public/assets/tracker-top-grid/runic-stone.png",
+      "ownedPublicUrl": "/public/assets/tracker-top-grid/runic-stone.png",
+      "sha256": "a21dbe70e781910ee52b0953676fea831cbf51d45e0ad565de08e0da4562146d",
+      "cachedAt": "2026-06-16T02:29:49.601Z"
     }
   },
   "desktop": {
     "cols": "310.656px 310.672px 310.656px",
-    "cardCount": 5,
+    "cardCount": 6,
     "order": [
       "Online / Accounts",
       "Secret Fish",
       "Forgotten Fish",
+      "Ruby Gemstone",
       "Evolved Enchant Stone",
       "Runic Stone"
     ],
     "images": [
       {
         "alt": "Online accounts",
-        "src": "http://127.0.0.1:58729/public/img/tracker/online_avatar.png",
+        "src": "http://127.0.0.1:63808/public/img/tracker/online_avatar.png",
         "complete": true,
         "naturalWidth": 485,
         "naturalHeight": 514
       },
       {
         "alt": "Secret fish",
-        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/secret-fish.png",
         "complete": true,
         "naturalWidth": 150,
         "naturalHeight": 150
       },
       {
         "alt": "Forgotten fish",
-        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/forgotten-fish.png",
         "complete": true,
         "naturalWidth": 150,
         "naturalHeight": 150
       },
       {
+        "alt": "Ruby Gemstone",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/ruby-gemstone.png",
+        "complete": true,
+        "naturalWidth": 150,
+        "naturalHeight": 106
+      },
+      {
         "alt": "Evolved Enchant Stone",
-        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/evolved-enchant-stone.png",
         "complete": true,
         "naturalWidth": 420,
         "naturalHeight": 420
       },
       {
         "alt": "Runic Stone",
-        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15_v2.png",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/runic-stone.png",
         "complete": true,
         "naturalWidth": 420,
         "naturalHeight": 420
@@ -77,46 +129,54 @@
   },
   "mobile": {
     "cols": "118px 118px 118px",
-    "cardCount": 5,
+    "cardCount": 6,
     "order": [
       "Online / Accounts",
       "Secret Fish",
       "Forgotten Fish",
+      "Ruby Gemstone",
       "Evolved Enchant Stone",
       "Runic Stone"
     ],
     "images": [
       {
         "alt": "Online accounts",
-        "src": "http://127.0.0.1:58729/public/img/tracker/online_avatar.png",
+        "src": "http://127.0.0.1:63808/public/img/tracker/online_avatar.png",
         "complete": true,
         "naturalWidth": 485,
         "naturalHeight": 514
       },
       {
         "alt": "Secret fish",
-        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/secret-fish.png",
         "complete": true,
         "naturalWidth": 150,
         "naturalHeight": 150
       },
       {
         "alt": "Forgotten fish",
-        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/forgotten-fish.png",
         "complete": true,
         "naturalWidth": 150,
         "naturalHeight": 150
       },
       {
+        "alt": "Ruby Gemstone",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/ruby-gemstone.png",
+        "complete": true,
+        "naturalWidth": 150,
+        "naturalHeight": 106
+      },
+      {
         "alt": "Evolved Enchant Stone",
-        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/evolved-enchant-stone.png",
         "complete": true,
         "naturalWidth": 420,
         "naturalHeight": 420
       },
       {
         "alt": "Runic Stone",
-        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15_v2.png",
+        "src": "http://127.0.0.1:63808/public/assets/tracker-top-grid/runic-stone.png",
         "complete": true,
         "naturalWidth": 420,
         "naturalHeight": 420

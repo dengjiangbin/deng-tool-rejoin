@@ -119,10 +119,25 @@ async function main() {
     console.error('BROKEN_IMAGES', JSON.stringify(broken));
     process.exit(2);
   }
-  const expectedOrder = ['Online / Accounts', 'Secret Fish', 'Forgotten Fish', 'Evolved Enchant Stone', 'Runic Stone'];
+  const expectedOrder = ['Online / Accounts', 'Secret Fish', 'Forgotten Fish', 'Ruby Gemstone', 'Evolved Enchant Stone', 'Runic Stone'];
   if (JSON.stringify(desktop.info.order) !== JSON.stringify(expectedOrder)) {
     console.error('WRONG_CARD_ORDER', JSON.stringify(desktop.info.order));
     process.exit(4);
+  }
+  if (desktop.info.images.length !== 6) {
+    console.error('WRONG_IMAGE_COUNT', desktop.info.images.length);
+    process.exit(5);
+  }
+  for (const img of desktop.info.images) {
+    const src = String(img.src || '');
+    if (/placeholder|missing|data:/i.test(src)) {
+      console.error('FORBIDDEN_IMAGE_SRC', src);
+      process.exit(6);
+    }
+    if (img.alt !== 'Online accounts' && !src.includes('/public/assets/tracker-top-grid/') && !src.includes('/public/img/tracker/')) {
+      console.error('NOT_OWNED_URL', src);
+      process.exit(7);
+    }
   }
   for (const v of [desktop.info, mobile.info]) {
     const cols = String(v.cols || '').trim().split(/\s+/).filter(Boolean);

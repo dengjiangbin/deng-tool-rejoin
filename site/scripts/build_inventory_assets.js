@@ -153,6 +153,11 @@ function main() {
   fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
   const shell = buildShellEjs(styleBlock.before, bodyHtml, MARKER);
   fs.writeFileSync(EJS_PATH, shell);
+  try {
+    require('../src/fishitTrackerTopGridAssets').syncTopGridAssets({ persist: true });
+  } catch (err) {
+    console.warn('[inventory-assets] tracker top-grid asset sync skipped:', err && err.message ? err.message : err);
+  }
   console.log('[inventory-assets] wrote', cssName, jsName, 'manifest', MANIFEST_PATH);
 }
 

@@ -3046,11 +3046,13 @@ function buildTrackerPageLocals(req) {
   const viewer = buildInventoryViewer(sessionUser);
   const assetUrls = inventoryAssets.inventoryAssetUrls();
   // Top summary card icons resolved from REAL DB assets only (no fallbacks).
-  let topSummaryIcons = { online: trackerTopSummaryIcons.ONLINE_AVATAR_URL, evolved: null, secret: null, forgotten: null, ruby: null };
+  let topSummaryIcons = { online: trackerTopSummaryIcons.ONLINE_AVATAR_URL, secret: null, forgotten: null, ruby: null, evolved: null, runic: null };
   try {
     topSummaryIcons = trackerTopSummaryIcons.resolveTopSummaryIcons();
     for (const [k, v] of Object.entries(topSummaryIcons)) {
-      if (k !== 'proof' && !v) console.error(`[fishit-tracker] top summary icon missing real DB asset: ${k}`);
+      if (k !== 'proof' && k !== 'order' && k !== 'manifestPath' && k !== 'ownedDir' && !v) {
+        console.error(`[fishit-tracker] top summary icon missing owned asset: ${k}`);
+      }
     }
   } catch (err) {
     console.error('[fishit-tracker] top summary icon resolve failed:', err && err.message ? err.message : err);
