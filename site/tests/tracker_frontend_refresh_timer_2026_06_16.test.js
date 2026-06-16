@@ -104,16 +104,17 @@ describe('tracker frontend refresh timer source wiring', () => {
     assert.match(src, /function formatPresenceStatusText\(entry\) \{[\s\S]*return formatFrontendRefreshAgeText\(entry\);/);
   });
 
-  test('timer resets only on a renderable poll response, before merge with local data', () => {
+  test('timer resets via signature-gated maybeResetSectionTimers AFTER the merge (sees displayed data)', () => {
     const src = readSource();
     const fn = src.indexOf('function applyInventoryPollPayload(entry, key, data) {');
     assert.ok(fn > 0, 'applyInventoryPollPayload missing');
-    const body = src.slice(fn, fn + 1400);
-    // Gate is evaluated on the raw response, before mergePreservedInventorySnapshot.
-    const markIdx = body.indexOf('if (hasRenderableTrackerData(data)) markEntryFrontendRefreshed(entry);');
+    const body = src.slice(fn, fn + 4200);
     const mergeIdx = body.indexOf('entry.lastData = mergePreservedInventorySnapshot(entry.lastData, data);');
-    assert.ok(markIdx > 0, 'renderable-gated mark missing in applyInventoryPollPayload');
-    assert.ok(mergeIdx > markIdx, 'mark must be evaluated before the local-data merge');
+    const resetIdx = body.indexOf('maybeResetSectionTimers(entry);');
+    assert.ok(mergeIdx >= 0, 'snapshot merge missing');
+    assert.ok(resetIdx > mergeIdx, 'timer reset must run after the merge so it reflects the displayed dataset');
+    // The gated mark lives inside maybeResetSectionTimers, behind a signature change.
+    assert.match(src, /function maybeResetSectionTimers\(entry\) \{[\s\S]*?if \(sig !== entry\._trackerDisplaySig\)[\s\S]*?markEntryFrontendRefreshed\(entry\)/);
   });
 
   test('exactly one call-site resets the timer (status-only poll path does not)', () => {

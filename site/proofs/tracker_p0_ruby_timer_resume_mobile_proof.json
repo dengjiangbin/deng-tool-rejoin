@@ -1,0 +1,61 @@
+{
+  "task": "STRICT P0 FRONTEND FIX — Ruby Gemstone count + timer false reset + mobile text cutoff",
+  "date": "2026-06-16",
+  "scope": "frontend only (site/src/inventory/fishit_tracker.source.ejs + tests + rebuilt bundle)",
+  "no_changes_to": ["roblox lua", "upload pipeline", "backend ingest/write", "cloudflare", "auth/oauth/apk", "db schema", "pm2/infra"],
+
+  "problem1_ruby_gemstone": {
+    "root_cause": "The previous fix matched fish whose MUTATION name was a 'Ruby' alias. The real Fish It payload is the opposite shape: a fish CARD named 'Ruby' (baseFishName/cleanName 'Ruby', card mutation null) whose per-instance mutation is 'Gemstone'. So the top card never matched and stayed 0.",
+    "fix": "Added normalizeToken + RUBY_FISH_NAME_ALIASES({'ruby'}) + GEMSTONE_MUTATION_ALIASES({'gemstone','gem stone','ruby gemstone'}) + isRubyGemstoneFishInstance(row) which requires name=Ruby AND mutation=Gemstone. rubyGemstoneCountForItem expands ownedInstances (merging card+instance fields) and counts each matching instance; falls back to the row amount, then to the legacy standalone 'Ruby Gemstone' item detector. getRubyGemstoneTopCardCount sums per-card counts over getPublicFishItems/Stone/Totem — the same getters the detail/list view uses.",
+    "live_proof_dengjiangbin": {
+      "Ruby Gemstone top count": 1,
+      "matched fish rows": [{ "name": "Ruby", "cleanName": "Ruby", "mutation": "Gemstone", "weight": 5.7, "count": 1 }],
+      "detail_list_count": 1,
+      "final_top_card_value": 1
+    },
+    "tests": [
+      "single Ruby fish + Gemstone mutation -> 1",
+      "multiple Ruby+Gemstone instances -> N",
+      "aggregated Ruby Gemstone row amount:3 -> 3 (string amount works)",
+      "Ruby fish WITHOUT Gemstone -> 0",
+      "Gemstone mutation on NON-Ruby fish -> 0",
+      "top card does not stay 0 among other fish",
+      "legacy standalone 'Ruby Gemstone' item still counts",
+      "detail view + top card share getPublicFishItems source",
+      "value flows from computed stat (not hardcoded)"
+    ]
+  },
+
+  "problem2_timer_false_reset": {
+    "root_cause": "Every renderable poll (and every status poll carrying leaderstats) called markEntry*Refreshed unconditionally, so the visible timer reset on each poll even when the displayed numbers did not change — producing the 1s..~10s loop.",
+    "fix": "Introduced an effective displayed-dataset signature. stableStringify + buildLeaderstatsSignature (displayed coins/totalCaught/rarest) + buildInventorySignature (fish/stone/totem rows + Ruby Gemstone count) + buildDisplayedDatasetSignature (username + leaderstats + inventory). maybeResetSectionTimers(entry) runs AFTER the preserved-inventory merge + live-snapshot sync and only marks a section refreshed when that section's signature changed. Wired into applyInventoryPollPayload and applyAccountStatusPayload; removed the unconditional pre-merge marks.",
+    "behavior": {
+      "initial_render": "marks all sections once (1s)",
+      "identical_poll_after_10s": "no reset",
+      "same_backend_data_new_receive_time": "no reset",
+      "fallback/preserved_snapshot": "no reset",
+      "changed_coins": "leaderstats + tracker reset",
+      "changed_totalCaught": "leaderstats + tracker reset",
+      "changed_fish/item_count": "inventory + tracker reset",
+      "changed_ruby_gemstone_count": "inventory + tracker reset",
+      "status_only_payload": "leaderstats reset, inventory keeps counting (preserved inventory => identical inventory signature)",
+      "failed_poll": "no reset (handler returns before maybeResetSectionTimers)"
+    },
+    "applies_to": ["main tracker/status timer", "leaderstats timer", "inventory timer", "fish/items timer"]
+  },
+
+  "problem2c_first_load_resume": {
+    "fix": "pollUser now tags each request via entry._pollReqSeq and aborts applying a response when a newer request started (isStaleResponse checked after fetch resolves AND after reading the body), so a slow stale response can never overwrite newer state. Tab visibilitychange / window focus / pageshow now trigger refreshTrackerNow with a 700ms leading-edge debounce (one immediate fresh fetch, no burst). pageshow is no longer gated on ev.persisted. Page load already fetches immediately on add + requestAnimationFrame(pollAccountStatuses(true)).",
+    "immediate_fetch_on": ["page load", "tab hidden->visible", "window focus", "pageshow"],
+    "stale_guard": "per-entry request ordering (entry._pollReqSeq)"
+  },
+
+  "problem3_mobile_cutoff": {
+    "root_cause": ".accounts-mobile-card__username forced overflow:hidden + text-overflow:ellipsis + white-space:nowrap on a fixed font, and the stats grid coin/value cells could clip on 320-390px phones.",
+    "fix": "Username now wraps up to 2 lines (clamp font, overflow-wrap:anywhere, -webkit-line-clamp:2) with a title tooltip exposing the full name. Coin/Caught/Rare values use min-width:0, overflow-wrap:anywhere, white-space:normal, text-overflow:clip and clamp() fonts. @media(max-width:420px) scales fonts; @media(max-width:340px) collapses the stats grid to 2 columns with Rare spanning full width.",
+    "viewports_validated": ["320px", "340px", "360px", "390px", "desktop unaffected"]
+  },
+
+  "tests_result": "new + updated suites pass: tracker_p0_signature_timer_resume_mobile_2026_06_16 (all), tracker_sections_ruby_mutation_2026_06_16 (all), tracker_frontend_refresh_timer_2026_06_16 (11/11). Pre-existing unrelated backend-grace failures in fishit_three_separate_indicators (5 pass / 3 fail) confirmed identical on clean baseline.",
+  "build": "rebuilt via scripts/build_inventory_assets.js"
+}

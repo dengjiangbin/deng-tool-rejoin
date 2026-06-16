@@ -127,26 +127,36 @@ describe('per-section frontend-receive timers (2026-06-16)', () => {
 });
 
 describe('per-section timer reset wiring', () => {
-  test('renderable get-backpack poll resets all three sections, gated on the RAW response before merge', () => {
+  test('the get-backpack poll resets timers via the signature-gated maybeResetSectionTimers, AFTER merge', () => {
     const source = readSource();
     const fn = source.indexOf('function applyInventoryPollPayload(entry, key, data) {');
     assert.ok(fn > 0, 'applyInventoryPollPayload missing');
-    const body = source.slice(fn, fn + 1600);
-    const trackerIdx = body.indexOf('if (hasRenderableTrackerData(data)) markEntryFrontendRefreshed(entry);');
-    const leaderIdx = body.indexOf('if (payloadHasLeaderstats(data)) markEntryLeaderstatsRefreshed(entry);');
-    const invIdx = body.indexOf('if (entryHasInventoryRows(data)) markEntryInventoryRefreshed(entry);');
+    const body = source.slice(fn, fn + 4200);
     const mergeIdx = body.indexOf('entry.lastData = mergePreservedInventorySnapshot(entry.lastData, data);');
-    assert.ok(trackerIdx >= 0 && leaderIdx >= 0 && invIdx >= 0, 'all three section resets must be wired');
-    assert.ok(mergeIdx > trackerIdx && mergeIdx > leaderIdx && mergeIdx > invIdx, 'resets must be gated before the local-data merge');
+    const resetIdx = body.indexOf('maybeResetSectionTimers(entry);');
+    assert.ok(mergeIdx >= 0, 'snapshot merge must exist');
+    assert.ok(resetIdx > mergeIdx, 'timer reset must run AFTER the merge so it sees the displayed dataset');
+    // No more unconditional per-poll marks inside the poll handler.
+    assert.ok(!body.includes('if (hasRenderableTrackerData(data)) markEntryFrontendRefreshed(entry);'), 'unconditional mark removed');
   });
 
-  test('account-status poll resets leaderstats (when present) but never the inventory timer', () => {
+  test('account-status poll routes through maybeResetSectionTimers (no unconditional leaderstats mark)', () => {
     const source = readSource();
     const fn = source.indexOf('function applyAccountStatusPayload(payload) {');
     const end = source.indexOf('function entrySnapshotData(', fn);
     const body = source.slice(fn, end);
-    assert.match(body, /if \(payloadHasLeaderstats\(st\)\) markEntryLeaderstatsRefreshed\(entry\);/);
-    assert.ok(!/markEntryInventoryRefreshed/.test(body), 'status-only poll must not reset the inventory timer');
+    assert.match(body, /maybeResetSectionTimers\(entry\);/);
+    assert.ok(!/if \(payloadHasLeaderstats\(st\)\) markEntryLeaderstatsRefreshed\(entry\);/.test(body), 'must not unconditionally mark leaderstats');
+  });
+
+  test('maybeResetSectionTimers gates every section mark behind a per-section signature change', () => {
+    const source = readSource();
+    const fn = source.indexOf('function maybeResetSectionTimers(entry) {');
+    assert.ok(fn > 0, 'maybeResetSectionTimers missing');
+    const body = source.slice(fn, fn + 900);
+    assert.match(body, /buildDisplayedDatasetSignature\(entry\)[\s\S]*?_trackerDisplaySig[\s\S]*?markEntryFrontendRefreshed\(entry\)/);
+    assert.match(body, /buildLeaderstatsSignature\(entry\)[\s\S]*?_leaderstatsDisplaySig[\s\S]*?markEntryLeaderstatsRefreshed\(entry\)/);
+    assert.match(body, /buildInventorySignature\(data\)[\s\S]*?_inventoryDisplaySig[\s\S]*?markEntryInventoryRefreshed\(entry\)/);
   });
 });
 
@@ -158,71 +168,95 @@ function makeRubyEnv(source) {
   const close = source.indexOf('  function computeInventoryStats() {');
   assert.ok(open > 0 && close > open, 'ruby helper block missing');
   const block = source.slice(open, close);
-  const sandbox = { Math, Number, String, Array, Set };
+  const sandbox = { Math, Number, String, Array, Set, JSON, window: {} };
   const script = `(function(){
+    const DEBUG_INVENTORY = false;
     function resolveItemAmount(item){ if(!item||typeof item!=='object')return 1; return item.amount ?? item.quantity ?? item.Quantity ?? 1; }
+    function getPublicFishItems(d){ return (d && (d.fishItems || d.publicFishItems)) || []; }
+    function getPublicStoneItems(d){ return (d && d.stoneItems) || []; }
+    function getPublicTotemItems(d){ return (d && d.totemItems) || []; }
 ${block}
-    // Mirror computeInventoryStats' aggregation across an item list.
     function countRubyAcross(items){ let n = 0; for (const it of items) n += rubyGemstoneCountForItem(it); return n; }
-    return { isRubyGemstoneItem, isRubyGemstoneMutationName, rubyGemstoneCountForItem, countRubyAcross, RUBY_GEMSTONE_ALIASES };
+    return { isRubyGemstoneItem, isRubyGemstoneMutationName, isRubyGemstoneFishInstance, rubyGemstoneCountForItem, getRubyGemstoneTopCardCount, countRubyAcross };
   })()`;
   return vm.runInNewContext(script, sandbox, { filename: 'ruby-helpers.js' });
 }
 
-describe('Ruby Gemstone top card count (2026-06-16)', () => {
-  test('detail/list per-instance Ruby mutation (name "Ruby") makes the top card count it', () => {
+describe('Ruby Gemstone top card count — fish name Ruby + mutation Gemstone (2026-06-16 P0)', () => {
+  // Production shape (confirmed from a live backpack): a fish CARD named "Ruby"
+  // whose ownedInstances carry mutation "Gemstone" (the card mutation is null).
+  test('a single Ruby fish with Gemstone mutation makes the top card count 1', () => {
     const ruby = makeRubyEnv(readSource());
-    // Shape seen in production: a fish card whose ownedInstances carry the Ruby
-    // gemstone mutation. The detail view renders 1 fish; the top card must match.
     const fishCard = {
-      name: 'Hawks Turtle',
-      ownedInstances: [{ mutationName: 'Ruby', weightKg: 5.7, quantity: 1 }],
+      name: 'Ruby', baseFishName: 'Ruby', mutation: null, category: 'fish', amount: 1,
+      ownedInstances: [{ name: 'Ruby', cleanName: 'Ruby', baseFishName: 'Ruby', mutationName: 'Gemstone', mutation: 'Gemstone', weightKg: 5.7, quantity: 1 }],
     };
+    assert.ok(ruby.isRubyGemstoneFishInstance({ cleanName: 'Ruby', mutation: 'Gemstone' }));
     assert.equal(ruby.rubyGemstoneCountForItem(fishCard), 1);
-    assert.equal(ruby.countRubyAcross([fishCard]), 1);
+    assert.equal(ruby.getRubyGemstoneTopCardCount({ fishItems: [fishCard] }), 1);
   });
 
-  test('item named "Ruby Gemstone" counts at the top card', () => {
+  test('multiple Ruby+Gemstone fish instances count correctly', () => {
     const ruby = makeRubyEnv(readSource());
-    const item = { name: 'Ruby Gemstone', amount: 2 };
-    assert.equal(ruby.rubyGemstoneCountForItem(item), 2);
+    const fishCard = {
+      name: 'Ruby', baseFishName: 'Ruby',
+      ownedInstances: [
+        { cleanName: 'Ruby', mutationName: 'Gemstone', quantity: 1 },
+        { cleanName: 'Ruby', mutationName: 'Gemstone', quantity: 1 },
+        { cleanName: 'Ruby', mutationName: 'Gem Stone', quantity: 1 },
+      ],
+    };
+    assert.equal(ruby.rubyGemstoneCountForItem(fishCard), 3);
+    assert.equal(ruby.getRubyGemstoneTopCardCount({ fishItems: [fishCard] }), 3);
   });
 
-  test('Ruby amount/quantity as a string still counts correctly', () => {
+  test('an aggregated Ruby Gemstone row with amount 3 counts as 3', () => {
     const ruby = makeRubyEnv(readSource());
-    const stringQtyInstance = { name: 'Fish', ownedInstances: [{ mutation: 'Ruby', quantity: '3' }] };
-    assert.equal(ruby.rubyGemstoneCountForItem(stringQtyInstance), 3);
-    const stringAmtItem = { name: 'Ruby Gemstone', amount: '4' };
-    assert.equal(ruby.rubyGemstoneCountForItem(stringAmtItem), 4);
+    // No instances; the row itself is Ruby + Gemstone with an amount.
+    const row = { cleanName: 'Ruby', mutation: 'Gemstone', amount: 3 };
+    assert.equal(ruby.rubyGemstoneCountForItem(row), 3);
+    // String amount still works.
+    assert.equal(ruby.rubyGemstoneCountForItem({ name: 'Ruby', mutationName: 'Gemstone', amount: '4' }), 4);
   });
 
-  test('top card does not stay 0 when detail/list has Ruby data (multiple owners + instances)', () => {
+  test('a Ruby fish WITHOUT Gemstone mutation does not count', () => {
     const ruby = makeRubyEnv(readSource());
-    const items = [
-      { name: 'Whale', ownedInstances: [{ mutationName: 'Ruby', quantity: 1 }, { mutationName: 'Gold', quantity: 1 }] },
-      { name: 'Eel', ownedInstances: [{ mutationName: 'ruby gemstone', quantity: 1 }] },
-      { name: 'Cod', ownedInstances: [{ mutationName: 'Shiny', quantity: 1 }] },
-    ];
-    const total = ruby.countRubyAcross(items);
-    assert.ok(total > 0, 'top card must not stay 0 when Ruby exists in detail data');
-    assert.equal(total, 2); // one Ruby + one ruby gemstone, the Gold/Shiny ignored
+    assert.equal(ruby.rubyGemstoneCountForItem({ name: 'Ruby', ownedInstances: [{ cleanName: 'Ruby', mutationName: 'Gold', quantity: 2 }] }), 0);
+    assert.equal(ruby.rubyGemstoneCountForItem({ cleanName: 'Ruby', mutation: null }), 0);
   });
 
-  test('non-Ruby items are not miscounted, and the count is not hardcoded', () => {
+  test('a Gemstone mutation on a NON-Ruby fish does not count', () => {
     const ruby = makeRubyEnv(readSource());
-    assert.equal(ruby.rubyGemstoneCountForItem({ name: 'Goldfish', ownedInstances: [{ mutationName: 'Gold', quantity: 9 }] }), 0);
-    assert.equal(ruby.rubyGemstoneCountForItem({ name: 'Bass' }), 0);
-    assert.equal(ruby.rubyGemstoneCountForItem({}), 0);
-    // Aliases are normalized (trim + case-insensitive), proving no hardcoded number.
-    assert.ok(ruby.isRubyGemstoneMutationName('  RUBY  '));
-    assert.ok(ruby.isRubyGemstoneMutationName('Ruby Gemstone'));
-    assert.ok(!ruby.isRubyGemstoneMutationName('Sapphire'));
+    assert.equal(ruby.rubyGemstoneCountForItem({ name: 'Whale Shark', ownedInstances: [{ cleanName: 'Whale Shark', mutationName: 'Gemstone', quantity: 5 }] }), 0);
+    assert.ok(!ruby.isRubyGemstoneFishInstance({ cleanName: 'Eel', mutation: 'Gemstone' }));
   });
 
-  test('top card binding uses the shared rubyGemstoneCountForItem helper (no hardcoded literal)', () => {
+  test('top card does not stay 0 when a matching Ruby Gemstone fish exists among other fish', () => {
+    const ruby = makeRubyEnv(readSource());
+    const snapshot = { fishItems: [
+      { name: 'Skeleton Narwhal', ownedInstances: [{ cleanName: 'Skeleton Narwhal', mutationName: null, quantity: 1 }] },
+      { name: 'Ruby', baseFishName: 'Ruby', ownedInstances: [{ cleanName: 'Ruby', mutationName: 'Gemstone', quantity: 1 }] },
+    ] };
+    const total = ruby.getRubyGemstoneTopCardCount(snapshot);
+    assert.ok(total > 0, 'top card must not stay 0 when a Ruby Gemstone fish exists');
+    assert.equal(total, 1);
+  });
+
+  test('a legacy standalone "Ruby Gemstone" item still counts (no regression)', () => {
+    const ruby = makeRubyEnv(readSource());
+    assert.equal(ruby.rubyGemstoneCountForItem({ name: 'Ruby Gemstone', amount: 2 }), 2);
+  });
+
+  test('detail view and top card use consistent source data (getPublicFishItems)', () => {
     const source = readSource();
+    // getRubyGemstoneTopCardCount reads the same public item getters the detail
+    // list view uses, so they cannot diverge.
+    assert.match(source, /function getRubyGemstoneTopCardCount\([\s\S]*?getPublicFishItems\(snapshotOrState\)/);
     assert.match(source, /const countRuby = \(item\) => \{\s*rubyGemstone \+= rubyGemstoneCountForItem\(item\);/);
-    // Ensure the displayed value flows from the computed stat, not a constant.
+  });
+
+  test('the count is not hardcoded and flows into the displayed stat', () => {
+    const source = readSource();
     assert.match(source, /countUp\.set\(statRubyGemstoneEl, \{ to: stats\.rubyGemstone \|\| 0/);
   });
 });
