@@ -1,0 +1,49 @@
+{
+  "task": "STRICT FRONTEND FIX — TIMER FOR ALL SECTIONS + FAIRY DUST/MIDNIGHT COLOR SWAP + RUBY GEMSTONE TOP CARD COUNT",
+  "date": "2026-06-16",
+  "scope": "frontend only (no Lua, upload pipeline, backend ingest/write, Cloudflare, auth/OAuth/APK, DB schema, PM2/infra changes)",
+  "task1_3_timers": {
+    "behavior": "All visible freshness timers now follow the per-section FRONTEND receive/refresh time, not the backend snapshot age.",
+    "sections": {
+      "tracker_status": "formatPresenceStatusText -> formatFrontendRefreshAgeText (_frontendRefreshAt)",
+      "leaderstats": "formatStatsUploadDurationText -> formatLeaderstatsRefreshAgeText (_leaderstatsFrontendRefreshAt)",
+      "inventory_fish": "formatEntrySyncStatusText -> formatInventoryRefreshAgeText (_inventoryFrontendRefreshAt)"
+    },
+    "reset_rules": {
+      "tracker": "renderable get-backpack poll only (single call-site)",
+      "leaderstats": "renderable poll with leaderstats OR account-status row carrying leaderstats (payloadHasLeaderstats)",
+      "inventory": "renderable poll carrying fish/items/stones/totems rows only; NEVER on status-only account-status poll",
+      "failed_poll": "no section reset (gated on the raw response before the preserved-inventory merge)"
+    },
+    "backend_debug_age_preserved": [
+      "backendPresenceAgeSeconds",
+      "backendStatsAgeSeconds (liveSecondsSinceStatsSuccess)",
+      "backendInventoryAgeSeconds (liveSecondsSinceInventorySuccess)"
+    ],
+    "in_memory_only": "_frontendRefreshAt / _leaderstatsFrontendRefreshAt / _inventoryFrontendRefreshAt are never persisted to or seeded from localStorage."
+  },
+  "task4_5_ruby": {
+    "root_cause": "Top card used isRubyGemstoneItem at the card level, but Ruby is a gemstone-family MUTATION carried per-instance (ownedInstances[].mutationName === 'Ruby'); the detail/list view counts at the instance level, so the top card stayed 0.",
+    "fix": "Added RUBY_GEMSTONE_ALIASES + isRubyGemstoneMutationName + rubyGemstoneCountForItem, which counts Ruby per-instance (same source as the detail view) and falls back to the card-level detector for standalone gemstone items. computeInventoryStats now uses rubyGemstoneCountForItem.",
+    "normalization": "trim + case-insensitive across cleanName/name/displayName/baseFishName/mutation/mutationTags/bracket and category/type; string amounts coerced via Number.",
+    "no_hardcode": "Count is derived from data via rubyGemstoneCountForItem; no literal Ruby count."
+  },
+  "task6_color_swap": {
+    "implementation": "Key-swap at the top of ftDetailMutationSemanticPalette: key 'fairy dust' -> 'midnight' and 'midnight' -> 'fairy dust'. Both previously fell through to the hash fallback keyed on their own name, so each now adopts the other's resolved theme. No other mutation key is touched; readable-contrast and rarity-distance guards still apply downstream."
+  },
+  "tests": {
+    "new": "site/tests/tracker_sections_ruby_mutation_2026_06_16.test.js (timers x10, ruby x6, color x4)",
+    "updated": [
+      "site/tests/tracker_upload_interval_60s_regression.test.js (stats+inventory timers now frontend-driven)",
+      "site/tests/tracker_fix_2026_06_15.test.js (extracts new ruby helpers; [Ruby] bracket fish now counts, matching detail view)",
+      "site/tests/fishit_three_separate_indicators.test.js (stats timer now leaderstats frontend refresh)"
+    ],
+    "result": "All touched suites green (69/69 across the 4 core suites). Pre-existing, unrelated failures in fishit_blocker10zt6 / fishit_sync_duration_stats_hotfix / tracker_polish_2026_06_15 / fishit_three_separate_indicators (backend grace + stale deploy-marker assertions) confirmed identical with changes stashed (baseline = same 14 failures)."
+  },
+  "build_deploy": {
+    "bundle": "inventory.53a471bd4d1f.js",
+    "manifest": "site/src/inventoryAssetManifest.json -> js: inventory.53a471bd4d1f.js",
+    "served": "GET http://127.0.0.1:8791/public/assets/inventory.53a471bd4d1f.js -> 200, contains formatInventoryRefreshAgeText, rubyGemstoneCountForItem, 'fairy dust' key-swap",
+    "pm2": "deng-tool-site restarted after build (--update-env)"
+  }
+}

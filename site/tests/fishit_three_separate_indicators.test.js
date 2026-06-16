@@ -174,21 +174,17 @@ describe('three separate indicators regression', () => {
     assert.doesNotMatch(js, /data-card-sync-text/);
   });
 
-  test('stats timer uses upload sync elapsed time and never stat-delta labels', () => {
+  test('stats timer follows the leaderstats FRONTEND refresh elapsed time and never stat-delta labels', () => {
     const source = fs.readFileSync(SOURCE_PATH, 'utf8');
     assert.doesNotMatch(source, /No stat change/);
     assert.match(source, /function formatStatsUploadDurationText/);
     assert.match(source, /function formatCaughtActivitySub[\s\S]*formatStatsUploadDurationText\(entry\)/);
+    // The visible leaderstats timer now follows the per-section frontend-receive
+    // time (markEntryLeaderstatsRefreshed), not the backend upload sync age.
+    assert.match(source, /function formatStatsUploadDurationText\(entry\) \{[\s\S]*?return formatLeaderstatsRefreshAgeText\(entry\)/);
     const names = [
-      'pad2',
-      'syncAgeSeconds',
-      'entryUploadStatus',
-      'liveDriftedSeconds',
-      'entryStatusSuccessTimestamp',
-      'liveSecondsSinceStatusSuccess',
-      'entryStatsUploadSuccessTimestamp',
-      'liveSecondsSinceStatsSuccess',
-      'formatPresenceDurationLabel',
+      'getEntryLeaderstatsRefreshAgeMs',
+      'formatLeaderstatsRefreshAgeText',
       'formatStatsUploadDurationText',
       'formatCaughtActivitySub',
     ];
@@ -196,28 +192,26 @@ describe('three separate indicators regression', () => {
     blocks.forEach((block, i) => {
       assert.ok(block, `missing helper: ${names[i]}`);
     });
-    const fns = new Function(`
-      const displayableEntryPlayerStats = (stats) => stats;
+    const clock = { now: 0 };
+    const fns = new Function('Date', `
+      function pad2(n) { return String(n).padStart(2, '0'); }
+      function formatPresenceDurationLabel(secs) {
+        if (secs == null) return '';
+        if (secs < 60) return Math.max(1, secs) + 's';
+        return '1m ' + pad2(secs % 60) + 's';
+      }
       ${blocks.map((block) => block[0]).join('\n')}
       return {
         formatCaughtActivitySub,
         formatStatsUploadDurationText,
       };
-    `)();
-    const now = Date.now();
-    const uploadAt = new Date(now - 8000).toISOString();
-    const entry = {
-      uploadStatus: {
-        leaderstatsLastSuccessAt: uploadAt,
-        secondsSinceLastLeaderstatsSuccess: 8,
-      },
-      _uploadStatusFetchedAtMs: Date.now(),
-      lastData: { lastRequiredUploadAt: uploadAt, sameValuesFreshSync: true },
-    };
+    `)({ now: () => clock.now });
+    clock.now = 100000;
+    const entry = { _leaderstatsFrontendRefreshAt: clock.now - 8000 };
     assert.equal(fns.formatCaughtActivitySub(entry), '8s');
-    entry.lastData.sameValuesFreshSync = true;
     assert.notEqual(fns.formatCaughtActivitySub(entry), 'No stat change');
-    entry.uploadStatus.secondsSinceLastLeaderstatsSuccess = 0;
+    // A fresh leaderstats receive resets it to ~1s.
+    entry._leaderstatsFrontendRefreshAt = clock.now;
     assert.equal(fns.formatCaughtActivitySub(entry), '1s');
   });
 

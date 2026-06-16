@@ -38,6 +38,8 @@ function sliceBalanced(src, startToken, open, close) {
 
 function loadScanHelpers() {
   const src = readSource();
+  const aliasConst = src.match(/const RUBY_GEMSTONE_ALIASES = \[[\s\S]*?\];\s*const RUBY_GEMSTONE_ALIAS_SET = new Set\([\s\S]*?\);/);
+  if (!aliasConst) throw new Error('RUBY_GEMSTONE_ALIASES const block missing');
   const parts = [
     sliceBalanced(src, 'const FT_MUTATION_COLORS = {', '{', '}') + ';',
     sliceBalanced(src, 'function ftMutationHashColor(', '{', '}'),
@@ -45,9 +47,11 @@ function loadScanHelpers() {
     sliceBalanced(src, 'function ftBracketToken(', '{', '}'),
     sliceBalanced(src, 'function ftExtractMutation(', '{', '}'),
     sliceBalanced(src, 'function ftExtractBaseName(', '{', '}'),
+    aliasConst[0],
+    sliceBalanced(src, 'function isRubyGemstoneMutationName(', '{', '}'),
     sliceBalanced(src, 'function isRubyGemstoneItem(', '{', '}'),
   ];
-  const factory = new Function(`${parts.join('\n')}\n return { ftMutationColor, ftMutationHashColor, ftBracketToken, ftExtractMutation, ftExtractBaseName, isRubyGemstoneItem };`);
+  const factory = new Function(`${parts.join('\n')}\n return { ftMutationColor, ftMutationHashColor, ftBracketToken, ftExtractMutation, ftExtractBaseName, isRubyGemstoneMutationName, isRubyGemstoneItem };`);
   return factory();
 }
 
@@ -116,10 +120,16 @@ describe('STRICT tracker fix — Ruby Gemstone stat (D)', () => {
     assert.equal(scan.isRubyGemstoneItem({ name: 'Gemstone', mutation: 'Ruby', category: 'Gemstone' }), true);
   });
 
-  test('does NOT count an unrelated Ruby fish', () => {
+  test('does NOT count an unrelated plain Ruby-named fish (no mutation marker)', () => {
     assert.equal(scan.isRubyGemstoneItem({ name: 'Ruby', category: 'fish' }), false);
     assert.equal(scan.isRubyGemstoneItem({ name: 'Ruby Snapper', category: 'fish' }), false);
-    assert.equal(scan.isRubyGemstoneItem({ name: '[Ruby] Whale Shark', category: 'fish' }), false);
+  });
+
+  test('DOES count a [Ruby] bracket-mutation fish, matching the detail/list view', () => {
+    // The detail view extracts "Ruby" as the gemstone mutation from the [Ruby]
+    // bracket and renders a GEMSTONE card, so the top card must count it too.
+    assert.equal(scan.ftExtractMutation({ name: '[Ruby] Whale Shark', category: 'fish' }), 'Ruby');
+    assert.equal(scan.isRubyGemstoneItem({ name: '[Ruby] Whale Shark', category: 'fish' }), true);
   });
 
   test('does NOT count a non-ruby gemstone', () => {
