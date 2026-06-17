@@ -34,7 +34,9 @@ describe('tracker ingest upload reliability', () => {
 
   test('oversized upload payload returns 413 JSON not 502', async () => {
     const app = makeIngestApp();
-    const big = 'x'.repeat(600 * 1024);
+    // Body limit was raised (no 500-cap era) so complete large inventories are
+    // accepted; an upload past the new ceiling must still fail clean (413, not 502).
+    const big = 'x'.repeat(9 * 1024 * 1024);
     const res = await request(app)
       .post('/api/fishit-tracker/update-backpack')
       .set('Content-Type', 'application/json')

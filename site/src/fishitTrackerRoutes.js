@@ -1072,10 +1072,15 @@ function annotateReplionIdentity(items) {
   });
 }
 
+// NO 300/500 truncation on uploaded rows — process the full owned-item list so
+// rare/mutated instances past index 300 are never dropped. Bounded only by the
+// upload body limit. (Was raw.slice(0, 300).)
+const SANITISE_ITEMS_MAX = Number(process.env.FISHIT_SANITISE_ITEMS_MAX || 100000);
+
 function sanitiseItems(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
-  for (const item of raw.slice(0, 300)) {
+  for (const item of raw.slice(0, SANITISE_ITEMS_MAX)) {
     if (!isUsableUploadRow(item)) continue;
     const name = typeof item.name === 'string'
       ? item.name
@@ -5096,7 +5101,7 @@ function handleUpdateBackpack(req, res) {
 }
 
 const updateBackpackMiddleware = [
-  express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '512kb' }),
+  express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '8mb' }),
   trackerUploadCoalesceMiddleware,
   safeTrackerUploadHandler(
     'update-backpack',
@@ -5126,7 +5131,7 @@ function handleUpdateCatalog(req, res) {
 }
 
 const updateCatalogMiddleware = [
-  express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '512kb' }),
+  express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '8mb' }),
   trackerUploadCoalesceMiddleware,
   safeTrackerUploadHandler('update-catalog', handleUpdateCatalog),
 ];

@@ -27,70 +27,74 @@ const readSource = () => fs.readFileSync(SOURCE_PATH, 'utf8');
 // --------------------------------------------------------------------------
 // T3 — offline timer continuity (functional, via the real seeding helper)
 // --------------------------------------------------------------------------
-function makeOfflineSeedEnv(source, { online, presenceAge, statsAge, inventoryAge }) {
-  const block = source.match(/function seedOfflineTimersFromBackend\(entry\) \{[\s\S]*?\n {2}\}/);
-  assert.ok(block, 'seedOfflineTimersFromBackend helper missing from source');
+function makeOfflineSeedEnv(source, { presenceAge, statsAge, inventoryAge }) {
+  const block = source.match(/function seedTimersFromBackend\(entry\) \{[\s\S]*?\n {2}\}/);
+  assert.ok(block, 'seedTimersFromBackend helper missing from source');
   const clock = { now: 0 };
   const sandbox = {
     Math,
     Number,
     Date: { now: () => clock.now },
-    isTrackerAccountOnline: () => online,
     backendPresenceAgeSeconds: () => presenceAge,
     backendStatsAgeSeconds: () => statsAge,
     backendInventoryAgeSeconds: () => inventoryAge,
   };
-  const script = `(function(){\n${block[0]}\n  return { seedOfflineTimersFromBackend };\n})()`;
-  const api = vm.runInNewContext(script, sandbox, { filename: 'offline-seed.js' });
+  const script = `(function(){\n${block[0]}\n  return { seedTimersFromBackend };\n})()`;
+  const api = vm.runInNewContext(script, sandbox, { filename: 'timer-seed.js' });
   return { api, setNow: (ms) => { clock.now = ms; } };
 }
 
-describe('T3 — offline username timer does not reset on a new session/device', () => {
-  test('offline account: timer base time is seeded from backend last-real-update age (~30m)', () => {
-    // Backend says the last real update for each section was 30 minutes ago.
-    const env = makeOfflineSeedEnv(readSource(), { online: false, presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
+describe('T3 — username timer (all states) does not reset on a new session/device', () => {
+  test('timer base time is seeded from backend last-real-update age (~30m), not 1s', () => {
+    const env = makeOfflineSeedEnv(readSource(), { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
     env.setNow(5_000_000); // arbitrary "page open" time on a brand-new session
     const entry = {}; // fresh entry — nothing observed yet this session
-    env.api.seedOfflineTimersFromBackend(entry);
+    env.api.seedTimersFromBackend(entry);
     // Visible age = now - base. It must read ~30m (1800s), not ~1s.
     assert.equal(5_000_000 - entry._frontendRefreshAt, 1_800_000);
     assert.equal(5_000_000 - entry._leaderstatsFrontendRefreshAt, 1_800_000);
     assert.equal(5_000_000 - entry._inventoryFrontendRefreshAt, 1_800_000);
-    assert.equal(entry._offlineTimersSeeded, true);
+    assert.equal(entry._timersSeededFromBackend, true);
   });
 
   test('opening from another session/device shows the SAME ~30m, not 1s', () => {
     const src = readSource();
-    // Simulate two independent browser sessions opening the same offline account.
-    const a = makeOfflineSeedEnv(src, { online: false, presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
+    const a = makeOfflineSeedEnv(src, { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
     a.setNow(1_000_000);
     const entryA = {};
-    a.api.seedOfflineTimersFromBackend(entryA);
-    const b = makeOfflineSeedEnv(src, { online: false, presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
+    a.api.seedTimersFromBackend(entryA);
+    const b = makeOfflineSeedEnv(src, { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
     b.setNow(9_999_999);
     const entryB = {};
-    b.api.seedOfflineTimersFromBackend(entryB);
+    b.api.seedTimersFromBackend(entryB);
     assert.equal(1_000_000 - entryA._frontendRefreshAt, 1_800_000);
     assert.equal(9_999_999 - entryB._frontendRefreshAt, 1_800_000);
   });
 
-  test('online account: seeding is a no-op so the frontend displayed-change time is kept', () => {
-    const env = makeOfflineSeedEnv(readSource(), { online: true, presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
-    env.setNow(123456);
-    const entry = { _frontendRefreshAt: 123456 }; // just refreshed online
-    env.api.seedOfflineTimersFromBackend(entry);
-    assert.equal(entry._frontendRefreshAt, 123456); // untouched
-    assert.equal(entry._offlineTimersSeeded, undefined);
+  test('B3: an ONLINE account whose last upload was 30m ago also shows ~30m on open (not 1s)', () => {
+    const env = makeOfflineSeedEnv(readSource(), { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
+    env.setNow(5_000_000);
+    const entry = {}; // first observation, no section base set yet
+    env.api.seedTimersFromBackend(entry);
+    assert.equal(5_000_000 - entry._inventoryFrontendRefreshAt, 1_800_000);
+  });
+
+  test('only seeds UNSET fields — a base already set by maybeResetSectionTimers is preserved', () => {
+    const env = makeOfflineSeedEnv(readSource(), { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
+    env.setNow(5_000_000);
+    const entry = { _frontendRefreshAt: 4_999_000 }; // already seeded from a real data change
+    env.api.seedTimersFromBackend(entry);
+    assert.equal(entry._frontendRefreshAt, 4_999_000); // untouched
   });
 
   test('seeding runs once per entry/session and never re-seeds an already-seeded entry', () => {
-    const env = makeOfflineSeedEnv(readSource(), { online: false, presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
+    const env = makeOfflineSeedEnv(readSource(), { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
     env.setNow(1000);
     const entry = {};
-    env.api.seedOfflineTimersFromBackend(entry);
+    env.api.seedTimersFromBackend(entry);
     const firstBase = entry._frontendRefreshAt;
     env.setNow(2000); // a later poll on the same session
-    env.api.seedOfflineTimersFromBackend(entry);
+    env.api.seedTimersFromBackend(entry);
     assert.equal(entry._frontendRefreshAt, firstBase); // not re-seeded
   });
 });
@@ -121,10 +125,10 @@ describe('T3 — wiring', () => {
     assert.equal(calls.length, 1, 'still exactly one frontend-refresh reset call-site');
   });
 
-  test('offline base time is in-memory only (never persisted to localStorage)', () => {
+  test('timer base time is in-memory only (never persisted to localStorage)', () => {
     const src = readSource();
-    assert.ok(!/localStorage[\s\S]{0,160}_offlineTimersSeeded/.test(src));
-    assert.ok(!/_offlineTimersSeeded[\s\S]{0,160}localStorage/.test(src));
+    assert.ok(!/localStorage[\s\S]{0,160}_timersSeededFromBackend/.test(src));
+    assert.ok(!/_timersSeededFromBackend[\s\S]{0,160}localStorage/.test(src));
   });
 });
 
@@ -175,31 +179,31 @@ describe('T2 — no blinking timers/indicators', () => {
 // --------------------------------------------------------------------------
 // T4 — mobile uses readable cards, not the cramped fixed table
 // --------------------------------------------------------------------------
-describe('T4 — mobile account cards, no clipped text', () => {
-  test('the max-width:768px query shows cards and hides the table (no table-layout:fixed)', () => {
+describe('T4 — REVERTED: desktop-style table with smooth horizontal scroll on mobile', () => {
+  test('the max-width:768px query shows the table (scrollable) and hides the cards', () => {
     const src = readSource();
-    assert.match(src, /@media \(max-width:768px\)[\s\S]*\.accounts-table-wrap \{ display:none/);
-    assert.match(src, /@media \(max-width:768px\)[\s\S]*\.accounts-mobile-list \{ display:flex/);
-    assert.doesNotMatch(src, /@media \(max-width:768px\)[\s\S]*table-layout:fixed/);
+    assert.match(src, /@media \(max-width:768px\)[\s\S]*\.accounts-table-wrap \{\s*display:block !important;/);
+    assert.match(src, /@media \(max-width:768px\)[\s\S]*\.accounts-mobile-list \{ display:none !important; \}/);
+    // The table keeps natural columns + a readable min-width for horizontal scroll.
+    assert.match(src, /@media \(max-width:768px\)[\s\S]*\.accounts-table \{\s*table-layout:auto !important;\s*min-width:760px;/);
   });
 
-  test('APK embed also uses the stacked cards (not the forced fixed table)', () => {
+  test('APK embed also keeps the scrollable table (not the stacked cards)', () => {
     const src = readSource();
-    assert.match(src, /\.inventory-apk-embed [^\n]*\.accounts-table-wrap \{ display:none !important; \}/);
-    assert.match(src, /\.inventory-apk-embed [^\n]*\.accounts-mobile-list \{ display:flex !important; \}/);
+    assert.match(src, /\.inventory-apk-embed [^\n]*\.accounts-table-wrap \{\s*\n\s*display:block !important;/);
+    assert.match(src, /\.inventory-apk-embed [^\n]*\.accounts-mobile-list \{ display:none !important; \}/);
   });
 
-  test('action buttons stay tappable on mobile (>=40px) and username wraps', () => {
-    const src = readSource();
-    // 40px tappable icon button inside the mobile query.
-    assert.match(src, /@media \(max-width:768px\)[\s\S]*\.accounts-table__icon-btn \{[\s\S]*?min-width:40px/);
-    assert.match(src, /\.accounts-mobile-card__username[\s\S]*overflow-wrap:anywhere/);
-  });
-
-  test('compiled CSS bundle reflects the card layout (table hidden on mobile)', () => {
+  test('the table wrap is a smooth horizontal scroll container', () => {
     const css = fs.readFileSync(INVENTORY_CSS, 'utf8');
-    assert.match(css, /@media \(max-width:768px\)[\s\S]*\.accounts-mobile-list\{display:flex/);
-    assert.doesNotMatch(css, /@media \(max-width:768px\)[\s\S]*table-layout:fixed/);
+    assert.match(css, /-webkit-overflow-scrolling:touch/);
+    assert.match(css, /scroll-behavior:smooth/);
+    assert.match(css, /min-width:760px/);
+  });
+
+  test('compiled CSS bundle reflects the reverted table layout (cards hidden on mobile)', () => {
+    const css = fs.readFileSync(INVENTORY_CSS, 'utf8');
+    assert.match(css, /@media \(max-width:768px\)[\s\S]*accounts-mobile-list\{display:none ?!important/);
   });
 });
 

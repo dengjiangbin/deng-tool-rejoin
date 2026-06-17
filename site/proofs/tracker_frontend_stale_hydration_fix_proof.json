@@ -31,8 +31,5 @@
     "css": "inventory.d62363e68ab0.css"
   },
   "serviceWorker": "none in repo",
-  "bundle": {
-    "js": "inventory.2e92af6729d3.js",
-    "css": "inventory.d62363e68ab0.css"
-  }
+  "localStorage": "LS_KEY usernames only (migrated to server); no inventory snapshot cache"
 }

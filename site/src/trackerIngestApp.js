@@ -95,7 +95,7 @@ app.use((err, req, res, _next) => {
     return res.status(413).json({
       ok: false,
       error: 'payload_too_large',
-      limit: err.limit || '512kb',
+      limit: err.limit || (process.env.TRACKER_UPLOAD_BODY_LIMIT || '8mb'),
     });
   }
   console.error('[deng-tracker-ingest] error:', err);

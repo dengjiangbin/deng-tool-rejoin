@@ -1,15 +1,15 @@
 {
-  "capturedAt": "2026-06-17T12:17:03.199Z",
+  "capturedAt": "2026-06-17T14:46:45.993Z",
   "report": {
     "username": "Arayaaa_30",
     "shard": "arayaaa_30.json",
     "isOnline": true,
-    "lastInventoryAt": "2026-06-17T12:16:19.019Z",
+    "lastInventoryAt": "2026-06-17T14:46:36.672Z",
     "current": {
       "source": "playerDataFishItems (latest live upload)",
-      "rawInstances": 500,
-      "rubyNamedRows": 0,
-      "rubyGemstoneCount": 0
+      "rawInstances": 1044,
+      "rubyNamedRows": 1,
+      "rubyGemstoneCount": 1
     },
     "lastGoodPublic": {
       "source": "lastGoodPublicFishItems (prior cached public snapshot)",

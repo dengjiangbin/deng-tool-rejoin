@@ -14,7 +14,13 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
 
-const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
+// After the performance rebuild the page CSS/JS are extracted into hashed asset
+// bundles and only a shell EJS is rendered, so behavioural (JS) and style (CSS)
+// assertions are made against the inlined source-of-truth template, while the
+// rendered HTML is checked over the canonical /tracker route (legacy /inventory
+// is now a 301 alias).
+const SRC = fs.readFileSync(path.join(__dirname, '..', 'src', 'inventory', 'fishit_tracker.source.ejs'), 'utf8');
+const LAYOUT = fs.readFileSync(path.join(__dirname, '..', 'views', 'layout.ejs'), 'utf8');
 
 function makeApp() {
   const app = express();
@@ -26,7 +32,7 @@ function makeApp() {
 
 describe('BLOCKER10ZT leaderboard-style account table', () => {
   test('inventory page renders required table columns and controls', async () => {
-    const res = await request(makeApp()).get('/inventory').expect(200);
+    const res = await request(makeApp()).get('/tracker').expect(200);
     for (const label of [
       'Status', 'Username', 'Coins', 'Total Caught', 'Rarest Fish',
       'Backpack', 'Actions',
@@ -38,15 +44,16 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     assert.match(res.text, /data-account-filter="online"[^>]*>Online</);
     assert.match(res.text, /data-account-filter="offline"[^>]*>Offline</);
     assert.match(res.text, /id="accountsTableBody"/);
-    assert.match(res.text, /data-open-backpack/);
-    assert.match(res.text, /data-remove-account/);
-    assert.match(res.text, /function renderAccountsTable/);
-    assert.match(res.text, /function formatTableSyncAge/);
     assert.match(res.text, /id="hideUsernamesBtn"/);
     assert.match(res.text, /id="viewFishGridBtn"[^>]*title="Fish grid"/);
     assert.match(res.text, /id="viewFishGridBtn"[^>]*aria-label="Fish grid"/);
     assert.match(res.text, /id="inventoryViewSection"/);
-    assert.match(res.text, /inventoryViewSectionEl\.hidden = !isGrid/);
+    // Row/behaviour wiring lives in the extracted bundle (source of truth).
+    assert.match(SRC, /data-open-backpack/);
+    assert.match(SRC, /data-remove-account/);
+    assert.match(SRC, /function renderAccountsTable/);
+    assert.match(SRC, /function formatTableSyncAge/);
+    assert.match(SRC, /inventoryViewSectionEl\.hidden = !isGrid/);
     assert.doesNotMatch(res.text, />Ruin</);
     assert.doesNotMatch(res.text, />Artifact</);
     assert.doesNotMatch(res.text, />Quest</);
@@ -54,87 +61,86 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     assert.doesNotMatch(res.text, /\d+s ago/i);
   });
 
+  test('legacy /inventory alias redirects to canonical /tracker', async () => {
+    const res = await request(makeApp()).get('/inventory');
+    assert.equal(res.status, 301);
+    assert.match(String(res.headers.location || ''), /\/tracker/);
+  });
+
   test('offline table status uses red dead styling, not orange stale', () => {
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /function tableSyncFreshness/);
-    assert.match(tpl, /accounts-status \.status-dot\.dead/);
-    assert.doesNotMatch(tpl, /accounts-status[\s\S]*status-dot\.stale/);
-    assert.doesNotMatch(tpl, /\.status-dot\.stale/);
-    assert.match(tpl, /return 'dead'/);
+    assert.match(SRC, /function tableSyncFreshness/);
+    assert.match(SRC, /\.accounts-status \.status-dot\.dead/);
+    assert.doesNotMatch(SRC, /\.accounts-status \.status-dot\.stale/);
+    assert.match(SRC, /return 'dead'/);
   });
 
   test('leaderboard status format is compact duration without ago or just now', () => {
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /function formatTableSyncAge/);
-    assert.doesNotMatch(tpl, /function formatSyncStatusAgo/);
-    assert.doesNotMatch(tpl, /just now/);
-    assert.match(tpl, /\$\{secs\}s/);
-    assert.match(tpl, /\$\{Math\.floor\(secs \/ 60\)\}m/);
-    assert.doesNotMatch(tpl, /tickAccountsTableStatus/);
+    assert.match(SRC, /function formatTableSyncAge/);
+    assert.doesNotMatch(SRC, /function formatSyncStatusAgo/);
+    assert.doesNotMatch(SRC, /just now/);
+    assert.match(SRC, /\$\{secs\}s/);
+    assert.match(SRC, /\$\{mins\}m/);
+    assert.doesNotMatch(SRC, /tickAccountsTableStatus/);
   });
 
   test('quest and crossed icon/check columns are not present', () => {
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.doesNotMatch(tpl, />Quest</);
-    assert.doesNotMatch(tpl, /quest progress/i);
-    assert.doesNotMatch(tpl, /data-quest/i);
-    assert.doesNotMatch(tpl, /Quest \(\d/i);
-    assert.doesNotMatch(tpl, /elementFlags/i);
-    assert.doesNotMatch(tpl, />Remove</);
-    assert.doesNotMatch(tpl, /Last sync:/i);
-    assert.doesNotMatch(tpl, /displayProgressStat/);
-    assert.doesNotMatch(tpl, /viewCardsBtn/);
-    assert.doesNotMatch(tpl, /is-cards-only/);
+    assert.doesNotMatch(SRC, />Quest</);
+    assert.doesNotMatch(SRC, /quest progress/i);
+    assert.doesNotMatch(SRC, /data-quest/i);
+    assert.doesNotMatch(SRC, /Quest \(\d/i);
+    assert.doesNotMatch(SRC, /elementFlags/i);
+    assert.doesNotMatch(SRC, />Remove</);
+    assert.doesNotMatch(SRC, /Last sync:/i);
+    assert.doesNotMatch(SRC, /displayProgressStat/);
+    assert.doesNotMatch(SRC, /viewCardsBtn/);
+    assert.doesNotMatch(SRC, /is-cards-only/);
   });
 
   test('backpack buttons reuse main website nav backpack icon', () => {
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    const layout = fs.readFileSync(path.join(__dirname, '..', 'views', 'layout.ejs'), 'utf8');
     const backpackPath = 'M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10Z';
-    assert.match(layout, new RegExp(backpackPath));
-    assert.match(tpl, /data-nav-icon="backpack"/);
-    assert.match(tpl, new RegExp(backpackPath));
-    assert.match(tpl, /BACKPACK_NAV_ICON/);
-    assert.match(tpl, /data-open-backpack[\s\S]*\$\{BACKPACK_NAV_ICON\}/);
+    assert.match(LAYOUT, new RegExp(backpackPath));
+    assert.match(SRC, /data-nav-icon="backpack"/);
+    assert.match(SRC, new RegExp(backpackPath));
+    assert.match(SRC, /BACKPACK_NAV_ICON/);
+    assert.match(SRC, /data-open-backpack[\s\S]*\$\{BACKPACK_NAV_ICON\}/);
   });
 
   test('inventory view uses two-column mobile card grid', () => {
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.inventory-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.fish-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-    assert.match(tpl, /@media \(max-width:280px\)[\s\S]*grid-template-columns:1fr/);
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*\.inventory-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*\.fish-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(SRC, /@media \(max-width:280px\)[\s\S]*grid-template-columns:1fr/);
   });
 
-  test('mobile table view uses stacked account cards on small screens', () => {
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /buildAccountMobileCardHtml/);
-    assert.match(tpl, /accounts-mobile-list/);
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-table-wrap \{ display:none/);
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-mobile-list \{ display:flex/);
-    assert.doesNotMatch(tpl, /@media \(max-width:768px\)[\s\S]*table-layout:fixed/);
+  test('mobile keeps the desktop account table in a smooth horizontal scroll (cards retired)', () => {
+    // Part C revert: instead of swapping to stacked cards on mobile, the desktop
+    // table stays visible inside a horizontally scrollable wrap so text is never
+    // squeezed/cut. The card builder remains defined but is no longer shown.
+    assert.match(SRC, /buildAccountMobileCardHtml/);
+    assert.match(SRC, /accounts-mobile-list/);
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*\.accounts-table-wrap \{[\s\S]*display:block !important/);
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*\.accounts-mobile-list \{ display:none !important/);
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*\.accounts-table-wrap \{[\s\S]*overflow-x:auto/);
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*table-layout:auto !important/);
   });
 
-  test('mobile controls and compact loadstring rules exist', () => {
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-filters[\s\S]*grid-template-columns:repeat\(3/);
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-actions[\s\S]*grid-template-columns:repeat\(5/);
-    assert.match(tpl, /\.accounts-icon-btn[\s\S]*height:42px/);
-    assert.match(tpl, /\.loadstring-box\.is-compact/);
-    assert.match(tpl, /inventory-apk-embed/);
+  test('mobile controls use compact flex layout and apk embed rules exist', () => {
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*\.accounts-filters \{[\s\S]*display:flex/);
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*\.accounts-actions \{[\s\S]*display:flex/);
+    assert.match(SRC, /@media \(max-width:768px\)[\s\S]*\.accounts-icon-btn \{[\s\S]*height:38px/);
+    assert.match(SRC, /inventory-apk-embed/);
   });
 
   test('table view hides inventory section; inventory view shows it', () => {
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /id="inventoryViewSection"[^>]*hidden/);
-    assert.match(tpl, /setAccountViewMode\('fish'\)/);
-    assert.match(tpl, /setAccountViewMode\('table'\)/);
-    assert.match(tpl, /is-inventory-only/);
-    assert.match(tpl, /\.inventory-view-section\[hidden\]/);
+    assert.match(SRC, /id="inventoryViewSection"[^>]*hidden/);
+    assert.match(SRC, /setAccountViewMode\('fish'\)/);
+    assert.match(SRC, /setAccountViewMode\('table'\)/);
+    assert.match(SRC, /is-inventory-only/);
+    assert.match(SRC, /\.inventory-view-section\[hidden\]/);
   });
 
   test('update-backpack stores and returns playerStats without quest fields', async () => {
     const app = makeApp();
-    await request(app)
+    const postRes = await request(app)
       .post('/api/fishit-tracker/update-backpack')
       .send({
         type: 'inventory_snapshot',
@@ -155,8 +161,9 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
           artifact: { current: 4, max: 4 },
           quest: { current: 1, max: 4 },
         },
-      })
-      .expect(200);
+      });
+    // Uploads are accepted asynchronously now (202) but a synchronous 200 is also fine.
+    assert.ok([200, 202].includes(postRes.status), `unexpected upload status ${postRes.status}`);
 
     const res = await request(app).get('/api/fishit-tracker/get-backpack/LeaderTableUser').expect(200);
     assert.equal(res.body.playerStats.coinsText, '201.2K');

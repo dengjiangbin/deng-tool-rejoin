@@ -14,6 +14,7 @@
     "css": "inventory.7c5c078802bf.css"
   },
   "tests": "site/tests/tracker_username_bulk_remove_2026_06_16.test.js (9/9 pass)",
+  "commit": "495836d",
   "proofHtml": "site/proofs/tracker_username_bulk_remove_proof.html",
   "unchanged": ["Roblox Lua", "backend ingest", "upload pipeline", "Cloudflare", "auth/OAuth/APK"]
 }

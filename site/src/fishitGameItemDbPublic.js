@@ -297,7 +297,10 @@ function normaliseUploadRows(rows) {
   return rows.map(normaliseUploadRow).filter(Boolean);
 }
 
-const MAX_FISH_INSTANCES_PER_GROUP = 1000;
+// NO per-group instance cap that silently drops owned fish. High safety ceiling
+// only (bounded in practice by the upload body limit), so a user owning thousands
+// of one fish type keeps every instance + its mutation/weight for detection.
+const MAX_FISH_INSTANCES_PER_GROUP = Number(process.env.FISHIT_MAX_FISH_INSTANCES_PER_GROUP || 100000);
 
 // Per-instance descriptor preserved before aggregation so the inline detail
 // view can render one card per owned fish with its OWN mutation + weight.

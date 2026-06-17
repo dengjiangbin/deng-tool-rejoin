@@ -9,7 +9,10 @@ const { trackerUploadKey } = require('./trackerUploadRateLimit');
 const { recordCoalescedUpload } = require('./trackerRouteMetrics');
 
 const COALESCE_WINDOW_MS = Number(process.env.TRACKER_UPLOAD_COALESCE_MS || 750);
-const MAX_BODY_BYTES = Number(process.env.TRACKER_UPLOAD_MAX_BODY_BYTES || 512 * 1024);
+// Raised from 512KB so large (complete, un-truncated) inventories of 1000s of
+// fish/stone/totem instances are accepted instead of rejected with 413. The
+// fast lane still parses fast (~tens of ms for a few MB) and defers heavy work.
+const MAX_BODY_BYTES = Number(process.env.TRACKER_UPLOAD_MAX_BODY_BYTES || 8 * 1024 * 1024);
 
 /** @type {Map<string, { at: number, hash: string, count: number }>} */
 const recentByLane = new Map();

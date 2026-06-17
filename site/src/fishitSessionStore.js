@@ -18,8 +18,13 @@ function storePath() {
 }
 
 const MAX_SESSIONS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 2000);
-const MAX_ITEMS_PER_SESSION = Number(process.env.FISHIT_MAX_PERSISTED_ITEMS || 500);
-const MAX_PUBLIC_FISH = Number(process.env.FISHIT_MAX_PERSISTED_PUBLIC_FISH || 100);
+// NO 500 INSTANCE CAP: owned fish/stone/totem instances must persist completely
+// (a rare Ruby+Gemstone past index 500 was previously dropped here). This is a
+// high memory-safety ceiling, NOT a truncation of real inventories — the real
+// transport bound is the upload body limit (TRACKER_UPLOAD_BODY_LIMIT), so a
+// realistic inventory of a few thousand instances persists in full.
+const MAX_ITEMS_PER_SESSION = Number(process.env.FISHIT_MAX_PERSISTED_ITEMS || 100000);
+const MAX_PUBLIC_FISH = Number(process.env.FISHIT_MAX_PERSISTED_PUBLIC_FISH || 5000);
 const FLUSH_DEBOUNCE_MS = Number(process.env.FISHIT_SESSION_FLUSH_MS || 400);
 const SYNC_SAVE = process.env.FISHIT_SESSION_SYNC_SAVE === '1'
   || process.env.NODE_ENV === 'test';

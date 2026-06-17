@@ -157,6 +157,20 @@
 
     <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" aria-label="Live Tracker">
 
+    <!-- Username controls sit ABOVE the top summary card grid so users can
+         add/remove accounts before the cards. -->
+    <div class="player-control-bar">
+      <input type="text" id="usernameInput" name="username" placeholder="Enter nickname..." maxlength="20" autocomplete="username" spellcheck="false" aria-label="Roblox nickname" aria-describedby="usernameError" inputmode="text">
+      <button class="btn btn-add" id="addBtn" type="button">+ Add</button>
+      <button class="btn btn-multiple" id="multipleBtn" type="button">+ Multiple</button>
+      <div class="tracker-username-actions" aria-label="Bulk username removal">
+        <button type="button" class="tracker-username-action-button tracker-username-action-button--offline" id="removeOfflineBtn">Remove Offline</button>
+        <button type="button" class="tracker-username-action-button tracker-username-action-button--nodata" id="removeNoDataBtn">Remove No Data</button>
+        <button type="button" class="tracker-username-action-button tracker-username-action-button--all tracker-username-action-danger" id="removeAllBtn">Remove All</button>
+      </div>
+      <div class="username-error" id="usernameError" role="status" aria-live="polite"></div>
+    </div>
+
     <% var TTS = (typeof trackerTopSummaryIcons !== 'undefined' && trackerTopSummaryIcons) ? trackerTopSummaryIcons : { online: '/public/img/tracker/online_avatar.png', secret: null, forgotten: null, ruby: null, evolved: null, runic: null }; %>
     <div class="inventory-stats tracker-top-summary-grid" id="inventoryStats" aria-label="Inventory summary">
       <div class="tracker-top-summary-card tracker-top-summary-card--online">
@@ -191,18 +205,6 @@
       </div>
     </div>
 
-    <div class="player-control-bar">
-      <input type="text" id="usernameInput" name="username" placeholder="Enter nickname..." maxlength="20" autocomplete="username" spellcheck="false" aria-label="Roblox nickname" aria-describedby="usernameError" inputmode="text">
-      <button class="btn btn-add" id="addBtn" type="button">+ Add</button>
-      <button class="btn btn-multiple" id="multipleBtn" type="button">+ Multiple</button>
-      <div class="tracker-username-actions" aria-label="Bulk username removal">
-        <button type="button" class="tracker-username-action-button tracker-username-action-button--offline" id="removeOfflineBtn">Remove Offline</button>
-        <button type="button" class="tracker-username-action-button tracker-username-action-button--nodata" id="removeNoDataBtn">Remove No Data</button>
-        <button type="button" class="tracker-username-action-button tracker-username-action-button--all tracker-username-action-danger" id="removeAllBtn">Remove All</button>
-      </div>
-      <div class="username-error" id="usernameError" role="status" aria-live="polite"></div>
-    </div>
-
     <div class="summary-bar" id="summaryBar">
       <span id="summaryText">No players added yet</span>
     </div>
@@ -217,6 +219,22 @@
         <div class="modal-actions">
           <button type="button" class="btn-modal-cancel" id="multipleAddCancel">Cancel</button>
           <button type="button" class="btn-modal-submit" id="multipleAddSubmit">Add Accounts</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="pageSizeModal" class="modal-overlay" hidden aria-hidden="true">
+      <div class="modal-dialog" role="dialog" aria-labelledby="pageSizeModalTitle" aria-modal="true">
+        <h2 id="pageSizeModalTitle" class="modal-title">Players per page</h2>
+        <p class="modal-helper">Choose how many accounts to show per page.</p>
+        <div class="page-size-options" role="group" aria-label="Page size options">
+          <button type="button" class="page-size-option" data-page-size="20">20 players</button>
+          <button type="button" class="page-size-option" data-page-size="50">50 players</button>
+          <button type="button" class="page-size-option" data-page-size="100">100 players</button>
+          <button type="button" class="page-size-option" data-page-size="1000">1000 players</button>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-modal-cancel" id="pageSizeCancel">Close</button>
         </div>
       </div>
     </div>
@@ -316,6 +334,20 @@
         </table>
       </div>
       <div class="accounts-mobile-list" id="accountsMobileList" aria-label="Account cards"></div>
+      <div class="accounts-pagination" id="accountsPagination" hidden>
+        <div class="accounts-pagination__info">
+          <span id="accountsPaginationRange">Showing 0 of 0 players</span>
+          <span class="accounts-pagination__dot" aria-hidden="true">·</span>
+          <span id="accountsPaginationPage">Page 1 of 1</span>
+        </div>
+        <div class="accounts-pagination__controls" role="group" aria-label="Table pagination">
+          <button type="button" class="accounts-pagination__btn" id="accountsPageFirst" aria-label="First page">&laquo; First</button>
+          <button type="button" class="accounts-pagination__btn" id="accountsPagePrev" aria-label="Previous page">&lsaquo; Prev</button>
+          <button type="button" class="accounts-pagination__btn" id="accountsPageNext" aria-label="Next page">Next &rsaquo;</button>
+          <button type="button" class="accounts-pagination__btn" id="accountsPageLast" aria-label="Last page">Last &raquo;</button>
+          <button type="button" class="accounts-pagination__btn accounts-pagination__size" id="accountsPageSizeBtn" aria-haspopup="dialog" aria-controls="pageSizeModal">20 / page</button>
+        </div>
+      </div>
     </section>
 
     <div id="inventoryViewSection" class="inventory-view-section" hidden>
