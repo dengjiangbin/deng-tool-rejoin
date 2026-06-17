@@ -49,3 +49,24 @@ test('Phase 9: counts gemstone mutation spelling aliases ("gem stone", "Ruby Gem
   const body = { fishItems: [{ name: 'Ruby', cleanName: 'Ruby', ownedInstances: [{ mutation: 'gem stone' }, { mutation: 'Ruby Gemstone' }] }] };
   assert.strictEqual(ruby.computeRubyGemstoneTopCard(body).count, 2);
 });
+
+test('Phase 9: detects gemstone via mutation FIELD aliases (mutationType / modifier)', () => {
+  const body = {
+    fishItems: [
+      { name: 'Ruby', cleanName: 'Ruby', ownedInstances: [{ mutationType: 'Gemstone' }] },
+      { name: 'Ruby', cleanName: 'Ruby', ownedInstances: [{ modifier: 'Gemstone' }] },
+    ],
+  };
+  assert.strictEqual(ruby.computeRubyGemstoneTopCard(body).count, 2);
+});
+
+test('Phase 9: detects Ruby via NAME field aliases (baseFishName / displayName / itemName)', () => {
+  const body = {
+    fishItems: [
+      { baseFishName: 'Ruby', ownedInstances: [{ mutation: 'Gemstone' }] },
+      { displayName: 'Ruby', ownedInstances: [{ mutation: 'Gemstone' }] },
+      { itemName: 'Ruby', ownedInstances: [{ mutation: 'Gemstone' }] },
+    ],
+  };
+  assert.strictEqual(ruby.computeRubyGemstoneTopCard(body).count, 3);
+});

@@ -1,0 +1,31 @@
+{
+  "capturedAt": "2026-06-17T12:17:03.199Z",
+  "report": {
+    "username": "Arayaaa_30",
+    "shard": "arayaaa_30.json",
+    "isOnline": true,
+    "lastInventoryAt": "2026-06-17T12:16:19.019Z",
+    "current": {
+      "source": "playerDataFishItems (latest live upload)",
+      "rawInstances": 500,
+      "rubyNamedRows": 0,
+      "rubyGemstoneCount": 0
+    },
+    "lastGoodPublic": {
+      "source": "lastGoodPublicFishItems (prior cached public snapshot)",
+      "rows": 22,
+      "rubyNamedRows": 1,
+      "rubyGemstoneCount": 1,
+      "rubyRowProof": [
+        {
+          "name": "Ruby",
+          "cardMutation": null,
+          "instanceMutations": [
+            "Gemstone"
+          ],
+          "amount": 1
+        }
+      ]
+    }
+  }
+}
