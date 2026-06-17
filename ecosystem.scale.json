@@ -1,0 +1,60 @@
+{
+  "apps": [
+    {
+      "name": "deng-tracker-read",
+      "script": "tracker-read-server.js",
+      "cwd": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site",
+      "interpreter": "node",
+      "watch": false,
+      "autorestart": true,
+      "max_restarts": 15,
+      "restart_delay": 3000,
+      "kill_timeout": 8000,
+      "listen_timeout": 12000,
+      "max_memory_restart": "1024M",
+      "env": {
+        "NODE_ENV": "production",
+        "TRACKER_READ_HOST": "127.0.0.1",
+        "TRACKER_READ_PORT": "8793",
+        "TRACKER_READ_FALLBACK": "1",
+        "TRACKER_READ_CACHE_REFRESH_MS": "1000",
+        "TRACKER_READ_FALLBACK_TIMEOUT_MS": "2500",
+        "TOOL_SITE_HOST": "127.0.0.1",
+        "TOOL_SITE_PORT": "8791",
+        "FISHIT_PRECOMPUTE_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_precompute.db",
+        "TRACKER_WORKER_METRICS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\tracker_worker_metrics.json"
+      }
+    },
+    {
+      "name": "deng-tracker-worker",
+      "script": "tracker-worker.js",
+      "cwd": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site",
+      "interpreter": "node",
+      "watch": false,
+      "autorestart": true,
+      "max_restarts": 15,
+      "restart_delay": 3000,
+      "kill_timeout": 8000,
+      "max_memory_restart": "2048M",
+      "env": {
+        "NODE_ENV": "production",
+        "TRACKER_WEB_MODE": "1",
+        "SKIP_TRACKER_UPLOAD_ROUTES": "1",
+        "FISHIT_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite",
+        "FISHIT_LIVE_SESSIONS_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions",
+        "FISHIT_LIVE_SESSIONS_PATH": "",
+        "FISHIT_SESSION_SHARDED": "1",
+        "FISHIT_MAX_PERSISTED_SESSIONS": "2000",
+        "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/fish-it",
+        "TOOL_SITE_PUBLIC_URL": "https://aio.deng.my.id",
+        "TRACKER_PRECOMPUTE_BASE_URL": "https://aio.deng.my.id",
+        "FISHIT_PRECOMPUTE_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_precompute.db",
+        "TRACKER_WORKER_METRICS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\tracker_worker_metrics.json",
+        "TRACKER_WORKER_TICK_MS": "500",
+        "TRACKER_WORKER_REFRESH_MS": "120000",
+        "TRACKER_WORKER_MAX_PER_TICK": "80",
+        "TRACKER_WORKER_CONCURRENCY": "6"
+      }
+    }
+  ]
+}

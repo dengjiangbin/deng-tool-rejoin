@@ -1,0 +1,21 @@
+{
+  "capturedAt": "2026-06-17T04:45:02.489Z",
+  "summary": {
+    "base": "http://127.0.0.1:8793",
+    "total": 3000,
+    "concurrency": 80,
+    "elapsedMs": 11635,
+    "throughputPerSec": 258,
+    "statusCounts": {
+      "200": 3000
+    },
+    "badGateways": 0,
+    "latencyMs": {
+      "min": 1,
+      "p50": 296,
+      "p95": 510,
+      "p99": 594,
+      "max": 654
+    }
+  }
+}

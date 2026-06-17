@@ -1,0 +1,437 @@
+{
+  "capturedAt": "2026-06-17T04:26:05.690Z",
+  "summary": {
+    "sampled": 60,
+    "precomputedHits": 60,
+    "fallbacks": 0,
+    "notFound": 0,
+    "ageMs": {
+      "min": 43,
+      "p50": 5159,
+      "p95": 24874,
+      "max": 31142
+    }
+  },
+  "results": [
+    {
+      "user": "kaomougi",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 43,
+      "fallback": "0"
+    },
+    {
+      "user": "priadivine458",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 9234,
+      "fallback": "0"
+    },
+    {
+      "user": "zefannya_21",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 4820,
+      "fallback": "0"
+    },
+    {
+      "user": "sdqweher",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 8084,
+      "fallback": "0"
+    },
+    {
+      "user": "lacur888",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 24725,
+      "fallback": "0"
+    },
+    {
+      "user": "radiantciphers",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 25012,
+      "fallback": "0"
+    },
+    {
+      "user": "lawsonsir",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 5654,
+      "fallback": "0"
+    },
+    {
+      "user": "rinzhama7",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 24874,
+      "fallback": "0"
+    },
+    {
+      "user": "yokozuna696",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 9718,
+      "fallback": "0"
+    },
+    {
+      "user": "rinzgoat",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 22317,
+      "fallback": "0"
+    },
+    {
+      "user": "lacursembilan",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 30857,
+      "fallback": "0"
+    },
+    {
+      "user": "keswoy204",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 849,
+      "fallback": "0"
+    },
+    {
+      "user": "gstystwn",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 15649,
+      "fallback": "0"
+    },
+    {
+      "user": "veyy663",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 15943,
+      "fallback": "0"
+    },
+    {
+      "user": "wldngfh",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 4792,
+      "fallback": "0"
+    },
+    {
+      "user": "nixkuli3",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 9172,
+      "fallback": "0"
+    },
+    {
+      "user": "gepzk906",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 13072,
+      "fallback": "0"
+    },
+    {
+      "user": "priadivine146",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 9610,
+      "fallback": "0"
+    },
+    {
+      "user": "tuanbagaz",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 31142,
+      "fallback": "0"
+    },
+    {
+      "user": "jeemitzy",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 13125,
+      "fallback": "0"
+    },
+    {
+      "user": "sandragna",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 9738,
+      "fallback": "0"
+    },
+    {
+      "user": "kromosoml",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 1226,
+      "fallback": "0"
+    },
+    {
+      "user": "matt_vloid",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 22603,
+      "fallback": "0"
+    },
+    {
+      "user": "datpolxlol",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 3412,
+      "fallback": "0"
+    },
+    {
+      "user": "whoareyaaaw",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 1286,
+      "fallback": "0"
+    },
+    {
+      "user": "vornic05",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 4001,
+      "fallback": "0"
+    },
+    {
+      "user": "lacurlima",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 12812,
+      "fallback": "0"
+    },
+    {
+      "user": "talonxrobloxv5",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 1248,
+      "fallback": "0"
+    },
+    {
+      "user": "belliontzy09",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 3694,
+      "fallback": "0"
+    },
+    {
+      "user": "keswoy0105",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 5159,
+      "fallback": "0"
+    },
+    {
+      "user": "lacurlimabelas",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 81,
+      "fallback": "0"
+    },
+    {
+      "user": "iroly_fishing",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 3726,
+      "fallback": "0"
+    },
+    {
+      "user": "eijiromatsuq",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 16890,
+      "fallback": "0"
+    },
+    {
+      "user": "adika_123456",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 7078,
+      "fallback": "0"
+    },
+    {
+      "user": "majesticsvv7",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 4919,
+      "fallback": "0"
+    },
+    {
+      "user": "viaranesa",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 1038,
+      "fallback": "0"
+    },
+    {
+      "user": "lacurdua",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 9820,
+      "fallback": "0"
+    },
+    {
+      "user": "ditzzzasli8",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 1275,
+      "fallback": "0"
+    },
+    {
+      "user": "priadivine241",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 1419,
+      "fallback": "0"
+    },
+    {
+      "user": "echosentinelx",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 14780,
+      "fallback": "0"
+    },
+    {
+      "user": "divinemanatahan125",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 365,
+      "fallback": "0"
+    },
+    {
+      "user": "arayaaa_30",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 3709,
+      "fallback": "0"
+    },
+    {
+      "user": "belliontzy17",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 76,
+      "fallback": "0"
+    },
+    {
+      "user": "lacurdel4pan",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 13155,
+      "fallback": "0"
+    },
+    {
+      "user": "trofyuto",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 1403,
+      "fallback": "0"
+    },
+    {
+      "user": "priadivine32",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 4178,
+      "fallback": "0"
+    },
+    {
+      "user": "moralered",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 9178,
+      "fallback": "0"
+    },
+    {
+      "user": "priabank2",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 4989,
+      "fallback": "0"
+    },
+    {
+      "user": "divinemanatahan35",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 3938,
+      "fallback": "0"
+    },
+    {
+      "user": "velunaca20",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 538,
+      "fallback": "0"
+    },
+    {
+      "user": "cihuyyy11512",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 19525,
+      "fallback": "0"
+    },
+    {
+      "user": "neptuneshiki11",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 3612,
+      "fallback": "0"
+    },
+    {
+      "user": "neptuneshiki8",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 3613,
+      "fallback": "0"
+    },
+    {
+      "user": "whoareyeeu",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 6406,
+      "fallback": "0"
+    },
+    {
+      "user": "iniacaa203",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 15624,
+      "fallback": "0"
+    },
+    {
+      "user": "sealunarr",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 15095,
+      "fallback": "0"
+    },
+    {
+      "user": "duskriverhe",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 1567,
+      "fallback": "0"
+    },
+    {
+      "user": "belliontzy14",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 5237,
+      "fallback": "0"
+    },
+    {
+      "user": "tipsyboulde",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 712,
+      "fallback": "0"
+    },
+    {
+      "user": "chlooeee_12",
+      "status": 200,
+      "precomputed": "1",
+      "ageMs": 3995,
+      "fallback": "0"
+    }
+  ]
+}

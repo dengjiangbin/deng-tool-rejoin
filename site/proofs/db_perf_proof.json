@@ -1,0 +1,31 @@
+{
+  "capturedAt": "2026-06-17T04:49:33.358Z",
+  "dbPath": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_precompute.db",
+  "fileMB": 201.5,
+  "journalMode": "wal",
+  "synchronous": {
+    "synchronous": 2
+  },
+  "busyTimeout": {
+    "timeout": 5000
+  },
+  "indexes": [
+    "tracker_latest_snapshots.idx_latest_precomputed_at",
+    "tracker_latest_snapshots.idx_latest_user_id",
+    "tracker_latest_snapshots.idx_latest_username",
+    "tracker_latest_snapshots.sqlite_autoindex_tracker_latest_snapshots_1",
+    "tracker_snapshot_history.idx_history_created",
+    "tracker_snapshot_history.idx_history_session"
+  ],
+  "upsertAvgMs": 0.388,
+  "readAvgMs": 6.42,
+  "readBodyBytes": 1118103,
+  "storeStats": {
+    "dbPath": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_precompute.db",
+    "latestRows": 531,
+    "historyRows": 6807,
+    "fileBytes": 211333120,
+    "historyMaxPerSession": 15,
+    "historyTtlMs": 129600000
+  }
+}

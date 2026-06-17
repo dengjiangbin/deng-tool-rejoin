@@ -20,10 +20,20 @@ const PORT = parseInt(process.env.TRACKER_INGEST_PORT || '8792', 10);
 
 app.use((req, res, next) => {
   res.set('X-DENG-Served-By', 'deng-tracker-ingest');
+  res.set('X-DENG-Ingest-Route', String(PORT));
   const viaProxy = String(req.headers['x-deng-via-web-proxy'] || '') === '1';
   recordIngestRequest(viaProxy);
   if (viaProxy) res.set('X-DENG-Tracker-Route', 'web-proxy-fallback');
   else res.set('X-DENG-Tracker-Route', 'direct-ingest');
+  // Stamp server-side accept time on every ingest response. Patch the response
+  // writers so the header lands before the body is flushed (additive, no change
+  // to the upload handler's own logic).
+  const startedAt = Date.now();
+  const stamp = () => { if (!res.headersSent) res.set('X-DENG-Ingest-Time-Ms', String(Date.now() - startedAt)); };
+  const origJson = res.json.bind(res);
+  const origSend = res.send.bind(res);
+  res.json = (body) => { stamp(); return origJson(body); };
+  res.send = (body) => { stamp(); return origSend(body); };
   next();
 });
 

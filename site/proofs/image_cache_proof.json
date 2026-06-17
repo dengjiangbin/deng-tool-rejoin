@@ -1,0 +1,38 @@
+{
+  "capturedAt": "2026-06-17T04:52:13.848Z",
+  "cacheDir": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fish_image_cache",
+  "indexStats": {
+    "cachedCount": 570,
+    "missingCount": 1,
+    "byAssetIdEntries": 571,
+    "byNameEntries": 715,
+    "byUrlEntries": 0,
+    "byLocalFileEntries": 0,
+    "indexUpdatedAt": "2026-06-16T17:10:54.554Z"
+  },
+  "onDiskFiles": 1815,
+  "onDiskMB": 42.9,
+  "dedupeRule": "sha256(first16).<ext>; index byAssetId/byName/byUrl/byLocalFile; skip download if localFile exists",
+  "perUser": [
+    {
+      "user": "denghub2",
+      "status": 200,
+      "readMode": "precomputed",
+      "precomputedAgeMs": "38830",
+      "rows": 16,
+      "localImageUrls": 14,
+      "externalImageUrls": 2,
+      "noImage": 0
+    },
+    {
+      "user": "kingree030",
+      "status": 200,
+      "readMode": "precomputed",
+      "precomputedAgeMs": "12298",
+      "rows": 75,
+      "localImageUrls": 69,
+      "externalImageUrls": 6,
+      "noImage": 0
+    }
+  ]
+}

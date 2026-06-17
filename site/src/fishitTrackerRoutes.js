@@ -57,6 +57,7 @@ const {
 } = require('./trackerAccountPresence');
 
 const catalogStore = require('./fishitCatalogStore');
+const rubyGemstoneCount = require('./fishitRubyGemstoneCount');
 const playerStatsStore = require('./fishitPlayerStats');
 const leaderstatsUpload = require('./fishitLeaderstatsUpload');
 const liveTrackerSerializer = require('./fishitLiveTrackerSerializer');
@@ -6035,17 +6036,47 @@ router.get('/api/fishit-tracker/catalog', getLimiter, (_req, res) => {
 // ── GET get-backpack (canonical + legacy alias) ───────────────────
 // Also resolves userId aliases (uid:<number> keys created on POST).
 async function handleGetBackpack(req, res) {
-  syncLiveTrackFromDisk();
   const queryStartedAt = Date.now();
-  const wantLite = trackerPerf.isLiteBackpackRequest(req);
-  const includeDebug = trackerPerf.isDebugRequest(req);
   const cleanUser = sanitiseUsername(req.params.username);
   if (!cleanUser) {
     return res.status(400).json({ error: 'Invalid username.' });
   }
+  const result = await buildBackpackBodyForKey(cleanUser, {
+    wantLite: trackerPerf.isLiteBackpackRequest(req),
+    includeDebug: trackerPerf.isDebugRequest(req),
+    baseUrl: `${req.protocol}://${req.get('host')}`,
+    debugMetadata: String(req.query.debug || '').toLowerCase() === 'metadata',
+    syncDisk: true,
+  });
+  if (result.status !== 200) {
+    return res.status(result.status).json(result.body);
+  }
+  if (result.includeDebug) {
+    res.set('X-Backpack-Mode', result.body.responseMode || 'full');
+    res.set('X-Tracker-Query-Ms', String(Date.now() - queryStartedAt));
+  }
+  return res.status(200).json(result.body);
+}
 
-  const key  = cleanUser.toLowerCase();
-  let data    = liveTrackDB[key];
+/**
+ * Build the get-backpack response body for a username/key WITHOUT req/res.
+ *
+ * This is the shared core extracted from handleGetBackpack so the background
+ * worker (deng-tracker-worker) produces a precomputed snapshot that is
+ * byte-identical to the legacy read path. Returns { status, body, includeDebug }.
+ */
+async function buildBackpackBodyForKey(cleanUser, opts = {}) {
+  const wantLite = opts.wantLite === true;
+  const includeDebug = opts.includeDebug === true;
+  const debugMetadata = opts.debugMetadata === true;
+  const baseUrlOverride = opts.baseUrl || null;
+  if (opts.syncDisk !== false) syncLiveTrackFromDisk();
+  const queryStartedAt = Date.now();
+  if (!cleanUser) {
+    return { status: 400, body: { error: 'Invalid username.' }, includeDebug };
+  }
+  const key = String(cleanUser).toLowerCase();
+  let data = liveTrackDB[key];
 
   // Fallback: if the param looks like a userId, resolve through the alias.
   if (!data && /^\d+$/.test(key)) {
@@ -6054,7 +6085,7 @@ async function handleGetBackpack(req, res) {
   }
 
   if (!data) {
-    return res.status(404).json({ error: 'No tracking session active for this user.' });
+    return { status: 404, body: { error: 'No tracking session active for this user.' }, includeDebug };
   }
   data = ensureSessionBuildCurrent(data);
   data = snapshotCompleteness.applyRehydratedCompleteness(data, playerStatsStore);
@@ -6067,7 +6098,7 @@ async function handleGetBackpack(req, res) {
   const rawInventory = buildInventoryGroups(sourceItems);
   const countsRaw = inventoryCountsFromGroups(rawInventory);
   const countsEnriched = inventoryCountsFromGroups(enrichedInventory);
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const baseUrl = baseUrlOverride || 'http://127.0.0.1:8791';
   let publicFish = await buildPublicFishFields(enrichedFlat, baseUrl, { sessionData: data, sessionKey: key });
   const liveFishCount = Array.isArray(publicFish.fishItems) ? publicFish.fishItems.length : 0;
   if (liveFishCount === 0 && Array.isArray(data.lastGoodPublicFishItems) && data.lastGoodPublicFishItems.length) {
@@ -6351,17 +6382,20 @@ async function handleGetBackpack(req, res) {
   const body = wantLite
     ? trackerPerf.buildLiteBackpackResponse(enriched)
     : { ...enriched, lite: false, responseMode: 'full' };
-  if (includeDebug) {
-    res.set('X-Backpack-Mode', body.responseMode || 'full');
-    res.set('X-Tracker-Query-Ms', String(Date.now() - queryStartedAt));
-  }
+  // Phase 9: authoritative server-side Ruby Gemstone top-card count, carried in
+  // every body (lite + full) so the precomputed snapshot and the client agree.
+  // Never let a proof field fail the read.
+  try {
+    body.topCards = body.topCards || {};
+    body.topCards.rubyGemstone = rubyGemstoneCount.computeRubyGemstoneTopCard(body);
+  } catch (_) { /* ignore proof failure */ }
   // BLOCKER G — explicit ?debug=metadata contract: counts + per-instance
   // mutation/weight health + lane state + data source. Never attached on the
   // normal page (only when ?debug=metadata is requested).
-  if (String(req.query.debug || '').toLowerCase() === 'metadata') {
+  if (debugMetadata) {
     body.metadataDebug = buildMetadataDebugBlock(data, publicFish, key);
   }
-  return res.status(200).json(body);
+  return { status: 200, body, includeDebug, queryMs: Date.now() - queryStartedAt };
 }
 
 // Per-instance mutation/weight health for ?debug=metadata. Pure counting; safe
@@ -7121,6 +7155,7 @@ module.exports = router;
 module.exports.uploadRouter = uploadRouter;
 module.exports.liveTrackDB = liveTrackDB;
 module.exports.syncLiveTrackFromDisk = syncLiveTrackFromDisk;
+module.exports.buildBackpackBodyForKey = buildBackpackBodyForKey;
 module.exports.collectPublicTrackerNetworkStats = collectPublicTrackerNetworkStats;
 module.exports.collectPublicTrackerNetworkProof = collectPublicTrackerNetworkProof;
 module.exports.buildPublicTrackerStatsPayload = buildPublicTrackerStatsPayload;

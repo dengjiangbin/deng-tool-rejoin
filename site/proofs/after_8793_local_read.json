@@ -1,0 +1,38 @@
+{
+  "label": "after_8793_local_read",
+  "capturedAt": "2026-06-17T04:20:40.003Z",
+  "base": "http://127.0.0.1:8793",
+  "users": [
+    "denghub2",
+    "kakaoomol2",
+    "priadivine275",
+    "lawsontzy",
+    "divinemanatahan126"
+  ],
+  "reads": 60,
+  "lite": "1",
+  "summary": {
+    "getBackpack": {
+      "count": 60,
+      "min": 2,
+      "p50": 3,
+      "p95": 6,
+      "max": 33,
+      "avg": 4
+    },
+    "tracker": null,
+    "home": null
+  },
+  "statusCounts": {
+    "get-backpack:200": 60
+  },
+  "headerProof": {
+    "getBackpack": {
+      "x-deng-tracker-read-route": "8793",
+      "x-deng-precomputed": "1",
+      "x-deng-read-mode": "precomputed",
+      "x-deng-read-fallback": "0",
+      "x-deng-served-by": "deng-tracker-read"
+    }
+  }
+}

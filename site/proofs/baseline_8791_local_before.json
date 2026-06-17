@@ -1,0 +1,46 @@
+{
+  "label": "baseline_8791_local_before",
+  "capturedAt": "2026-06-17T03:56:35.150Z",
+  "base": "http://127.0.0.1:8791",
+  "users": [
+    "denghub2",
+    "kakaoomol2",
+    "priadivine275",
+    "lawsontzy",
+    "divinemanatahan126"
+  ],
+  "reads": 40,
+  "lite": "1",
+  "summary": {
+    "getBackpack": {
+      "count": 40,
+      "min": 10,
+      "p50": 16,
+      "p95": 30,
+      "max": 592,
+      "avg": 32
+    },
+    "tracker": {
+      "count": 40,
+      "min": 5,
+      "p50": 6,
+      "p95": 10,
+      "max": 555,
+      "avg": 20
+    },
+    "home": null
+  },
+  "statusCounts": {
+    "get-backpack:200": 40,
+    "tracker:302": 40
+  },
+  "headerProof": {
+    "getBackpack": {
+      "x-deng-tracker-read-route": null,
+      "x-deng-precomputed": null,
+      "x-deng-read-mode": null,
+      "x-deng-read-fallback": null,
+      "x-deng-served-by": null
+    }
+  }
+}

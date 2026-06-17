@@ -1,0 +1,65 @@
+{
+  "capturedAt": "2026-06-17T04:55:14.031Z",
+  "host": "aio.deng.my.id",
+  "user": "denghub2",
+  "routeChecks": {
+    "getBackpack": {
+      "status": 200,
+      "ms": 701.1404,
+      "bytes": 241068,
+      "readRoute": "8793",
+      "readMode": "precomputed",
+      "precomputed": "1",
+      "servedBy": "deng-tracker-read"
+    },
+    "latest": {
+      "status": 200,
+      "ms": 192.2208,
+      "bytes": 241068,
+      "readRoute": "8793",
+      "readMode": "precomputed",
+      "precomputed": "1",
+      "servedBy": "deng-tracker-read"
+    },
+    "snapshot": {
+      "status": 200,
+      "ms": 182.2127,
+      "bytes": 241068,
+      "readRoute": "8793",
+      "readMode": "precomputed",
+      "precomputed": "1",
+      "servedBy": "deng-tracker-read"
+    },
+    "trackerPage": {
+      "status": 302,
+      "ms": 1947.2054,
+      "bytes": 66,
+      "readRoute": null,
+      "readMode": null,
+      "precomputed": null,
+      "servedBy": null
+    },
+    "uploadRouteProbe": {
+      "status": 404,
+      "ms": 213.9969,
+      "bytes": 668,
+      "readRoute": null,
+      "readMode": null,
+      "precomputed": null,
+      "servedBy": "deng-tracker-ingest"
+    }
+  },
+  "repeatedRead": {
+    "count": 100,
+    "statusCounts": {
+      "200": 100
+    },
+    "badGateways": 0,
+    "latencyMs": {
+      "p50": 90,
+      "p95": 204,
+      "p99": 325,
+      "max": 677
+    }
+  }
+}
