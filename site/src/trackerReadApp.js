@@ -43,6 +43,12 @@ const PRESENCE_INPUT_FIELDS = [
   'lastUploadAcceptedAt', 'lastSeenAt', 'lastSnapshotUploadAt', 'lastInventoryAt',
   'lastStatsUploadAt', 'lastOfflineAt', 'lastFailureReason', 'lastUploadRejectReason',
   'rejectReason', 'lastUploadStatusCodeReturned', 'lastUploadHttpStatus',
+  // Source-of-truth report identity (see trackerReportIdentity).
+  'lastRealRobloxStatusAt', 'statusRevision', 'statusReportId', 'statusSeq',
+  'statusSessionId', 'statusCapturedAt', 'statusSentAt', 'serverReceivedStatusAt',
+  'statusIdentityReason',
+  'lastRealLeaderstatsAt', 'leaderstatsRevision', 'leaderstatsReportId', 'leaderstatsSeq',
+  'lastRealInventoryAt', 'inventoryRevision', 'inventoryReportId', 'inventorySeq', 'inventoryHash',
 ];
 
 function extractPresenceInput(body) {
@@ -149,9 +155,16 @@ function buildPresenceContract(hit, nowMs) {
   const input = (hit && hit.presenceInput) || {};
   const presence = deriveAccountPresenceStatus(input, ACCOUNT_ONLINE_THRESHOLD_MS, nowMs);
   const hasRenderableData = !!(hit && hit.hasRenderableData);
-  const lastRealStatusAt = presence.lastAccountSeenAt || null;
-  const lastRealInventoryAt = input.lastInventoryAt || input.lastSnapshotUploadAt || null;
-  const lastRealLeaderstatsAt = input.lastStatsUploadAt || null;
+  // Identity-gated timestamps are authoritative when present; fall back to the
+  // legacy resolved timestamps for rows that have not reported under the new
+  // identity model yet (auto-migrates on the next real report).
+  const lastRealStatusAt = presence.lastRealRobloxStatusAt
+    || input.lastRealRobloxStatusAt
+    || presence.lastAccountSeenAt
+    || null;
+  const lastRealInventoryAt = input.lastRealInventoryAt
+    || input.lastInventoryAt || input.lastSnapshotUploadAt || null;
+  const lastRealLeaderstatsAt = input.lastRealLeaderstatsAt || input.lastStatsUploadAt || null;
   const lastRealUploadAt = input.lastSuccessfulUploadAt || input.lastSnapshotUploadAt || lastRealStatusAt || null;
   const isOnline = presence.accountPresenceLive === true;
   let presenceState;
@@ -164,13 +177,33 @@ function buildPresenceContract(hit, nowMs) {
     accountPresenceLive: isOnline,
     accountPresenceStatus: presence.accountPresenceStatus,
     accountPresenceReason: presence.accountPresenceReason,
-    statusAgeSeconds: presence.heartbeatAgeSeconds != null ? presence.heartbeatAgeSeconds : null,
+    statusAgeSeconds: presence.statusAgeSeconds != null
+      ? presence.statusAgeSeconds
+      : (presence.heartbeatAgeSeconds != null ? presence.heartbeatAgeSeconds : null),
     inventoryAgeSeconds: syncAgeSecondsFromTimestamp(lastRealInventoryAt, nowMs),
     leaderstatsAgeSeconds: syncAgeSecondsFromTimestamp(lastRealLeaderstatsAt, nowMs),
     lastRealStatusAt,
     lastRealUploadAt,
     lastRealInventoryAt,
     lastRealLeaderstatsAt,
+    // Source-of-truth identity debug — frontend resets its timer ONLY when
+    // statusRevision changes (a new fresh unique Roblox report), never on poll.
+    statusRevision: presence.statusRevision != null
+      ? presence.statusRevision
+      : (input.statusRevision != null ? Number(input.statusRevision) : null),
+    statusReportId: presence.statusReportId || input.statusReportId || null,
+    statusSeq: presence.statusSeq != null ? presence.statusSeq : (input.statusSeq != null ? Number(input.statusSeq) : null),
+    sessionId: presence.sessionId || input.statusSessionId || null,
+    serverReceivedStatusAt: presence.serverReceivedStatusAt || input.serverReceivedStatusAt || null,
+    statusDecisionReason: presence.statusDecisionReason || presence.accountStatusReason || null,
+    missedStatusReports: presence.missedStatusReports != null ? presence.missedStatusReports : null,
+    isStatusStale: presence.isStatusStale === true,
+    leaderstatsRevision: input.leaderstatsRevision != null ? Number(input.leaderstatsRevision) : null,
+    leaderstatsReportId: input.leaderstatsReportId || null,
+    inventoryRevision: input.inventoryRevision != null ? Number(input.inventoryRevision) : null,
+    inventoryReportId: input.inventoryReportId || null,
+    inventoryHash: input.inventoryHash || (hit && hit.precomputedHash) || null,
+    preservedDataReason: !isOnline && hasRenderableData ? 'offline_preserve_last_known' : null,
     snapshotSource: (hit && hit.snapshotSource) || 'precomputed',
     isFallback: false,
     hasRenderableData,
@@ -189,6 +222,17 @@ function applyPresenceHeaders(res, c) {
   if (c.lastRealLeaderstatsAt) res.set('X-DENG-Last-Real-Leaderstats-At', c.lastRealLeaderstatsAt);
   res.set('X-DENG-Snapshot-Source', c.snapshotSource);
   res.set('X-DENG-Has-Renderable', c.hasRenderableData ? '1' : '0');
+  // Source-of-truth identity headers (frontend keys its timer reset on the
+  // status revision, never on poll/refresh/login).
+  if (c.statusRevision != null) res.set('X-DENG-Status-Revision', String(c.statusRevision));
+  if (c.statusReportId) res.set('X-DENG-Status-Report-Id', c.statusReportId);
+  if (c.statusSeq != null) res.set('X-DENG-Status-Seq', String(c.statusSeq));
+  if (c.statusDecisionReason) res.set('X-DENG-Status-Decision', c.statusDecisionReason);
+  if (c.missedStatusReports != null) res.set('X-DENG-Missed-Status-Reports', String(c.missedStatusReports));
+  res.set('X-DENG-Status-Stale', c.isStatusStale ? '1' : '0');
+  if (c.leaderstatsRevision != null) res.set('X-DENG-Leaderstats-Revision', String(c.leaderstatsRevision));
+  if (c.inventoryRevision != null) res.set('X-DENG-Inventory-Revision', String(c.inventoryRevision));
+  if (c.preservedDataReason) res.set('X-DENG-Preserved-Data-Reason', c.preservedDataReason);
 }
 
 function warmLoadCache() {

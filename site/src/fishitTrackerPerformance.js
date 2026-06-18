@@ -85,6 +85,17 @@ const LITE_BACKPACK_KEYS = [
   'playerStats', 'playerStatsProven', 'playerStatsUpdatedAt',
   'liveAccountStats', 'statsSource', 'statsEmptyReason',
   'updatedAt', 'serverNow',
+  // ── Source-of-truth report identity (status/leaderstats/inventory lanes) ──
+  // These MUST survive the lite projection so the worker's presence_json + the
+  // read API can derive online/offline + ages ONLY from fresh unique Roblox
+  // report identity (never from precompute/read time). Dropping them here is
+  // what previously forced the read API onto the legacy lastAccountSeenAt path.
+  'lastRealRobloxStatusAt', 'statusRevision', 'statusReportId', 'statusSeq',
+  'statusSessionId', 'statusCapturedAt', 'statusSentAt', 'serverReceivedStatusAt',
+  'statusIdentityReason',
+  'lastRealLeaderstatsAt', 'leaderstatsRevision', 'leaderstatsReportId', 'leaderstatsSeq',
+  'lastRealInventoryAt', 'inventoryRevision', 'inventoryReportId', 'inventorySeq', 'inventoryHash',
+  'lastOfflineAt',
 ];
 
 function buildLiteBackpackResponse(full) {

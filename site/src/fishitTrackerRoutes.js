@@ -55,6 +55,7 @@ const {
   deriveAccountPresenceStatus,
   resolveLastAccountSeenAt,
 } = require('./trackerAccountPresence');
+const reportIdentity = require('./trackerReportIdentity');
 
 const catalogStore = require('./fishitCatalogStore');
 const rubyGemstoneCount = require('./fishitRubyGemstoneCount');
@@ -854,6 +855,46 @@ async function persistSessionState(key, baseUrl) {
   } catch (err) {
     console.warn('[fishit-tracker] session persist failed:', key, err && err.message ? err.message : err);
   }
+}
+
+/**
+ * Stamp the source-of-truth report identity for an upload lane onto the live
+ * session. A FRESH unique report advances the lane's lastReal* timestamp +
+ * revision; a duplicate/replay/cached report advances nothing (so it can never
+ * reset the online timer). Each lane is independent: a stale inventory or
+ * leaderstats report can never affect the status lane and vice-versa.
+ *
+ *   lane: 'status' | 'leaderstats' | 'inventory'
+ */
+function stampReportIdentity(key, lane, body, nowIso) {
+  const data = liveTrackDB[key];
+  if (!data || typeof data !== 'object') return null;
+  const nowMs = nowIso ? Date.parse(nowIso) : Date.now();
+  const result = reportIdentity.applyReport(lane, data, body || {}, Number.isFinite(nowMs) ? nowMs : Date.now());
+  if (result && result.updates) Object.assign(data, result.updates);
+  return result;
+}
+
+/**
+ * A fresh ONLINE report on the inventory/leaderstats lane reinforces the status
+ * truth (advances lastRealRobloxStatusAt + statusRevision) so the status lane
+ * does not falsely red an in-game account whose heartbeat lagged behind its
+ * inventory/leaderstats cadence. It never overwrites the dedicated status
+ * identity, and it only fires when the lane report was FRESH and isOnline===true
+ * — a stale/replayed report can never fake status freshness.
+ */
+function reinforceStatusFromLane(key, laneResult, online, nowIso) {
+  if (!online || !laneResult || laneResult.fresh !== true) return;
+  const data = liveTrackDB[key];
+  if (!data || typeof data !== 'object') return;
+  const nowMs = nowIso ? Date.parse(nowIso) : Date.now();
+  const upd = reportIdentity.advanceStatusTruth(
+    data,
+    laneResult.capturedAtMs,
+    Number.isFinite(nowMs) ? nowMs : Date.now(),
+    laneResult.lane || 'lane',
+  );
+  if (upd) Object.assign(data, upd);
 }
 
 /** Persist heartbeat-critical session fields; non-blocking priority flush for cross-process reads. */
@@ -3552,6 +3593,32 @@ async function handleAccountStatus(req, res) {
         accountPresenceReason: presence.accountPresenceReason,
         accountPresenceGraceSeconds: presence.accountPresenceGraceSeconds,
         uploadWarningReason: presence.uploadWarningReason || null,
+        // ── Source-of-truth report identity debug fields ──────────────────────
+        statusColor: presence.accountPresenceLive ? 'green' : 'red',
+        lastRealRobloxStatusAt: presence.lastRealRobloxStatusAt
+          || (sessionData && sessionData.lastRealRobloxStatusAt) || null,
+        serverReceivedStatusAt: presence.serverReceivedStatusAt
+          || (sessionData && sessionData.serverReceivedStatusAt) || null,
+        statusRevision: presence.statusRevision != null
+          ? presence.statusRevision
+          : (sessionData && sessionData.statusRevision != null ? Number(sessionData.statusRevision) : null),
+        statusReportId: presence.statusReportId || (sessionData && sessionData.statusReportId) || null,
+        statusSeq: presence.statusSeq != null
+          ? presence.statusSeq
+          : (sessionData && sessionData.statusSeq != null ? Number(sessionData.statusSeq) : null),
+        sessionId: presence.sessionId || (sessionData && sessionData.statusSessionId) || null,
+        statusAgeSeconds: presence.statusAgeSeconds != null ? presence.statusAgeSeconds : null,
+        statusDecisionReason: presence.statusDecisionReason || presence.accountStatusReason || null,
+        missedStatusReports: presence.missedStatusReports != null ? presence.missedStatusReports : null,
+        isStatusStale: presence.isStatusStale === true,
+        leaderstatsRevision: sessionData && sessionData.leaderstatsRevision != null
+          ? Number(sessionData.leaderstatsRevision) : null,
+        lastRealLeaderstatsAt: (sessionData && sessionData.lastRealLeaderstatsAt) || null,
+        inventoryRevision: sessionData && sessionData.inventoryRevision != null
+          ? Number(sessionData.inventoryRevision) : null,
+        lastRealInventoryAt: (sessionData && sessionData.lastRealInventoryAt) || null,
+        preservedDataReason: (!presence.accountPresenceLive && session)
+          ? 'offline_preserve_last_known' : null,
         inventoryUploadFresh: inventoryUpload.inventoryUploadFresh === true,
         inventoryUploadStatus: inventoryUpload.inventoryUploadStatus,
         inventoryRedSince: inventoryUpload.inventoryRedSince || null,
@@ -4357,6 +4424,9 @@ function handleUpdateBackpack(req, res) {
         isTrustedBuild: isTrustedClientBuild,
       });
       const conn = deriveConnectionStatus(liveTrackDB[key]);
+      // STATUS LANE (high priority): advance source-of-truth status identity only
+      // on a fresh unique report. Independent of inventory/leaderstats upload.
+      stampReportIdentity(key, 'status', body, now);
       scheduleAioTrackerCacheRefresh(key);
       persistSessionHeartbeat(key);
       scheduleIngestPostResponseFlush(res);
@@ -4409,6 +4479,10 @@ function handleUpdateBackpack(req, res) {
       });
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
       applySessionOwnerMapping(key);
+      // LEADERSTATS LANE: own identity. A fresh ONLINE leaderstats report also
+      // reinforces status truth (online evidence), but never owns status identity.
+      const lsLaneResult = stampReportIdentity(key, 'leaderstats', body, now);
+      reinforceStatusFromLane(key, lsLaneResult, online, now);
       scheduleAioTrackerCacheRefresh(key);
       persistSessionHeartbeat(key);
       scheduleIngestPostResponseFlush(res);
@@ -4455,6 +4529,9 @@ function handleUpdateBackpack(req, res) {
         accepted: true,
         statusCode: 200,
       }));
+      // Explicit offline status report — advance status identity so the grace
+      // state machine sees a confirmed offline (lastOfflineAt >= lastReal) → red.
+      stampReportIdentity(key, 'status', body, now);
       scheduleAioTrackerCacheRefresh(key);
       persistSessionHeartbeat(key);
       scheduleIngestPostResponseFlush(res);
@@ -5096,6 +5173,13 @@ function handleUpdateBackpack(req, res) {
         ` fastPathMs=${totalResponseMs}`
       );
     }
+    // INVENTORY LANE: own identity (+ inventoryHash). Leaderstats truth advances
+    // here too when this snapshot carried player stats. A fresh ONLINE inventory
+    // report reinforces status truth (so a heartbeat that lags behind inventory
+    // can never false-red an in-game account); a stale/replayed report cannot.
+    const invLaneResult = stampReportIdentity(key, 'inventory', body, now);
+    reinforceStatusFromLane(key, invLaneResult, online, now);
+    if (hadPlayerStats) stampReportIdentity(key, 'leaderstats', body, now);
     persistSessionHeartbeat(key);
     return finishTrackerUploadResponse(req, res, responsePayload, key);
 }
@@ -6342,6 +6426,28 @@ async function buildBackpackBodyForKey(cleanUser, opts = {}) {
     statsSource: liveAccountStats.statsSource,
     statsEmptyReason: liveAccountStats.emptyReason,
     updatedAt: data.updatedAt || null,
+    // ── Source-of-truth report identity (carried through so the worker's tiny
+    // presence_json + the read API can derive online/offline + ages WITHOUT
+    // re-parsing the heavy body, and so debug fields are visible per username) ──
+    lastRealRobloxStatusAt: data.lastRealRobloxStatusAt || null,
+    statusRevision: data.statusRevision != null ? Number(data.statusRevision) : null,
+    statusReportId: data.statusReportId || null,
+    statusSeq: data.statusSeq != null ? Number(data.statusSeq) : null,
+    statusSessionId: data.statusSessionId || null,
+    statusCapturedAt: data.statusCapturedAt || null,
+    statusSentAt: data.statusSentAt || null,
+    serverReceivedStatusAt: data.serverReceivedStatusAt || null,
+    statusIdentityReason: data.statusIdentityReason || null,
+    lastRealLeaderstatsAt: data.lastRealLeaderstatsAt || null,
+    leaderstatsRevision: data.leaderstatsRevision != null ? Number(data.leaderstatsRevision) : null,
+    leaderstatsReportId: data.leaderstatsReportId || null,
+    leaderstatsSeq: data.leaderstatsSeq != null ? Number(data.leaderstatsSeq) : null,
+    lastRealInventoryAt: data.lastRealInventoryAt || null,
+    inventoryRevision: data.inventoryRevision != null ? Number(data.inventoryRevision) : null,
+    inventoryReportId: data.inventoryReportId || null,
+    inventorySeq: data.inventorySeq != null ? Number(data.inventorySeq) : null,
+    inventoryHash: data.inventoryHash || null,
+    lastOfflineAt: data.lastOfflineAt || null,
   };
   const enrichedFullOnly = wantLite ? {} : {
     ...data,

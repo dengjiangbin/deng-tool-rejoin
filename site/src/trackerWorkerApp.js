@@ -38,6 +38,11 @@ const CONCURRENCY = parseInt(process.env.TRACKER_WORKER_CONCURRENCY || '4', 10);
 const HISTORY_ON_CHANGE = process.env.TRACKER_WORKER_HISTORY !== '0';
 const CLEANUP_EVERY_MS = parseInt(process.env.TRACKER_WORKER_CLEANUP_MS || String(5 * 60 * 1000), 10);
 const METRICS_FLUSH_MS = parseInt(process.env.TRACKER_WORKER_METRICS_MS || '3000', 10);
+// Cadence for the lightweight presence sweep that keeps online/offline + age
+// fresh independent of the heavy inventory rebuild. 2s gives sub-2s presence lag
+// behind a real Roblox report while staying trivially cheap (a field copy +
+// JSON.stringify per session, write only on change).
+const PRESENCE_SWEEP_MS = parseInt(process.env.TRACKER_WORKER_PRESENCE_SWEEP_MS || '2000', 10);
 const BASE_URL = process.env.TRACKER_PRECOMPUTE_BASE_URL
   || process.env.TOOL_SITE_PUBLIC_URL
   || 'https://aio.deng.my.id';
@@ -107,6 +112,14 @@ const WORKER_PRESENCE_FIELDS = [
   'lastUploadAcceptedAt', 'lastSeenAt', 'lastSnapshotUploadAt', 'lastInventoryAt',
   'lastStatsUploadAt', 'lastOfflineAt', 'lastFailureReason', 'lastUploadRejectReason',
   'rejectReason', 'lastUploadStatusCodeReturned', 'lastUploadHttpStatus',
+  // Source-of-truth report identity — the read API derives online/offline + ages
+  // ONLY from these (never from precompute time). The worker copies them through
+  // unchanged; it never invents freshness.
+  'lastRealRobloxStatusAt', 'statusRevision', 'statusReportId', 'statusSeq',
+  'statusSessionId', 'statusCapturedAt', 'statusSentAt', 'serverReceivedStatusAt',
+  'statusIdentityReason',
+  'lastRealLeaderstatsAt', 'leaderstatsRevision', 'leaderstatsReportId', 'leaderstatsSeq',
+  'lastRealInventoryAt', 'inventoryRevision', 'inventoryReportId', 'inventorySeq', 'inventoryHash',
 ];
 
 function buildPresenceJson(body) {
@@ -116,6 +129,37 @@ function buildPresenceJson(body) {
     if (body[f] !== undefined) out[f] = body[f];
   }
   return JSON.stringify(out);
+}
+
+// LIGHTWEIGHT presence sweep. The heavy dirty/rebuild path (sourceSig) keys ONLY
+// on inventory/leaderstats content, so a STATUS-ONLY heartbeat (which advances
+// lastRealRobloxStatusAt + statusRevision but leaves the inventory body
+// byte-stable) would NOT mark the session dirty and would only refresh presence
+// on the slow REFRESH_MS (120s) staleness backstop — making an actively-online
+// account read RED for up to ~2 minutes. This sweep fixes that the cheap way:
+// every tick it rebuilds the tiny presence_json DIRECTLY from the live session
+// (every WORKER_PRESENCE_FIELD is a raw ingest-written field, no enrichment
+// needed) and writes it ONLY when it actually changed. No heavy JSON blob is
+// rewritten, so the read lane is never forced to re-pull a snapshot. This keeps
+// online/offline + age fresh within one tick of every real Roblox report while
+// never inventing freshness (a duplicate/stale report leaves identity unchanged,
+// so presence_json is byte-identical and nothing is written).
+function sweepPresence() {
+  if (!routes || !routes.liveTrackDB) return 0;
+  let updated = 0;
+  for (const key of liveKeys()) {
+    const data = routes.liveTrackDB[key];
+    if (!data || typeof data !== 'object') continue;
+    const presenceJson = buildPresenceJson(data);
+    if (!presenceJson) continue;
+    if (lastPresenceSig.get(key) === presenceJson) continue;
+    try {
+      precomputeStore.updatePresence(key, presenceJson);
+      lastPresenceSig.set(key, presenceJson);
+      updated += 1;
+    } catch (_) { /* non-fatal: next tick retries */ }
+  }
+  return updated;
 }
 
 const buildMsSamples = []; // ring buffer
@@ -354,6 +398,7 @@ async function processBatch(batch) {
 
 let lastCleanupMs = 0;
 let lastMetricsFlushMs = 0;
+let lastPresenceSweepMs = 0;
 
 function flushMetrics(force) {
   const now = Date.now();
@@ -392,6 +437,20 @@ async function tick() {
     metrics.lastTickDirty = dirty.length;
     metrics.lastTickProcessed = batch.length;
     if (batch.length) await processBatch(batch);
+
+    // Decoupled status/presence freshness: keep every account's tiny presence
+    // record current within PRESENCE_SWEEP_MS of its last real Roblox report,
+    // independent of whether its (heavy) inventory body changed. This is what
+    // prevents an actively-online account from reading RED while its heartbeat
+    // advances but inventory stays byte-stable.
+    const sweepNow = Date.now();
+    if (sweepNow - lastPresenceSweepMs >= PRESENCE_SWEEP_MS) {
+      lastPresenceSweepMs = sweepNow;
+      try {
+        const n = sweepPresence();
+        if (n) metrics.lastPresenceSweepUpdated = n;
+      } catch (_) { /* non-fatal: next tick retries */ }
+    }
 
     const now = Date.now();
     if (now - lastCleanupMs > CLEANUP_EVERY_MS) {
@@ -449,5 +508,10 @@ module.exports = {
     SINGLETON_LOCK_PATH,
     MY_START_MS,
     MY_PID,
+    buildPresenceJson,
+    sourceSig,
+    sweepPresence,
+    WORKER_PRESENCE_FIELDS,
+    PRESENCE_SWEEP_MS,
   },
 };

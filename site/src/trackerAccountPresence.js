@@ -2,6 +2,7 @@
 
 const { EXPECTED_CLIENT_TRACKER_BUILD, isAllowedTrackerBuild } = require('./fishitTrackerBuild');
 const { isTransientServerUploadFailure } = require('./fishitTrackerUploadStatus');
+const reportIdentity = require('./trackerReportIdentity');
 
 /** Public status grace — stay green unless uploads fail continuously for 10 minutes. */
 const ACCOUNT_PRESENCE_GRACE_MS = 600_000;
@@ -95,6 +96,46 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_ONLINE_THRESHOLD_M
       accountPresenceStatus: 'error',
       accountPresenceReason: 'outdated_loader',
       accountStatusReason: 'outdated_loader',
+    };
+  }
+  // ── Identity-gated authoritative path ────────────────────────────────────
+  // When a fresh-unique Roblox status report has ever been recorded for this
+  // session, online/offline + age come ONLY from lastRealRobloxStatusAt via the
+  // binary grace state machine. This is decoupled from inventory/leaderstats
+  // uploads, backend precompute time, and read time. Sessions with no real
+  // status identity yet (legacy rows pre-deploy) fall through to the legacy
+  // lastAccountSeenAt path below and auto-migrate on their next status report.
+  if (reportIdentity.hasRealStatusIdentity(data)) {
+    const st = reportIdentity.evaluateStatusState(data, nowMs);
+    const reasonMap = {
+      fresh_status_report: 'heartbeat',
+      within_grace_missed_report: 'loader_contact',
+      client_offline: 'client_offline',
+      hard_offline_timeout: 'account_offline_timeout',
+      no_status_report: 'no_session',
+    };
+    const mappedReason = reasonMap[st.statusDecisionReason] || st.statusDecisionReason;
+    return {
+      ...base,
+      lastAccountSeenAt: st.lastRealRobloxStatusAt || lastAccountSeenAt,
+      lastRealRobloxStatusAt: st.lastRealRobloxStatusAt,
+      heartbeatAgeSeconds: st.statusAgeSeconds != null ? st.statusAgeSeconds : seenAgeSeconds,
+      accountPresenceLive: st.online,
+      accountOnline: st.online,
+      accountPresenceStatus: st.online ? 'online' : 'offline',
+      accountPresenceReason: mappedReason,
+      accountStatusReason: mappedReason,
+      statusDecisionReason: st.statusDecisionReason,
+      statusAgeSeconds: st.statusAgeSeconds,
+      missedStatusReports: st.missedStatusReports,
+      isStatusStale: st.isStatusStale,
+      statusRevision: data.statusRevision != null ? Number(data.statusRevision) : null,
+      statusReportId: data.statusReportId || null,
+      statusSeq: data.statusSeq != null ? Number(data.statusSeq) : null,
+      sessionId: data.statusSessionId || null,
+      serverReceivedStatusAt: data.serverReceivedStatusAt || null,
+      softGraceSeconds: st.softGraceSeconds,
+      hardOfflineSeconds: st.hardOfflineSeconds,
     };
   }
   if (!lastAccountSeenAt) {

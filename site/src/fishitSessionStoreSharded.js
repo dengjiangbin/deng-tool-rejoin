@@ -19,6 +19,14 @@ const MAX_FILE_BYTES_ALERT = Number(process.env.FISHIT_LIVE_JSON_MAX_BYTES || 25
 // frontend intermittently showed nothing. Keep this well above peak players.
 const MAX_ACCOUNTS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 2000);
 
+// Monotonic activity timestamps, freshest-wins, for the disk-reload freshness
+// guard (never clobber a newer in-memory row with an older shard on reload).
+const FRESHNESS_FIELDS = [
+  'lastUploadReceivedAt', 'lastUploadAcceptedAt', 'lastRealRobloxStatusAt',
+  'lastHeartbeatAt', 'lastSeenAt', 'lastAccountSeenAt', 'updatedAt',
+  'lastInventoryAt', 'lastStatsUploadAt', 'lastSnapshotUploadAt',
+];
+
 function shardedRoot() {
   return process.env.FISHIT_LIVE_SESSIONS_DIR
     || path.join(__dirname, '..', 'data', 'fishit_live_sessions');
@@ -56,6 +64,9 @@ let _indexDirty = false;
 let _flushInFlight = false;
 let _pendingFlush = false;
 let _lastIndexMtimeMs = 0;
+// Per-shard mtime cache (filename -> mtimeMs) driving the incremental reload so
+// the worker tracks every account's latest shard without re-reading 800 files.
+let _shardMtimes = new Map();
 let _flushCount = 0;
 let _flushFailCount = 0;
 let _lastFlushMs = 0;
@@ -353,41 +364,109 @@ function loadAllIntoLiveTrackDB(liveTrackDB, sanitiseSessionFn) {
   return { loaded, path: shardedRoot(), updatedAt: _index.updatedAt || null, mode: 'sharded' };
 }
 
+// Highest monotonic activity timestamp on a session row. Used as the freshness
+// guard so a disk reload NEVER clobbers a newer in-memory row with older data.
+function rowFreshnessMs(row) {
+  if (!row || typeof row !== 'object') return 0;
+  let best = 0;
+  for (const f of FRESHNESS_FIELDS) {
+    const v = row[f];
+    if (v == null || v === '') continue;
+    const ms = typeof v === 'number' ? v : Date.parse(v);
+    if (Number.isFinite(ms) && ms > best) best = ms;
+  }
+  return best;
+}
+
 function reloadChangedAccounts(liveTrackDB, sanitiseSessionFn) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { reloaded: false };
   try {
-    if (!fs.existsSync(indexPath())) return { reloaded: false, path: shardedRoot() };
-    const st = fs.statSync(indexPath());
-    if (st.mtimeMs <= _lastIndexMtimeMs) return { reloaded: false };
-    const prevKeys = new Set(Object.keys(_index?.accounts || {}));
-    _index = readIndexFromDisk();
-    _lastIndexMtimeMs = st.mtimeMs;
+    const dir = accountsDir();
+    if (!fs.existsSync(dir)) return { reloaded: false, path: shardedRoot() };
+
+    // Refresh the index + uid aliases only when index.json actually changed
+    // (cheap gate). The index is used for aliases and for conservative eviction
+    // of accounts that were genuinely removed — it is NOT the freshness signal.
+    let indexChanged = false;
+    let prevIndexKeys = null;
+    try {
+      if (fs.existsSync(indexPath())) {
+        const ist = fs.statSync(indexPath());
+        if (ist.mtimeMs > _lastIndexMtimeMs) {
+          indexChanged = true;
+          prevIndexKeys = new Set(Object.keys(_index?.accounts || {}));
+          _index = readIndexFromDisk();
+          _lastIndexMtimeMs = ist.mtimeMs;
+          for (const [alias, usernameKey] of Object.entries(_index.uidAliases || {})) {
+            liveTrackDB[alias] = usernameKey;
+          }
+        }
+      }
+    } catch (_) { /* index errors are non-fatal; per-shard scan below is source of truth */ }
+
+    // PER-SHARD incremental reload — the authoritative freshness signal. Each
+    // account shard is overwritten on EVERY upload WITHOUT touching index.json,
+    // so gating reloads on index mtime alone left the read-only worker's
+    // liveTrackDB (hence the read API's online/offline + age) stale for minutes
+    // between account-set changes — the root cause of an actively-online account
+    // intermittently reading RED. We stat every shard each sync and reload only
+    // those whose mtime advanced. The freshness guard guarantees we never clobber
+    // a newer in-memory row with older disk data, so the ingest (the writer, whose
+    // memory is always >= disk) is effectively a no-op while the worker always
+    // converges to the latest shard within one sync interval.
+    let files;
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.endsWith('.tmp'));
+    } catch (_) {
+      return { reloaded: false, path: shardedRoot() };
+    }
     let merged = 0;
-    for (const key of Object.keys(_index.accounts || {})) {
-      const file = accountFilePath(key);
-      if (!fs.existsSync(file)) continue;
-      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const seenFiles = new Set();
+    for (const f of files) {
+      seenFiles.add(f);
+      const full = path.join(dir, f);
+      let stat;
+      try { stat = fs.statSync(full); } catch (_) { continue; }
+      const prevMtime = _shardMtimes.get(f);
+      if (prevMtime != null && stat.mtimeMs <= prevMtime) continue; // unchanged since last sync
+      let raw;
+      try { raw = JSON.parse(fs.readFileSync(full, 'utf8')); } catch (_) { continue; }
+      _shardMtimes.set(f, stat.mtimeMs);
+      const key = (raw && (raw.usernameKey || raw.username))
+        ? String(raw.usernameKey || raw.username).toLowerCase()
+        : f.slice(0, -5);
       const row = sanitiseSessionFn(key, raw);
       if (!row) continue;
+      const existing = liveTrackDB[key];
+      // Never overwrite a strictly-newer in-memory row (protects the ingest's
+      // just-received upload from being clobbered by the slightly-older shard).
+      if (existing && typeof existing === 'object' && rowFreshnessMs(existing) > rowFreshnessMs(row)) continue;
       row.restoredFromDisk = true;
-      liveTrackDB[key] = { ...(liveTrackDB[key] || {}), ...row };
+      liveTrackDB[key] = { ...(existing && typeof existing === 'object' ? existing : {}), ...row };
       _accountCache.set(key, row);
       merged += 1;
     }
-    // Only evict from the in-memory DB when the shard file is genuinely gone.
-    // A cross-process index that momentarily omits an account (e.g. another
-    // writer mid-flush, or trim churn) must NOT erase a still-persisted account
-    // and make the frontend show empty.
-    for (const key of prevKeys) {
-      if (_index.accounts[key]) continue;
-      let fileStillExists = false;
-      try { fileStillExists = fs.existsSync(accountFilePath(key)); } catch (_) { fileStillExists = false; }
-      if (!fileStillExists) delete liveTrackDB[key];
+    // Forget mtime bookkeeping for shards that vanished.
+    if (_shardMtimes.size > seenFiles.size) {
+      for (const f of Array.from(_shardMtimes.keys())) {
+        if (!seenFiles.has(f)) _shardMtimes.delete(f);
+      }
     }
-    for (const [alias, usernameKey] of Object.entries(_index.uidAliases || {})) {
-      liveTrackDB[alias] = usernameKey;
+
+    // Conservative eviction: only when the index explicitly dropped an account
+    // AND its shard file is genuinely gone. A cross-process index that momentarily
+    // omits an account (another writer mid-flush, trim churn) must NEVER erase a
+    // still-persisted account and make the frontend show empty.
+    if (indexChanged && prevIndexKeys) {
+      for (const key of prevIndexKeys) {
+        if (_index.accounts[key]) continue;
+        let fileStillExists = false;
+        try { fileStillExists = fs.existsSync(accountFilePath(key)); } catch (_) { fileStillExists = false; }
+        if (!fileStillExists) delete liveTrackDB[key];
+      }
     }
-    return { reloaded: merged > 0, merged, path: shardedRoot(), updatedAt: _index.updatedAt || null, mode: 'sharded' };
+
+    return { reloaded: merged > 0, merged, path: shardedRoot(), updatedAt: (_index && _index.updatedAt) || null, mode: 'sharded' };
   } catch (err) {
     return { reloaded: false, error: err.message };
   }
@@ -443,6 +522,7 @@ function resetShardedForTests() {
   _flushFailCount = 0;
   _lastFlushMs = 0;
   _lastIndexMtimeMs = 0;
+  _shardMtimes.clear();
   try {
     const root = shardedRoot();
     if (fs.existsSync(root)) {
@@ -453,6 +533,7 @@ function resetShardedForTests() {
 
 function invalidateReloadCursorForTests() {
   _lastIndexMtimeMs = 0;
+  _shardMtimes.clear();
 }
 
 // Drop only the in-memory index/cache (keep on-disk shards) to simulate a fresh
@@ -463,6 +544,7 @@ function dropInMemoryIndexForTests() {
   _dirtyAccounts.clear();
   _indexDirty = false;
   _lastIndexMtimeMs = 0;
+  _shardMtimes.clear();
 }
 
 module.exports = {

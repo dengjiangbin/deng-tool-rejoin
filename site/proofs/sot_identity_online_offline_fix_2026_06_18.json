@@ -1,0 +1,63 @@
+{
+  "title": "Tracker online/offline source-of-truth identity + per-shard reload staleness fix",
+  "date": "2026-06-18",
+  "rootCause": [
+    "Read API online/offline + age was driven by precompute presence_json that could lag the live shard for actively-online accounts, causing intermittent false-RED and >1min update lag.",
+    "Two compounding causes: (1) worker dirty-signature (sourceSig) ignored status-only heartbeats so presence_json only refreshed on the 120s staleness backstop (fixed earlier via sweepPresence); (2) worker liveTrackDB reload (fishitSessionStoreSharded.reloadChangedAccounts) gated on index.json mtime, but account shards are overwritten on EVERY upload WITHOUT touching index.json, so the worker served stale in-memory rows for minutes between account-set changes."
+  ],
+  "fix": {
+    "file": "site/src/fishitSessionStoreSharded.js",
+    "change": "reloadChangedAccounts now does a PER-SHARD mtime incremental reload (stat every accounts/*.json each sync, reload only shards whose mtime advanced) with a freshness guard (never clobber a strictly-newer in-memory row with an older shard). Index.json is still used only for uid-aliases + conservative eviction.",
+    "newHelpers": ["rowFreshnessMs(row) via FRESHNESS_FIELDS", "_shardMtimes per-file mtime cache, cleared in reset/invalidate/drop helpers"]
+  },
+  "stateMachine": {
+    "expectedIntervalMs": 60000,
+    "softGraceMs": 150000,
+    "hardOfflineMs": 195000,
+    "colors": {"online": "green rgb(34,197,94)", "offline": "red rgb(239,68,68)"}
+  },
+  "reliability": {
+    "readApiSample": "745/745 HTTP 200",
+    "errors": "0x502 / 0x503 / 0x530 / 0 timeouts",
+    "withStatusRevisionHeader": "100/100 sampled",
+    "falseGreen_amongIdentityAccounts": 0,
+    "falseRed_amongIdentityAccounts": 0,
+    "falseGreen_amongStaleNoIdentity": 0,
+    "worstShardVsApiAgeLagSeconds": 6
+  },
+  "ageTruthProof_shard_equals_api": [
+    {"u": "DatpolxCuan", "shardLastRealAgeS": 51, "apiAgeS": 50, "state": "online (reconnected)"},
+    {"u": "denghub2", "shardLastRealAgeS": 63, "apiAgeS": 62, "state": "online"},
+    {"u": "lacurdua", "shardLastRealAgeS": 320, "apiAgeS": 320, "state": "offline (reports stopped)"},
+    {"u": "nepmancing", "shardLastRealAgeS": 337, "apiAgeS": 337, "state": "offline (reports stopped)"},
+    {"u": "priadivine321", "shardLastRealAgeS": 127, "apiAgeS": 127, "state": "online"},
+    {"u": "lilokecil15", "shardLastRealAgeS": 56, "apiAgeS": 56, "state": "online"}
+  ],
+  "liveBrowserProof": {
+    "url": "https://aio.deng.my.id/tracker (logged-in Discord session)",
+    "binaryColorsOnly": true,
+    "offlinePreservesData": {
+      "dengjiangbin": {"color": "red", "coin": "201.7K", "totalCaught": 450, "rarest": "1/4.50K"},
+      "majesticsvv": {"color": "red", "coin": "547.2M", "totalCaught": 957159},
+      "XivionKert": {"color": "red", "coin": "152.2M", "totalCaught": 134217}
+    },
+    "refreshProof": {
+      "beforeReload": {"dengjiangbin": "red 7m ago", "majesticsvv": "red 1h ago"},
+      "afterReload": {"dengjiangbin": "red 8m ago (increased, NOT reset)", "majesticsvv": "red 1h ago"},
+      "conclusion": "Offline timer derived from server lastRealRobloxStatusAt; browser refresh did not reset it to page-open time."
+    },
+    "liveTransitionProof": "A batch of farm accounts (lacurdua, nepmancing, etc.) genuinely stopped reporting and correctly transitioned green->red after the 195s grace; reconnecting accounts (DatpolxCuan) returned green within one upload interval.",
+    "screenshots": [
+      "site/proofs/sot_tracker_table_before_refresh_2026_06_18.png",
+      "site/proofs/sot_tracker_after_refresh_2026_06_18.png",
+      "site/proofs/sot_tracker_live_counts_2026_06_18.png"
+    ]
+  },
+  "processProof": {
+    "worker": "deng-tracker-worker single instance, restarts=0 after clean restart, uptime stable",
+    "singletonLock": "tracker_worker_singleton.json pid matches running worker; orphans killed",
+    "metrics": "tracker_worker_metrics.json startedAt stable, ticks advancing, totalFailed=0, lastPresenceSweepUpdated>0",
+    "portOwners": {"8791": "deng-tool-site", "8792": "deng-tracker-ingest", "8793": "deng-tracker-read"},
+    "precomputeDbWriters": "single (worker only)"
+  }
+}
