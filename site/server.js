@@ -145,6 +145,10 @@ function shutdown(signal) {
   siteShuttingDown = true;
   console.log(`[deng-tool-site] ${signal} received – releasing port then flushing live sessions`);
   try { server.close(() => console.log('[deng-tool-site] HTTP server closed')); } catch (_) { /* ignore */ }
+  // Force-release the listening socket: destroy keep-alive connections so a
+  // PM2-restarted instance can bind 8791 on its first retry instead of racing a
+  // slow-draining old process and orphaning it (the orphan-PID restart loop).
+  try { if (typeof server.closeAllConnections === 'function') server.closeAllConnections(); } catch (_) { /* ignore */ }
   const fishitTrackerRoutes = require('./src/fishitTrackerRoutes');
   Promise.resolve(fishitTrackerRoutes.flushAllLiveSessionsToDisk())
     .then((flushResult) => {

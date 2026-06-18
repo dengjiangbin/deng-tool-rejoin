@@ -59,10 +59,19 @@ server.on('error', (err) => {
 
 startListening();
 
+let readShuttingDown = false;
 function shutdown(signal) {
+  if (readShuttingDown) return;
+  readShuttingDown = true;
   console.log(`[deng-tracker-read] ${signal} received — closing`);
   try { server.close(); } catch (_) { /* ignore */ }
-  setTimeout(() => process.exit(0), 300);
+  // CRITICAL: forcibly destroy keep-alive sockets so the listening port is
+  // released IMMEDIATELY. Without this, server.close() waits for persistent
+  // poller connections to drain (keepAliveTimeout=61s), the old process keeps
+  // 8793 bound, the PM2-restarted instance loses the bind race and exits, and
+  // the slow-dying fork becomes an orphan PID holding the port -> restart loop.
+  try { if (typeof server.closeAllConnections === 'function') server.closeAllConnections(); } catch (_) { /* ignore */ }
+  setTimeout(() => process.exit(0), 150).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

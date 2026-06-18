@@ -88,6 +88,22 @@ function migrate(db) {
       created_ms INTEGER
     );
   `);
+  // Presence decoupling (2026-06-18): a tiny per-account presence record that the
+  // worker refreshes on EVERY real heartbeat — even when the inventory body is
+  // byte-stable (churn-skip). Without this, a heartbeat-only upload never bumps
+  // precomputed_hash, so the read lane never refreshes presence and an actively
+  // uploading account shows stale "offline" with a frozen age. presence_json
+  // carries only the small presence/age fields; last_precomputed_at is bumped so
+  // the read lane's existing change probe picks it up WITHOUT pulling the blob.
+  const cols = db.prepare('PRAGMA table_info(tracker_latest_snapshots)').all().map((c) => c.name);
+  if (!cols.includes('presence_json')) {
+    try {
+      db.exec('ALTER TABLE tracker_latest_snapshots ADD COLUMN presence_json TEXT;');
+    } catch (err) {
+      // Another process (worker vs read) may have added it first — that's fine.
+      if (!/duplicate column/i.test(err && err.message ? err.message : '')) throw err;
+    }
+  }
   db.exec('CREATE INDEX IF NOT EXISTS idx_latest_username ON tracker_latest_snapshots(username);');
   db.exec('CREATE INDEX IF NOT EXISTS idx_latest_user_id ON tracker_latest_snapshots(user_id);');
   db.exec('CREATE INDEX IF NOT EXISTS idx_latest_precomputed_at ON tracker_latest_snapshots(last_precomputed_at);');
@@ -101,11 +117,11 @@ function prepareStatements(db) {
       INSERT INTO tracker_latest_snapshots
         (session_key, username, user_id, latest_precomputed_json, precomputed_hash, raw_hash,
          ruby_gemstone_count, fish_type_count, build_ms, last_upload_at, last_inventory_at,
-         last_precomputed_at, updated_at)
+         last_precomputed_at, updated_at, presence_json)
       VALUES
         (@session_key, @username, @user_id, @latest_precomputed_json, @precomputed_hash, @raw_hash,
          @ruby_gemstone_count, @fish_type_count, @build_ms, @last_upload_at, @last_inventory_at,
-         @last_precomputed_at, @updated_at)
+         @last_precomputed_at, @updated_at, @presence_json)
       ON CONFLICT(session_key) DO UPDATE SET
         username = excluded.username,
         user_id = excluded.user_id,
@@ -118,7 +134,19 @@ function prepareStatements(db) {
         last_upload_at = excluded.last_upload_at,
         last_inventory_at = excluded.last_inventory_at,
         last_precomputed_at = excluded.last_precomputed_at,
-        updated_at = excluded.updated_at
+        updated_at = excluded.updated_at,
+        presence_json = excluded.presence_json
+    `),
+    // Cheap presence-only refresh: updates the tiny presence record and bumps
+    // last_precomputed_at (the read lane's change-probe watermark) WITHOUT
+    // rewriting the multi-hundred-KB inventory JSON or changing precomputed_hash.
+    // Used on every real heartbeat so an online account never reads stale.
+    updatePresence: db.prepare(`
+      UPDATE tracker_latest_snapshots
+      SET presence_json = @presence_json,
+          last_precomputed_at = @last_precomputed_at,
+          updated_at = @updated_at
+      WHERE session_key = @session_key
     `),
     getLatestJson: db.prepare(
       'SELECT latest_precomputed_json, precomputed_hash, raw_hash, ruby_gemstone_count, last_precomputed_at, last_upload_at, last_inventory_at, username, user_id FROM tracker_latest_snapshots WHERE session_key = ?',
@@ -133,7 +161,7 @@ function prepareStatements(db) {
       'SELECT session_key, raw_hash, last_upload_at, last_precomputed_at FROM tracker_latest_snapshots',
     ),
     allRowsForCache: db.prepare(
-      'SELECT session_key, user_id, latest_precomputed_json, precomputed_hash, last_precomputed_at FROM tracker_latest_snapshots',
+      'SELECT session_key, user_id, latest_precomputed_json, precomputed_hash, last_precomputed_at, presence_json FROM tracker_latest_snapshots',
     ),
     changedSince: db.prepare(
       'SELECT session_key, user_id, latest_precomputed_json, last_precomputed_at FROM tracker_latest_snapshots WHERE last_precomputed_at >= ?',
@@ -143,7 +171,7 @@ function prepareStatements(db) {
     // pulling any multi-hundred-KB JSON. This keeps the synchronous node:sqlite
     // read off the hot serving event loop in steady state.
     changedMetaSince: db.prepare(
-      'SELECT session_key, user_id, precomputed_hash, last_precomputed_at FROM tracker_latest_snapshots WHERE last_precomputed_at >= ?',
+      'SELECT session_key, user_id, precomputed_hash, last_precomputed_at, presence_json FROM tracker_latest_snapshots WHERE last_precomputed_at >= ?',
     ),
     getJsonByKey: db.prepare(
       'SELECT latest_precomputed_json, precomputed_hash, last_precomputed_at, user_id FROM tracker_latest_snapshots WHERE session_key = ?',
@@ -189,6 +217,24 @@ function upsertLatest(entry) {
     build_ms: Number.isFinite(entry.buildMs) ? Math.round(entry.buildMs) : 0,
     last_upload_at: entry.lastUploadAt || null,
     last_inventory_at: entry.lastInventoryAt || null,
+    last_precomputed_at: nowIso,
+    updated_at: nowIso,
+    presence_json: entry.presenceJson || null,
+  });
+  return nowIso;
+}
+
+/**
+ * Cheap presence-only refresh. Writes the small presence record and advances
+ * the read lane's change-probe watermark (last_precomputed_at) WITHOUT touching
+ * the heavy inventory JSON or precomputed_hash. Returns the ISO timestamp used.
+ */
+function updatePresence(sessionKey, presenceJson) {
+  openDb();
+  const nowIso = new Date().toISOString();
+  _stmts.updatePresence.run({
+    session_key: String(sessionKey),
+    presence_json: presenceJson || null,
     last_precomputed_at: nowIso,
     updated_at: nowIso,
   });
@@ -346,6 +392,7 @@ module.exports = {
   dbPath,
   openDb,
   upsertLatest,
+  updatePresence,
   recordHistory,
   cleanupHistory,
   getLatest,

@@ -48,6 +48,29 @@ const METRICS_PATH = process.env.TRACKER_WORKER_METRICS_PATH
 const lastSourceSig = new Map(); // key -> updatedAt string used at last precompute
 const lastPrecomputedMs = new Map(); // key -> Date.now() of last precompute
 const firstDirtySeenMs = new Map(); // key -> when it first became dirty (for oldest-age metric)
+const lastPresenceSig = new Map(); // key -> last presence_json string written (heartbeat decoupling)
+
+// The small presence/age fields the read API (8793) derives authoritative
+// red/green + ages from. These are written to the lightweight presence record
+// on EVERY real heartbeat — even when the inventory body is byte-stable — so an
+// actively-uploading account never reads stale "offline" with a frozen age.
+const WORKER_PRESENCE_FIELDS = [
+  'isOnline', 'trackerBuild', 'lastUploadTrackerBuild',
+  'lastAccountSeenAt', 'lastValidStatusAt', 'lastSuccessfulUploadAt',
+  'lastSuccessfulHeartbeatAt', 'lastHeartbeatAt', 'lastUploadReceivedAt',
+  'lastUploadAcceptedAt', 'lastSeenAt', 'lastSnapshotUploadAt', 'lastInventoryAt',
+  'lastStatsUploadAt', 'lastOfflineAt', 'lastFailureReason', 'lastUploadRejectReason',
+  'rejectReason', 'lastUploadStatusCodeReturned', 'lastUploadHttpStatus',
+];
+
+function buildPresenceJson(body) {
+  if (!body || typeof body !== 'object') return null;
+  const out = {};
+  for (const f of WORKER_PRESENCE_FIELDS) {
+    if (body[f] !== undefined) out[f] = body[f];
+  }
+  return JSON.stringify(out);
+}
 
 const buildMsSamples = []; // ring buffer
 const BUILD_SAMPLE_MAX = 500;
@@ -204,6 +227,7 @@ async function precomputeOne(item) {
     const rubyCount = body.topCards && body.topCards.rubyGemstone
       ? Number(body.topCards.rubyGemstone.count) || 0
       : 0;
+    const presenceJson = buildPresenceJson(body);
     const prevMeta = precomputeStore.getMeta(key);
     const contentUnchanged = prevMeta && prevMeta.precomputed_hash === precomputedHash;
     // PERF: when the rebuilt body is byte-stable (only the idle staleness
@@ -213,6 +237,17 @@ async function precomputeOne(item) {
     // tick — the dominant source of read-lane event-loop stalls. We still mark
     // the staleness clock satisfied in-memory so the backstop does not hot-loop.
     if (contentUnchanged) {
+      // Inventory body is byte-stable, so we do NOT rewrite the heavy JSON (that
+      // would force the read lane to re-pull this snapshot's blob every tick).
+      // BUT presence/heartbeat timestamps may have advanced — refresh the tiny
+      // presence record so the read API serves FRESH red/green + age even when
+      // the inventory content has not changed. Only write when it actually moved.
+      if (presenceJson && lastPresenceSig.get(key) !== presenceJson) {
+        try {
+          precomputeStore.updatePresence(key, presenceJson);
+          lastPresenceSig.set(key, presenceJson);
+        } catch (_) { /* non-fatal: next tick retries */ }
+      }
       recordBuildMs(buildMs);
       metrics.lastSuccessAt = new Date().toISOString();
       lastSourceSig.set(key, sig);
@@ -232,7 +267,9 @@ async function precomputeOne(item) {
       buildMs,
       lastUploadAt: body.lastSnapshotUploadAt || body.updatedAt || null,
       lastInventoryAt: body.lastInventoryAt || null,
+      presenceJson,
     });
+    if (presenceJson) lastPresenceSig.set(key, presenceJson);
     if (HISTORY_ON_CHANGE && (!prevMeta || prevMeta.precomputed_hash !== precomputedHash)) {
       try { precomputeStore.recordHistory(key, precomputedHash, rubyCount); } catch (_) { /* non-fatal */ }
     }

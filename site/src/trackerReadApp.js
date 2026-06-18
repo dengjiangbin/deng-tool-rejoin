@@ -54,6 +54,14 @@ function extractPresenceInput(body) {
   return out;
 }
 
+function parsePresenceJson(presenceJson) {
+  if (!presenceJson || typeof presenceJson !== 'string') return null;
+  try {
+    const obj = JSON.parse(presenceJson);
+    return obj && typeof obj === 'object' ? obj : null;
+  } catch (_) { return null; }
+}
+
 function bodyHasRenderableData(body) {
   if (!body || typeof body !== 'object') return false;
   if (body.playerStats && typeof body.playerStats === 'object') return true;
@@ -114,6 +122,12 @@ function ingestRow(row) {
     hasRenderableData = bodyHasRenderableData(parsed);
     if (parsed && parsed.snapshotSource) snapshotSource = String(parsed.snapshotSource);
   } catch (_) { /* keep defaults; serve will treat as no_data */ }
+  // Prefer the decoupled presence record when present: it is refreshed by the
+  // worker on EVERY heartbeat (even when the inventory body is byte-stable), so
+  // it is the freshest authoritative presence source. Falls back to the body's
+  // baked presence fields for rows written before this column existed.
+  const freshPresence = parsePresenceJson(row.presence_json);
+  if (freshPresence) presenceInput = freshPresence;
   cacheByKey.set(key, {
     json: row.latest_precomputed_json,
     lastPrecomputedAt: row.last_precomputed_at || '',
@@ -232,14 +246,21 @@ function refreshCache() {
           latest_precomputed_json: full.json,
           precomputed_hash: newHash,
           last_precomputed_at: newAt || full.lastPrecomputedAt,
+          presence_json: meta.presence_json,
         });
         continue;
       }
     }
     // Unchanged content (or JSON vanished): just advance the watermark/alias
-    // bookkeeping without re-reading or re-storing the blob.
+    // bookkeeping without re-reading or re-storing the blob. CRITICAL: still
+    // refresh the small presence record so a heartbeat-only update (online
+    // account whose inventory is unchanged) updates red/green + age WITHOUT
+    // re-pulling the multi-hundred-KB JSON. This is the fix for "online account
+    // not refreshing" + "offline age frozen while heartbeats continue".
     if (existing) {
       if (newAt && newAt !== existing.lastPrecomputedAt) existing.lastPrecomputedAt = newAt;
+      const freshPresence = parsePresenceJson(meta.presence_json);
+      if (freshPresence) existing.presenceInput = freshPresence;
     }
     if (meta.user_id != null && meta.user_id !== '') uidToKey.set(String(meta.user_id), key);
     if (newAt > cacheMaxPrecomputedAt) cacheMaxPrecomputedAt = newAt;
