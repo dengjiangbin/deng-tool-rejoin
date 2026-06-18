@@ -134,6 +134,9 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_ONLINE_THRESHOLD_M
       statusSeq: data.statusSeq != null ? Number(data.statusSeq) : null,
       sessionId: data.statusSessionId || null,
       serverReceivedStatusAt: data.serverReceivedStatusAt || null,
+      reportIdentitySource: data.reportIdentitySource || 'backend_derived',
+      leaderstatsIdentitySource: data.leaderstatsIdentitySource || 'backend_derived',
+      inventoryIdentitySource: data.inventoryIdentitySource || 'backend_derived',
       softGraceSeconds: st.softGraceSeconds,
       hardOfflineSeconds: st.hardOfflineSeconds,
     };

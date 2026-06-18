@@ -49,6 +49,7 @@ const PRESENCE_INPUT_FIELDS = [
   'statusIdentityReason',
   'lastRealLeaderstatsAt', 'leaderstatsRevision', 'leaderstatsReportId', 'leaderstatsSeq',
   'lastRealInventoryAt', 'inventoryRevision', 'inventoryReportId', 'inventorySeq', 'inventoryHash',
+  'reportIdentitySource', 'leaderstatsIdentitySource', 'inventoryIdentitySource',
 ];
 
 function extractPresenceInput(body) {
@@ -198,10 +199,13 @@ function buildPresenceContract(hit, nowMs) {
     statusDecisionReason: presence.statusDecisionReason || presence.accountStatusReason || null,
     missedStatusReports: presence.missedStatusReports != null ? presence.missedStatusReports : null,
     isStatusStale: presence.isStatusStale === true,
+    reportIdentitySource: presence.reportIdentitySource || input.reportIdentitySource || 'backend_derived',
     leaderstatsRevision: input.leaderstatsRevision != null ? Number(input.leaderstatsRevision) : null,
     leaderstatsReportId: input.leaderstatsReportId || null,
+    leaderstatsIdentitySource: presence.leaderstatsIdentitySource || input.leaderstatsIdentitySource || 'backend_derived',
     inventoryRevision: input.inventoryRevision != null ? Number(input.inventoryRevision) : null,
     inventoryReportId: input.inventoryReportId || null,
+    inventoryIdentitySource: presence.inventoryIdentitySource || input.inventoryIdentitySource || 'backend_derived',
     inventoryHash: input.inventoryHash || (hit && hit.precomputedHash) || null,
     preservedDataReason: !isOnline && hasRenderableData ? 'offline_preserve_last_known' : null,
     snapshotSource: (hit && hit.snapshotSource) || 'precomputed',

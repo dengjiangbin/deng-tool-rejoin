@@ -47,6 +47,7 @@ const LANE_FIELDS = {
     lastReal: 'lastRealRobloxStatusAt',
     serverReceived: 'serverReceivedStatusAt',
     decisionReason: 'statusIdentityReason',
+    identitySource: 'reportIdentitySource',
   },
   leaderstats: {
     seq: 'leaderstatsSeq',
@@ -57,6 +58,7 @@ const LANE_FIELDS = {
     lastReal: 'lastRealLeaderstatsAt',
     serverReceived: 'serverReceivedLeaderstatsAt',
     decisionReason: 'leaderstatsIdentityReason',
+    identitySource: 'leaderstatsIdentitySource',
   },
   inventory: {
     seq: 'inventorySeq',
@@ -68,6 +70,7 @@ const LANE_FIELDS = {
     lastReal: 'lastRealInventoryAt',
     serverReceived: 'serverReceivedInventoryAt',
     decisionReason: 'inventoryIdentityReason',
+    identitySource: 'inventoryIdentitySource',
   },
 };
 
@@ -104,7 +107,11 @@ function explicitIdentityHints(lane, body) {
   const b = body || {};
   const ps = b.playerStats && typeof b.playerStats === 'object' ? b.playerStats : {};
   if (lane === 'status') {
+    // explicit = the NEW reporter contract (statusReportId, or sessionId+statusSeq).
+    // runId/executionSessionId/uploadSeq are legacy-derived and do NOT count as explicit.
+    const explicit = !!(b.statusReportId || (b.sessionId != null && b.statusSeq != null));
     return {
+      explicit,
       sessionId: firstString(b.sessionId, b.statusSessionId, b.runId, b.executionSessionId, b.executionSession),
       seq: firstFiniteNumber(b.statusSeq, b.statusReportSeq, b.uploadSeq),
       reportId: firstString(b.statusReportId),
@@ -113,7 +120,9 @@ function explicitIdentityHints(lane, body) {
     };
   }
   if (lane === 'leaderstats') {
+    const explicit = !!(b.leaderstatsReportId || b.leaderstatsSeq != null);
     return {
+      explicit,
       sessionId: firstString(b.sessionId, b.leaderstatsSessionId, b.runId, b.executionSessionId),
       seq: firstFiniteNumber(b.leaderstatsSeq, b.leaderstatsUploadSeq, b.uploadSeq),
       reportId: firstString(b.leaderstatsReportId),
@@ -122,7 +131,9 @@ function explicitIdentityHints(lane, body) {
     };
   }
   // inventory
+  const explicit = !!(b.inventoryReportId || b.inventorySeq != null || b.inventoryHash);
   return {
+    explicit,
     sessionId: firstString(b.sessionId, b.inventorySessionId, b.runId, b.executionSessionId),
     seq: firstFiniteNumber(b.inventorySeq, b.uploadSeq),
     reportId: firstString(b.inventoryReportId),
@@ -215,6 +226,7 @@ function classifyReport(lane, body, session, serverNowMs = Date.now()) {
     capturedAtMs,
     sentAt: hints.sentAt || null,
     hash: hints.hash || null,
+    identitySource: hints.explicit ? 'client_explicit' : 'backend_derived',
   };
 }
 
@@ -228,6 +240,9 @@ function applyReport(lane, session, body, serverNowMs = Date.now()) {
   const c = classifyReport(lane, body, session, serverNowMs);
   const updates = {};
   updates[F.decisionReason] = c.reason;
+  // identitySource reflects the LAST report on this lane (explicit vs derived),
+  // independent of freshness so the API always shows the current reporter contract.
+  if (F.identitySource) updates[F.identitySource] = c.identitySource;
   if (c.fresh) {
     // lastReal = when Roblox captured the report, never in the future, never
     // older than what we already trusted (monotonic).
@@ -253,6 +268,7 @@ function applyReport(lane, session, body, serverNowMs = Date.now()) {
     seq: c.seq,
     sessionId: c.sessionId,
     capturedAtMs: c.capturedAtMs,
+    identitySource: c.identitySource,
   };
 }
 

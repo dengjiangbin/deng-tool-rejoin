@@ -229,6 +229,7 @@ const WORKER_PRESENCE_FIELDS = [
   'statusIdentityReason',
   'lastRealLeaderstatsAt', 'leaderstatsRevision', 'leaderstatsReportId', 'leaderstatsSeq',
   'lastRealInventoryAt', 'inventoryRevision', 'inventoryReportId', 'inventorySeq', 'inventoryHash',
+  'reportIdentitySource', 'leaderstatsIdentitySource', 'inventoryIdentitySource',
 ];
 
 function buildPresenceJson(body) {

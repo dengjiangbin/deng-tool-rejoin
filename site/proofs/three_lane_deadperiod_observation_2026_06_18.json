@@ -1,0 +1,54 @@
+{
+  "observedMs": 376942,
+  "intervalMs": 5000,
+  "users": {
+    "usaxz10": {
+      "samples": 74,
+      "http200": 74,
+      "httpOther": 0,
+      "greenSamples": 74,
+      "everWentRed": false,
+      "maxStatusAgeSeconds": 158,
+      "maxLeaderstatsAgeSeconds": 171,
+      "maxInventoryAgeSeconds": 171,
+      "distinctStatusRevisions": 2,
+      "distinctLeaderstatsRevisions": 1,
+      "distinctInventoryRevisions": 1,
+      "identitySources": [
+        "backend_derived"
+      ]
+    },
+    "phantomkernels": {
+      "samples": 74,
+      "http200": 74,
+      "httpOther": 0,
+      "greenSamples": 74,
+      "everWentRed": false,
+      "maxStatusAgeSeconds": 140,
+      "maxLeaderstatsAgeSeconds": 177,
+      "maxInventoryAgeSeconds": 177,
+      "distinctStatusRevisions": 2,
+      "distinctLeaderstatsRevisions": 1,
+      "distinctInventoryRevisions": 1,
+      "identitySources": [
+        "backend_derived"
+      ]
+    },
+    "priadivine387": {
+      "samples": 74,
+      "http200": 74,
+      "httpOther": 0,
+      "greenSamples": 74,
+      "everWentRed": false,
+      "maxStatusAgeSeconds": 148,
+      "maxLeaderstatsAgeSeconds": 165,
+      "maxInventoryAgeSeconds": 165,
+      "distinctStatusRevisions": 1,
+      "distinctLeaderstatsRevisions": 1,
+      "distinctInventoryRevisions": 1,
+      "identitySources": [
+        "backend_derived"
+      ]
+    }
+  }
+}
