@@ -49,29 +49,84 @@ const BASE_URL = process.env.TRACKER_PRECOMPUTE_BASE_URL
 const METRICS_PATH = process.env.TRACKER_WORKER_METRICS_PATH
   || path.join(__dirname, '..', 'data', 'tracker_worker_metrics.json');
 
-// ── Singleton guard ───────────────────────────────────────────────────────
+// ── Singleton guard (park-not-exit, liveness heartbeat) ───────────────────
 // PM2 restarts / daemon churn can leave ORPHAN worker processes alive that PM2
 // no longer tracks. Multiple workers all write the SAME precompute DB, and an
 // orphan with a frozen in-memory liveTrackDB will clobber fresh presence/age
 // with stale timestamps every idle-refresh tick — making online accounts look
-// stale and freezing offline ages. The lock makes the NEWEST worker the sole
-// writer: every worker stamps a monotonic claim token at boot; any worker that
-// observes a strictly-newer token on the lock self-exits within one tick. No
-// PID-killing required — older/orphan instances drain themselves cleanly.
+// stale and freezing offline ages.
+//
+// The PREVIOUS design ("newest startMs wins; a superseded worker process.exit()s")
+// fixed split-brain but INTRODUCED a 5-minute-class dead period: exiting feeds
+// PM2 autorestart, the restarted worker gets a newer token, supersedes whoever
+// is running, that one exits, PM2 restarts it newer… an infinite leapfrog. While
+// it leapfrogs NO worker keeps presence_json fresh, so every actively-online
+// account's age grows past the 195s hard-offline threshold and reads RED until a
+// human manually breaks the loop. That is the reported "online username red for
+// ~5 minutes while still playing".
+//
+// New design: a superseded worker PARKS (stays alive + idle, never writes the DB)
+// instead of exiting. Because it never exits, PM2 never restarts it, so no new
+// generation is ever spawned and the leapfrog can't start. Exactly ONE worker
+// owns the lock and writes; the rest park. Ownership is decided by LIVENESS, not
+// just recency: the owner heartbeats the lock every tick, and a parked/booting
+// worker only yields to an owner whose pid is ALIVE and whose heartbeat is FRESH.
+// A dead or stale owner (crash, kill, hung) is taken over within HB_STALE_MS, so
+// there is always a live writer and never two.
 const SINGLETON_LOCK_PATH = process.env.TRACKER_WORKER_LOCK_PATH
   || path.join(__dirname, '..', 'data', 'tracker_worker_singleton.json');
 const MY_START_MS = Date.now();
 const MY_PID = process.pid;
+// A token unique to THIS process instance (survives across our own lock rewrites,
+// changes across restarts). Used to tell "the lock is mine" from "someone else's".
+const MY_TOKEN = `${MY_START_MS}.${MY_PID}`;
+// How long an owner's heartbeat may be silent before a parked worker may take
+// over. Must be comfortably > TICK_MS and the metrics flush, but well under the
+// 195s hard-offline threshold so a real owner death is covered long before any
+// account could false-red. 15s = 30 missed 500ms ticks.
+// A parked peer waits this long with no heartbeat before declaring the owner dead
+// and taking over. Must exceed the worst-case synchronous tick block (heavy
+// precompute batch + history cleanup can briefly stall the event loop, which also
+// stalls the heartbeat) so two live workers never ping-pong ownership, yet stay
+// well under the 195s hard-offline threshold so a real owner death is recovered
+// long before any account could false-red. 45s satisfies both.
+const SINGLETON_HB_STALE_MS = parseInt(process.env.TRACKER_WORKER_HB_STALE_MS || '45000', 10);
+// How often the active owner rewrites its heartbeat (throttle; << stale window).
+const SINGLETON_HB_WRITE_MS = parseInt(process.env.TRACKER_WORKER_HB_WRITE_MS || '3000', 10);
+let lastHbMs = 0;
 
-function claimSingleton() {
+function readLock() {
+  try {
+    if (!fs.existsSync(SINGLETON_LOCK_PATH)) return null;
+    return JSON.parse(fs.readFileSync(SINGLETON_LOCK_PATH, 'utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function pidAlive(pid) {
+  const p = Number(pid) || 0;
+  if (!p) return false;
+  try {
+    // signal 0 = existence/permission probe; throws ESRCH if the pid is gone.
+    process.kill(p, 0);
+    return true;
+  } catch (e) {
+    return e && e.code === 'EPERM'; // exists but not signalable → still alive
+  }
+}
+
+function writeLock(extra) {
   try {
     fs.mkdirSync(path.dirname(SINGLETON_LOCK_PATH), { recursive: true });
     const tmp = `${SINGLETON_LOCK_PATH}.${MY_PID}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({
+    fs.writeFileSync(tmp, JSON.stringify(Object.assign({
       startMs: MY_START_MS,
       pid: MY_PID,
+      token: MY_TOKEN,
       claimedAt: new Date(MY_START_MS).toISOString(),
-    }));
+      hbAt: Date.now(),
+    }, extra || {})));
     fs.renameSync(tmp, SINGLETON_LOCK_PATH);
     return true;
   } catch (_) {
@@ -79,20 +134,74 @@ function claimSingleton() {
   }
 }
 
-// Returns true when another worker holds a STRICTLY-NEWER claim than ours, i.e.
-// it started later (or same ms but higher pid as a deterministic tiebreaker).
+function claimSingleton() {
+  return writeLock();
+}
+
+// Refresh OUR heartbeat (only meaningful when we own the lock). Cheap; called
+// every tick by the active owner so parked/booting peers see we're alive.
+function heartbeatSingleton() {
+  return writeLock();
+}
+
+// Is the lock holder strictly NEWER than us (later startMs, or same ms + higher
+// pid as a deterministic tiebreaker)? Newest-wins makes a freshly-restarted PM2
+// worker supersede any lingering older orphan.
+function lockIsNewer(lock) {
+  const otherStart = Number(lock.startMs) || 0;
+  const otherPid = Number(lock.pid) || 0;
+  if (otherStart > MY_START_MS) return true;
+  if (otherStart === MY_START_MS && otherPid > MY_PID) return true;
+  return false;
+}
+
+// Is the lock holder a verifiably-live owner (pid alive + heartbeat fresh)?
+// Legacy locks (no hbAt) are treated as live so the pure recency rule applies.
+function lockOwnerLive(lock) {
+  if (!pidAlive(lock.pid)) return false;
+  const hbAt = Number(lock.hbAt) || 0;
+  if (hbAt <= 0) return true;
+  return (Date.now() - hbAt) <= SINGLETON_HB_STALE_MS;
+}
+
+// True when a DIFFERENT, strictly-NEWER, verifiably-LIVE worker owns the lock —
+// i.e. WE must yield (park). Newest-wins + liveness: we never yield to an older
+// worker (we'd take over) nor to a dead/stale newer worker (it crashed). This is
+// the exact condition that makes the older peer park forever while the newer
+// owner runs — so there is no flapping and no leapfrog. Fail-open on
+// missing/corrupt lock so the sole worker is never blocked.
 function singletonSuperseded() {
-  try {
-    if (!fs.existsSync(SINGLETON_LOCK_PATH)) return false;
-    const raw = JSON.parse(fs.readFileSync(SINGLETON_LOCK_PATH, 'utf8'));
-    const otherStart = Number(raw.startMs) || 0;
-    const otherPid = Number(raw.pid) || 0;
-    if (otherStart > MY_START_MS) return true;
-    if (otherStart === MY_START_MS && otherPid > MY_PID) return true;
-    return false;
-  } catch (_) {
-    return false;
+  const lock = readLock();
+  if (!lock) return false;
+  if (lock.token && lock.token === MY_TOKEN) return false; // it's ours
+  if (!lockIsNewer(lock)) return false; // we're newer/equal → we win, not superseded
+  const hbAt = Number(lock.hbAt) || 0;
+  if (hbAt > 0) return lockOwnerLive(lock); // modern: yield only to a live newer owner
+  return true; // legacy lock (no heartbeat): pure recency rule (back-compat)
+}
+
+// Decide whether THIS worker should be the active writer. Returns true if we own
+// (or just claimed/took over) the lock; false if we must PARK because a newer,
+// live owner holds it. Park-not-exit: a parked worker stays alive (so PM2 never
+// restarts it → no leapfrog) and re-checks every tick, taking over instantly if
+// the newer owner dies or goes stale.
+function ensureOwnership() {
+  const lock = readLock();
+  if (!lock) { claimSingleton(); lastHbMs = Date.now(); return true; }
+  if (lock.token === MY_TOKEN) {
+    // We own it: refresh heartbeat (throttled — every 500ms tick would be wasteful;
+    // SINGLETON_HB_WRITE_MS keeps hbAt comfortably fresh vs the stale window even
+    // across heavy ticks).
+    const now = Date.now();
+    if (now - lastHbMs >= SINGLETON_HB_WRITE_MS) { heartbeatSingleton(); lastHbMs = now; }
+    return true;
   }
+  // A different worker holds it. Park only if it is a newer, live owner.
+  if (lockIsNewer(lock) && lockOwnerLive(lock)) return false;
+  // Otherwise WE win: either we're newer, or the holder is dead/stale. Take over.
+  claimSingleton();
+  lastHbMs = Date.now();
+  return true;
 }
 
 // Per-key tracking for coalescing + staleness.
@@ -193,6 +302,7 @@ const metrics = {
 let routes = null;
 let running = false;
 let stopped = false;
+let parked = false;
 
 function pct(sortedArr, p) {
   if (!sortedArr.length) return 0;
@@ -417,16 +527,28 @@ function flushMetrics(force) {
 
 async function tick() {
   if (running || stopped) return;
-  // Singleton enforcement: a strictly-newer worker has claimed the lock, so this
-  // instance is an older/orphan duplicate. Stop writing to the shared precompute
-  // DB immediately and exit cleanly so it can never clobber fresh presence/age.
-  if (singletonSuperseded()) {
-    stopped = true;
-    console.log('[deng-tracker-worker] superseded by a newer worker — exiting (pid=%d startMs=%d)', MY_PID, MY_START_MS);
-    try { flushMetrics(true); } catch (_) { /* ignore */ }
-    setTimeout(() => process.exit(0), 50);
+  // Singleton enforcement (park-not-exit): if another LIVE worker owns the lock
+  // we PARK — stay alive but write nothing to the shared precompute DB, so we can
+  // never clobber the owner's fresh presence/age AND we never feed PM2 autorestart
+  // (which is what created the leapfrog 5-minute dead period). We keep ticking so
+  // that the instant the owner dies/goes stale we take ownership and resume,
+  // guaranteeing there is always exactly one live writer.
+  if (!ensureOwnership()) {
+    // PURE PARK: stay alive, write nothing. We never self-exit — a non-owner exit
+    // would feed PM2 autorestart and recreate the leapfrog cascade. The current
+    // OWNER reaps us (we're an older duplicate) within a few seconds instead.
+    if (!parked) {
+      parked = true;
+      console.log('[deng-tracker-worker] parked — a newer live worker owns the lock (pid=%d startMs=%d); awaiting reap', MY_PID, MY_START_MS);
+    }
+    metrics.parked = true;
     return;
   }
+  if (parked) {
+    parked = false;
+    console.log('[deng-tracker-worker] resumed ownership — previous owner died/stale (pid=%d startMs=%d)', MY_PID, MY_START_MS);
+  }
+  metrics.parked = false;
   running = true;
   try {
     metrics.ticks += 1;
@@ -476,11 +598,17 @@ function start() {
   process.env.SKIP_TRACKER_UPLOAD_ROUTES = process.env.SKIP_TRACKER_UPLOAD_ROUTES || '1';
   routes = require('./fishitTrackerRoutes');
   precomputeStore.openDb();
-  // Claim singleton ownership BEFORE the first tick so any older worker still
-  // alive (PM2 churn / orphan) observes our newer token and drains itself.
-  claimSingleton();
-  console.log('[deng-tracker-worker] starting tick=%dms refresh=%dms maxPerTick=%d concurrency=%d base=%s pid=%d startMs=%d',
-    TICK_MS, REFRESH_MS, MAX_PER_TICK, CONCURRENCY, BASE_URL, MY_PID, MY_START_MS);
+  // Ownership-aware boot: take the lock only if no LIVE owner holds it; otherwise
+  // park (the tick loop keeps re-checking and takes over the instant the owner
+  // dies/goes stale). This is what stops the PM2 restart leapfrog at the source —
+  // a freshly-restarted worker never blindly steals from a live peer.
+  if (ensureOwnership()) {
+    console.log('[deng-tracker-worker] starting (OWNER) tick=%dms refresh=%dms maxPerTick=%d concurrency=%d base=%s pid=%d startMs=%d',
+      TICK_MS, REFRESH_MS, MAX_PER_TICK, CONCURRENCY, BASE_URL, MY_PID, MY_START_MS);
+  } else {
+    parked = true;
+    console.log('[deng-tracker-worker] starting (PARKED — live owner present) pid=%d startMs=%d', MY_PID, MY_START_MS);
+  }
   // Force an initial disk load before the first tick.
   try { routes.syncLiveTrackFromDisk(); } catch (_) { /* ignore */ }
   const timer = setInterval(tick, TICK_MS);
@@ -505,9 +633,15 @@ module.exports = {
     precomputeOne,
     claimSingleton,
     singletonSuperseded,
+    heartbeatSingleton,
+    ensureOwnership,
+    readLock,
+    pidAlive,
     SINGLETON_LOCK_PATH,
+    SINGLETON_HB_STALE_MS,
     MY_START_MS,
     MY_PID,
+    MY_TOKEN,
     buildPresenceJson,
     sourceSig,
     sweepPresence,
