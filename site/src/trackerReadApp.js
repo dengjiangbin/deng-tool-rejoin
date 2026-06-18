@@ -26,6 +26,44 @@ const http = require('http');
 const fs = require('fs');
 
 const precomputeStore = require('./fishitPrecomputeStore');
+const {
+  deriveAccountPresenceStatus,
+  ACCOUNT_ONLINE_THRESHOLD_MS,
+  syncAgeSecondsFromTimestamp,
+  parseTimestampMs,
+} = require('./trackerAccountPresence');
+
+// Fields deriveAccountPresenceStatus + the age contract read. We extract ONLY
+// these (small) from the multi-hundred-KB precomputed body once at ingest time
+// so per-request presence is computed from RAM without re-parsing the blob.
+const PRESENCE_INPUT_FIELDS = [
+  'isOnline', 'trackerBuild', 'lastUploadTrackerBuild',
+  'lastAccountSeenAt', 'lastValidStatusAt', 'lastSuccessfulUploadAt',
+  'lastSuccessfulHeartbeatAt', 'lastHeartbeatAt', 'lastUploadReceivedAt',
+  'lastUploadAcceptedAt', 'lastSeenAt', 'lastSnapshotUploadAt', 'lastInventoryAt',
+  'lastStatsUploadAt', 'lastOfflineAt', 'lastFailureReason', 'lastUploadRejectReason',
+  'rejectReason', 'lastUploadStatusCodeReturned', 'lastUploadHttpStatus',
+];
+
+function extractPresenceInput(body) {
+  const out = {};
+  if (!body || typeof body !== 'object') return out;
+  for (const f of PRESENCE_INPUT_FIELDS) {
+    if (body[f] !== undefined) out[f] = body[f];
+  }
+  return out;
+}
+
+function bodyHasRenderableData(body) {
+  if (!body || typeof body !== 'object') return false;
+  if (body.playerStats && typeof body.playerStats === 'object') return true;
+  if (Array.isArray(body.fishItems) && body.fishItems.length) return true;
+  if (Array.isArray(body.stoneItems) && body.stoneItems.length) return true;
+  if (Array.isArray(body.totemItems) && body.totemItems.length) return true;
+  if (body.topCards && typeof body.topCards === 'object') return true;
+  if (body.counts && typeof body.counts === 'object') return true;
+  return false;
+}
 
 const FALLBACK_HOST = process.env.TRACKER_READ_FALLBACK_HOST || process.env.TOOL_SITE_HOST || '127.0.0.1';
 const FALLBACK_PORT = parseInt(process.env.TRACKER_READ_FALLBACK_PORT || process.env.TOOL_SITE_PORT || '8791', 10);
@@ -63,16 +101,80 @@ let cacheRefreshTimer = null;
 function ingestRow(row) {
   if (!row || !row.session_key) return;
   const key = String(row.session_key);
+  // Parse the blob ONCE per content change to extract the small presence/age
+  // inputs. Presence is then derived FRESH on every request (serve time), so a
+  // body that stops being rebuilt (idle account, churn-skip) can NEVER keep a
+  // stale baked accountPresenceLive=true alive. This is the authoritative source.
+  let presenceInput = {};
+  let hasRenderableData = false;
+  let snapshotSource = 'precomputed';
+  try {
+    const parsed = JSON.parse(row.latest_precomputed_json);
+    presenceInput = extractPresenceInput(parsed);
+    hasRenderableData = bodyHasRenderableData(parsed);
+    if (parsed && parsed.snapshotSource) snapshotSource = String(parsed.snapshotSource);
+  } catch (_) { /* keep defaults; serve will treat as no_data */ }
   cacheByKey.set(key, {
     json: row.latest_precomputed_json,
     lastPrecomputedAt: row.last_precomputed_at || '',
     precomputedHash: row.precomputed_hash || '',
+    presenceInput,
+    hasRenderableData,
+    snapshotSource,
   });
   if (row.user_id != null && row.user_id !== '') {
     uidToKey.set(String(row.user_id), key);
   }
   const at = row.last_precomputed_at || '';
   if (at > cacheMaxPrecomputedAt) cacheMaxPrecomputedAt = at;
+}
+
+// Authoritative presence + age contract, computed FRESH per request from the
+// stable real timestamps (never from precompute/cache freshness or read time).
+function buildPresenceContract(hit, nowMs) {
+  const input = (hit && hit.presenceInput) || {};
+  const presence = deriveAccountPresenceStatus(input, ACCOUNT_ONLINE_THRESHOLD_MS, nowMs);
+  const hasRenderableData = !!(hit && hit.hasRenderableData);
+  const lastRealStatusAt = presence.lastAccountSeenAt || null;
+  const lastRealInventoryAt = input.lastInventoryAt || input.lastSnapshotUploadAt || null;
+  const lastRealLeaderstatsAt = input.lastStatsUploadAt || null;
+  const lastRealUploadAt = input.lastSuccessfulUploadAt || input.lastSnapshotUploadAt || lastRealStatusAt || null;
+  const isOnline = presence.accountPresenceLive === true;
+  let presenceState;
+  if (isOnline) presenceState = 'online';
+  else if (!hasRenderableData && (presence.accountPresenceReason === 'no_session' || !lastRealStatusAt)) presenceState = 'no_data';
+  else presenceState = 'offline';
+  return {
+    presenceState,
+    isOnline,
+    accountPresenceLive: isOnline,
+    accountPresenceStatus: presence.accountPresenceStatus,
+    accountPresenceReason: presence.accountPresenceReason,
+    statusAgeSeconds: presence.heartbeatAgeSeconds != null ? presence.heartbeatAgeSeconds : null,
+    inventoryAgeSeconds: syncAgeSecondsFromTimestamp(lastRealInventoryAt, nowMs),
+    leaderstatsAgeSeconds: syncAgeSecondsFromTimestamp(lastRealLeaderstatsAt, nowMs),
+    lastRealStatusAt,
+    lastRealUploadAt,
+    lastRealInventoryAt,
+    lastRealLeaderstatsAt,
+    snapshotSource: (hit && hit.snapshotSource) || 'precomputed',
+    isFallback: false,
+    hasRenderableData,
+  };
+}
+
+function applyPresenceHeaders(res, c) {
+  res.set('X-DENG-Presence-State', c.presenceState);
+  res.set('X-DENG-Is-Online', c.isOnline ? '1' : '0');
+  res.set('X-DENG-Presence-Reason', c.accountPresenceReason || '');
+  if (c.statusAgeSeconds != null) res.set('X-DENG-Status-Age', String(c.statusAgeSeconds));
+  if (c.inventoryAgeSeconds != null) res.set('X-DENG-Inventory-Age', String(c.inventoryAgeSeconds));
+  if (c.leaderstatsAgeSeconds != null) res.set('X-DENG-Leaderstats-Age', String(c.leaderstatsAgeSeconds));
+  if (c.lastRealStatusAt) res.set('X-DENG-Last-Real-Status-At', c.lastRealStatusAt);
+  if (c.lastRealInventoryAt) res.set('X-DENG-Last-Real-Inventory-At', c.lastRealInventoryAt);
+  if (c.lastRealLeaderstatsAt) res.set('X-DENG-Last-Real-Leaderstats-At', c.lastRealLeaderstatsAt);
+  res.set('X-DENG-Snapshot-Source', c.snapshotSource);
+  res.set('X-DENG-Has-Renderable', c.hasRenderableData ? '1' : '0');
 }
 
 function warmLoadCache() {
@@ -258,14 +360,34 @@ function servePrecomputed(req, res) {
   if (!hit) {
     return proxyToFallback(req, res, 'not_precomputed_yet');
   }
-  const ageMs = hit.lastPrecomputedAt ? (Date.now() - Date.parse(hit.lastPrecomputedAt)) : null;
+  const now = Date.now();
+  const ageMs = hit.lastPrecomputedAt ? (now - Date.parse(hit.lastPrecomputedAt)) : null;
+  const contract = buildPresenceContract(hit, now);
   setBaseHeaders(res);
   res.set('X-DENG-Precomputed', '1');
   res.set('X-DENG-Read-Mode', 'precomputed');
   res.set('X-DENG-Read-Fallback', '0');
   if (ageMs != null) res.set('X-DENG-Precomputed-Age-Ms', String(ageMs));
   res.set('X-DENG-Precomputed-At', hit.lastPrecomputedAt || '');
+  res.set('X-DENG-Snapshot-Hash', hit.precomputedHash || '');
+  applyPresenceHeaders(res, contract);
   res.type('application/json');
+  // Content-hash conditional fetch: when the caller already holds this exact
+  // snapshot (?h=<hash>), do NOT re-ship the (up to multi-MB, no-cap) body.
+  // Return a tiny "unchanged" envelope carrying the fresh authoritative
+  // presence/age contract. This kills the repeated large JSON.parse stalls
+  // behind the slow updates + 10-minute frontend degradation, while preserving
+  // complete data whenever the snapshot actually changes.
+  const knownHash = req.query && (req.query.h || req.query.hash);
+  if (knownHash && hit.precomputedHash && String(knownHash) === hit.precomputedHash) {
+    res.set('X-DENG-Unchanged', '1');
+    return res.status(200).send(JSON.stringify({
+      unchanged: true,
+      snapshotHash: hit.precomputedHash,
+      presence: contract,
+    }));
+  }
+  res.set('X-DENG-Unchanged', '0');
   return res.status(200).send(hit.json);
 }
 
@@ -328,3 +450,14 @@ module.exports.PORT = PORT;
 module.exports.startCache = startCache;
 module.exports.refreshCache = refreshCache;
 module.exports._cacheStats = () => ({ size: cacheByKey.size, maxPrecomputedAt: cacheMaxPrecomputedAt });
+// Exported for unit tests of the authoritative presence/age contract.
+module.exports._buildPresenceContract = buildPresenceContract;
+module.exports._extractPresenceInput = extractPresenceInput;
+module.exports._bodyHasRenderableData = bodyHasRenderableData;
+module.exports._ingestForTest = (key, body) => ingestRow({
+  session_key: key,
+  latest_precomputed_json: typeof body === 'string' ? body : JSON.stringify(body),
+  precomputed_hash: 'testhash',
+  last_precomputed_at: new Date().toISOString(),
+});
+module.exports._cacheEntryForTest = (key) => cacheByKey.get(key) || null;

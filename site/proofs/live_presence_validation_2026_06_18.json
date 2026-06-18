@@ -1,0 +1,650 @@
+{
+  "anomalies": 0,
+  "done": true,
+  "rows": [
+    {
+      "t": "2026-06-18T03:50:21.995Z",
+      "i": 0,
+      "denghub2": {
+        "ps": "offline",
+        "age": 433,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 214123,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 1033,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078624,
+        "condB": 559,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:50:52.049Z",
+      "i": 1,
+      "denghub2": {
+        "ps": "offline",
+        "age": 463,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 214123,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 1063,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078624,
+        "condB": 559,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:51:22.095Z",
+      "i": 2,
+      "denghub2": {
+        "ps": "online",
+        "age": 36,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224533,
+        "condB": 535,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 1093,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078624,
+        "condB": 559,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:51:52.158Z",
+      "i": 3,
+      "denghub2": {
+        "ps": "online",
+        "age": 66,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224533,
+        "condB": 535,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "online",
+        "age": 62,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078518,
+        "condB": 537,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:52:22.264Z",
+      "i": 4,
+      "denghub2": {
+        "ps": "online",
+        "age": 97,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224533,
+        "condB": 537,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "online",
+        "age": 93,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078518,
+        "condB": 537,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:52:52.743Z",
+      "i": 5,
+      "denghub2": {
+        "ps": "online",
+        "age": 127,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224533,
+        "condB": 538,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "online",
+        "age": 123,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078518,
+        "condB": 538,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:53:22.800Z",
+      "i": 6,
+      "denghub2": {
+        "ps": "offline",
+        "age": 157,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 153,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078518,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:53:52.833Z",
+      "i": 7,
+      "denghub2": {
+        "ps": "offline",
+        "age": 187,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 183,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078518,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:54:23.365Z",
+      "i": 8,
+      "denghub2": {
+        "ps": "offline",
+        "age": 218,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "online",
+        "age": 92,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078520,
+        "condB": 536,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:54:53.562Z",
+      "i": 9,
+      "denghub2": {
+        "ps": "offline",
+        "age": 248,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "online",
+        "age": 122,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078520,
+        "condB": 537,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:55:23.612Z",
+      "i": 10,
+      "denghub2": {
+        "ps": "offline",
+        "age": 278,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 152,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078520,
+        "condB": 555,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:55:53.804Z",
+      "i": 11,
+      "denghub2": {
+        "ps": "offline",
+        "age": 308,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 182,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078520,
+        "condB": 555,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:56:23.844Z",
+      "i": 12,
+      "denghub2": {
+        "ps": "offline",
+        "age": 338,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 212,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078551,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:56:53.873Z",
+      "i": 13,
+      "denghub2": {
+        "ps": "offline",
+        "age": 368,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 242,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078551,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:57:23.964Z",
+      "i": 14,
+      "denghub2": {
+        "ps": "offline",
+        "age": 398,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 224620,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 272,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078551,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:57:54.069Z",
+      "i": 15,
+      "denghub2": {
+        "ps": "online",
+        "age": 50,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 326619,
+        "condB": 535,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 302,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078551,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:58:24.211Z",
+      "i": 16,
+      "denghub2": {
+        "ps": "online",
+        "age": 81,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 326619,
+        "condB": 535,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "online",
+        "age": 83,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078444,
+        "condB": 535,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:58:54.296Z",
+      "i": 17,
+      "denghub2": {
+        "ps": "online",
+        "age": 111,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 326619,
+        "condB": 538,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "online",
+        "age": 113,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078444,
+        "condB": 538,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:59:24.325Z",
+      "i": 18,
+      "denghub2": {
+        "ps": "online",
+        "age": 141,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 326619,
+        "condB": 538,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "online",
+        "age": 143,
+        "online": true,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078444,
+        "condB": 538,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T03:59:54.358Z",
+      "i": 19,
+      "denghub2": {
+        "ps": "offline",
+        "age": 171,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 326619,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 174,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078444,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T04:00:25.066Z",
+      "i": 20,
+      "denghub2": {
+        "ps": "offline",
+        "age": 201,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 326706,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 204,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078533,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T04:00:55.098Z",
+      "i": 21,
+      "denghub2": {
+        "ps": "offline",
+        "age": 231,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 326706,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 234,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078533,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    },
+    {
+      "t": "2026-06-18T04:01:25.342Z",
+      "i": 22,
+      "denghub2": {
+        "ps": "offline",
+        "age": 262,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 326706,
+        "condB": 556,
+        "condUnchanged": "1"
+      },
+      "dengjiangbin": {
+        "ps": "offline",
+        "age": 264,
+        "online": false,
+        "presenceOk": true,
+        "ageOk": true,
+        "condOk": true,
+        "httpOk": true,
+        "fullB": 2078533,
+        "condB": 556,
+        "condUnchanged": "1"
+      }
+    }
+  ]
+}
