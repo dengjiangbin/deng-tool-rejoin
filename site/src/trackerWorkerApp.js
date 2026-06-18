@@ -44,6 +44,52 @@ const BASE_URL = process.env.TRACKER_PRECOMPUTE_BASE_URL
 const METRICS_PATH = process.env.TRACKER_WORKER_METRICS_PATH
   || path.join(__dirname, '..', 'data', 'tracker_worker_metrics.json');
 
+// ── Singleton guard ───────────────────────────────────────────────────────
+// PM2 restarts / daemon churn can leave ORPHAN worker processes alive that PM2
+// no longer tracks. Multiple workers all write the SAME precompute DB, and an
+// orphan with a frozen in-memory liveTrackDB will clobber fresh presence/age
+// with stale timestamps every idle-refresh tick — making online accounts look
+// stale and freezing offline ages. The lock makes the NEWEST worker the sole
+// writer: every worker stamps a monotonic claim token at boot; any worker that
+// observes a strictly-newer token on the lock self-exits within one tick. No
+// PID-killing required — older/orphan instances drain themselves cleanly.
+const SINGLETON_LOCK_PATH = process.env.TRACKER_WORKER_LOCK_PATH
+  || path.join(__dirname, '..', 'data', 'tracker_worker_singleton.json');
+const MY_START_MS = Date.now();
+const MY_PID = process.pid;
+
+function claimSingleton() {
+  try {
+    fs.mkdirSync(path.dirname(SINGLETON_LOCK_PATH), { recursive: true });
+    const tmp = `${SINGLETON_LOCK_PATH}.${MY_PID}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({
+      startMs: MY_START_MS,
+      pid: MY_PID,
+      claimedAt: new Date(MY_START_MS).toISOString(),
+    }));
+    fs.renameSync(tmp, SINGLETON_LOCK_PATH);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Returns true when another worker holds a STRICTLY-NEWER claim than ours, i.e.
+// it started later (or same ms but higher pid as a deterministic tiebreaker).
+function singletonSuperseded() {
+  try {
+    if (!fs.existsSync(SINGLETON_LOCK_PATH)) return false;
+    const raw = JSON.parse(fs.readFileSync(SINGLETON_LOCK_PATH, 'utf8'));
+    const otherStart = Number(raw.startMs) || 0;
+    const otherPid = Number(raw.pid) || 0;
+    if (otherStart > MY_START_MS) return true;
+    if (otherStart === MY_START_MS && otherPid > MY_PID) return true;
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 // Per-key tracking for coalescing + staleness.
 const lastSourceSig = new Map(); // key -> updatedAt string used at last precompute
 const lastPrecomputedMs = new Map(); // key -> Date.now() of last precompute
@@ -326,6 +372,16 @@ function flushMetrics(force) {
 
 async function tick() {
   if (running || stopped) return;
+  // Singleton enforcement: a strictly-newer worker has claimed the lock, so this
+  // instance is an older/orphan duplicate. Stop writing to the shared precompute
+  // DB immediately and exit cleanly so it can never clobber fresh presence/age.
+  if (singletonSuperseded()) {
+    stopped = true;
+    console.log('[deng-tracker-worker] superseded by a newer worker — exiting (pid=%d startMs=%d)', MY_PID, MY_START_MS);
+    try { flushMetrics(true); } catch (_) { /* ignore */ }
+    setTimeout(() => process.exit(0), 50);
+    return;
+  }
   running = true;
   try {
     metrics.ticks += 1;
@@ -361,8 +417,11 @@ function start() {
   process.env.SKIP_TRACKER_UPLOAD_ROUTES = process.env.SKIP_TRACKER_UPLOAD_ROUTES || '1';
   routes = require('./fishitTrackerRoutes');
   precomputeStore.openDb();
-  console.log('[deng-tracker-worker] starting tick=%dms refresh=%dms maxPerTick=%d concurrency=%d base=%s',
-    TICK_MS, REFRESH_MS, MAX_PER_TICK, CONCURRENCY, BASE_URL);
+  // Claim singleton ownership BEFORE the first tick so any older worker still
+  // alive (PM2 churn / orphan) observes our newer token and drains itself.
+  claimSingleton();
+  console.log('[deng-tracker-worker] starting tick=%dms refresh=%dms maxPerTick=%d concurrency=%d base=%s pid=%d startMs=%d',
+    TICK_MS, REFRESH_MS, MAX_PER_TICK, CONCURRENCY, BASE_URL, MY_PID, MY_START_MS);
   // Force an initial disk load before the first tick.
   try { routes.syncLiveTrackFromDisk(); } catch (_) { /* ignore */ }
   const timer = setInterval(tick, TICK_MS);
@@ -377,4 +436,18 @@ function stop() {
   flushMetrics(true);
 }
 
-module.exports = { start, stop, tick, metrics, _internals: { computeDirty, precomputeOne } };
+module.exports = {
+  start,
+  stop,
+  tick,
+  metrics,
+  _internals: {
+    computeDirty,
+    precomputeOne,
+    claimSingleton,
+    singletonSuperseded,
+    SINGLETON_LOCK_PATH,
+    MY_START_MS,
+    MY_PID,
+  },
+};
