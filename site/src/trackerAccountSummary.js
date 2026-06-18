@@ -2,7 +2,7 @@
 
 const uploadAccountStatus = require('./fishitTrackerUploadStatus');
 const {
-  ACCOUNT_PRESENCE_GRACE_MS,
+  ACCOUNT_ONLINE_THRESHOLD_MS,
   deriveAccountPresenceStatus,
   resolveLastAccountSeenAt,
 } = require('./trackerAccountPresence');
@@ -26,7 +26,10 @@ function buildTrackerAccountSummary(trackedAccounts, liveTrackDB, opts = {}) {
   const expectedTrackerBuild = opts.expectedTrackerBuild || null;
   const isTrustedBuild = typeof opts.isTrustedBuild === 'function' ? opts.isTrustedBuild : null;
   const discordOwnerId = opts.discordOwnerId || null;
-  const freshnessWindowMs = opts.freshnessWindowMs || ACCOUNT_PRESENCE_GRACE_MS;
+  // Online decision uses the tight authoritative threshold (150s) so a polled
+  // account-status summary flips red as soon as real heartbeats stop, identical
+  // to the per-account presence used by get-backpack.
+  const freshnessWindowMs = opts.freshnessWindowMs || ACCOUNT_ONLINE_THRESHOLD_MS;
   const list = Array.isArray(trackedAccounts) ? trackedAccounts : [];
   const store = liveTrackDB && typeof liveTrackDB === 'object' ? liveTrackDB : {};
 

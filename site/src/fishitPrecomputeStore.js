@@ -133,10 +133,20 @@ function prepareStatements(db) {
       'SELECT session_key, raw_hash, last_upload_at, last_precomputed_at FROM tracker_latest_snapshots',
     ),
     allRowsForCache: db.prepare(
-      'SELECT session_key, user_id, latest_precomputed_json, last_precomputed_at FROM tracker_latest_snapshots',
+      'SELECT session_key, user_id, latest_precomputed_json, precomputed_hash, last_precomputed_at FROM tracker_latest_snapshots',
     ),
     changedSince: db.prepare(
       'SELECT session_key, user_id, latest_precomputed_json, last_precomputed_at FROM tracker_latest_snapshots WHERE last_precomputed_at >= ?',
+    ),
+    // Lightweight change probe: NO json blob. The read lane uses this every
+    // refresh tick to detect which sessions actually changed (by hash) before
+    // pulling any multi-hundred-KB JSON. This keeps the synchronous node:sqlite
+    // read off the hot serving event loop in steady state.
+    changedMetaSince: db.prepare(
+      'SELECT session_key, user_id, precomputed_hash, last_precomputed_at FROM tracker_latest_snapshots WHERE last_precomputed_at >= ?',
+    ),
+    getJsonByKey: db.prepare(
+      'SELECT latest_precomputed_json, precomputed_hash, last_precomputed_at, user_id FROM tracker_latest_snapshots WHERE session_key = ?',
     ),
     count: db.prepare('SELECT COUNT(*) AS n FROM tracker_latest_snapshots'),
     insertHistory: db.prepare(
@@ -277,6 +287,32 @@ function getChangedSince(iso) {
   return _stmts.changedSince.all(String(iso || ''));
 }
 
+/**
+ * Lightweight metadata-only change probe (no JSON blob). Returns
+ * { session_key, user_id, precomputed_hash, last_precomputed_at } for rows at
+ * or after the watermark. The read lane compares precomputed_hash against its
+ * cached value and only pulls the full JSON (getJsonByKey) for rows that truly
+ * changed — so an idle/unchanged fleet costs a few tiny rows per refresh
+ * instead of moving every snapshot's multi-hundred-KB JSON synchronously.
+ */
+function getChangedMetaSince(iso) {
+  openDb();
+  return _stmts.changedMetaSince.all(String(iso || ''));
+}
+
+/** Single-row JSON fetch for a session that the read lane detected as changed. */
+function getJsonByKey(sessionKey) {
+  openDb();
+  const row = _stmts.getJsonByKey.get(String(sessionKey));
+  if (!row || !row.latest_precomputed_json) return null;
+  return {
+    json: row.latest_precomputed_json,
+    precomputedHash: row.precomputed_hash || '',
+    lastPrecomputedAt: row.last_precomputed_at || '',
+    userId: row.user_id,
+  };
+}
+
 function allMeta() {
   openDb();
   return _stmts.allMeta.all();
@@ -318,6 +354,8 @@ module.exports = {
   allMeta,
   getAllRowsForCache,
   getChangedSince,
+  getChangedMetaSince,
+  getJsonByKey,
   resolveUserIdAlias,
   getStoreStats,
   close,

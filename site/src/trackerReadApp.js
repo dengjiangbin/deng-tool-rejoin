@@ -51,12 +51,13 @@ const PORT = parseInt(process.env.TRACKER_READ_PORT || '8793', 10);
 // ---------------------------------------------------------------------------
 const CACHE_REFRESH_MS = parseInt(process.env.TRACKER_READ_CACHE_REFRESH_MS || '1000', 10);
 
-const cacheByKey = new Map();   // session_key -> { json, lastPrecomputedAt }
+const cacheByKey = new Map();   // session_key -> { json, lastPrecomputedAt, precomputedHash }
 const uidToKey = new Map();     // numeric user_id -> session_key
 let cacheMaxPrecomputedAt = ''; // high-water mark for incremental sync
 let cacheWarmedAt = 0;
 let cacheLastRefreshAt = 0;
 let cacheLastRefreshCount = 0;
+let cacheLastRefreshJsonPulls = 0;
 let cacheRefreshTimer = null;
 
 function ingestRow(row) {
@@ -65,6 +66,7 @@ function ingestRow(row) {
   cacheByKey.set(key, {
     json: row.latest_precomputed_json,
     lastPrecomputedAt: row.last_precomputed_at || '',
+    precomputedHash: row.precomputed_hash || '',
   });
   if (row.user_id != null && row.user_id !== '') {
     uidToKey.set(String(row.user_id), key);
@@ -92,25 +94,60 @@ function warmLoadCache() {
 
 function refreshCache() {
   const started = Date.now();
-  let rows = [];
+  // STEP 1 — cheap metadata-only probe (no JSON blob). This is the only query
+  // that runs against SQLite every tick in steady state, and it never moves a
+  // snapshot's multi-hundred-KB JSON unless that snapshot's content hash
+  // actually changed. Keeps the synchronous node:sqlite read off the hot
+  // serving event loop.
+  let metaRows = [];
   try {
-    rows = precomputeStore.getChangedSince(cacheMaxPrecomputedAt);
+    metaRows = precomputeStore.getChangedMetaSince(cacheMaxPrecomputedAt);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[read] cache refresh failed:', err.message);
     return;
   }
   let changed = 0;
-  for (const row of rows) {
-    const existing = cacheByKey.get(String(row.session_key));
-    if (!existing || existing.lastPrecomputedAt !== (row.last_precomputed_at || '')) changed += 1;
-    ingestRow(row);
+  let jsonPulls = 0;
+  for (const meta of metaRows) {
+    const key = String(meta.session_key);
+    const newHash = meta.precomputed_hash || '';
+    const newAt = meta.last_precomputed_at || '';
+    const existing = cacheByKey.get(key);
+    const contentChanged = !existing || existing.precomputedHash !== newHash;
+    if (contentChanged) {
+      // STEP 2 — only now pull the heavy JSON, and only for this one row.
+      let full = null;
+      try {
+        full = precomputeStore.getJsonByKey(key);
+      } catch (_) { full = null; }
+      if (full) {
+        jsonPulls += 1;
+        changed += 1;
+        ingestRow({
+          session_key: key,
+          user_id: meta.user_id,
+          latest_precomputed_json: full.json,
+          precomputed_hash: newHash,
+          last_precomputed_at: newAt || full.lastPrecomputedAt,
+        });
+        continue;
+      }
+    }
+    // Unchanged content (or JSON vanished): just advance the watermark/alias
+    // bookkeeping without re-reading or re-storing the blob.
+    if (existing) {
+      if (newAt && newAt !== existing.lastPrecomputedAt) existing.lastPrecomputedAt = newAt;
+    }
+    if (meta.user_id != null && meta.user_id !== '') uidToKey.set(String(meta.user_id), key);
+    if (newAt > cacheMaxPrecomputedAt) cacheMaxPrecomputedAt = newAt;
   }
   cacheLastRefreshAt = Date.now();
   cacheLastRefreshCount = changed;
+  cacheLastRefreshJsonPulls = jsonPulls;
   if (changed > 0 && process.env.TRACKER_READ_CACHE_LOG === '1') {
     // eslint-disable-next-line no-console
-    console.log(`[read] refreshed ${changed} snapshots in ${Date.now() - started}ms`);
+    console.log(`[read] refreshed ${changed} snapshots (json pulls=${jsonPulls}, probed=${metaRows.length}) in ${Date.now() - started}ms`);
   }
 }
 
@@ -258,6 +295,7 @@ function readHealth(_req, res) {
       warmedAt: cacheWarmedAt ? new Date(cacheWarmedAt).toISOString() : null,
       lastRefreshAt: cacheLastRefreshAt ? new Date(cacheLastRefreshAt).toISOString() : null,
       lastRefreshChanged: cacheLastRefreshCount,
+      lastRefreshJsonPulls: cacheLastRefreshJsonPulls,
       maxPrecomputedAt: cacheMaxPrecomputedAt || null,
       refreshMs: CACHE_REFRESH_MS,
     },

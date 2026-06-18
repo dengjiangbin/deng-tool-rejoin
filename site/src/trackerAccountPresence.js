@@ -7,6 +7,18 @@ const { isTransientServerUploadFailure } = require('./fishitTrackerUploadStatus'
 const ACCOUNT_PRESENCE_GRACE_MS = 600_000;
 const STATUS_CONTINUOUS_FAILURE_GRACE_MS = ACCOUNT_PRESENCE_GRACE_MS;
 
+// Authoritative ONLINE threshold. The loader sends a real isOnline heartbeat
+// every 60s, so an account is GREEN only if its last real tracker contact is
+// within 2.5x the interval (150s). Past that it is RED (offline / stale / no
+// data) — there is no long "looks online for 10 minutes" window. This matches
+// the upload-status path (deriveTrackerUploadAccountStatus: min(interval*2.5,600)
+// = 150s for a 60s interval), so the row dot and the status pill agree. Override
+// with TRACKER_ONLINE_THRESHOLD_MS only for tests/tuning.
+const ACCOUNT_ONLINE_THRESHOLD_MS = parseInt(
+  process.env.TRACKER_ONLINE_THRESHOLD_MS || '150000',
+  10,
+);
+
 function parseTimestampMs(value) {
   if (!value) return null;
   const ms = new Date(value).getTime();
@@ -53,7 +65,7 @@ function resolveLastAccountSeenAt(data) {
   return best;
 }
 
-function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS, nowMs = Date.now()) {
+function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_ONLINE_THRESHOLD_MS, nowMs = Date.now()) {
   const lastAccountSeenAt = resolveLastAccountSeenAt(data);
   const seenAgeSeconds = syncAgeSecondsFromTimestamp(lastAccountSeenAt, nowMs);
   const loaderBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
@@ -162,6 +174,7 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS,
 
 module.exports = {
   ACCOUNT_PRESENCE_GRACE_MS,
+  ACCOUNT_ONLINE_THRESHOLD_MS,
   STATUS_CONTINUOUS_FAILURE_GRACE_MS,
   parseTimestampMs,
   syncAgeSecondsFromTimestamp,

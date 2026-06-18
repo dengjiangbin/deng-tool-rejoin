@@ -43,13 +43,13 @@ describe('Blocker 1 — account-state false-red grace (deriveAccountPresenceStat
     assert.equal(r.accountPresenceLive, true);
   });
 
-  test('T=9m59s within grace → still green', () => {
-    const r = deriveAccountPresenceStatus({ isOnline: false, lastAccountSeenAt: iso(599000) });
+  test('T=149s within the tight 150s online window → still green', () => {
+    const r = deriveAccountPresenceStatus({ isOnline: false, lastAccountSeenAt: iso(149000) });
     assert.equal(r.accountPresenceLive, true);
   });
 
-  test('T>10m no contact (online flag, stale) → red (account_offline_timeout)', () => {
-    const r = deriveAccountPresenceStatus({ isOnline: true, lastAccountSeenAt: iso(601000) });
+  test('T=151s past the 150s online window (online flag, stale) → red (account_offline_timeout)', () => {
+    const r = deriveAccountPresenceStatus({ isOnline: true, lastAccountSeenAt: iso(151000) });
     assert.equal(r.accountPresenceLive, false);
     assert.equal(r.accountPresenceReason, 'account_offline_timeout');
   });
@@ -88,8 +88,8 @@ describe('Blocker 1 — frontend monotonic + grace guard is present', () => {
   const src = fs.readFileSync(SOURCE_EJS, 'utf8');
   const bundle = fs.readFileSync(BUNDLE_JS, 'utf8');
 
-  test('source defines the canonical 10-minute grace constant', () => {
-    assert.match(src, /ACCOUNT_PRESENCE_GRACE_MS\s*=\s*600\s*\*\s*1000/);
+  test('source defines the tight 150s online window constant', () => {
+    assert.match(src, /ACCOUNT_PRESENCE_GRACE_MS\s*=\s*150\s*\*\s*1000/);
   });
 
   test('source has reconcileEntryPresence with monotonic + grace + confirmed-offline logic', () => {

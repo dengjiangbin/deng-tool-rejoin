@@ -107,11 +107,11 @@ describe('per-section frontend-receive timers (2026-06-16)', () => {
     assert.equal(api.formatInventoryRefreshAgeText(entry), '10s'); // not reset
   });
 
-  test('section timers are in-memory only (no localStorage) and the visible Status text uses the tracker timer', () => {
+  test('section timers are in-memory only (no localStorage) and the visible Status text uses the authoritative backend age', () => {
     const source = readSource();
-    assert.match(source, /function formatPresenceStatusText\(entry\) \{[\s\S]*?return formatFrontendRefreshAgeText\(entry\)/);
-    assert.match(source, /function formatStatsUploadDurationText\(entry\) \{[\s\S]*?return formatLeaderstatsRefreshAgeText\(entry\)/);
-    assert.match(source, /function formatEntrySyncStatusText\(entry\) \{[\s\S]*?return formatInventoryRefreshAgeText\(entry\)/);
+    assert.match(source, /function formatPresenceStatusText\(entry\) \{[\s\S]*?return formatAgeAgoSeconds\(backendPresenceAgeSeconds\(entry\)\);/);
+    assert.match(source, /function formatStatsUploadDurationText\(entry\) \{[\s\S]*?return formatAgeAgoSeconds\(backendStatsAgeSeconds\(entry\)\);/);
+    assert.match(source, /function formatEntrySyncStatusText\(entry\) \{[\s\S]*?return formatAgeAgoSeconds\(backendInventoryAgeSeconds\(entry\)\);/);
     ['_frontendRefreshAt', '_leaderstatsFrontendRefreshAt', '_inventoryFrontendRefreshAt'].forEach((field) => {
       assert.ok(!new RegExp(`localStorage[\\s\\S]{0,160}${field}`).test(source), `${field} must not be persisted`);
       assert.ok(!new RegExp(`${field}[\\s\\S]{0,160}localStorage`).test(source), `${field} must not be read from localStorage`);
@@ -153,7 +153,7 @@ describe('per-section timer reset wiring', () => {
     const source = readSource();
     const fn = source.indexOf('function maybeResetSectionTimers(entry) {');
     assert.ok(fn > 0, 'maybeResetSectionTimers missing');
-    const body = source.slice(fn, fn + 900);
+    const body = source.slice(fn, fn + 1700);
     assert.match(body, /buildDisplayedDatasetSignature\(entry\)[\s\S]*?_trackerDisplaySig[\s\S]*?markEntryFrontendRefreshed\(entry\)/);
     assert.match(body, /buildLeaderstatsSignature\(entry\)[\s\S]*?_leaderstatsDisplaySig[\s\S]*?markEntryLeaderstatsRefreshed\(entry\)/);
     assert.match(body, /buildInventorySignature\(data\)[\s\S]*?_inventoryDisplaySig[\s\S]*?markEntryInventoryRefreshed\(entry\)/);

@@ -73,17 +73,18 @@ describe('sync duration + stats interval hotfix regression', () => {
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\?v=/);
   });
 
-  test('C/D frontend renders minimal duration only for green and red', () => {
+  test('C/D frontend renders the authoritative "<age> ago" timer, not stat-delta labels', () => {
     const source = fs.readFileSync(SOURCE_PATH, 'utf8');
-    assert.match(source, /function formatMinimalSyncDuration/);
-    assert.match(source, /isEntryStatusGreen\(entry\)\) return formatMinimalSyncDuration\(entrySuccessUploadAt\(entry\)\)/);
-    assert.match(source, /formatMinimalSyncDuration\(entryRedSince\(entry\)\)/);
+    // Authoritative timer helper + wiring (replaces the old green/red minimal-duration split).
+    assert.match(source, /function formatAgeAgo\(ms\)/);
+    assert.match(source, /function formatStatsUploadDurationText\(entry\) \{[\s\S]*?return formatAgeAgoSeconds\(backendStatsAgeSeconds\(entry\)\);/);
+    // Timers now include "ago" and carry no extra wording.
+    assert.match(source, /\bago\b/);
     assert.doesNotMatch(source, /Last sync success/i);
     assert.doesNotMatch(source, /Sync failed/i);
     assert.doesNotMatch(source, /stale for/i);
     assert.doesNotMatch(source, /Fresh stats updated/i);
     assert.doesNotMatch(source, /Heartbeat only/i);
-    assert.doesNotMatch(source, /\sago\b/i);
   });
 
   test('E green status uses lastSuccessfulUploadAt only', () => {

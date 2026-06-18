@@ -205,6 +205,21 @@ async function precomputeOne(item) {
       ? Number(body.topCards.rubyGemstone.count) || 0
       : 0;
     const prevMeta = precomputeStore.getMeta(key);
+    const contentUnchanged = prevMeta && prevMeta.precomputed_hash === precomputedHash;
+    // PERF: when the rebuilt body is byte-stable (only the idle staleness
+    // backstop fired, no real inventory/leaderstats/status change), do NOT
+    // re-UPSERT. Re-writing would bump last_precomputed_at and force the read
+    // lane (8793) to re-pull this snapshot's multi-hundred-KB JSON every cache
+    // tick — the dominant source of read-lane event-loop stalls. We still mark
+    // the staleness clock satisfied in-memory so the backstop does not hot-loop.
+    if (contentUnchanged) {
+      recordBuildMs(buildMs);
+      metrics.lastSuccessAt = new Date().toISOString();
+      lastSourceSig.set(key, sig);
+      lastPrecomputedMs.set(key, Date.now());
+      firstDirtySeenMs.delete(key);
+      return true;
+    }
     precomputeStore.upsertLatest({
       sessionKey: key,
       username: body.username || key,

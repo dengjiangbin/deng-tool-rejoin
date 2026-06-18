@@ -174,45 +174,29 @@ describe('three separate indicators regression', () => {
     assert.doesNotMatch(js, /data-card-sync-text/);
   });
 
-  test('stats timer follows the leaderstats FRONTEND refresh elapsed time and never stat-delta labels', () => {
+  test('stats timer is the authoritative "<age> ago" backend age, never stat-delta labels', () => {
     const source = fs.readFileSync(SOURCE_PATH, 'utf8');
     assert.doesNotMatch(source, /No stat change/);
     assert.match(source, /function formatStatsUploadDurationText/);
     assert.match(source, /function formatCaughtActivitySub[\s\S]*formatStatsUploadDurationText\(entry\)/);
-    // The visible leaderstats timer now follows the per-section frontend-receive
-    // time (markEntryLeaderstatsRefreshed), not the backend upload sync age.
-    assert.match(source, /function formatStatsUploadDurationText\(entry\) \{[\s\S]*?return formatLeaderstatsRefreshAgeText\(entry\)/);
-    const names = [
-      'getEntryLeaderstatsRefreshAgeMs',
-      'formatLeaderstatsRefreshAgeText',
-      'formatStatsUploadDurationText',
-      'formatCaughtActivitySub',
-    ];
-    const blocks = names.map((name) => source.match(new RegExp(`function ${name}\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n  \\}`)));
-    blocks.forEach((block, i) => {
-      assert.ok(block, `missing helper: ${names[i]}`);
-    });
-    const clock = { now: 0 };
-    const fns = new Function('Date', `
-      function pad2(n) { return String(n).padStart(2, '0'); }
-      function formatPresenceDurationLabel(secs) {
-        if (secs == null) return '';
-        if (secs < 60) return Math.max(1, secs) + 's';
-        return '1m ' + pad2(secs % 60) + 's';
-      }
-      ${blocks.map((block) => block[0]).join('\n')}
-      return {
-        formatCaughtActivitySub,
-        formatStatsUploadDurationText,
-      };
-    `)({ now: () => clock.now });
-    clock.now = 100000;
-    const entry = { _leaderstatsFrontendRefreshAt: clock.now - 8000 };
-    assert.equal(fns.formatCaughtActivitySub(entry), '8s');
-    assert.notEqual(fns.formatCaughtActivitySub(entry), 'No stat change');
-    // A fresh leaderstats receive resets it to ~1s.
-    entry._leaderstatsFrontendRefreshAt = clock.now;
-    assert.equal(fns.formatCaughtActivitySub(entry), '1s');
+    // The visible leaderstats timer is the true backend leaderstats age rendered
+    // as "<age> ago" (authoritative) — NOT the per-session frontend-receive time,
+    // so it never resets to "1s" on refresh/new session.
+    assert.match(source, /function formatStatsUploadDurationText\(entry\) \{[\s\S]*?return formatAgeAgoSeconds\(backendStatsAgeSeconds\(entry\)\);/);
+
+    // Run the real authoritative helpers under a controllable clock.
+    const open = source.indexOf('  function formatAgeAgo(ms) {');
+    const close = source.indexOf('  function syncAgeSeconds(timestamp) {');
+    assert.ok(open > 0 && close > open, 'formatAgeAgo helper block missing');
+    const block = source.slice(open, close);
+    const fns = new Function('Math', 'Number', 'Date', `
+      ${block}
+      return { formatAgeAgoSeconds };
+    `)(Math, Number, { now: () => 100000 });
+    // 8m-old backend leaderstats age -> "8m ago" (does NOT reset to "1s").
+    assert.equal(fns.formatAgeAgoSeconds(8 * 60), '8m ago');
+    // No authoritative timestamp -> blank, never a fake "1s".
+    assert.equal(fns.formatAgeAgoSeconds(null), '');
   });
 
   test('backend records stats value-change timestamp only when a value changes', async () => {
