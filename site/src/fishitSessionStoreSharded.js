@@ -378,6 +378,69 @@ function rowFreshnessMs(row) {
   return best;
 }
 
+// Per-lane monotonic identity bundles. A lane's sequence number only ever moves
+// forward on a genuine new report, so a disk row carrying an OLDER seq must never
+// be allowed to overwrite a higher in-memory seq during a cross-process reload —
+// otherwise an actively-uploading account's statusSeq/statusReportId visibly
+// regresses (and its client_explicit identity reverts) when a slightly-stale
+// shard write lands with a fresh timestamp. We keep whichever side has the higher
+// seq, carrying that side's full identity bundle so the lane never goes backwards.
+const MONOTONIC_LANES = [
+  {
+    seq: 'statusSeq',
+    revision: 'statusRevision',
+    fields: [
+      'statusSeq', 'statusReportId', 'statusSessionId', 'statusCapturedAt',
+      'statusSentAt', 'statusRevision', 'lastRealRobloxStatusAt',
+      'serverReceivedStatusAt', 'statusIdentityReason', 'reportIdentitySource',
+    ],
+  },
+  {
+    seq: 'leaderstatsSeq',
+    revision: 'leaderstatsRevision',
+    fields: [
+      'leaderstatsSeq', 'leaderstatsReportId', 'leaderstatsSessionId',
+      'leaderstatsCapturedAt', 'leaderstatsRevision', 'lastRealLeaderstatsAt',
+      'serverReceivedLeaderstatsAt', 'leaderstatsIdentitySource',
+    ],
+  },
+  {
+    seq: 'inventorySeq',
+    revision: 'inventoryRevision',
+    fields: [
+      'inventorySeq', 'inventoryReportId', 'inventorySessionId',
+      'inventoryCapturedAt', 'inventoryHash', 'inventoryRevision',
+      'lastRealInventoryAt', 'serverReceivedInventoryAt', 'inventoryIdentitySource',
+    ],
+  },
+];
+
+function numOr(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+// Mutates `merged` so each lane keeps the higher-seq identity bundle between the
+// prior in-memory row (`existing`) and the freshly-merged disk row.
+function preserveMonotonicLanes(existing, merged) {
+  if (!existing || typeof existing !== 'object' || !merged || typeof merged !== 'object') return merged;
+  for (const lane of MONOTONIC_LANES) {
+    const existingSeq = numOr(existing[lane.seq], -Infinity);
+    const mergedSeq = numOr(merged[lane.seq], -Infinity);
+    if (existingSeq > mergedSeq) {
+      // In-memory lane is ahead of disk — restore its whole identity bundle.
+      for (const f of lane.fields) {
+        if (existing[f] != null) merged[f] = existing[f];
+      }
+    }
+    // Revision is independently monotonic (reinforcement can bump it without seq).
+    const existingRev = numOr(existing[lane.revision], -Infinity);
+    const mergedRev = numOr(merged[lane.revision], -Infinity);
+    if (existingRev > mergedRev) merged[lane.revision] = existing[lane.revision];
+  }
+  return merged;
+}
+
 function reloadChangedAccounts(liveTrackDB, sanitiseSessionFn) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { reloaded: false };
   try {
@@ -442,7 +505,9 @@ function reloadChangedAccounts(liveTrackDB, sanitiseSessionFn) {
       // just-received upload from being clobbered by the slightly-older shard).
       if (existing && typeof existing === 'object' && rowFreshnessMs(existing) > rowFreshnessMs(row)) continue;
       row.restoredFromDisk = true;
-      liveTrackDB[key] = { ...(existing && typeof existing === 'object' ? existing : {}), ...row };
+      const mergedRow = { ...(existing && typeof existing === 'object' ? existing : {}), ...row };
+      preserveMonotonicLanes(existing, mergedRow);
+      liveTrackDB[key] = mergedRow;
       _accountCache.set(key, row);
       merged += 1;
     }
@@ -556,6 +621,7 @@ module.exports = {
   saveAccount,
   loadAllIntoLiveTrackDB,
   reloadChangedAccounts,
+  preserveMonotonicLanes,
   flushDirtyAccountsAsync,
   scheduleAccountFlush,
   getShardedMetrics,

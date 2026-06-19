@@ -857,6 +857,35 @@ async function persistSessionState(key, baseUrl) {
   }
 }
 
+// Status-lane source-of-truth identity fields. The inventory_snapshot handler
+// rebuilds liveTrackDB[key] from a curated object literal (it does NOT spread
+// the previous session), so these must be explicitly carried forward or the
+// dedicated tracker_status heartbeat identity (set by stampReportIdentity) is
+// wiped on every inventory upload — which is exactly what made the status lane
+// report backend_derived with null statusSeq/statusReportId and a statusRevision
+// permanently stuck at 1 while online.
+const STATUS_IDENTITY_CARRY_FIELDS = [
+  'statusSessionId',
+  'statusSeq',
+  'statusReportId',
+  'statusCapturedAt',
+  'statusSentAt',
+  'statusRevision',
+  'lastRealRobloxStatusAt',
+  'serverReceivedStatusAt',
+  'statusIdentityReason',
+  'reportIdentitySource',
+];
+
+function carryStatusIdentity(existing) {
+  const out = {};
+  if (!existing || typeof existing !== 'object') return out;
+  for (const f of STATUS_IDENTITY_CARRY_FIELDS) {
+    if (existing[f] != null) out[f] = existing[f];
+  }
+  return out;
+}
+
 /**
  * Stamp the source-of-truth report identity for an upload lane onto the live
  * session. A FRESH unique report advances the lane's lastReal* timestamp +
@@ -4790,6 +4819,10 @@ function handleUpdateBackpack(req, res) {
 
     // Store under username key + userId alias.
     liveTrackDB[key] = withUploadCount(snapshotCompleteness.applyCompletenessFields({
+      // Preserve the dedicated tracker_status heartbeat identity across the
+      // inventory rebuild (this object does not spread `existing`). Without this
+      // the status lane is reset to backend_derived on every snapshot upload.
+      ...carryStatusIdentity(existing),
       username:        cleanUser,
       userId:          cleanUserId,
       source,

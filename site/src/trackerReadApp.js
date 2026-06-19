@@ -234,6 +234,11 @@ function applyPresenceHeaders(res, c) {
   if (c.statusDecisionReason) res.set('X-DENG-Status-Decision', c.statusDecisionReason);
   if (c.missedStatusReports != null) res.set('X-DENG-Missed-Status-Reports', String(c.missedStatusReports));
   res.set('X-DENG-Status-Stale', c.isStatusStale ? '1' : '0');
+  // Source-of-truth identity classification (client_explicit vs backend_derived).
+  // Emitted on every read so the identity hop is verifiable end-to-end.
+  if (c.reportIdentitySource) res.set('X-DENG-Report-Identity-Source', c.reportIdentitySource);
+  if (c.leaderstatsIdentitySource) res.set('X-DENG-Leaderstats-Identity-Source', c.leaderstatsIdentitySource);
+  if (c.inventoryIdentitySource) res.set('X-DENG-Inventory-Identity-Source', c.inventoryIdentitySource);
   if (c.leaderstatsRevision != null) res.set('X-DENG-Leaderstats-Revision', String(c.leaderstatsRevision));
   if (c.inventoryRevision != null) res.set('X-DENG-Inventory-Revision', String(c.inventoryRevision));
   if (c.preservedDataReason) res.set('X-DENG-Preserved-Data-Reason', c.preservedDataReason);

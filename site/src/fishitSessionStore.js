@@ -218,6 +218,11 @@ function sanitiseSession(key, data) {
     statusRevision: data.statusRevision != null ? data.statusRevision : null,
     serverReceivedStatusAt: data.serverReceivedStatusAt || null,
     statusIdentityReason: data.statusIdentityReason || null,
+    // Identity SOURCE (client_explicit vs backend_derived) must persist or the
+    // read API/worker (which only ever see the on-disk row) can never report
+    // client_explicit even when the Lua client sends explicit identity — the
+    // exact reason both denghub2/dengjiangbin read backend_derived while online.
+    reportIdentitySource: data.reportIdentitySource || null,
     lastRealLeaderstatsAt: data.lastRealLeaderstatsAt || null,
     leaderstatsSessionId: data.leaderstatsSessionId || null,
     leaderstatsSeq: data.leaderstatsSeq != null ? data.leaderstatsSeq : null,
@@ -225,6 +230,7 @@ function sanitiseSession(key, data) {
     leaderstatsCapturedAt: data.leaderstatsCapturedAt || null,
     leaderstatsRevision: data.leaderstatsRevision != null ? data.leaderstatsRevision : null,
     serverReceivedLeaderstatsAt: data.serverReceivedLeaderstatsAt || null,
+    leaderstatsIdentitySource: data.leaderstatsIdentitySource || null,
     lastRealInventoryAt: data.lastRealInventoryAt || null,
     inventorySessionId: data.inventorySessionId || null,
     inventorySeq: data.inventorySeq != null ? data.inventorySeq : null,
@@ -233,6 +239,7 @@ function sanitiseSession(key, data) {
     inventoryHash: data.inventoryHash || null,
     inventoryRevision: data.inventoryRevision != null ? data.inventoryRevision : null,
     serverReceivedInventoryAt: data.serverReceivedInventoryAt || null,
+    inventoryIdentitySource: data.inventoryIdentitySource || null,
     leaderstatsUploadOk: data.leaderstatsUploadOk === true,
     leaderstatsUploadedAt: data.leaderstatsUploadedAt || null,
     leaderstatsUploadSeq: data.leaderstatsUploadSeq != null ? data.leaderstatsUploadSeq : null,
