@@ -20,7 +20,11 @@ describe('ingest server — EADDRINUSE retry instead of exit loop', () => {
   test('retries the bind on EADDRINUSE rather than exiting immediately', () => {
     assert.match(source, /EADDRINUSE/);
     assert.match(source, /LISTEN_RETRY_MAX_MS|listenRetryStartedAt/);
-    assert.match(source, /server\.listen\(PORT, HOST\)/);
+    // Ingest now binds via the shared listen-with-reclaim helper (retries the
+    // bind AND evicts a genuine stuck orphan) instead of the old inline
+    // server.listen(PORT, HOST) that exited without reclaiming — the exit-loop
+    // that let an orphan hold 8792 forever and produced Cloudflare 502s.
+    assert.match(source, /listenWithReclaim\(server, PORT, HOST/);
   });
 
   test('releases the listening socket first on shutdown', () => {

@@ -3,7 +3,7 @@
 const https = require('https');
 
 const URL = 'https://aio.deng.my.id/api/fishit-tracker/update-backpack';
-const BUILD = 'UPLOAD_502_INTERVAL_SINGLETON_FIX_2026_06_15';
+const BUILD = process.env.PROOF_TRACKER_BUILD || 'UPLOAD_HTML_530_GATEWAY_DIAG_2026_06_15';
 const RAW = 'https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua';
 
 function post(body) {

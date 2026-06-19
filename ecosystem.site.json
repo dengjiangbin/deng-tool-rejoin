@@ -10,7 +10,7 @@
       "max_restarts": 15,
       "restart_delay": 3000,
       "kill_timeout": 8000,
-      "listen_timeout": 12000,
+      "listen_timeout": 30000,
       "max_memory_restart": "1536M",
       "env": {
         "NODE_ENV": "production",
@@ -53,8 +53,8 @@
       "max_restarts": 15,
       "restart_delay": 3000,
       "kill_timeout": 8000,
-      "listen_timeout": 12000,
-      "max_memory_restart": "2048M",
+      "listen_timeout": 30000,
+      "max_memory_restart": "4096M",
       "env": {
         "NODE_ENV": "production",
         "TRACKER_INGEST_MODE": "1",

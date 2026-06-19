@@ -24,40 +24,14 @@ server.headersTimeout = parseInt(process.env.TRACKER_READ_HEADERS_TIMEOUT_MS || 
 server.maxRequestsPerSocket = 0;
 if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 
-const LISTEN_RETRY_MAX_MS = parseInt(process.env.TRACKER_READ_LISTEN_RETRY_MAX_MS || '8000', 10);
-const LISTEN_RETRY_DELAY_MS = parseInt(process.env.TRACKER_READ_LISTEN_RETRY_DELAY_MS || '500', 10);
-let listenRetryStartedAt = 0;
-
-function startListening() {
-  server.listen(PORT, HOST);
-}
-
-server.on('listening', () => {
-  listenRetryStartedAt = 0;
-  console.log(`[deng-tracker-read] Listening on http://${HOST}:${PORT}`);
+const { listenWithReclaim } = require('./src/reclaimPort');
+listenWithReclaim(server, PORT, HOST, '[deng-tracker-read]', {
+  // reclaimAfterMs > PM2 kill_timeout (8000ms): never reclaim a sibling that is
+  // still gracefully shutting down on restart (avoids the mutual-kill loop).
+  reclaimAfterMs: parseInt(process.env.TRACKER_READ_RECLAIM_AFTER_MS || '9000', 10),
+  retryDelayMs: parseInt(process.env.TRACKER_READ_LISTEN_RETRY_DELAY_MS || '400', 10),
+  maxMs: parseInt(process.env.TRACKER_READ_LISTEN_RETRY_MAX_MS || '22000', 10),
 });
-
-server.on('error', (err) => {
-  if (err && err.code === 'EADDRINUSE') {
-    const nowMs = Date.now();
-    if (!listenRetryStartedAt) listenRetryStartedAt = nowMs;
-    const waitedMs = nowMs - listenRetryStartedAt;
-    if (waitedMs <= LISTEN_RETRY_MAX_MS) {
-      console.warn('[deng-tracker-read] %d busy, retrying bind in %dms (waited %dms)', PORT, LISTEN_RETRY_DELAY_MS, waitedMs);
-      setTimeout(() => {
-        try { server.close(); } catch (_) { /* not yet listening */ }
-        startListening();
-      }, LISTEN_RETRY_DELAY_MS);
-      return;
-    }
-    console.error('[deng-tracker-read] %d still busy after %dms — exiting for clean PM2 restart', PORT, waitedMs);
-  } else {
-    console.error('[deng-tracker-read] Listen error:', err);
-  }
-  process.exit(1);
-});
-
-startListening();
 
 let readShuttingDown = false;
 function shutdown(signal) {

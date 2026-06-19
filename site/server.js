@@ -100,41 +100,14 @@ if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 // EADDRINUSE retry — keep the window shorter than PM2's listen_timeout so a
 // restarted instance racing the previous process's port release retries and
 // binds, instead of exiting and leaving an orphan PID holding 8791.
-const SITE_LISTEN_RETRY_MAX_MS = parseInt(process.env.TOOL_SITE_LISTEN_RETRY_MAX_MS || '8000', 10);
-const SITE_LISTEN_RETRY_DELAY_MS = parseInt(process.env.TOOL_SITE_LISTEN_RETRY_DELAY_MS || '500', 10);
-let siteListenRetryStartedAt = 0;
-
-function startSiteListening() {
-  server.listen(PORT, HOST);
-}
-
-server.on('listening', () => {
-  siteListenRetryStartedAt = 0;
-  console.log(`[deng-tool-site] Listening on http://${HOST}:${PORT}`);
+const { listenWithReclaim } = require('./src/reclaimPort');
+listenWithReclaim(server, PORT, HOST, '[deng-tool-site]', {
+  // reclaimAfterMs > PM2 kill_timeout (8000ms): never reclaim a sibling that is
+  // still gracefully shutting down on restart (avoids the mutual-kill loop).
+  reclaimAfterMs: parseInt(process.env.TOOL_SITE_RECLAIM_AFTER_MS || '9000', 10),
+  retryDelayMs: parseInt(process.env.TOOL_SITE_LISTEN_RETRY_DELAY_MS || '400', 10),
+  maxMs: parseInt(process.env.TOOL_SITE_LISTEN_RETRY_MAX_MS || '22000', 10),
 });
-
-server.on('error', (err) => {
-  if (err && err.code === 'EADDRINUSE') {
-    const nowMs = Date.now();
-    if (!siteListenRetryStartedAt) siteListenRetryStartedAt = nowMs;
-    const waitedMs = nowMs - siteListenRetryStartedAt;
-    if (waitedMs <= SITE_LISTEN_RETRY_MAX_MS) {
-      console.warn('[deng-tool-site] %s busy, retrying bind in %dms (waited %dms)',
-        PORT, SITE_LISTEN_RETRY_DELAY_MS, waitedMs);
-      setTimeout(() => {
-        try { server.close(); } catch (_) { /* not yet listening */ }
-        startSiteListening();
-      }, SITE_LISTEN_RETRY_DELAY_MS);
-      return;
-    }
-    console.error('[deng-tool-site] %s still busy after %dms — exiting for clean PM2 restart', PORT, waitedMs);
-  } else {
-    console.error('[deng-tool-site] Listen error:', err);
-  }
-  process.exit(1);
-});
-
-startSiteListening();
 
 // Graceful shutdown — release the listening socket first so a restarted PM2
 // instance can bind 8791 immediately (prevents the orphan-PID/EADDRINUSE loop),
