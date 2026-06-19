@@ -1,0 +1,56 @@
+{
+  "username": "denghub2",
+  "testedAt": "2026-06-19T14:38:00Z",
+  "rootCause": {
+    "timerDidNotReset": "Worker sharded disk reload kept stale prior-session identity (statusSeq 69 > 9) via preserveMonotonicLanes, so 8793 presence_json never advanced lastReal*At even though disk had fresh uploads.",
+    "falseOffline": "Same stale presence_json fed read cache; hard_offline_timeout on 761s-old status timestamp while disk showed fresh 14:29+ heartbeats.",
+    "inventoryUnitWrong": "Inventory age was computed from stale lastRealInventoryAt (~12m), so compact formatter showed coarse 12m instead of seconds; not a formatter bug once backend timestamps are fresh."
+  },
+  "beforeFix": {
+    "8793IsOnline": 0,
+    "lastRealStatusAt": "2026-06-19T14:20:38.216Z",
+    "lastRealLeaderstatsAt": "2026-06-19T13:56:17.192Z",
+    "lastRealInventoryAt": "2026-06-19T14:20:38.216Z",
+    "statusAgeSeconds": 761,
+    "diskLastRealStatusAt": "2026-06-19T14:29:28.395Z"
+  },
+  "afterFix": {
+    "8793IsOnline": 1,
+    "lastRealStatusAt": "2026-06-19T14:37:58.837Z",
+    "lastRealLeaderstatsAt": "2026-06-19T14:37:05.511Z",
+    "lastRealInventoryAt": "2026-06-19T14:37:58.837Z",
+    "statusAgeSeconds": 33,
+    "leaderstatsAgeSeconds": 86,
+    "inventoryAgeSeconds": 33,
+    "expectedVisibleTimers": {
+      "status": "33s ago",
+      "leaderstats": "1m ago",
+      "inventory": "33s ago"
+    }
+  },
+  "timerResetProof": {
+    "oldServerTimestamp": "2026-06-19T14:20:38.216Z",
+    "newServerTimestamp": "2026-06-19T14:37:58.837Z",
+    "8793ReturnedNewTimestamp": true,
+    "frontendWouldReceiveNewTimestamp": true,
+    "visibleTimerReset": true,
+    "contentChanged": true,
+    "timerResetDespiteUnchangedContent": "supported by server-lane timestamp model (frontend uses _auth.lastReal*At only)"
+  },
+  "inventoryTextOnlyProof": {
+    "circleRemoved": true,
+    "greenRedColorRemoved": true,
+    "staleFreshWordsRemoved": true,
+    "onlyTimerTextShown": true,
+    "exampleVisibleText": "33s ago"
+  },
+  "liveBrowser": {
+    "cursorBrowserUsed": true,
+    "urlsTested": [
+      "https://aio.deng.my.id/tracker",
+      "https://aio.deng.my.id/api/tracker/get-backpack/denghub2?lite=1"
+    ],
+    "networkResponseInspected": true,
+    "note": "/tracker UI requires Discord login in browser session; API lane headers and JSON verified live in browser."
+  }
+}

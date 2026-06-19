@@ -420,11 +420,58 @@ function numOr(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function tsMs(value) {
+  if (value == null || value === '') return null;
+  const ms = typeof value === 'number' ? value : Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function laneSessionId(lane, row) {
+  if (!row || typeof row !== 'object') return null;
+  if (lane.seq === 'statusSeq') return row.statusSessionId || null;
+  if (lane.seq === 'leaderstatsSeq') return row.leaderstatsSessionId || null;
+  if (lane.seq === 'inventorySeq') return row.inventorySessionId || null;
+  return null;
+}
+
+function laneLastRealMs(lane, row) {
+  if (!row || typeof row !== 'object') return null;
+  if (lane.seq === 'statusSeq') return tsMs(row.lastRealRobloxStatusAt);
+  if (lane.seq === 'leaderstatsSeq') return tsMs(row.lastRealLeaderstatsAt);
+  if (lane.seq === 'inventorySeq') return tsMs(row.lastRealInventoryAt);
+  return null;
+}
+
+function laneRealTimestampsAdvanced(existing, row) {
+  if (!existing || !row) return false;
+  for (const lane of MONOTONIC_LANES) {
+    const existingReal = laneLastRealMs(lane, existing);
+    const rowReal = laneLastRealMs(lane, row);
+    if (rowReal != null && (existingReal == null || rowReal > existingReal + 500)) return true;
+  }
+  return false;
+}
+
 // Mutates `merged` so each lane keeps the higher-seq identity bundle between the
 // prior in-memory row (`existing`) and the freshly-merged disk row.
 function preserveMonotonicLanes(existing, merged) {
   if (!existing || typeof existing !== 'object' || !merged || typeof merged !== 'object') return merged;
   for (const lane of MONOTONIC_LANES) {
+    const existingSid = laneSessionId(lane, existing);
+    const mergedSid = laneSessionId(lane, merged);
+    const existingReal = laneLastRealMs(lane, existing);
+    const mergedReal = laneLastRealMs(lane, merged);
+    // A new Roblox join resets seq to a small number. Never keep a stale in-memory
+    // high-seq bundle from the prior session when disk carries a newer real lane ts.
+    if (existingSid && mergedSid && existingSid !== mergedSid) {
+      if (mergedReal != null && (existingReal == null || mergedReal >= existingReal - 1000)) {
+        continue;
+      }
+      for (const f of lane.fields) {
+        if (existing[f] != null) merged[f] = existing[f];
+      }
+      continue;
+    }
     const existingSeq = numOr(existing[lane.seq], -Infinity);
     const mergedSeq = numOr(merged[lane.seq], -Infinity);
     if (existingSeq > mergedSeq) {
@@ -503,7 +550,11 @@ function reloadChangedAccounts(liveTrackDB, sanitiseSessionFn) {
       const existing = liveTrackDB[key];
       // Never overwrite a strictly-newer in-memory row (protects the ingest's
       // just-received upload from being clobbered by the slightly-older shard).
-      if (existing && typeof existing === 'object' && rowFreshnessMs(existing) > rowFreshnessMs(row)) continue;
+      // Still reload when any real lane timestamp advanced on disk even if a
+      // non-authoritative auxiliary field (lastUploadReceivedAt) is older.
+      if (existing && typeof existing === 'object'
+        && rowFreshnessMs(existing) > rowFreshnessMs(row)
+        && !laneRealTimestampsAdvanced(existing, row)) continue;
       row.restoredFromDisk = true;
       const mergedRow = { ...(existing && typeof existing === 'object' ? existing : {}), ...row };
       preserveMonotonicLanes(existing, mergedRow);
