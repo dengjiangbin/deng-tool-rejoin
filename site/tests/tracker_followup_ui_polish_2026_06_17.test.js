@@ -25,110 +25,60 @@ const INVENTORY_CSS = path.join(__dirname, '..', 'public', 'assets', manifest.cs
 const readSource = () => fs.readFileSync(SOURCE_PATH, 'utf8');
 
 // --------------------------------------------------------------------------
-// T3 — offline timer continuity (functional, via the real seeding helper)
+// T3 — restored 4394cfd visible-timer model (Layer 1 = frontend receive).
+// The visible timers measure when THIS browser rendered fresher data. A fresh
+// session shows blank until a real renderable response arrives, then resets to
+// "1s ago". The seedTimersFromBackend / seedOfflineTimersFromBackend helpers
+// are kept as inert no-ops so any stale call site is harmless. The dot (Layer
+// 2) is still authoritative on backend status age — proven separately in
+// tracker_authoritative_timer_2026_06_18.
 // --------------------------------------------------------------------------
-function makeOfflineSeedEnv(source, { presenceAge, statsAge, inventoryAge }) {
-  const block = source.match(/function seedTimersFromBackend\(entry\) \{[\s\S]*?\n {2}\}/);
-  assert.ok(block, 'seedTimersFromBackend helper missing from source');
-  const clock = { now: 0 };
-  const sandbox = {
-    Math,
-    Number,
-    Date: { now: () => clock.now },
-    backendPresenceAgeSeconds: () => presenceAge,
-    backendStatsAgeSeconds: () => statsAge,
-    backendInventoryAgeSeconds: () => inventoryAge,
-  };
-  const script = `(function(){\n${block[0]}\n  return { seedTimersFromBackend };\n})()`;
-  const api = vm.runInNewContext(script, sandbox, { filename: 'timer-seed.js' });
-  return { api, setNow: (ms) => { clock.now = ms; } };
-}
-
-describe('T3 — username timer (all states) does not reset on a new session/device', () => {
-  test('timer base time is seeded from backend last-real-update age (~30m), not 1s', () => {
-    const env = makeOfflineSeedEnv(readSource(), { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
-    env.setNow(5_000_000); // arbitrary "page open" time on a brand-new session
-    const entry = {}; // fresh entry — nothing observed yet this session
-    env.api.seedTimersFromBackend(entry);
-    // Visible age = now - base. It must read ~30m (1800s), not ~1s.
-    assert.equal(5_000_000 - entry._frontendRefreshAt, 1_800_000);
-    assert.equal(5_000_000 - entry._leaderstatsFrontendRefreshAt, 1_800_000);
-    assert.equal(5_000_000 - entry._inventoryFrontendRefreshAt, 1_800_000);
-    assert.equal(entry._timersSeededFromBackend, true);
-  });
-
-  test('opening from another session/device shows the SAME ~30m, not 1s', () => {
+describe('T3 — visible timer is frontend-receive (restored 4394cfd)', () => {
+  test('seedTimersFromBackend is an inert no-op (does not seed any visible base from backend age)', () => {
     const src = readSource();
-    const a = makeOfflineSeedEnv(src, { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
-    a.setNow(1_000_000);
-    const entryA = {};
-    a.api.seedTimersFromBackend(entryA);
-    const b = makeOfflineSeedEnv(src, { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
-    b.setNow(9_999_999);
-    const entryB = {};
-    b.api.seedTimersFromBackend(entryB);
-    assert.equal(1_000_000 - entryA._frontendRefreshAt, 1_800_000);
-    assert.equal(9_999_999 - entryB._frontendRefreshAt, 1_800_000);
+    const block = src.match(/function seedTimersFromBackend\(_entry\) \{[\s\S]*?\}/);
+    assert.ok(block, 'seedTimersFromBackend stub missing');
+    assert.doesNotMatch(block[0], /_frontendRefreshAt/);
+    assert.doesNotMatch(block[0], /_leaderstatsFrontendRefreshAt/);
+    assert.doesNotMatch(block[0], /_inventoryFrontendRefreshAt/);
+    assert.doesNotMatch(block[0], /backendPresenceAgeSeconds/);
   });
 
-  test('B3: an ONLINE account whose last upload was 30m ago also shows ~30m on open (not 1s)', () => {
-    const env = makeOfflineSeedEnv(readSource(), { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
-    env.setNow(5_000_000);
-    const entry = {}; // first observation, no section base set yet
-    env.api.seedTimersFromBackend(entry);
-    assert.equal(5_000_000 - entry._inventoryFrontendRefreshAt, 1_800_000);
-  });
-
-  test('only seeds UNSET fields — a base already set by maybeResetSectionTimers is preserved', () => {
-    const env = makeOfflineSeedEnv(readSource(), { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
-    env.setNow(5_000_000);
-    const entry = { _frontendRefreshAt: 4_999_000 }; // already seeded from a real data change
-    env.api.seedTimersFromBackend(entry);
-    assert.equal(entry._frontendRefreshAt, 4_999_000); // untouched
-  });
-
-  test('seeding runs once per entry/session and never re-seeds an already-seeded entry', () => {
-    const env = makeOfflineSeedEnv(readSource(), { presenceAge: 1800, statsAge: 1800, inventoryAge: 1800 });
-    env.setNow(1000);
-    const entry = {};
-    env.api.seedTimersFromBackend(entry);
-    const firstBase = entry._frontendRefreshAt;
-    env.setNow(2000); // a later poll on the same session
-    env.api.seedTimersFromBackend(entry);
-    assert.equal(entry._frontendRefreshAt, firstBase); // not re-seeded
-  });
-});
-
-// --------------------------------------------------------------------------
-// T3 wiring — seeding is called from both poll paths, after the reset
-// --------------------------------------------------------------------------
-describe('T3 — wiring', () => {
-  test('seedOfflineTimersFromBackend runs after maybeResetSectionTimers in both poll paths', () => {
+  test('seedOfflineTimersFromBackend is an inert no-op (back-compat alias)', () => {
     const src = readSource();
-    // Inventory poll path.
+    const block = src.match(/function seedOfflineTimersFromBackend\(_entry\) \{[\s\S]*?\}/);
+    assert.ok(block, 'seedOfflineTimersFromBackend stub missing');
+    assert.doesNotMatch(block[0], /_frontendRefreshAt/);
+  });
+
+  test('neither poll path calls seedOfflineTimersFromBackend any more', () => {
+    const src = readSource();
     const inv = src.indexOf('function applyInventoryPollPayload(entry, key, data) {');
-    const invBody = src.slice(inv, inv + 4200);
-    const r1 = invBody.indexOf('maybeResetSectionTimers(entry);');
-    const s1 = invBody.indexOf('seedOfflineTimersFromBackend(entry);');
-    assert.ok(r1 >= 0 && s1 > r1, 'inventory poll must seed offline timers after the reset');
-    // Status-only poll path.
+    const invEnd = src.indexOf('function applyPollPayload(', inv);
+    const invBody = src.slice(inv, invEnd > inv ? invEnd : inv + 4200);
+    assert.ok(!/seedOfflineTimersFromBackend\(entry\);/.test(invBody), 'inventory poll must not seed from backend');
     const st = src.indexOf('function applyAccountStatusPayload(payload) {');
-    const stBody = src.slice(st, st + 3000);
-    const r2 = stBody.indexOf('maybeResetSectionTimers(entry);');
-    const s2 = stBody.indexOf('seedOfflineTimersFromBackend(entry);');
-    assert.ok(r2 >= 0 && s2 > r2, 'status poll must seed offline timers after the reset');
+    const stEnd = src.indexOf('function entrySnapshotData(', st);
+    const stBody = src.slice(st, stEnd > st ? stEnd : st + 3000);
+    assert.ok(!/seedOfflineTimersFromBackend\(entry\);/.test(stBody), 'status poll must not seed from backend');
   });
 
-  test('seeding does not introduce a new markEntryFrontendRefreshed call-site', () => {
+  test('signature-gated reset calls markEntry*Refreshed only — never seeds from backend', () => {
     const src = readSource();
-    const calls = src.match(/markEntryFrontendRefreshed\(entry\);/g) || [];
-    assert.equal(calls.length, 1, 'still exactly one frontend-refresh reset call-site');
+    const fn = src.match(/function maybeResetSectionTimers\(entry\) \{[\s\S]*?\n  \}/)[0];
+    assert.match(fn, /markEntryFrontendRefreshed\(entry\);/);
+    assert.match(fn, /markEntryLeaderstatsRefreshed\(entry\);/);
+    assert.match(fn, /markEntryInventoryRefreshed\(entry\);/);
+    assert.doesNotMatch(fn, /seedSectionBaseFromBackendAge/);
+    assert.doesNotMatch(fn, /backendPresenceAgeSeconds/);
   });
 
   test('timer base time is in-memory only (never persisted to localStorage)', () => {
     const src = readSource();
-    assert.ok(!/localStorage[\s\S]{0,160}_timersSeededFromBackend/.test(src));
-    assert.ok(!/_timersSeededFromBackend[\s\S]{0,160}localStorage/.test(src));
+    for (const field of ['_frontendRefreshAt', '_leaderstatsFrontendRefreshAt', '_inventoryFrontendRefreshAt']) {
+      assert.ok(!new RegExp(`localStorage[\\s\\S]{0,160}${field}`).test(src));
+      assert.ok(!new RegExp(`${field}[\\s\\S]{0,160}localStorage`).test(src));
+    }
   });
 });
 
@@ -148,12 +98,21 @@ describe('T1 — no global inventory indicator over the selected username', () =
     assert.match(fn[0], /return null;/);
   });
 
-  test('updateInventoryUploadIndicator hides the bulk indicator unless scoped to one account', () => {
+  test('aggregate inventory upload indicator is removed from bulk search row', () => {
+    const src = readSource();
+    assert.doesNotMatch(src, /#bulkInventoryPanel[\s\S]{0,600}data-inventory-upload-indicator/);
+    assert.doesNotMatch(src, /ensureCardInventoryUploadBar/);
+  });
+
+  test('updateInventoryUploadIndicator patches fish/item/detail section badges for the active account only', () => {
     const src = readSource();
     const fn = src.match(/function updateInventoryUploadIndicator\(preferredEntry\) \{[\s\S]*?\n {2}\}/);
     assert.ok(fn, 'updateInventoryUploadIndicator missing');
-    assert.match(fn[0], /setInventoryIndicatorHidden\(bulkIndicator, !scoped\)/);
-    assert.match(fn[0], /accountViewMode === 'account'/);
+    assert.match(fn[0], /ensureFishGridUploadIndicator/);
+    assert.match(fn[0], /ensureItemGridUploadIndicator/);
+    assert.match(fn[0], /ensureDetailUploadIndicator/);
+    assert.match(fn[0], /accountViewMode === 'account' && activeAccountKey/);
+    assert.doesNotMatch(fn[0], /bulkIndicator/);
   });
 });
 
@@ -168,11 +127,13 @@ describe('T2 — no blinking timers/indicators', () => {
     assert.match(fn[0], /if \(!statusEl\.classList\.contains\(want\)\)/);
   });
 
-  test('inventory upload dot only swaps classes when the state changes', () => {
+  test('inventory upload indicator is text-only neutral (no dot class churn)', () => {
     const src = readSource();
     const fn = src.match(/function patchInventoryUploadIndicatorDom\(root, entry\) \{[\s\S]*?\n {2}\}/);
     assert.ok(fn, 'patchInventoryUploadIndicatorDom missing');
-    assert.match(fn[0], /if \(!dotEl\.classList\.contains\(want\)\)/);
+    assert.match(fn[0], /formatInventoryUploadLabel/);
+    assert.match(fn[0], /dotEl\.remove\(\)/);
+    assert.match(fn[0], /is-neutral/);
   });
 });
 

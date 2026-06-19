@@ -1,3994 +1,6 @@
-﻿<!DOCTYPE html>
-<!-- BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11' %>">
-  <link rel="icon" type="image/png" href="/public/img/deng-logo.png?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
-  <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/tracker' %>">
-  <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
-  <title>DENG Tracker &mdash; Fish It</title>
-  <style>
-    /* BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11 */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:        #090910;
-      --surface:   #161a22;
-      --surface2:  #1e2430;
-      --border:    #2a3040;
-      --accent:    #3b82f6;
-      --accent2:   #60a5fa;
-      --text:      #e2e8f0;
-      --muted:     #8a94a6;
-      --danger:    #ef4444;
-      --success:   #22c55e;
-      --warn:      #f59e0b;
-      --shine:     #fbbf24;
-      --radius:    10px;
-      --radius-lg: 16px;
-      --font:      'Segoe UI', system-ui, -apple-system, sans-serif;
-    }
-
-    html, body {
-      min-height: 100vh;
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
-      font-size: 15px;
-      line-height: 1.5;
-    }
-
-    .inventory-shell {
-      display:flex;
-      flex-direction:column;
-      min-height:100vh;
-      width:100%;
-      overflow-x:hidden;
-    }
-    .inventory-main {
-      flex:1;
-      min-width:0;
-      width:100%;
-    }
-    .page { min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:32px 16px 64px; }
-    .inner { width:100%; max-width:1040px; }
-
-    .inventory-sidebar {
-      display:flex;
-      flex-direction:column;
-      gap:12px;
-      width:100%;
-      padding:14px 12px;
-      background:linear-gradient(180deg,rgba(18,22,32,.98) 0%,rgba(13,15,20,.98) 100%);
-      border-bottom:1px solid var(--border);
-    }
-    .inventory-sidebar__brand {
-      display:flex;
-      align-items:center;
-      gap:12px;
-      padding:8px 10px;
-      border-radius:14px;
-      background:linear-gradient(145deg,rgba(30,36,48,.92) 0%,rgba(22,26,34,.92) 100%);
-      border:1px solid rgba(96,165,250,.18);
-      box-shadow:0 10px 28px rgba(0,0,0,.22);
-    }
-    .inventory-sidebar__top {
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      width:100%;
-      min-width:0;
-    }
-    .inventory-sidebar__logo {
-      width:46px;
-      height:46px;
-      border-radius:12px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      flex-shrink:0;
-      overflow:hidden;
-      background:rgba(15,23,42,.65);
-      border:1px solid rgba(96,165,250,.22);
-    }
-    .inventory-sidebar__logo img {
-      width:38px;
-      height:38px;
-      object-fit:contain;
-    }
-    .inventory-sidebar__titles {
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-      min-width:0;
-    }
-    .inventory-sidebar__title {
-      font-size:.98rem;
-      font-weight:800;
-      letter-spacing:-.02em;
-      background:linear-gradient(100deg,#22d3ee 0%,#3b82f6 45%,#ec4899 100%);
-      -webkit-background-clip:text;
-      background-clip:text;
-      color:transparent;
-      -webkit-text-fill-color:transparent;
-    }
-    .inventory-sidebar__subtitle {
-      font-size:.78rem;
-      font-weight:700;
-      color:var(--muted);
-      letter-spacing:.04em;
-      text-transform:uppercase;
-    }
-    .inventory-sidebar__spacer {
-      display:none;
-      pointer-events:none;
-      flex:1;
-      min-height:0;
-    }
-    .inventory-sidebar__bottom {
-      display:grid;
-      gap:10px;
-      min-width:0;
-      position:relative;
-      z-index:2;
-    }
-    .inventory-sidebar__controls,
-    .profile-control-row {
-      display:grid;
-      gap:10px;
-      min-width:0;
-      position:relative;
-      z-index:2;
-    }
-    .inventory-privacy-toggle {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      width:100%;
-      padding:9px 12px;
-      border-radius:12px;
-      border:1px solid var(--border);
-      background:var(--surface2);
-      color:var(--muted);
-      font-size:.78rem;
-      font-weight:700;
-      font-family:var(--font);
-      cursor:pointer;
-      position:relative;
-      z-index:1;
-      pointer-events:auto;
-      transition:color .15s,border-color .15s,background .15s;
-    }
-    .inventory-privacy-toggle:hover { color:var(--text); border-color:#475569; }
-    .inventory-privacy-toggle.is-active {
-      color:var(--text);
-      border-color:rgba(96,165,250,.35);
-      background:rgba(59,130,246,.08);
-    }
-    .inventory-privacy-toggle__label {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      min-width:0;
-      flex:1 1 auto;
-    }
-    .inventory-privacy-toggle__icon {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      width:18px;
-      height:18px;
-      flex-shrink:0;
-    }
-    .inventory-privacy-toggle__icon svg {
-      width:16px;
-      height:16px;
-      stroke:currentColor;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-      fill:none;
-    }
-    .inventory-privacy-toggle__text--short { display:none; }
-    .hide-username-toggle {
-      width:28px;
-      height:16px;
-      border-radius:999px;
-      padding:2px;
-      background:rgba(148,163,184,.32);
-      flex:0 0 auto;
-      box-sizing:border-box;
-      pointer-events:none;
-    }
-    .hide-username-toggle::before {
-      content:"";
-      display:block;
-      width:12px;
-      height:12px;
-      border-radius:999px;
-      background:rgba(229,231,235,.85);
-      transition:transform .15s ease,background .15s ease;
-    }
-    .inventory-privacy-toggle.is-active .hide-username-toggle {
-      background:rgba(59,130,246,.45);
-    }
-    .inventory-privacy-toggle.is-active .hide-username-toggle::before {
-      transform:translateX(12px);
-      background:rgba(241,245,249,.95);
-    }
-    .inventory-profile-card {
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:10px 12px;
-      border-radius:12px;
-      background:var(--surface);
-      border:1px solid var(--border);
-      min-height:56px;
-    }
-    .inventory-profile-card__avatar,
-    .inventory-profile-card__avatar-placeholder {
-      width:36px;
-      height:36px;
-      border-radius:10px;
-      flex-shrink:0;
-      object-fit:cover;
-    }
-    .inventory-profile-card__avatar-placeholder {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      background:linear-gradient(135deg,#1d4ed8,#7c3aed);
-      color:#fff;
-      font-size:.82rem;
-      font-weight:800;
-    }
-    .inventory-profile-card__meta {
-      min-width:0;
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-    }
-    .inventory-profile-card__name {
-      font-size:.86rem;
-      font-weight:700;
-      color:var(--text);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .inventory-profile-card__sub {
-      font-size:.72rem;
-      color:var(--muted);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .profile-control-row > .inventory-action-btn,
-    .profile-control-row > form {
-      margin:0;
-      min-width:0;
-    }
-    .profile-control-row > form {
-      display:block;
-    }
-    .profile-control-row > .inventory-action-btn,
-    .profile-control-row > form .inventory-action-btn {
-      width:100%;
-    }
-    .inventory-action-btn {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:6px;
-      min-height:40px;
-      padding:8px 10px;
-      border-radius:12px;
-      border:1px solid var(--border);
-      background:var(--surface2);
-      color:var(--text);
-      font-size:.78rem;
-      font-weight:700;
-      font-family:var(--font);
-      text-decoration:none;
-      cursor:pointer;
-      position:relative;
-      z-index:1;
-      pointer-events:auto;
-      transition:background .15s,border-color .15s,color .15s,transform .1s;
-    }
-    .inventory-action-btn svg {
-      width:16px;
-      height:16px;
-      stroke:currentColor;
-      stroke-width:1.8;
-      fill:none;
-      flex-shrink:0;
-    }
-    .inventory-action-btn:active { transform:scale(.97); }
-    .inventory-action-btn--script {
-      color:var(--muted);
-    }
-    .inventory-action-btn--script svg {
-      opacity:.92;
-    }
-    .inventory-action-btn--script:hover {
-      color:var(--text);
-      border-color:rgba(96,165,250,.45);
-      background:rgba(59,130,246,.12);
-    }
-    .inventory-action-btn--logout {
-      border-color:rgba(239,68,68,.28);
-      color:#fca5a5;
-      background:rgba(127,29,29,.18);
-    }
-    .inventory-action-btn--logout:hover {
-      border-color:rgba(239,68,68,.55);
-      background:rgba(127,29,29,.28);
-      color:#fecaca;
-    }
-    .inventory-action-btn.is-copied {
-      border-color:rgba(34,197,94,.45);
-      color:#86efac;
-      background:rgba(22,101,52,.22);
-    }
-
-    .header { text-align:center; margin-bottom:28px; }
-    .header h1 { font-size:clamp(1.5rem,4vw,2.2rem); font-weight:700; background:linear-gradient(90deg,#60a5fa,#f9a8d4); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; color:transparent; letter-spacing:-.5px; margin-bottom:6px; }
-    .header p { color:var(--muted); font-size:.9rem; }
-
-    /* Dashboard catch summary keeps the compact legacy stat tiles. */
-    .dashboard-stats {
-      display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:12px;
-      margin-bottom:18px;
-      align-items:stretch;
-    }
-    .dashboard-stats .stat-card {
-      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      padding:18px 16px;
-      min-height:96px;
-      height:100%;
-      display:flex;
-      flex-direction:column;
-      justify-content:flex-start;
-      box-shadow:0 8px 24px rgba(0,0,0,.18);
-    }
-    .dashboard-stats .stat-card__label {
-      font-size:.78rem;
-      font-weight:600;
-      letter-spacing:.02em;
-      color:var(--muted);
-      text-transform:uppercase;
-      min-height:2.2em;
-      line-height:1.05;
-      display:flex;
-      align-items:flex-start;
-      gap:6px;
-    }
-    .dashboard-stats .stat-card__value {
-      margin-top:auto;
-      font-size:clamp(1.35rem,3vw,1.85rem);
-      font-weight:800;
-      color:var(--text);
-      line-height:1;
-      letter-spacing:-.02em;
-      white-space:nowrap;
-      display:flex;
-      align-items:flex-end;
-    }
-    .dashboard-stats .stat-card--secret .stat-card__value { color:#00ff7f; }
-    .dashboard-stats .stat-card--forgotten .stat-card__value { color:#e5e7eb; }
-
-    /* /tracker top summary cards — screenshot layout (centered icon/label/value).
-       Always exactly THREE columns; mobile keeps 3 columns and only shrinks. */
-    #inventoryStats.tracker-top-summary-grid {
-      display:grid;
-      grid-template-columns:repeat(3,minmax(0,1fr));
-      gap:16px;
-      margin:18px 0 28px;
-      align-items:stretch;
-    }
-    .tracker-top-summary-card {
-      box-sizing:border-box;
-      min-height:176px;
-      padding:24px 20px;
-      border-radius:26px;
-      background:#17171d;
-      border:1px solid rgba(255,255,255,0.08);
-      box-shadow:
-        0 12px 32px rgba(0,0,0,0.32),
-        inset 0 1px 0 rgba(255,255,255,0.04);
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      text-align:center;
-      min-width:0;
-      overflow:hidden;
-    }
-    .tracker-top-summary-icon {
-      width:54px;
-      height:54px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      margin:0 auto 16px;
-      flex:0 0 auto;
-    }
-    .tracker-top-summary-img {
-      width:54px;
-      height:54px;
-      object-fit:contain;
-      display:block;
-    }
-    .tracker-top-summary-icon--avatar .tracker-top-summary-img {
-      width:50px;
-      height:50px;
-      border-radius:10px;
-    }
-    .tracker-top-summary-label {
-      color:rgba(255,255,255,0.50);
-      font-size:17px;
-      font-weight:600;
-      line-height:1.22;
-      margin-bottom:9px;
-      text-transform:none;
-      letter-spacing:0;
-      max-width:100%;
-      overflow-wrap:anywhere;
-    }
-    .tracker-top-summary-value {
-      color:#fff;
-      font-size:30px;
-      font-weight:900;
-      line-height:1.05;
-      letter-spacing:-0.02em;
-      white-space:nowrap;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      flex-wrap:nowrap;
-    }
-    /* Online number stays green across every theme / forced-color mode. */
-    .tracker-online-value .online-count {
-      color:#62e68a !important;
-    }
-    .tracker-online-value .separator,
-    .tracker-online-value .total-count {
-      color:#ffffff;
-    }
-    @media (max-width:640px) {
-      #inventoryStats.tracker-top-summary-grid,
-      .inventory-apk-embed #inventoryStats.tracker-top-summary-grid {
-        grid-template-columns:repeat(3,minmax(0,1fr));
-        gap:8px;
-      }
-      .tracker-top-summary-card {
-        min-height:118px;
-        padding:12px 8px;
-        border-radius:18px;
-      }
-      .tracker-top-summary-icon {
-        width:34px;
-        height:34px;
-        margin-bottom:9px;
-      }
-      .tracker-top-summary-img {
-        width:34px;
-        height:34px;
-      }
-      .tracker-top-summary-icon--avatar .tracker-top-summary-img {
-        width:34px;
-        height:34px;
-      }
-      .tracker-top-summary-label {
-        font-size:11px;
-        line-height:1.15;
-      }
-      .tracker-top-summary-value {
-        font-size:18px;
-        line-height:1.05;
-      }
-    }
-
-    .inventory-main-nav {
-      display:flex;
-      align-items:center;
-      gap:4px;
-      padding:3px;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background:rgba(15,23,42,.55);
-      width:100%;
-      max-width:100%;
-      min-width:0;
-      flex:1 1 auto;
-    }
-    .inventory-main-nav__tab {
-      appearance:none;
-      border:0;
-      background:transparent;
-      color:var(--muted);
-      font-family:var(--font);
-      font-size:.72rem;
-      font-weight:700;
-      line-height:1;
-      padding:8px 10px;
-      border-radius:999px;
-      cursor:pointer;
-      white-space:nowrap;
-      transition:color .15s,background .15s;
-      flex:1 1 0;
-      text-align:center;
-      min-width:0;
-    }
-    .inventory-main-nav__tab:hover { color:var(--text); }
-    .inventory-main-nav__tab.is-active {
-      color:#fff;
-      background:linear-gradient(135deg,#2563eb,#3b82f6);
-      box-shadow:0 6px 18px rgba(37,99,235,.28);
-    }
-    /* Mobile/APK segmented Dashboard/Live Tracker switcher — hidden when desktop sidebar nav is visible. */
-    .inventory-main-nav--mobile { display:none; }
-    .inventory-apk-embed .inventory-main-nav--mobile { display:flex; }
-    .inventory-panel[hidden] { display:none !important; }
-    .dashboard-toolbar {
-      display:flex;
-      flex-direction:column;
-      align-items:stretch;
-      gap:10px;
-      margin-bottom:14px;
-      position:relative;
-    }
-    .dashboard-toolbar.is-loading .dashboard-period-filter {
-      opacity:0.94;
-    }
-    .dashboard-toolbar.is-loading::after {
-      content:'';
-      position:absolute;
-      top:0;
-      right:0;
-      width:14px;
-      height:14px;
-      margin:6px;
-      border:2px solid rgba(96,165,250,.25);
-      border-top-color:rgba(96,165,250,.85);
-      border-radius:50%;
-      animation:dashboardToolbarSpin .65s linear infinite;
-      pointer-events:none;
-    }
-    @keyframes dashboardToolbarSpin {
-      to { transform:rotate(360deg); }
-    }
-    .dashboard-period-filter {
-      display:flex;
-      align-items:center;
-      gap:4px;
-      padding:3px;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background:var(--surface);
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
-      scrollbar-width:none;
-    }
-    .dashboard-period-filter::-webkit-scrollbar { display:none; }
-    .dashboard-period-filter__btn {
-      appearance:none;
-      border:0;
-      background:transparent;
-      color:var(--muted);
-      font-family:var(--font);
-      font-size:.68rem;
-      font-weight:700;
-      line-height:1;
-      padding:8px 10px;
-      border-radius:999px;
-      cursor:pointer;
-      white-space:nowrap;
-      flex:0 0 auto;
-    }
-    .dashboard-period-filter__btn.is-active {
-      color:#fff;
-      background:var(--accent);
-    }
-    .dashboard-period-custom {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .dashboard-period-custom__toggle {
-      appearance:none;
-      border:1px solid var(--border);
-      background:var(--surface);
-      color:var(--muted);
-      font-family:var(--font);
-      font-size:.72rem;
-      font-weight:700;
-      line-height:1;
-      padding:8px 12px;
-      border-radius:999px;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      white-space:nowrap;
-    }
-    .dashboard-period-custom__toggle svg {
-      width:14px;
-      height:14px;
-      stroke:currentColor;
-      fill:none;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-    }
-    .dashboard-period-custom__toggle.is-active,
-    .dashboard-period-custom__toggle:hover {
-      color:var(--text);
-      border-color:rgba(96,165,250,.35);
-    }
-    .dashboard-period-custom__panel {
-      display:none;
-      align-items:center;
-      gap:8px;
-      flex-wrap:wrap;
-      padding:10px 12px;
-      border:1px solid var(--border);
-      border-radius:var(--radius-lg);
-      background:var(--surface2);
-    }
-    .dashboard-period-custom__panel.is-open { display:flex; }
-    .dashboard-period-custom__field {
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-      min-width:0;
-      flex:1 1 120px;
-    }
-    .dashboard-period-custom__field label {
-      font-size:.62rem;
-      font-weight:700;
-      color:var(--muted);
-      letter-spacing:.04em;
-      text-transform:uppercase;
-    }
-    .dashboard-period-custom__field input[type="date"] {
-      appearance:none;
-      border:1px solid var(--border);
-      background:#0a0c10;
-      color:var(--text);
-      font-family:var(--font);
-      font-size:.78rem;
-      font-weight:600;
-      padding:8px 10px;
-      border-radius:var(--radius);
-      min-width:0;
-      width:100%;
-      color-scheme:dark;
-    }
-    .dashboard-period-custom__apply {
-      appearance:none;
-      border:0;
-      background:var(--accent);
-      color:#fff;
-      font-family:var(--font);
-      font-size:.72rem;
-      font-weight:700;
-      padding:9px 14px;
-      border-radius:999px;
-      cursor:pointer;
-      white-space:nowrap;
-    }
-    .dashboard-stats {
-      grid-template-columns:repeat(2,minmax(0,1fr));
-    }
-    .dashboard-chart-card {
-      margin-top:16px;
-      padding:14px 12px 10px;
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
-    }
-    .dashboard-chart-card__title {
-      font-size:.84rem;
-      font-weight:700;
-      color:var(--text);
-      margin-bottom:10px;
-    }
-    .dashboard-chart-wrap {
-      width:100%;
-      overflow:hidden;
-    }
-    .dashboard-chart {
-      display:block;
-      width:100%;
-      height:132px;
-      overflow:visible;
-    }
-    .dashboard-chart-line {
-      fill:none;
-      stroke:url(#dashboardLineGrad);
-      stroke-width:2.4;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-    }
-    .dashboard-chart-area {
-      fill:url(#dashboardAreaGrad);
-      opacity:.85;
-    }
-    .dashboard-chart-grid {
-      stroke:rgba(148,163,184,.12);
-      stroke-width:1;
-    }
-    .dashboard-chart-point {
-      fill:#60a5fa;
-      stroke:#0d0f14;
-      stroke-width:1.5;
-    }
-    .dashboard-chart-value {
-      fill:#e2e8f0;
-      font-family:var(--font);
-      font-size:8px;
-      font-weight:700;
-      text-anchor:middle;
-    }
-    .dashboard-chart-zero {
-      fill:#64748b;
-      font-family:var(--font);
-      font-size:8px;
-      font-weight:600;
-      text-anchor:middle;
-    }
-    .dashboard-chart-labels {
-      display:flex;
-      justify-content:space-between;
-      gap:4px;
-      margin-top:6px;
-      font-size:.62rem;
-      color:var(--muted);
-      line-height:1;
-    }
-    .dashboard-chart-labels span {
-      flex:1 1 0;
-      text-align:center;
-      min-width:0;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .dashboard-chart-empty {
-      margin-top:8px;
-      font-size:.78rem;
-      color:var(--muted);
-      text-align:center;
-    }
-    .dashboard-fish-section {
-      margin-top:16px;
-    }
-    .dashboard-fish-section__title {
-      font-size:.84rem;
-      font-weight:700;
-      color:var(--text);
-      margin-bottom:10px;
-    }
-    .dashboard-fish-grid .items-grid {
-      margin-top:0;
-    }
-    .dashboard-fish-empty {
-      font-size:.78rem;
-      color:var(--muted);
-      text-align:center;
-      padding:20px 12px;
-      border:1px dashed var(--border);
-      border-radius:var(--radius-lg);
-      background:rgba(15,23,42,.35);
-    }
-    .dashboard-status-notice {
-      font-size:.78rem;
-      line-height:1.45;
-      padding:10px 12px;
-      border-radius:var(--radius-lg);
-      margin:0 0 12px;
-      border:1px solid var(--border);
-      background:rgba(15,23,42,.45);
-      color:var(--muted);
-    }
-    .dashboard-status-notice.is-error {
-      border-color:rgba(248,113,113,.45);
-      background:rgba(127,29,29,.22);
-      color:#fecaca;
-    }
-    .dashboard-status-notice.is-debug {
-      font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size:.68rem;
-      white-space:pre-wrap;
-      word-break:break-word;
-    }
-
-    .player-control-bar {
-      display:flex;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-      margin-bottom:10px;
-      padding:12px;
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      background:var(--surface);
-    }
-    .player-control-bar input {
-      flex:1 1 220px;
-      min-width:0;
-      padding:12px 16px;
-      background:var(--surface2);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius);
-      color:var(--text);
-      font-size:.95rem;
-      font-family:var(--font);
-      outline:none;
-      transition:border-color .15s;
-    }
-    .player-control-bar input:focus { border-color:var(--accent); }
-    .player-control-bar input.is-invalid { border-color:var(--danger); }
-    .player-control-bar input::placeholder { color:var(--muted); }
-    .username-error { flex:1 1 100%; font-size:.82rem; color:var(--danger); min-height:1.1em; }
-
-    .btn { padding:12px 18px; border-radius:var(--radius); border:none; cursor:pointer; font-size:.9rem; font-weight:650; font-family:var(--font); transition:opacity .15s,transform .1s,background .15s,border-color .15s; white-space:nowrap; }
-    .btn:active { transform:scale(.97); }
-    .btn-add {
-      background:#f8fafc;
-      color:#0f172a;
-      border:1.5px solid #e2e8f0;
-    }
-    .btn-add:hover { background:#fff; }
-    .btn-multiple {
-      background:var(--surface2);
-      color:var(--text);
-      border:1.5px solid var(--border);
-    }
-    .btn-multiple:hover { border-color:#475569; }
-    .tracker-username-actions {
-      display:flex;
-      flex-wrap:wrap;
-      align-items:center;
-      gap:8px;
-      flex:1 1 100%;
-      min-width:0;
-    }
-    .tracker-username-action-button {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      min-height:40px;
-      padding:8px 12px;
-      border-radius:var(--radius);
-      border:1.5px solid transparent;
-      font-size:.82rem;
-      font-weight:700;
-      font-family:var(--font);
-      line-height:1.1;
-      cursor:pointer;
-      white-space:nowrap;
-      transition:background .15s,border-color .15s,color .15s,transform .1s;
-    }
-    .tracker-username-action-button:active { transform:scale(.97); }
-    .tracker-username-action-button--offline {
-      background:rgba(127,29,29,.22);
-      border-color:rgba(239,68,68,.45);
-      color:#fecaca;
-    }
-    .tracker-username-action-button--offline:hover {
-      background:rgba(153,27,27,.35);
-      border-color:rgba(248,113,113,.65);
-      color:#fff;
-    }
-    .tracker-username-action-button--nodata {
-      background:rgba(120,53,15,.22);
-      border-color:rgba(245,158,11,.45);
-      color:#fde68a;
-    }
-    .tracker-username-action-button--nodata:hover {
-      background:rgba(146,64,14,.32);
-      border-color:rgba(251,191,36,.65);
-      color:#fffbeb;
-    }
-    .tracker-username-action-button--all,
-    .tracker-username-action-danger {
-      background:linear-gradient(180deg,#7f1d1d 0%,#991b1b 100%);
-      border-color:rgba(239,68,68,.55);
-      color:#fee2e2;
-      box-shadow:0 0 0 1px rgba(239,68,68,.18);
-    }
-    .tracker-username-action-button--all:hover,
-    .tracker-username-action-danger:hover {
-      background:linear-gradient(180deg,#991b1b 0%,#b91c1c 100%);
-      color:#fff;
-    }
-    .username-error.tracker-username-action-notice { color:var(--muted); }
-
-    .ft-chip-owner {
-      background:rgba(59,130,246,.18);
-      border:1px solid rgba(96,165,250,.35);
-      color:#dbeafe;
-      font-size:.72rem;
-      font-weight:700;
-      max-width:100%;
-    }
-    .ft-chip-owner-qty { color:#93c5fd; margin-left:2px; }
-    .ft-card-stats--owners { flex-wrap:wrap; gap:5px; margin-top:6px; }
-
-    .summary-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; font-size:.85rem; color:var(--muted); }
-    .summary-bar strong { color:var(--text); }
-
-    .no-trackers { text-align:center; padding:60px 20px; color:var(--muted); border:1.5px dashed var(--border); border-radius:var(--radius-lg); margin-bottom:24px; }
-    .no-trackers .icon { font-size:2.5rem; margin-bottom:10px; }
-    .no-trackers p { font-size:.9rem; }
-
-    .tracker-card { background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); margin-bottom:14px; overflow:hidden; animation:slideIn .2s ease; transition:border-color .25s; }
-    .tracker-card.state-live    { border-color:var(--success); }
-    .tracker-card.state-waiting { border-color:var(--warn); }
-    .tracker-card.state-error   { border-color:var(--danger); }
-    .tracker-card.is-highlighted { box-shadow:0 0 0 1px rgba(59,130,246,.45), 0 10px 28px rgba(59,130,246,.12); }
-    .tracker-card--account-inventory {
-      background:transparent;
-      border:none;
-      border-radius:0;
-      margin-bottom:0;
-      overflow:visible;
-      box-shadow:none;
-      animation:none;
-    }
-    .tracker-card--account-inventory.state-live,
-    .tracker-card--account-inventory.state-waiting,
-    .tracker-card--account-inventory.state-error {
-      border-color:transparent;
-    }
-    .tracker-card--account-inventory.is-highlighted { box-shadow:none; }
-    .tracker-card--account-inventory .card-head,
-    .tracker-card--account-inventory .chevron,
-    .tracker-card--account-inventory .card-status-line {
-      display:none !important;
-    }
-    .tracker-card--account-inventory .card-body {
-      display:block !important;
-      padding:0;
-    }
-
-    @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-
-    .card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px 10px; cursor:pointer; user-select:none; }
-    .card-head:hover { background:var(--surface2); }
-    .card-head-main { display:flex; align-items:center; gap:8px; min-width:0; flex:1; }
-
-    .status-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--muted); transition:background .2s; }
-    .status-dot.live { background:var(--success); animation:pulse 1.4s ease-in-out infinite; }
-    .status-dot.stale { background:var(--warn); animation:pulse 2s ease-in-out infinite; }
-    .status-dot.dead { background:var(--danger); }
-    .accounts-status .status-dot.dead { background:var(--danger); box-shadow:0 0 0 1px rgba(239,68,68,.35); }
-    .accounts-status .status-dot.live { color:rgba(74,222,128,.88); }
-
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-
-    .accounts-status__text { font-size:.8rem; font-weight:600; white-space:nowrap; color:var(--text); }
-    .accounts-table__stat-sub {
-      font-size:.62rem;
-      font-weight:500;
-      color:var(--muted);
-      white-space:nowrap;
-    }
-    .accounts-table__stat-sub.is-stale { color:var(--warn); }
-    .accounts-mobile-card__row-value-stack { display:flex; flex-direction:column; align-items:center; gap:1px; }
-    .accounts-mobile-card__stat-sub {
-      font-size:.62rem;
-      font-weight:500;
-      color:var(--muted);
-      white-space:nowrap;
-    }
-    .accounts-mobile-card__stat-sub.is-stale { color:var(--warn); }
-    .inventory-upload-indicator {
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      flex-shrink:0;
-      padding:6px 8px;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background:var(--surface2);
-      font-size:.68rem;
-      font-weight:600;
-      color:var(--muted);
-      white-space:nowrap;
-    }
-    .inventory-upload-indicator__text { min-width:0; }
-    .inventory-upload-indicator.is-neutral { color:var(--muted); border-color:var(--border); }
-    .inventory-section-head {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-      flex-wrap:wrap;
-      margin:0 0 8px;
-      min-width:0;
-    }
-    .fish-section__title,
-    .items-section-head__title {
-      font-size:clamp(.78rem, 2.8vw, .92rem);
-      font-weight:700;
-      color:var(--text);
-      min-width:0;
-      overflow-wrap:anywhere;
-    }
-    .ft-detail-panel__head .inventory-upload-indicator {
-      margin-left:auto;
-      flex-shrink:0;
-    }
-    .card-head-main:empty { display:none; }
-    .card-head:has(.card-head-main:empty) { justify-content:flex-end; }
-
-    .state-live    .status-dot.live { background:var(--success); }
-    .state-waiting .status-dot.dead { background:var(--muted); }
-    .state-error   .status-dot.dead { background:var(--danger); }
-
-    .chevron { width:16px; height:16px; color:var(--muted); transition:transform .2s; flex-shrink:0; margin-top:4px; }
-    .tracker-card.expanded .chevron { transform:rotate(180deg); }
-
-    .btn-remove { background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:999px; color:var(--muted); cursor:pointer; padding:3px 10px; font-size:.72rem; font-family:var(--font); transition:color .15s,border-color .15s,background .15s; flex-shrink:0; line-height:1.2; }
-    .btn-remove:hover { color:var(--danger); border-color:var(--danger); background:#1a0808; }
-
-    .card-status-line { padding:0 16px 8px; font-size:.8rem; color:var(--muted); }
-    .card-status-line:empty { display:none; }
-
-    .card-body { padding:0 16px 12px; display:none; }
-    .tracker-card.expanded .card-body { display:block; }
-
-    .modal-overlay {
-      position:fixed;
-      inset:0;
-      z-index:120;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:16px;
-      background:rgba(0,0,0,.68);
-      backdrop-filter:blur(2px);
-    }
-    .modal-overlay[hidden] { display:none !important; }
-
-    .ft-card--interactive { cursor:pointer; }
-    .ft-card--interactive:focus-visible { outline:2px solid #60a5fa; outline-offset:2px; }
-    [data-ft-hidden="1"] { display:none !important; }
-    /* Inline detail panel (NOT a modal/overlay). Renders in normal page flow
-       inside the inventory panel, replacing the grid while open. */
-    .ft-detail-panel { margin-top:4px; }
-    .ft-detail-panel[hidden] { display:none !important; }
-    .ft-detail-panel__head {
-      display:flex;
-      gap:12px;
-      align-items:center;
-      margin-bottom:14px;
-      padding:12px 14px;
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
-    }
-    .ft-detail-back {
-      flex-shrink:0;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      padding:8px 12px;
-      border-radius:8px;
-      border:1px solid var(--border);
-      background:rgba(255,255,255,.05);
-      color:var(--text);
-      font-weight:700;
-      font-size:.82rem;
-      cursor:pointer;
-    }
-    .ft-detail-back:hover { background:rgba(255,255,255,.12); }
-    .ft-detail-back svg { width:15px; height:15px; }
-    .ft-detail-icon {
-      flex:0 0 52px;
-      width:52px;
-      height:52px;
-      border-radius:10px;
-      background:rgba(255,255,255,.06);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      overflow:hidden;
-    }
-    .ft-detail-icon img { width:100%; height:100%; object-fit:contain; }
-    .ft-detail-icon__fallback { font-size:26px; }
-    .ft-detail-headtext { min-width:0; flex:1 1 auto; }
-    .ft-detail-tag {
-      display:inline-block;
-      font-size:.72rem;
-      font-weight:800;
-      letter-spacing:.03em;
-      text-transform:uppercase;
-      color:#93c5fd;
-      margin-bottom:3px;
-    }
-    .ft-detail-tag[hidden] { display:none !important; }
-    .ft-detail-name {
-      font-size:1.12rem;
-      font-weight:800;
-      letter-spacing:-.01em;
-      color:#fff;
-      line-height:1.18;
-      word-break:break-word;
-    }
-    .ft-detail-count { font-size:.78rem; font-weight:700; color:var(--muted); margin-top:2px; }
-    .ft-detail-instances {
-      display:grid;
-      /* Two-plus columns wherever there is enough width; collapses to one only
-         on genuinely narrow screens. Fixes the wasted-space single column. */
-      grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
-      gap:12px;
-    }
-    /* Fish detail instance cards only — scoped; stones/totems use .ft-detail-owner */
-    .tracker-detail-fish-card {
-      box-sizing:border-box;
-      border-radius:22px;
-      padding:18px 20px;
-      background:#17171d;
-      border:1px solid rgba(255,255,255,0.08);
-      box-shadow:
-        0 12px 32px rgba(0,0,0,0.28),
-        inset 0 1px 0 rgba(255,255,255,0.04);
-      display:flex;
-      align-items:flex-start;
-      gap:14px;
-      min-width:0;
-      color:#fff;
-    }
-    .tracker-detail-fish-card__img {
-      flex:0 0 auto;
-      width:54px;
-      height:54px;
-      border-radius:12px;
-      background:rgba(255,255,255,.06);
-      border:1px solid rgba(255,255,255,0.10);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      overflow:hidden;
-      font-size:22px;
-    }
-    .tracker-detail-fish-card__img img { width:100%; height:100%; object-fit:contain; }
-    .tracker-detail-fish-card__body {
-      min-width:0;
-      flex:1 1 auto;
-      display:flex;
-      flex-direction:column;
-      gap:0;
-    }
-    .tracker-detail-fish-weight {
-      font-size:12px;
-      font-weight:600;
-      line-height:1.25;
-      margin-top:4px;
-      color:var(--tdf-muted,#94a3b8);
-    }
-    .tracker-detail-fish-weight--unknown {
-      font-size:12px;
-      font-weight:600;
-      color:#64748b;
-      font-style:italic;
-    }
-    .tracker-detail-fish-mutation {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      width:fit-content;
-      max-width:100%;
-      padding:5px 10px;
-      border-radius:999px;
-      font-size:13px;
-      font-weight:900;
-      line-height:1;
-      margin-bottom:8px;
-      text-transform:uppercase;
-      letter-spacing:.03em;
-    }
-    .tracker-detail-fish-name {
-      font-size:16px;
-      font-weight:800;
-      line-height:1.18;
-      word-break:break-word;
-      margin-bottom:4px;
-    }
-    .tracker-detail-fish-owner {
-      font-size:11px;
-      line-height:14px;
-      color:#93c5fd;
-      font-weight:700;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-    }
-    .tracker-detail-fish-card.has-mutation {
-      border-width:1px;
-      border-style:solid;
-      background:var(--tdf-bg,#17171d);
-      border-color:var(--tdf-border,rgba(255,255,255,0.08));
-      color:var(--tdf-text,#fff);
-      box-shadow:
-        0 12px 32px rgba(0,0,0,0.28),
-        inset 0 1px 0 rgba(255,255,255,0.04);
-    }
-    .tracker-detail-fish-card.has-mutation .tracker-detail-fish-mutation {
-      background:var(--tdf-pill-bg,rgba(255,255,255,0.12));
-      color:var(--tdf-pill-text,#fff);
-    }
-    .tracker-detail-fish-card.has-mutation .tracker-detail-fish-weight {
-      color:var(--tdf-muted,#94a3b8);
-    }
-    .tracker-detail-fish-card.has-mutation .tracker-detail-fish-owner {
-      color:var(--tdf-owner,#93c5fd);
-    }
-    .ft-detail-search { margin:10px 0 4px; }
-    .ft-detail-search__input {
-      width:100%;
-      box-sizing:border-box;
-      padding:10px 14px;
-      border-radius:10px;
-      border:1.5px solid var(--border);
-      background:var(--surface2);
-      color:var(--text);
-      font-size:.9rem;
-      font-family:var(--font);
-      outline:none;
-      transition:border-color .15s,background .15s;
-    }
-    .ft-detail-search__input:focus { border-color:var(--accent2); background:var(--surface); }
-    .ft-detail-search__input::placeholder { color:var(--muted); }
-    .ft-detail-instances.is-empty { display:block; }
-    .ft-detail-owners { display:flex; flex-direction:column; gap:6px; }
-    .ft-detail-owner {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      padding:9px 12px;
-      border-radius:8px;
-      background:rgba(255,255,255,.04);
-      border:1px solid var(--border);
-    }
-    .ft-detail-owner__main { min-width:0; display:flex; flex-direction:column; gap:1px; }
-    .ft-detail-owner__mut { font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.02em; }
-    .ft-detail-owner__name { font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .ft-detail-owner__qty { font-weight:800; color:#93c5fd; flex-shrink:0; }
-    .ft-detail-owner--empty { justify-content:center; color:var(--muted); }
-    /* Only collapse to a single column on genuinely narrow screens so mobile
-       (and the APK embed at ~360-390px) still shows two columns. */
-    @media (max-width:340px) {
-      .ft-detail-instances { grid-template-columns:1fr; gap:8px; }
-    }
-    .inventory-apk-embed .ft-detail-instances { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
-    .modal-dialog {
-      width:min(500px,100%);
-      max-height:calc(100vh - 32px);
-      overflow:auto;
-      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      padding:24px;
-      box-shadow:0 24px 56px rgba(0,0,0,.45);
-    }
-    .modal-title { font-size:1.2rem; font-weight:700; margin-bottom:8px; letter-spacing:-.02em; }
-    .modal-helper { color:var(--muted); font-size:.92rem; margin-bottom:4px; }
-    .modal-example { color:var(--muted); font-size:.84rem; margin-bottom:14px; opacity:.92; }
-    .modal-textarea {
-      width:100%;
-      min-height:140px;
-      resize:vertical;
-      padding:14px 16px;
-      background:var(--surface);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius);
-      color:var(--text);
-      font-family:var(--font);
-      font-size:17px;
-      line-height:1.45;
-      outline:none;
-      transition:border-color .15s;
-    }
-    .modal-textarea:focus { border-color:var(--accent); }
-    .modal-textarea::placeholder { color:var(--muted); font-size:17px; opacity:.78; }
-    .modal-error {
-      margin-top:10px;
-      font-size:.86rem;
-      color:var(--danger);
-      min-height:1.1em;
-    }
-    .modal-error[hidden] { display:none; }
-    .modal-actions {
-      display:flex;
-      justify-content:flex-end;
-      gap:10px;
-      margin-top:18px;
-      flex-wrap:wrap;
-    }
-    .btn-modal-cancel {
-      background:var(--surface2);
-      color:var(--text);
-      border:1.5px solid var(--border);
-      padding:11px 18px;
-      border-radius:var(--radius);
-      font-weight:600;
-      cursor:pointer;
-      font-family:var(--font);
-    }
-    .btn-modal-cancel:hover { border-color:#475569; }
-    .btn-modal-submit {
-      background:#f8fafc;
-      color:#0f172a;
-      border:1.5px solid #e2e8f0;
-      padding:11px 20px;
-      border-radius:var(--radius);
-      font-weight:700;
-      cursor:pointer;
-      font-family:var(--font);
-    }
-    .btn-modal-submit:hover { background:#fff; }
-    .btn-modal-submit--danger {
-      background:linear-gradient(180deg,#dc2626 0%,#b91c1c 100%);
-      color:#fff;
-      border-color:#7f1d1d;
-    }
-    .btn-modal-submit--danger:hover { background:linear-gradient(180deg,#ef4444 0%,#dc2626 100%); }
-
-    .accounts-overview {
-      margin-bottom:18px;
-      background:var(--surface);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      overflow:hidden;
-    }
-    .accounts-toolbar {
-      display:flex;
-      align-items:center;
-      gap:12px;
-      flex-wrap:wrap;
-      padding:14px 16px;
-      border-bottom:1px solid var(--border);
-      background:linear-gradient(180deg,var(--surface2) 0%,var(--surface) 100%);
-    }
-    .accounts-toolbar__controls {
-      display:contents;
-    }
-    .accounts-search {
-      flex:1 1 240px;
-      min-width:0;
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:10px 14px;
-      background:var(--surface);
-      border:1.5px solid var(--border);
-      border-radius:999px;
-    }
-    .accounts-search svg { width:18px; height:18px; color:var(--muted); flex-shrink:0; }
-    .accounts-search input {
-      flex:1;
-      min-width:0;
-      border:none;
-      background:transparent;
-      color:var(--text);
-      font-size:.95rem;
-      font-family:var(--font);
-      outline:none;
-    }
-    .accounts-search input::placeholder { color:var(--muted); }
-    .accounts-filters { display:flex; gap:8px; flex-wrap:wrap; }
-    .accounts-filter {
-      border:1.5px solid var(--border);
-      background:var(--surface);
-      color:var(--muted);
-      border-radius:999px;
-      padding:8px 14px;
-      font-size:.84rem;
-      font-weight:600;
-      cursor:pointer;
-      font-family:var(--font);
-    }
-    .accounts-filter.is-active {
-      background:var(--surface2);
-      color:var(--text);
-      border-color:#475569;
-    }
-    .accounts-actions {
-      display:flex;
-      gap:8px;
-      margin-left:auto;
-      flex-wrap:wrap;
-    }
-    .accounts-icon-btn {
-      width:38px;
-      height:38px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      border:1.5px solid var(--border);
-      background:var(--surface);
-      color:var(--text);
-      border-radius:10px;
-      cursor:pointer;
-      padding:0;
-    }
-    .accounts-icon-btn:hover { border-color:#475569; background:var(--surface2); }
-    .accounts-icon-btn.is-active { border-color:var(--accent); color:var(--accent2); }
-    .accounts-icon-btn svg { width:18px; height:18px; }
-    .accounts-view-group {
-      display:inline-flex;
-      align-items:stretch;
-      border:1.5px solid var(--border);
-      border-radius:10px;
-      overflow:hidden;
-      background:var(--surface);
-    }
-    .accounts-view-group .accounts-icon-btn {
-      border:none;
-      border-radius:0;
-      border-right:1px solid var(--border);
-      width:38px;
-    }
-    .accounts-view-group .accounts-icon-btn:last-child { border-right:none; }
-    .accounts-view-group .accounts-icon-btn.is-active { background:var(--surface2); }
-    .accounts-view-group .accounts-view-btn {
-      width:40px;
-      height:40px;
-      flex-shrink:0;
-    }
-    .accounts-view-icon {
-      width:20px;
-      height:20px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      flex-shrink:0;
-      pointer-events:none;
-    }
-    .accounts-view-group .accounts-view-icon svg {
-      width:20px;
-      height:20px;
-      display:block;
-      stroke:currentColor;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-      fill:none;
-    }
-    .accounts-view-group .accounts-view-icon svg .accounts-view-icon__fill {
-      fill:currentColor;
-      stroke:none;
-    }
-    .accounts-table-wrap {
-      width:100%;
-      overflow-x:auto;
-      overflow-y:hidden;
-      -webkit-overflow-scrolling:touch;
-      scroll-behavior:smooth;
-    }
-    .accounts-table {
-      width:100%;
-      border-collapse:collapse;
-    }
-    .accounts-pagination {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      flex-wrap:wrap;
-      gap:10px;
-      margin-top:12px;
-      padding:10px 12px;
-      border:1px solid var(--border);
-      border-radius:12px;
-      background:rgba(255,255,255,.02);
-    }
-    .accounts-pagination__info {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      color:var(--muted);
-      font-size:.82rem;
-      font-weight:600;
-    }
-    .accounts-pagination__dot { opacity:.5; }
-    .accounts-pagination__controls {
-      display:flex;
-      align-items:center;
-      gap:6px;
-      flex-wrap:wrap;
-    }
-    .accounts-pagination__btn {
-      appearance:none;
-      border:1px solid var(--border);
-      background:rgba(255,255,255,.03);
-      color:var(--text);
-      border-radius:9px;
-      padding:7px 12px;
-      font-size:.8rem;
-      font-weight:600;
-      cursor:pointer;
-      min-height:38px;
-      transition:background .15s ease,border-color .15s ease,opacity .15s ease;
-    }
-    .accounts-pagination__btn:hover:not(:disabled) { background:rgba(255,255,255,.08); border-color:var(--border-strong,#3a4058); }
-    .accounts-pagination__btn:disabled { opacity:.4; cursor:default; }
-    .accounts-pagination__size { background:rgba(59,130,246,.12); border-color:rgba(59,130,246,.4); }
-    .page-size-options {
-      display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:10px;
-      margin:14px 0;
-    }
-    .page-size-option {
-      appearance:none;
-      border:1px solid var(--border);
-      background:rgba(255,255,255,.03);
-      color:var(--text);
-      border-radius:10px;
-      padding:14px 10px;
-      font-size:.92rem;
-      font-weight:700;
-      cursor:pointer;
-      min-height:48px;
-      transition:background .15s ease,border-color .15s ease;
-    }
-    .page-size-option:hover { background:rgba(255,255,255,.08); }
-    .page-size-option.is-active { background:rgba(59,130,246,.18); border-color:rgba(59,130,246,.6); }
-    .accounts-table col.col-index { width:var(--acct-col-index); }
-    .accounts-table col.col-status { width:var(--acct-col-status); }
-    .accounts-table col.col-username { width:var(--acct-col-username); }
-    .accounts-table col.col-coin { width:var(--acct-col-coin); }
-    .accounts-table col.col-caught { width:var(--acct-col-caught); }
-    .accounts-table col.col-rare { width:var(--acct-col-rare); }
-    .accounts-table col.col-backpack { width:var(--acct-col-backpack); }
-    .accounts-table col.col-actions { width:var(--acct-col-actions); }
-    .accounts-table thead th,
-    .accounts-table tbody td {
-      padding:var(--acct-cell-py) var(--acct-cell-px);
-      border-bottom:1px solid rgba(42,48,64,.65);
-      vertical-align:middle;
-      box-sizing:border-box;
-    }
-    .accounts-table thead th {
-      text-align:left;
-      color:var(--muted);
-      font-size:.76rem;
-      font-weight:700;
-      letter-spacing:.04em;
-      text-transform:uppercase;
-      border-bottom:1px solid var(--border);
-      background:rgba(255,255,255,.02);
-      white-space:nowrap;
-    }
-    .accounts-table tbody td { white-space:nowrap; }
-    .accounts-table tbody tr:hover { background:rgba(255,255,255,.02); }
-    .accounts-table tbody tr.is-highlighted { background:rgba(59,130,246,.08); }
-    .accounts-table .col-index,
-    .accounts-table thead th.col-index,
-    .accounts-table tbody td.col-index {
-      text-align:center;
-    }
-    .accounts-table .col-status,
-    .accounts-table thead th.col-status,
-    .accounts-table tbody td.col-status {
-      text-align:center;
-    }
-    .accounts-table .col-username,
-    .accounts-table thead th.col-username,
-    .accounts-table tbody td.col-username {
-      text-align:left;
-      white-space:nowrap;
-    }
-    .accounts-table .col-coin,
-    .accounts-table .col-coins,
-    .accounts-table .col-caught,
-    .accounts-table .col-total-caught,
-    .accounts-table .col-rare,
-    .accounts-table .col-rarest-fish,
-    .accounts-table thead th.col-coin,
-    .accounts-table thead th.col-coins,
-    .accounts-table thead th.col-caught,
-    .accounts-table thead th.col-total-caught,
-    .accounts-table thead th.col-rare,
-    .accounts-table thead th.col-rarest-fish,
-    .accounts-table tbody td.col-coin,
-    .accounts-table tbody td.col-coins,
-    .accounts-table tbody td.col-caught,
-    .accounts-table tbody td.col-total-caught,
-    .accounts-table tbody td.col-rare,
-    .accounts-table tbody td.col-rarest-fish,
-    .accounts-table [data-col="coin"],
-    .accounts-table [data-col="total-caught"],
-    .accounts-table [data-col="rarest-fish"] {
-      text-align:center;
-    }
-    .accounts-table tbody td.col-coins,
-    .accounts-table tbody td.col-caught,
-    .accounts-table tbody td.col-rare,
-    .accounts-table tbody td.col-coin,
-    .accounts-table tbody td.col-total-caught,
-    .accounts-table tbody td.col-rarest-fish {
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-      max-width:0;
-    }
-    .accounts-table .col-backpack,
-    .accounts-table .col-actions,
-    .accounts-table thead th.col-backpack,
-    .accounts-table thead th.col-actions,
-    .accounts-table tbody td.col-backpack,
-    .accounts-table tbody td.col-actions {
-      text-align:center;
-    }
-    .accounts-table__index { color:var(--muted); }
-    .accounts-status {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:7px;
-      color:var(--muted);
-      font-size:.8rem;
-    }
-    .accounts-table__username { font-weight:700; }
-    .accounts-table__stat { font-weight:600; }
-    .accounts-table__stat.is-muted { color:var(--muted); font-weight:500; }
-    .accounts-table__stat.is-complete { color:#4ade80; font-weight:700; }
-    .accounts-table__stat-stack {
-      display:inline-flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      gap:1px;
-      line-height:1.15;
-      max-width:100%;
-    }
-    .coin-value,
-    .total-caught-value,
-    .rarest-fish-value {
-      text-align:center;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="coin"],
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="total-caught"],
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="rarest-fish"],
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-coin,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-total-caught,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-rarest-fish {
-      text-align:center;
-      justify-content:center;
-      align-items:center;
-      flex-direction:column;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="coin"] .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="total-caught"] .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="rarest-fish"] .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="coin"] .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="total-caught"] .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="rarest-fish"] .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-coin .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-total-caught .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-rarest-fish .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-coin .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-total-caught .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-rarest-fish .accounts-mobile-card__row-value {
-      min-width:0;
-      width:100%;
-      flex:0 0 auto;
-      text-align:center;
-      margin-left:auto;
-      margin-right:auto;
-    }
-    .accounts-table__sub { display:block; margin-top:2px; font-size:.72rem; color:var(--muted); }
-    .accounts-table__icon-btn {
-      width:34px;
-      height:34px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      border:1.5px solid var(--border);
-      background:var(--surface2);
-      color:var(--text);
-      border-radius:10px;
-      cursor:pointer;
-      padding:0;
-    }
-    .accounts-table__icon-btn:hover { border-color:#475569; }
-    .accounts-table__icon-btn .nav-icon,
-    .accounts-icon-btn .nav-icon {
-      width:18px;
-      height:18px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      background:transparent;
-      box-shadow:none;
-    }
-    .accounts-table__icon-btn .nav-icon svg,
-    .accounts-icon-btn .nav-icon svg {
-      width:16px;
-      height:16px;
-      stroke:currentColor;
-      stroke-width:2.2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-      fill:none;
-    }
-    .accounts-table__icon-btn--danger {
-      border-color:rgba(239,68,68,.45);
-      color:#fca5a5;
-      background:rgba(127,29,29,.18);
-    }
-    .accounts-table__icon-btn--danger:hover { background:rgba(153,27,27,.28); color:#fff; }
-    .accounts-table__empty {
-      padding:28px 16px;
-      text-align:center;
-      color:var(--muted);
-      font-size:.9rem;
-    }
-    .accounts-overview.is-inventory-only .accounts-table-wrap { display:none; }
-    .accounts-overview.is-inventory-only .accounts-mobile-list { display:none; }
-    .accounts-table .th-short { display:none; }
-    .accounts-mobile-list {
-      display:none;
-      flex-direction:column;
-      gap:10px;
-    }
-    .accounts-mobile-card {
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      padding:12px;
-      background:var(--surface);
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-    }
-    .accounts-mobile-card.is-highlighted {
-      border-color:var(--accent);
-      box-shadow:0 0 0 1px rgba(59,130,246,.25);
-    }
-    .accounts-mobile-card__top {
-      display:flex;
-      flex-wrap:wrap;
-      align-items:flex-start;
-      justify-content:flex-start;
-      gap:8px;
-    }
-    .accounts-mobile-card__account {
-      flex:1 1 auto;
-      min-width:0;
-      display:flex;
-      align-items:center;
-      gap:8px;
-    }
-    .accounts-mobile-card__label {
-      display:block;
-      font-size:.7rem;
-      color:var(--muted);
-      text-transform:uppercase;
-      letter-spacing:.04em;
-      font-weight:700;
-      margin-bottom:2px;
-    }
-    .accounts-mobile-card__username {
-      font-weight:700;
-      font-size:clamp(.8rem, 3.4vw, .95rem);
-      min-width:0;
-      line-height:1.3;
-      /* Wrap (up to 2 lines) instead of hard-truncating so phone users can read
-         the full name; the full value is also exposed via the title tooltip. */
-      overflow-wrap:anywhere;
-      word-break:break-word;
-      display:-webkit-box;
-      -webkit-line-clamp:2;
-      -webkit-box-orient:vertical;
-      overflow:hidden;
-    }
-    .accounts-mobile-card__actions {
-      display:flex;
-      gap:8px;
-      flex-shrink:0;
-    }
-    .accounts-mobile-card__grid {
-      display:grid;
-      gap:8px;
-      margin-top:0;
-      align-items:stretch;
-      text-align:left;
-    }
-    .accounts-mobile-card__grid--stats {
-      grid-template-columns:repeat(3,minmax(0,1fr));
-      gap:8px;
-      align-items:stretch;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row {
-      flex-direction:column;
-      align-items:center;
-      justify-content:flex-start;
-      gap:4px;
-      text-align:center;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row-label {
-      min-width:0;
-      width:100%;
-      text-align:center;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value-stack {
-      width:100%;
-      justify-content:center;
-    }
-    .accounts-mobile-card__row {
-      display:flex;
-      flex-wrap:wrap;
-      align-items:baseline;
-      gap:6px;
-      font-size:.82rem;
-      min-width:0;
-    }
-    .accounts-mobile-card__row-label {
-      color:var(--muted);
-      min-width:72px;
-      flex-shrink:0;
-    }
-    .accounts-mobile-card__row-value {
-      font-weight:600;
-      overflow-wrap:anywhere;
-      min-width:0;
-      flex:1 1 auto;
-    }
-    .accounts-mobile-card__row-value.is-muted { color:var(--muted); font-weight:500; }
-    /* Coin / Caught / Rare values must stay readable on narrow phones instead of
-       getting clipped. min-width:0 lets flex/grid children shrink, clamp() scales
-       the font down, and wrapping is allowed so values never overflow as "...". */
-    .accounts-mobile-card__grid--stats .coin-value,
-    .accounts-mobile-card__grid--stats .total-caught-value,
-    .accounts-mobile-card__grid--stats .rarest-fish-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value {
-      min-width:0;
-      max-width:100%;
-      overflow-wrap:anywhere;
-      word-break:break-word;
-      white-space:normal;
-      text-overflow:clip;
-      font-size:clamp(.74rem, 3vw, .9rem);
-      line-height:1.2;
-    }
-    @media (max-width:420px) {
-      .accounts-mobile-card__grid--stats {
-        grid-template-columns:repeat(3,minmax(0,1fr));
-        gap:6px;
-      }
-      .accounts-mobile-card__row-label {
-        min-width:0;
-      }
-      .accounts-mobile-card__username {
-        font-size:clamp(.78rem, 3.8vw, .92rem);
-      }
-      .accounts-mobile-card__grid--stats .coin-value,
-      .accounts-mobile-card__grid--stats .total-caught-value,
-      .accounts-mobile-card__grid--stats .rarest-fish-value,
-      .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value {
-        font-size:clamp(.7rem, 3.4vw, .82rem);
-      }
-    }
-    @media (max-width:340px) {
-      .accounts-mobile-card__grid--stats {
-        grid-template-columns:1fr 1fr;
-      }
-      .accounts-mobile-card__grid--stats .col-rarest-fish,
-      .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="rarest-fish"] {
-        grid-column:1 / -1;
-      }
-    }
-    .accounts-mobile-card__empty {
-      padding:28px 16px;
-      text-align:center;
-      color:var(--muted);
-      font-size:.9rem;
-    }
-    .inventory-view-section[hidden] { display:none !important; }
-    #trackerList .tracker-card { scroll-margin-top:84px; }
-
-    .inventory-grid,
-    .items-grid,
-    .fish-grid,
-    .stones-grid,
-    .stone-grid,
-    .totems-grid {
-      display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
-      gap:11px;
-      align-items:stretch;
-      justify-content:start;
-      margin-top:4px;
-    }
-
-    /* BLOCKER10ZP - flex-only fish cards + canonical rarity backgrounds */
-    <%= typeof trackerRarityCardCss !== 'undefined' ? trackerRarityCardCss : '' %>
-    .ft-card {
-      width:100%;
-      min-height:84px;
-      height:84px;
-      border-radius:10px;
-      padding:10px 12px;
-      display:flex;
-      align-items:center;
-      gap:10px;
-      overflow:hidden;
-      box-sizing:border-box;
-      position:relative;
-      border:1px solid rgba(255,255,255,.08);
-      color:#fff;
-      box-shadow:0 4px 14px rgba(0,0,0,.18);
-      transition:transform .15s,box-shadow .2s;
-    }
-    .ft-card.ft-card--enter { animation:fadeIn .2s ease; }
-    .ft-card:hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(0,0,0,.24); }
-    .ft-card--fish { max-width:240px; }
-    .ft-card-icon {
-      flex:0 0 54px;
-      width:54px;
-      height:54px;
-      border-radius:8px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      overflow:hidden;
-      background:rgba(255,255,255,.14);
-    }
-    .ft-card-icon img {
-      width:100%;
-      height:100%;
-      object-fit:contain;
-      display:block;
-      background:transparent!important;
-    }
-    .ft-card-icon img[data-placeholder="true"] { opacity:.55; }
-    .ft-card-main {
-      min-width:0;
-      flex:1;
-      display:flex;
-      flex-direction:column;
-      justify-content:center;
-      align-items:flex-start;
-    }
-    .ft-card-name {
-      max-width:100%;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      font-size:13px;
-      font-weight:800;
-      line-height:16px;
-      color:#fff;
-      text-shadow:0 1px 2px rgba(0,0,0,.45);
-    }
-    .ft-card-stats {
-      display:flex;
-      align-items:center;
-      gap:6px;
-      margin-top:6px;
-      flex-wrap:nowrap;
-      max-width:100%;
-    }
-    .ft-chip {
-      height:20px;
-      padding:0 7px;
-      border-radius:6px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:4px;
-      font-size:11px;
-      font-weight:700;
-      line-height:20px;
-      color:#fff;
-      background:rgba(0,0,0,.16);
-      white-space:nowrap;
-      flex-shrink:0;
-    }
-    .ft-chip-icon { width:12px; height:12px; color:#fff; flex-shrink:0; }
-    .ft-card-weight {
-      margin-top:5px;
-      font-size:11px;
-      line-height:14px;
-      color:rgba(255,255,255,.9);
-      white-space:nowrap;
-    }
-
-    .stones-section { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
-    .items-section { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
-    .stones-section__title {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.88rem;
-      color:#fff;
-      margin-bottom:10px;
-      font-weight:700;
-      letter-spacing:.01em;
-    }
-    .stones-section__title::before {
-      content:'';
-      width:8px;
-      height:8px;
-      border-radius:50%;
-      background:#a855f7;
-      flex-shrink:0;
-    }
-    .totems-section__title {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.88rem;
-      color:#fff;
-      margin-bottom:10px;
-      font-weight:700;
-      letter-spacing:.01em;
-    }
-    .totems-section__title::before {
-      content:'';
-      width:8px;
-      height:8px;
-      border-radius:50%;
-      background:#a855f7;
-      flex-shrink:0;
-    }
-    .items-subsection { margin-top:10px; }
-    .items-subsection:first-of-type { margin-top:0; }
-    .items-subsection__title {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.82rem;
-      color:#d8b4fe;
-      margin-bottom:8px;
-      font-weight:600;
-      letter-spacing:.01em;
-    }
-    .items-subsection__title.stones-section__title,
-    .items-subsection__title.totems-section__title {
-      color:#fff;
-      font-weight:700;
-      font-size:.88rem;
-      margin-bottom:10px;
-    }
-    .fish-section__title {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.88rem;
-      color:#fff;
-      margin-bottom:10px;
-      font-weight:700;
-      letter-spacing:.01em;
-    }
-    .fish-section__title::before {
-      content:'';
-      width:8px;
-      height:8px;
-      border-radius:50%;
-      background:#38bdf8;
-      flex-shrink:0;
-    }
-    .ft-card--stone {
-      min-height:72px;
-      height:72px;
-      background:#232833;
-      border:1px solid rgba(255,255,255,.06);
-    }
-    .ft-card--stone .ft-card-icon {
-      flex-basis:48px;
-      width:48px;
-      height:48px;
-      background:rgba(255,255,255,.08);
-    }
-    .ft-card--stone .ft-card-name { font-size:12px; font-weight:700; }
-    .ft-card--stone .ft-card-stats { margin-top:4px; }
-    .ft-card--totem {
-      min-height:72px;
-      height:72px;
-      background:#232833;
-      border:1px solid rgba(255,255,255,.06);
-    }
-    .ft-card--totem .ft-card-icon {
-      flex-basis:48px;
-      width:48px;
-      height:48px;
-      background:rgba(255,255,255,.08);
-    }
-    .ft-card--totem .ft-card-name { font-size:12px; font-weight:700; }
-    .ft-card--totem .ft-card-stats { margin-top:4px; }
-
-    .global-db-proof { margin-top:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface2); }
-    .global-db-proof summary { cursor:pointer; padding:8px 10px; font-size:.78rem; color:#93c5fd; user-select:none; }
-    .global-db-proof .gdb-body { padding:8px 10px 10px; font-size:.74rem; color:var(--muted); line-height:1.45; }
-    .global-db-proof .gdb-row { display:flex; justify-content:space-between; gap:8px; }
-    .global-db-proof .gdb-on { color:#4ade80; font-weight:600; }
-    .global-db-debug { margin-top:6px; font-size:.68rem; color:#8a94a6; max-height:120px; overflow:auto; }
-    @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
-
-    .badge { font-size:.72rem; padding:2px 9px; border-radius:99px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
-    .badge-weight  { color:var(--accent2); border-color:#1d3a5c; background:#0d1f30; }
-    .rarity-common    { color:#f8fafc; }
-    .rarity-uncommon  { color:#84cc16; border-color:#3f6212; background:#1a2e05; }
-    .rarity-rare      { color:#93c5fd; border-color:#1e3a8a; background:#0f172a; }
-    .rarity-epic      { color:#d8b4fe; border-color:#6b21a8; background:#3b0764; }
-    .rarity-legendary { color:#fb923c; border-color:#9a3412; background:#431407; }
-    .rarity-mythic    { color:#fca5a5; border-color:#991b1b; background:#450a0a; }
-    .rarity-secret, .badge-rarity-secret { color:#00ff7f; border-color:#047857; background:#022c22; }
-    .rarity-forgotten { color:#e5e7eb; border-color:#6b7280; background:#374151; }
-
-    .card-empty { text-align:center; padding:24px; color:var(--muted); font-size:.85rem; }
-
-    .inventory-search-row {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      margin:0 0 12px;
-    }
-    .inventory-search {
-      flex:1;
-      min-width:0;
-      display:flex;
-      align-items:center;
-      gap:8px;
-      padding:10px 12px;
-      border:1.5px solid var(--border);
-      border-radius:var(--radius);
-      background:var(--surface2);
-    }
-    .inventory-search__icon {
-      width:16px;
-      height:16px;
-      color:var(--muted);
-      flex-shrink:0;
-    }
-    .inventory-search__input {
-      flex:1;
-      min-width:0;
-      border:none;
-      background:transparent;
-      color:var(--text);
-      font-size:.9rem;
-      font-family:var(--font);
-      outline:none;
-    }
-    .inventory-search__input::placeholder { color:var(--muted); }
-    .inventory-search__clear {
-      border:none;
-      background:var(--surface);
-      color:var(--muted);
-      border-radius:8px;
-      padding:4px 10px;
-      font-size:.78rem;
-      font-family:var(--font);
-      cursor:pointer;
-      display:none;
-    }
-    .inventory-search__clear.is-visible { display:inline-flex; }
-    .inventory-search-empty {
-      text-align:center;
-      padding:18px 12px;
-      color:var(--muted);
-      font-size:.85rem;
-    }
-
-    .inventory-mode-tabs {
-      display:flex;
-      gap:8px;
-      margin-bottom:14px;
-      padding:4px;
-      border-radius:12px;
-      background:var(--surface);
-      border:1px solid var(--border);
-    }
-    .inventory-mode-tab {
-      flex:1;
-      border:none;
-      background:transparent;
-      color:var(--muted);
-      padding:10px 12px;
-      border-radius:9px;
-      font-weight:650;
-      font-family:var(--font);
-      cursor:pointer;
-      transition:background .15s,color .15s;
-    }
-    .inventory-mode-tab.is-active {
-      background:var(--surface2);
-      color:var(--text);
-      box-shadow:inset 0 0 0 1px var(--border);
-    }
-    .bulk-inventory-panel { margin-bottom:14px; }
-    .bulk-inventory-header {
-      font-size:.85rem;
-      color:var(--muted);
-      margin-bottom:10px;
-    }
-    .bulk-inventory-header strong { color:var(--text); }
-    .card-empty-sub {
-      display:block;
-      margin-top:6px;
-      font-size:.82rem;
-      color:var(--muted);
-    }
-    /* APK embed is a phone surface: keep the DESKTOP-style table but scroll it
-       horizontally so username/coin columns stay clear (no "dengh..."/"139..."). */
-    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-table-wrap {
-      display:block !important;
-      width:100%;
-      overflow-x:auto;
-      overflow-y:hidden;
-      -webkit-overflow-scrolling:touch;
-      scroll-behavior:smooth;
-    }
-    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:none !important; }
-    .inventory-apk-embed .loadstring-box:not(.loadstring-box--debug) { display:none !important; }
-    .inventory-apk-embed .page { padding-top:8px; padding-bottom:16px; }
-    .inventory-apk-embed .header {
-      display:flex;
-      flex-direction:row;
-      align-items:center;
-      justify-content:center;
-      gap:10px;
-      flex-wrap:nowrap;
-      min-width:0;
-      padding:8px 10px;
-      margin-bottom:12px;
-      text-align:left;
-      overflow:hidden;
-    }
-    .inventory-apk-embed .header h1 {
-      font-size:clamp(16px,4vw,22px);
-      line-height:1;
-      white-space:nowrap;
-      margin:0;
-      flex-shrink:0;
-    }
-    .inventory-apk-embed .header__lead {
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;
-      gap:5px;
-      max-width:none;
-      margin:0;
-      min-width:0;
-      font-size:clamp(11px,3vw,14px);
-      line-height:1;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .header__lead > span:last-of-type {
-      overflow:hidden;
-      text-overflow:ellipsis;
-      min-width:0;
-    }
-    .inventory-apk-embed .header__lead-icon {
-      width:14px;
-      height:14px;
-      margin-top:0;
-      flex-shrink:0;
-    }
-    .inventory-apk-embed .header__lead-icon svg {
-      width:14px;
-      height:14px;
-    }
-    .inventory-apk-embed .dashboard-stats {
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:8px;
-      margin-bottom:12px;
-    }
-    .inventory-apk-embed .dashboard-stats .stat-card {
-      min-width:0;
-      min-height:64px;
-      height:100%;
-      padding:10px 8px;
-      border-radius:14px;
-      justify-content:flex-start;
-    }
-    .inventory-apk-embed .dashboard-stats .stat-card__label {
-      font-size:9px;
-      letter-spacing:.03em;
-      line-height:1.05;
-      min-height:28px;
-      display:flex;
-      align-items:flex-start;
-      white-space:normal;
-    }
-    .inventory-apk-embed .dashboard-stats .stat-card__value {
-      margin-top:auto;
-      font-size:14px;
-      font-weight:700;
-      line-height:1;
-      white-space:nowrap;
-      display:flex;
-      align-items:flex-end;
-    }
-    .inventory-apk-embed .player-control-bar {
-      display:grid;
-      grid-template-columns:minmax(0,1fr) auto auto;
-      gap:8px;
-      align-items:center;
-      padding:10px;
-      overflow:visible;
-      min-width:0;
-      margin-bottom:10px;
-      position:relative;
-      z-index:40;
-    }
-    .inventory-apk-embed .player-control-bar input {
-      min-width:0;
-      width:100%;
-      height:40px;
-      min-height:40px;
-      padding:0 12px;
-      font-size:13px;
-      box-sizing:border-box;
-    }
-    .inventory-apk-embed .player-control-bar .btn-add,
-    .inventory-apk-embed .player-control-bar .btn-multiple {
-      height:40px;
-      min-height:40px;
-      padding:0 10px;
-      font-size:13px;
-      line-height:1;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .player-control-bar .tracker-username-actions {
-      grid-column:1 / -1;
-      min-width:0;
-    }
-    .inventory-apk-embed .player-control-bar .tracker-username-action-button {
-      flex:1 1 auto;
-      min-width:0;
-    }
-    .inventory-apk-embed .player-control-bar .username-error {
-      grid-column:1 / -1;
-      min-height:0;
-    }
-    .inventory-apk-embed .inventory-grid,
-    .inventory-apk-embed .items-grid,
-    .inventory-apk-embed .fish-grid,
-    .inventory-apk-embed .stones-grid,
-    .inventory-apk-embed .stone-grid,
-    .inventory-apk-embed .totems-grid {
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:10px;
-    }
-    .inventory-apk-embed .ft-card {
-      min-width:0;
-      padding:8px;
-      gap:8px;
-    }
-    .inventory-apk-embed .ft-card--fish {
-      height:72px;
-      min-height:72px;
-    }
-    .inventory-apk-embed .ft-card--stone {
-      height:68px;
-      min-height:68px;
-    }
-    .inventory-apk-embed .ft-card-icon {
-      flex:0 0 44px;
-      width:44px;
-      height:44px;
-    }
-    .inventory-apk-embed .ft-card--stone .ft-card-icon {
-      flex-basis:40px;
-      width:40px;
-      height:40px;
-    }
-    .inventory-apk-embed .ft-card-name {
-      font-size:12px;
-      line-height:1.2;
-    }
-    .inventory-apk-embed .ft-card-stats {
-      margin-top:4px;
-      gap:4px;
-    }
-    .inventory-apk-embed .ft-chip {
-      font-size:10px;
-      height:18px;
-      line-height:18px;
-      padding:0 5px;
-    }
-    .inventory-apk-embed .ft-card-weight {
-      margin-top:3px;
-      font-size:10px;
-      line-height:1.1;
-    }
-    .inventory-apk-embed .inventory-sidebar {
-      display:grid;
-      grid-template-columns:minmax(0,1fr);
-      grid-template-rows:auto auto;
-      align-items:center;
-      gap:6px;
-      padding:8px 10px;
-      overflow:hidden;
-      min-width:0;
-    }
-    .inventory-apk-embed .inventory-sidebar__top {
-      grid-column:1 / -1;
-      display:flex;
-      align-items:center;
-      gap:6px;
-      min-width:0;
-    }
-    .inventory-apk-embed .inventory-sidebar__spacer { display:none !important; }
-    .inventory-apk-embed .inventory-sidebar__bottom {
-      grid-column:1 / -1;
-      display:block;
-      min-width:0;
-    }
-    .inventory-apk-embed .profile-control-row {
-      display:flex;
-      align-items:center;
-      gap:6px;
-      min-width:0;
-      width:100%;
-    }
-    .inventory-apk-embed .profile-control-row > form {
-      display:flex;
-      margin:0;
-      min-width:0;
-      width:auto;
-      flex:0 0 auto;
-    }
-    .inventory-apk-embed .profile-control-row > .inventory-action-btn,
-    .inventory-apk-embed .profile-control-row > form .inventory-action-btn {
-      flex:0 0 auto;
-      min-width:0;
-      width:auto;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      margin:0;
-      box-sizing:border-box;
-      padding:0 8px;
-      border-radius:11px;
-      font-size:.62rem;
-      gap:4px;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .inventory-profile-card {
-      flex:1 1 auto;
-      min-width:0;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      margin:0;
-      box-sizing:border-box;
-      padding:0 8px;
-      gap:6px;
-      border-radius:11px;
-    }
-    .inventory-apk-embed .inventory-profile-card__meta {
-      min-width:0;
-      flex:1 1 auto;
-    }
-    .inventory-apk-embed .inventory-sidebar__top .inventory-sidebar__brand {
-      flex:0 0 auto;
-      width:auto;
-      max-width:42%;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      padding:0 8px;
-      box-shadow:none;
-    }
-    .inventory-apk-embed .inventory-sidebar__top .inventory-sidebar__subtitle { display:none; }
-    .inventory-apk-embed .inventory-sidebar__top .inventory-main-nav {
-      flex:1 1 auto;
-      min-width:0;
-      margin:0;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      align-self:stretch;
-    }
-    .inventory-apk-embed .inventory-sidebar__top .inventory-main-nav__tab {
-      padding:7px 6px;
-      font-size:.62rem;
-    }
-    .inventory-apk-embed .inventory-sidebar__privacy {
-      flex:0 0 auto;
-      width:auto;
-      min-width:0;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      margin:0;
-      padding:0 8px;
-      gap:6px;
-      border-radius:11px;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle__text--full { display:none; }
-    .inventory-apk-embed .inventory-privacy-toggle__text--short { display:inline; }
-    .inventory-apk-embed .hide-username-toggle {
-      width:24px;
-      height:14px;
-      flex:0 0 auto;
-    }
-    .inventory-apk-embed .hide-username-toggle::before {
-      width:10px;
-      height:10px;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle.is-active .hide-username-toggle::before {
-      transform:translateX(10px);
-    }
-    .inventory-apk-embed .inventory-sidebar__logo {
-      width:30px;
-      height:30px;
-      border-radius:8px;
-    }
-    .inventory-apk-embed .inventory-sidebar__logo img {
-      width:24px;
-      height:24px;
-    }
-    .inventory-apk-embed .inventory-sidebar__title {
-      font-size:.72rem;
-      line-height:1.05;
-    }
-    .inventory-apk-embed .inventory-sidebar__subtitle {
-      font-size:.58rem;
-      line-height:1;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle {
-      padding:0 6px;
-      gap:4px;
-      border-radius:11px;
-      font-size:.62rem;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle__label {
-      min-width:0;
-      gap:5px;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle__label > span:last-of-type {
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle__icon svg {
-      width:14px;
-      height:14px;
-    }
-    .inventory-apk-embed .inventory-profile-card {
-      padding:0 6px;
-      gap:5px;
-      border-radius:11px;
-    }
-    .inventory-apk-embed .inventory-profile-card__avatar,
-    .inventory-apk-embed .inventory-profile-card__avatar-placeholder {
-      width:24px;
-      height:24px;
-      border-radius:6px;
-    }
-    .inventory-apk-embed .inventory-profile-card__avatar-placeholder {
-      font-size:.68rem;
-    }
-    .inventory-apk-embed .inventory-profile-card__sub { display:none; }
-    .inventory-apk-embed .inventory-profile-card__name {
-      font-size:.72rem;
-      line-height:1.1;
-    }
-    .inventory-apk-embed .profile-control-row > .inventory-action-btn svg,
-    .inventory-apk-embed .profile-control-row > form .inventory-action-btn svg {
-      width:14px;
-      height:14px;
-      flex-shrink:0;
-    }
-    .inventory-apk-embed .accounts-toolbar {
-      display:flex;
-      flex-direction:row;
-      align-items:center;
-      flex-wrap:wrap;
-      gap:8px 6px;
-      padding:8px 10px;
-      overflow:visible;
-    }
-    .inventory-apk-embed .accounts-toolbar__controls {
-      display:contents;
-    }
-    .inventory-apk-embed .accounts-search {
-      flex:1 1 140px;
-      min-width:0;
-      width:auto;
-      min-height:38px;
-      height:38px;
-      padding:0 10px;
-      box-sizing:border-box;
-      gap:6px;
-    }
-    .inventory-apk-embed .accounts-search svg {
-      width:15px;
-      height:15px;
-    }
-    .inventory-apk-embed .accounts-search input {
-      font-size:13px;
-    }
-    .inventory-apk-embed .accounts-filters {
-      display:flex;
-      flex:0 0 auto;
-      min-width:0;
-      gap:4px;
-      flex-wrap:nowrap;
-      width:auto;
-    }
-    .inventory-apk-embed .accounts-filter {
-      flex:0 0 auto;
-      min-width:0;
-      height:38px;
-      min-height:38px;
-      padding:0 8px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-size:12px;
-      line-height:1;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .accounts-actions {
-      display:flex;
-      flex:1 1 100%;
-      width:100%;
-      min-width:0;
-      flex-wrap:nowrap;
-      gap:6px;
-      margin-left:0;
-      padding:6px;
-      box-sizing:border-box;
-      border:1.5px solid var(--border);
-      border-radius:12px;
-      background:var(--surface2);
-      align-items:center;
-      justify-content:flex-start;
-    }
-    .inventory-apk-embed .accounts-icon-btn {
-      width:38px;
-      height:38px;
-      min-width:38px;
-      min-height:38px;
-      padding:0;
-      border-radius:12px;
-      flex:0 0 38px;
-    }
-    .inventory-apk-embed .accounts-view-group {
-      display:inline-flex;
-      flex:0 0 auto;
-      width:auto;
-      min-width:0;
-      border-radius:12px;
-    }
-    .inventory-apk-embed .accounts-view-group .accounts-view-btn {
-      width:38px;
-      height:38px;
-      min-width:38px;
-      min-height:38px;
-      flex:0 0 38px;
-      padding:0;
-    }
-    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-table-wrap {
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
-      scroll-behavior:smooth;
-    }
-    .inventory-apk-embed .accounts-table {
-      table-layout:auto;
-      --acct-cell-py:6px;
-      --acct-cell-px:8px;
-      min-width:760px;
-      font-size:11px;
-    }
-    .inventory-apk-embed .accounts-table col { width:auto !important; }
-    .inventory-apk-embed .accounts-table .col-username,
-    .inventory-apk-embed .accounts-table thead th.col-username,
-    .inventory-apk-embed .accounts-table tbody td.col-username {
-      min-width:0;
-      overflow:visible;
-      text-overflow:clip;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .accounts-table thead th {
-      font-size:8px;
-      letter-spacing:.03em;
-      line-height:1.1;
-    }
-    .inventory-apk-embed .accounts-table tbody td {
-      font-size:11px;
-      line-height:1.1;
-    }
-    .inventory-apk-embed .accounts-table .th-full { display:none; }
-    .inventory-apk-embed .accounts-table .th-short { display:inline; }
-    .inventory-apk-embed .accounts-table__index { font-size:10px; }
-    .inventory-apk-embed .accounts-table__username { font-size:11px; font-weight:700; }
-    .inventory-apk-embed .accounts-status { gap:4px; max-width:100%; }
-    .inventory-apk-embed .accounts-status .status-dot {
-      width:7px;
-      height:7px;
-    }
-    .inventory-apk-embed .accounts-status__text {
-      font-size:10px;
-      line-height:1;
-    }
-    .inventory-apk-embed .accounts-table__stat { font-size:11px; font-weight:700; }
-    .inventory-apk-embed .accounts-table thead th.col-backpack,
-    .inventory-apk-embed .accounts-table thead th.col-actions {
-      font-size:7px;
-      line-height:1;
-    }
-    .inventory-apk-embed .accounts-table__icon-btn {
-      width:30px;
-      height:30px;
-      min-width:30px;
-      min-height:30px;
-      border-radius:8px;
-    }
-    .inventory-apk-embed .accounts-table__icon-btn svg,
-    .inventory-apk-embed .accounts-table__icon-btn .nav-icon svg {
-      width:14px;
-      height:14px;
-    }
-    .copy-status { font-size:.78rem; color:var(--muted); margin-top:8px; min-height:1.1em; }
-    .copy-status.is-error { color:var(--warn); }
-    .copy-status.is-success { color:var(--success); }
-    .inventory-skeleton-grid {
-      display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:8px;
-      margin-top:8px;
-    }
-    .inventory-skeleton-card {
-      height:104px;
-      border-radius:10px;
-      background:linear-gradient(90deg,var(--surface2) 25%,var(--surface) 50%,var(--surface2) 75%);
-      background-size:200% 100%;
-      animation:inventoryShimmer 1.2s ease-in-out infinite;
-    }
-    @keyframes inventoryShimmer {
-      0% { background-position:100% 0; }
-      100% { background-position:-100% 0; }
-    }
-    .inventory-offline-notice {
-      margin:8px 0 12px;
-      padding:8px 12px;
-      border-radius:9px;
-      border:1px solid rgba(245,158,11,.35);
-      background:rgba(245,158,11,.08);
-      color:#fbbf24;
-      font-size:.82rem;
-    }
-
-    .loadstring-box { margin-top:36px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
-    .header__lead {
-      display:flex;
-      align-items:flex-start;
-      justify-content:center;
-      gap:8px;
-      max-width:640px;
-      margin:0 auto;
-      color:var(--muted);
-      font-size:.9rem;
-      line-height:1.55;
-    }
-    .header__lead-icon,
-    .loadstring-box__icon {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      flex-shrink:0;
-      width:18px;
-      height:18px;
-      color:var(--accent2);
-      margin-top:1px;
-    }
-    .header__lead-icon svg,
-    .loadstring-box__icon svg {
-      width:18px;
-      height:18px;
-      stroke:currentColor;
-      fill:none;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-    }
-    .loadstring-box h3 {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.8rem;
-      color:var(--muted);
-      text-transform:uppercase;
-      letter-spacing:.06em;
-      margin-bottom:12px;
-    }
-    .loadstring-debug {
-      display:none;
-      margin-top:10px;
-      font-size:.72rem;
-      color:var(--muted);
-    }
-    .loadstring-debug.is-visible { display:block; }
-    .loadstring-debug .code-block { margin-top:6px; white-space:pre-wrap; }
-    .code-row { display:flex; gap:8px; align-items:stretch; }
-    .code-block { flex:1; font-family:'Consolas','Fira Code',monospace; font-size:.82rem; background:#0a0c10; border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; color:#93c5fd; overflow-x:auto; white-space:nowrap; }
-    textarea.code-block.code-block--script { width:100%; min-height:52px; resize:none; white-space:pre; overflow-x:auto; line-height:1.45; }
-    .btn-copy { padding:0 16px; background:var(--surface2); border:1.5px solid var(--border); border-radius:var(--radius); color:var(--text); cursor:pointer; font-size:.85rem; font-family:var(--font); font-weight:600; white-space:nowrap; transition:background .15s,border-color .15s,color .15s; }
-    .btn-copy:hover  { background:var(--accent); border-color:var(--accent); color:#fff; }
-    .btn-copy.copied { background:var(--success); border-color:var(--success); color:#fff; }
-
-    @media (min-width:769px) {
-      .inventory-shell { flex-direction:row; }
-      .inventory-sidebar.deng-app-sidebar {
-        display:flex;
-        flex-direction:column;
-      }
-      .inventory-sidebar {
-        width:var(--sidebar-w, 268px);
-        flex-shrink:0;
-        position:sticky;
-        top:0;
-        height:100vh;
-        padding:16px 12px;
-        border-bottom:none;
-        border-right:1px solid var(--border);
-      }
-      .inventory-sidebar__spacer { display:block; flex:1; }
-      .inventory-sidebar__bottom {
-        margin-top:auto;
-        padding-top:14px;
-        border-top:1px solid rgba(148,163,184,.22);
-      }
-      .inventory-sidebar__top {
-        flex-direction:column;
-        gap:10px;
-        margin-bottom:12px;
-      }
-      .inventory-sidebar__top .inventory-sidebar__brand {
-        width:100%;
-        max-width:none;
-        height:auto;
-        min-height:0;
-        max-height:none;
-        padding:8px 10px;
-        box-shadow:0 10px 28px rgba(0,0,0,.22);
-      }
-      .inventory-sidebar__top .inventory-sidebar__subtitle { display:block; }
-      .inventory-sidebar .inventory-main-nav--mobile,
-      .inventory-sidebar.deng-app-sidebar [data-mobile-tracker-tabs] {
-        display:none !important;
-      }
-      .inventory-sidebar__controls,
-      .profile-control-row {
-        display:grid;
-        gap:10px;
-        grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-        grid-template-areas:
-          "profile profile"
-          "hide hide"
-          "script logout";
-      }
-      .profile-control-row > .inventory-profile-card { grid-area:profile; }
-      .profile-control-row > .inventory-sidebar__privacy { grid-area:hide; }
-      .profile-control-row > .inventory-action-btn--script { grid-area:script; }
-      .profile-control-row > form { grid-area:logout; }
-      .profile-control-row > .inventory-action-btn,
-      .profile-control-row > form .inventory-action-btn {
-        width:100%;
-        min-height:40px;
-        height:auto;
-        max-height:none;
-      }
-      .inventory-profile-card {
-        flex:none;
-        height:auto;
-        min-height:56px;
-        max-height:none;
-        padding:10px 12px;
-      }
-      .inventory-sidebar__privacy {
-        width:100%;
-        height:auto;
-        min-height:0;
-        max-height:none;
-        padding:9px 12px;
-      }
-      .inventory-main .page {
-        align-items:stretch;
-        padding:32px 24px 64px;
-      }
-      .inventory-main .inner {
-        max-width:1040px;
-        margin:0 auto;
-      }
-      .loadstring-box.loadstring-box--desktop-hidden {
-        position:absolute;
-        width:1px;
-        height:1px;
-        padding:0;
-        margin:-1px;
-        overflow:hidden;
-        clip:rect(0,0,0,0);
-        white-space:nowrap;
-        border:0;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-table-wrap { display:block !important; }
-      .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:none !important; }
-      .accounts-table {
-        table-layout:fixed;
-        min-width:980px;
-        font-size:.88rem;
-        --acct-cell-py:12px;
-        --acct-cell-px:14px;
-        --acct-col-index:4%;
-        --acct-col-status:10%;
-        --acct-col-username:14%;
-        --acct-col-coin:13%;
-        --acct-col-caught:14%;
-        --acct-col-rare:13%;
-        --acct-col-backpack:11%;
-        --acct-col-actions:11%;
-      }
-      .accounts-table thead th,
-      .accounts-table tbody td {
-        padding:12px 14px;
-      }
-      .accounts-table thead th {
-        font-size:.76rem;
-        letter-spacing:.04em;
-        line-height:normal;
-      }
-      .accounts-table tbody td {
-        font-size:inherit;
-        line-height:normal;
-      }
-      .accounts-table .th-full { display:inline; }
-      .accounts-table .th-short { display:none !important; }
-      .accounts-table thead th.col-index,
-      .accounts-table tbody td.col-index,
-      .accounts-table__index { font-size:inherit; }
-      .accounts-table thead th.col-username,
-      .accounts-table tbody td.col-username {
-        overflow:visible;
-        text-overflow:clip;
-      }
-      .accounts-table__username { font-size:inherit; font-weight:700; }
-      .accounts-status { gap:7px; max-width:none; }
-      .accounts-status .status-dot {
-        width:10px;
-        height:10px;
-      }
-      .accounts-status__text {
-        font-size:.8rem;
-        line-height:normal;
-      }
-      .accounts-table__stat { font-size:inherit; font-weight:600; }
-      .accounts-table thead th.col-backpack,
-      .accounts-table thead th.col-actions {
-        font-size:.76rem;
-        line-height:normal;
-      }
-      .accounts-table__icon-btn {
-        width:34px;
-        height:34px;
-        min-width:34px;
-        min-height:34px;
-        border-radius:10px;
-      }
-      .accounts-table__icon-btn svg,
-      .accounts-table__icon-btn .nav-icon svg {
-        width:16px;
-        height:16px;
-      }
-    }
-    @media (max-width:768px) {
-      .inventory-main-nav--mobile { display:flex; }
-      .page { padding:16px 10px 32px; overflow-x:hidden; }
-      .inner { max-width:100%; }
-      .accounts-overview:not(.is-inventory-only) { --accounts-mobile-inline-gap:8px; }
-      .accounts-overview { margin-bottom:14px; }
-      .accounts-toolbar {
-        display:flex;
-        flex-direction:row;
-        align-items:center;
-        flex-wrap:wrap;
-        gap:8px 6px;
-        padding:8px 10px;
-        overflow:visible;
-      }
-      .accounts-toolbar__controls {
-        display:contents;
-      }
-      .accounts-search {
-        flex:1 1 140px;
-        min-width:0;
-        width:auto;
-        min-height:38px;
-        height:38px;
-        padding:0 10px;
-        box-sizing:border-box;
-        gap:6px;
-      }
-      .accounts-search svg { width:15px; height:15px; }
-      .accounts-search input { font-size:13px; }
-      .accounts-filters {
-        display:flex;
-        flex:0 0 auto;
-        min-width:0;
-        gap:4px;
-        flex-wrap:nowrap;
-        width:auto;
-      }
-      .accounts-filter {
-        flex:0 0 auto;
-        min-width:0;
-        width:auto;
-        height:38px;
-        min-height:38px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        text-align:center;
-        padding:0 8px;
-        font-size:12px;
-        line-height:1;
-        white-space:nowrap;
-      }
-      .accounts-actions {
-        display:flex;
-        flex:1 1 100%;
-        width:100%;
-        min-width:0;
-        flex-wrap:nowrap;
-        gap:6px;
-        margin-left:0;
-        padding:6px;
-        box-sizing:border-box;
-        border:1.5px solid var(--border);
-        border-radius:12px;
-        background:var(--surface2);
-        align-items:center;
-        justify-content:flex-start;
-      }
-      .accounts-icon-btn {
-        width:38px;
-        height:38px;
-        min-width:38px;
-        min-height:38px;
-        padding:0;
-        border-radius:12px;
-        flex:0 0 38px;
-      }
-      .accounts-view-group {
-        display:inline-flex;
-        flex:0 0 auto;
-        width:auto;
-        min-width:0;
-        border-radius:12px;
-      }
-      .accounts-view-group .accounts-view-btn {
-        flex:0 0 38px;
-        width:38px;
-        min-width:38px;
-        height:38px;
-        min-height:38px;
-      }
-      /* Narrow screens keep the DESKTOP-style table (clear columns) and scroll it
-         horizontally instead of squeezing columns into "dengh..."/"139....". The
-         wrap is a smooth horizontal scroll container; the table keeps natural
-         column widths with a readable min-width. Mobile cards are retired here. */
-      .accounts-overview:not(.is-inventory-only) .accounts-table-wrap {
-        display:block !important;
-        width:100%;
-        overflow-x:auto;
-        overflow-y:hidden;
-        -webkit-overflow-scrolling:touch;
-        scroll-behavior:smooth;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:none !important; }
-      .accounts-overview:not(.is-inventory-only) .accounts-table {
-        table-layout:auto !important;
-        min-width:760px;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-table col { width:auto !important; }
-      .accounts-overview:not(.is-inventory-only) .accounts-table th,
-      .accounts-overview:not(.is-inventory-only) .accounts-table td {
-        white-space:nowrap !important;
-        overflow:visible !important;
-        text-overflow:clip !important;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-table .col-username,
-      .accounts-overview:not(.is-inventory-only) .accounts-table td.col-username {
-        white-space:normal !important;
-        overflow-wrap:anywhere;
-        word-break:break-word;
-        min-width:72px;
-        max-width:120px;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-table__stat-sub,
-      .accounts-overview:not(.is-inventory-only) .accounts-status__text {
-        font-size:clamp(.58rem, 2.6vw, .68rem);
-        white-space:normal !important;
-        overflow-wrap:anywhere;
-        word-break:break-word;
-        line-height:1.15;
-        max-width:11ch;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-table__stat-main,
-      .accounts-overview:not(.is-inventory-only) .accounts-table__username {
-        font-size:clamp(.72rem, 3vw, .86rem);
-      }
-      .accounts-status { gap:4px; max-width:none; }
-      .accounts-status .status-dot {
-        width:8px;
-        height:8px;
-      }
-      .accounts-status__text {
-        font-size:11px;
-        line-height:1;
-      }
-      .accounts-table__icon-btn {
-        width:40px;
-        height:40px;
-        min-width:40px;
-        min-height:40px;
-        border-radius:10px;
-      }
-      .accounts-table__icon-btn svg,
-      .accounts-table__icon-btn .nav-icon svg {
-        width:16px;
-        height:16px;
-      }
-      .loadstring-box:not(.loadstring-box--debug) { display:none !important; }
-      .inventory-grid,
-      .items-grid,
-      .fish-grid,
-      .totems-grid {
-        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
-        gap:10px;
-      }
-      .stones-grid,
-      .stone-grid {
-        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
-        gap:10px;
-      }
-      .ft-card {
-        min-width:0;
-        padding:8px;
-        gap:8px;
-      }
-      .ft-card--fish {
-        max-width:none;
-        width:100%;
-        height:72px;
-        min-height:72px;
-      }
-      .ft-card--stone {
-        max-width:none;
-        width:100%;
-        height:68px;
-        min-height:68px;
-      }
-      .ft-card-icon {
-        flex:0 0 44px;
-        width:44px;
-        height:44px;
-      }
-      .ft-card--stone .ft-card-icon {
-        flex-basis:40px;
-        width:40px;
-        height:40px;
-      }
-      .ft-card-name {
-        font-size:12px;
-        line-height:1.2;
-      }
-      .ft-card-stats {
-        margin-top:4px;
-        gap:4px;
-      }
-      .ft-chip {
-        font-size:10px;
-        height:18px;
-        line-height:18px;
-        padding:0 5px;
-      }
-      .ft-card-weight {
-        margin-top:3px;
-        font-size:10px;
-        line-height:1.1;
-      }
-      .header {
-        display:flex;
-        flex-direction:row;
-        align-items:center;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:nowrap;
-        min-width:0;
-        padding:8px 10px;
-        margin-bottom:14px;
-        text-align:left;
-        overflow:hidden;
-      }
-      .header h1 {
-        font-size:clamp(16px,4vw,22px);
-        line-height:1;
-        white-space:nowrap;
-        margin:0;
-        flex-shrink:0;
-      }
-      .header__lead {
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        gap:5px;
-        max-width:none;
-        margin:0;
-        min-width:0;
-        font-size:clamp(11px,3vw,14px);
-        line-height:1;
-        white-space:nowrap;
-      }
-      .header__lead > span:last-of-type {
-        overflow:hidden;
-        text-overflow:ellipsis;
-        min-width:0;
-      }
-      .header__lead-icon {
-        width:14px;
-        height:14px;
-        margin-top:0;
-        flex-shrink:0;
-      }
-      .header__lead-icon svg {
-        width:14px;
-        height:14px;
-      }
-      .dashboard-stats {
-        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
-        gap:8px;
-        margin-bottom:14px;
-      }
-      .dashboard-stats .stat-card {
-        min-width:0;
-        min-height:64px;
-        height:100%;
-        padding:10px 8px;
-        border-radius:14px;
-        justify-content:flex-start;
-      }
-      .dashboard-stats .stat-card__label {
-        font-size:9px;
-        letter-spacing:.03em;
-        line-height:1.05;
-        min-height:28px;
-        display:flex;
-        align-items:flex-start;
-        white-space:normal;
-      }
-      .dashboard-stats .stat-card__value {
-        margin-top:auto;
-        font-size:14px;
-        font-weight:700;
-        line-height:1;
-        white-space:nowrap;
-        display:flex;
-        align-items:flex-end;
-      }
-      .player-control-bar {
-        display:grid;
-        grid-template-columns:minmax(0,1fr) auto auto;
-        gap:8px;
-        align-items:center;
-        padding:10px;
-        overflow:visible;
-        min-width:0;
-        position:relative;
-        z-index:40;
-      }
-      .player-control-bar input {
-        min-width:0;
-        width:100%;
-        height:40px;
-        min-height:40px;
-        padding:0 12px;
-        font-size:13px;
-        box-sizing:border-box;
-      }
-      .player-control-bar .btn-add,
-      .player-control-bar .btn-multiple {
-        height:40px;
-        min-height:40px;
-        padding:0 10px;
-        font-size:13px;
-        line-height:1;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        white-space:nowrap;
-      }
-      .player-control-bar .tracker-username-actions {
-        grid-column:1 / -1;
-        min-width:0;
-        overflow-x:auto;
-        -webkit-overflow-scrolling:touch;
-      }
-      .player-control-bar .tracker-username-action-button {
-        flex:1 1 auto;
-        min-width:0;
-        max-width:100%;
-      }
-      .player-control-bar .username-error {
-        grid-column:1 / -1;
-        min-height:0;
-      }
-      .inventory-sidebar {
-        display:grid;
-        grid-template-columns:minmax(0,1fr);
-        grid-template-rows:auto auto;
-        align-items:center;
-        gap:6px;
-        padding:8px 10px;
-        overflow:hidden;
-        min-width:0;
-      }
-      .inventory-sidebar__top {
-        grid-column:1 / -1;
-        display:flex;
-        flex-direction:row;
-        align-items:center;
-        gap:6px;
-        min-width:0;
-      }
-      .inventory-sidebar__top .inventory-sidebar__brand {
-        flex:0 0 auto;
-        width:auto;
-        max-width:42%;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-        padding:0 8px;
-        box-shadow:none;
-      }
-      .inventory-sidebar__top .inventory-sidebar__subtitle { display:none; }
-      .inventory-sidebar__top .inventory-main-nav {
-        flex:1 1 auto;
-        min-width:0;
-        margin:0;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-      }
-      .inventory-sidebar__top .inventory-main-nav__tab {
-        padding:7px 6px;
-        font-size:.62rem;
-      }
-      .inventory-sidebar__spacer { display:none !important; }
-      .inventory-sidebar__bottom {
-        grid-column:1 / -1;
-        display:block;
-        min-width:0;
-      }
-      .inventory-sidebar__controls,
-      .profile-control-row {
-        display:flex;
-        align-items:center;
-        gap:6px;
-        min-width:0;
-        width:100%;
-      }
-      .profile-control-row > form {
-        display:flex;
-        margin:0;
-        min-width:0;
-        width:auto;
-        flex:0 0 auto;
-      }
-      .profile-control-row > .inventory-action-btn,
-      .profile-control-row > form .inventory-action-btn {
-        flex:0 0 auto;
-        width:auto;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-        margin:0;
-        box-sizing:border-box;
-        padding:0 8px;
-        border-radius:11px;
-        font-size:.62rem;
-        gap:4px;
-        white-space:nowrap;
-      }
-      .profile-control-row > .inventory-profile-card {
-        flex:1 1 auto;
-        min-width:0;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-        margin:0;
-        box-sizing:border-box;
-        padding:0 8px;
-        gap:6px;
-        border-radius:11px;
-      }
-      .profile-control-row > .inventory-profile-card .inventory-profile-card__meta {
-        min-width:0;
-        flex:1 1 auto;
-      }
-      .inventory-sidebar__privacy {
-        flex:0 0 auto;
-        width:auto;
-        min-width:0;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-        margin:0;
-        padding:0 8px;
-        gap:6px;
-        border-radius:11px;
-      }
-      .inventory-privacy-toggle__text--full { display:none; }
-      .inventory-privacy-toggle__text--short { display:inline; }
-      .hide-username-toggle {
-        width:24px;
-        height:14px;
-        flex:0 0 auto;
-      }
-      .hide-username-toggle::before {
-        width:10px;
-        height:10px;
-      }
-      .inventory-privacy-toggle.is-active .hide-username-toggle::before {
-        transform:translateX(10px);
-      }
-      .inventory-sidebar__logo {
-        width:30px;
-        height:30px;
-        border-radius:8px;
-      }
-      .inventory-sidebar__logo img {
-        width:24px;
-        height:24px;
-      }
-      .inventory-sidebar__title {
-        font-size:.72rem;
-        line-height:1.05;
-      }
-      .inventory-sidebar__subtitle {
-        font-size:.58rem;
-        line-height:1;
-      }
-      .inventory-privacy-toggle {
-        padding:0 6px;
-        gap:4px;
-        border-radius:11px;
-        font-size:.62rem;
-      }
-      .inventory-privacy-toggle__label {
-        min-width:0;
-        gap:5px;
-      }
-      .inventory-privacy-toggle__label > span:last-of-type {
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-      .inventory-privacy-toggle__icon svg {
-        width:14px;
-        height:14px;
-      }
-      .inventory-profile-card {
-        padding:0 8px;
-        gap:6px;
-        border-radius:11px;
-      }
-      .inventory-profile-card__avatar,
-      .inventory-profile-card__avatar-placeholder {
-        width:24px;
-        height:24px;
-        border-radius:6px;
-      }
-      .inventory-profile-card__avatar-placeholder {
-        font-size:.68rem;
-      }
-      .inventory-profile-card__sub { display:none; }
-      .inventory-profile-card__name {
-        font-size:.72rem;
-        line-height:1.1;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-      .profile-control-row > .inventory-action-btn svg,
-      .profile-control-row > form .inventory-action-btn svg {
-        width:14px;
-        height:14px;
-        flex-shrink:0;
-      }
-      .dashboard-stats { gap:8px; }
-      .dashboard-stats .stat-card { padding:10px 8px; min-height:64px; }
-      .dashboard-stats .stat-card__label { font-size:8px; min-height:26px; }
-      .dashboard-stats .stat-card__value { font-size:14px; }
-      .inventory-main-nav { width:100%; }
-      .inventory-main-nav__tab { padding:8px 10px; font-size:.68rem; }
-      .dashboard-toolbar { margin-bottom:10px; }
-      .dashboard-chart { height:110px; }
-      .dashboard-period-filter__btn { padding:7px 9px; font-size:.64rem; }
-    }
-    @media (max-width:430px) {
-      .dashboard-stats { gap:6px; }
-      .dashboard-stats .stat-card {
-        padding:9px 6px;
-        border-radius:12px;
-        min-height:60px;
-      }
-      .dashboard-stats .stat-card__label { font-size:8px; line-height:1.05; min-height:26px; }
-      .dashboard-stats .stat-card__value { font-size:13px; line-height:1; white-space:nowrap; }
-      .inventory-apk-embed .dashboard-stats .stat-card { padding:9px 6px; min-height:60px; }
-      .inventory-apk-embed .dashboard-stats .stat-card__label { font-size:8px; line-height:1.05; min-height:26px; }
-      .inventory-apk-embed .dashboard-stats .stat-card__value { font-size:13px; line-height:1; white-space:nowrap; }
-    }
-    @media (max-width:280px) {
-      .inventory-grid,
-      .items-grid,
-      .fish-grid,
-      .stones-grid,
-      .stone-grid,
-      .totems-grid {
-        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
-        gap:6px;
-      }
-      .inventory-skeleton-grid {
-        grid-template-columns:1fr;
-      }
-      .accounts-actions { gap:4px; padding:4px; }
-      .accounts-filters { gap:4px; }
-      .accounts-filter { padding:0 7px; font-size:11px; }
-      .accounts-icon-btn,
-      .accounts-view-group .accounts-view-btn {
-        width:36px;
-        height:36px;
-        min-width:36px;
-        min-height:36px;
-        flex-basis:36px;
-      }
-    }
-    @media (max-width:900px) {
-      .dashboard-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    }
-    @media (max-width:560px) {
-      .dashboard-stats { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
-      .code-row { flex-direction:column; }
-      .btn-copy { padding:10px; }
-    }
-  </style>
-</head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11') %>">
-<div class="inventory-shell">
-  <aside class="inventory-sidebar sidebar deng-app-sidebar" aria-label="Main navigation">
-    <div class="inventory-sidebar__top">
-    <div class="sidebar-brand-block">
-      <span class="sidebar-brand-block__logo" aria-hidden="true">
-        <img src="/public/img/deng-logo.png" alt="">
-      </span>
-      <div class="sidebar-brand-block__text">
-        <div class="sidebar-brand-block__title">DENG Tracker</div>
-        <div class="sidebar-brand-block__subtitle">Fish It</div>
-      </div>
-    </div>
-    <div class="sidebar-divider" aria-hidden="true"></div>
-    <%- include('partials/deng-sidebar-nav', { sidebarNavMode: 'tracker' }) %>
-    <nav class="inventory-main-nav inventory-main-nav--mobile" data-mobile-tracker-tabs aria-label="Main sections">
-      <button type="button" class="inventory-main-nav__tab is-active" data-inventory-section="accounts">Live Tracker</button>
-      <button type="button" class="inventory-main-nav__tab" data-inventory-section="dashboard">Dashboard</button>
-    </nav>
-    </div>
-    <div class="inventory-sidebar__spacer" aria-hidden="true"></div>
-    <div class="inventory-sidebar__bottom">
-      <div class="inventory-sidebar__controls profile-control-row">
-      <div class="inventory-profile-card discord-profile-pill">
-        <% if (viewer.hasDiscordAvatar) { %>
-          <img src="<%= viewer.avatarUrl %>" alt="" class="inventory-profile-card__avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
-          <div class="inventory-profile-card__avatar-placeholder" style="display:none"><%= viewer.initial %></div>
-        <% } else { %>
-          <div class="inventory-profile-card__avatar-placeholder"><%= viewer.initial %></div>
-        <% } %>
-        <div class="inventory-profile-card__meta">
-          <div class="inventory-profile-card__name"><%= viewer.name %></div>
-          <div class="inventory-profile-card__sub"><%= viewer.profileLabel %></div>
-        </div>
-      </div>
-      <button type="button" class="inventory-privacy-toggle inventory-sidebar__privacy hide-username-toggle-btn" id="hideUsernamesBtn" title="Hide usernames" aria-label="Hide usernames" aria-pressed="false">
-        <span class="inventory-privacy-toggle__label">
-          <span class="inventory-privacy-toggle__icon" id="hideUsernameIcon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-          </span>
-          <span class="inventory-privacy-toggle__text inventory-privacy-toggle__text--full">Hide Username</span>
-          <span class="inventory-privacy-toggle__text inventory-privacy-toggle__text--short">Hide</span>
-        </span>
-        <span class="hide-username-toggle" aria-hidden="true"></span>
-      </button>
-      <button type="button" class="inventory-action-btn inventory-action-btn--script script-button" id="sidebarScriptBtn" title="Copy tracker script" aria-label="Copy tracker script">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M15 12h-5"></path>
-          <path d="M15 8h-5"></path>
-          <path d="M19 17V5a2 2 0 0 0-2-2H8"></path>
-          <path d="M5 21h12a2 2 0 0 0 2-2v-1H7a2 2 0 0 1-2-2V5a2 2 0 0 1-2 2v14a2 2 0 0 0 2 2Z"></path>
-        </svg>
-        <span>Script</span>
-      </button>
-      <form method="POST" action="<%= typeof logoutUrl !== 'undefined' ? logoutUrl : '/auth/logout' %>" class="profile-control-row__logout">
-        <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
-        <button type="button" class="inventory-action-btn inventory-action-btn--logout logout-button" data-logout-confirm title="Logout" aria-label="Logout">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <path d="M16 17l5-5-5-5"></path>
-            <path d="M21 12H9"></path>
-          </svg>
-          <span>Logout</span>
-        </button>
-      </form>
-      </div>
-    </div>
-  </aside>
-  <div class="inventory-main">
-<div class="page">
-  <div class="inner">
-
-    <header class="header">
-      <h1>DENG Tracker</h1>
-      <p class="header__lead">
-        <span class="header__lead-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-          </svg>
-        </span>
-        <span>Track Your Fish It Accounts</span>
-      </p>
-    </header>
-
-    <section id="inventoryDashboardPanel" class="inventory-panel inventory-panel--dashboard" hidden aria-label="Dashboard">
-      <div class="dashboard-toolbar">
-        <div class="dashboard-period-filter" role="tablist" aria-label="Dashboard period">
-          <button type="button" class="dashboard-period-filter__btn is-active" data-dashboard-period="all">ALL TIME</button>
-          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="30d">30D</button>
-          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="7d">7D</button>
-          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="ytd">YTD</button>
-          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="tdy">TDY</button>
-        </div>
-        <div class="dashboard-period-custom">
-          <button type="button" class="dashboard-period-custom__toggle" id="dashboardCustomToggle" aria-expanded="false" aria-controls="dashboardCustomPanel">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>
-            <span>Custom Range</span>
-          </button>
-          <div class="dashboard-period-custom__panel" id="dashboardCustomPanel" hidden>
-            <div class="dashboard-period-custom__field">
-              <label for="dashboardCustomFrom">From</label>
-              <input type="date" id="dashboardCustomFrom" aria-label="Custom start date">
-            </div>
-            <div class="dashboard-period-custom__field">
-              <label for="dashboardCustomTo">To</label>
-              <input type="date" id="dashboardCustomTo" aria-label="Custom end date">
-            </div>
-            <button type="button" class="dashboard-period-custom__apply" id="dashboardCustomApply">Apply</button>
-          </div>
-        </div>
-      </div>
-      <p class="dashboard-status-notice" id="dashboardStatusNotice" hidden role="status"></p>
-      <div class="inventory-stats dashboard-stats" aria-label="Global catch summary">
-        <div class="stat-card stat-card--secret">
-          <div class="stat-card__label">Secret Fish</div>
-          <div class="stat-card__value js-count-up" id="dashboardSecretCaught" data-count-format="integer" data-count-duration="1200">0</div>
-        </div>
-        <div class="stat-card stat-card--forgotten">
-          <div class="stat-card__label">Forgotten Fish</div>
-          <div class="stat-card__value js-count-up" id="dashboardForgottenCaught" data-count-format="integer" data-count-duration="1200">0</div>
-        </div>
-      </div>
-      <div class="dashboard-chart-card">
-        <h2 class="dashboard-chart-card__title">Fish Caught Per Day</h2>
-        <div class="dashboard-chart-wrap" id="dashboardChartWrap">
-          <svg class="dashboard-chart" id="dashboardChart" viewBox="0 0 320 132" preserveAspectRatio="none" aria-hidden="true"></svg>
-          <div class="dashboard-chart-labels" id="dashboardChartLabels"></div>
-        </div>
-        <p class="dashboard-chart-empty" id="dashboardChartEmpty" hidden>No catch data for this period.</p>
-      </div>
-      <div class="dashboard-fish-section">
-        <h2 class="dashboard-fish-section__title">Caught Fish</h2>
-        <div id="dashboardFishGrid" class="dashboard-fish-grid" aria-label="Fish caught in selected period"></div>
-        <p class="dashboard-fish-empty" id="dashboardFishEmpty" hidden>No fish caught in this period.</p>
-      </div>
-    </section>
-
-    <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" aria-label="Live Tracker">
-
-    <!-- Username controls sit ABOVE the top summary card grid so users can
-         add/remove accounts before the cards. -->
-    <div class="player-control-bar">
-      <input type="text" id="usernameInput" name="username" placeholder="Enter nickname..." maxlength="20" autocomplete="username" spellcheck="false" aria-label="Roblox nickname" aria-describedby="usernameError" inputmode="text">
-      <button class="btn btn-add" id="addBtn" type="button">+ Add</button>
-      <button class="btn btn-multiple" id="multipleBtn" type="button">+ Multiple</button>
-      <div class="tracker-username-actions" aria-label="Bulk username removal">
-        <button type="button" class="tracker-username-action-button tracker-username-action-button--offline" id="removeOfflineBtn">Remove Offline</button>
-        <button type="button" class="tracker-username-action-button tracker-username-action-button--nodata" id="removeNoDataBtn">Remove No Data</button>
-        <button type="button" class="tracker-username-action-button tracker-username-action-button--all tracker-username-action-danger" id="removeAllBtn">Remove All</button>
-      </div>
-      <div class="username-error" id="usernameError" role="status" aria-live="polite"></div>
-    </div>
-
-    <% var TTS = (typeof trackerTopSummaryIcons !== 'undefined' && trackerTopSummaryIcons) ? trackerTopSummaryIcons : { online: '/public/img/tracker/online_avatar.png', secret: null, forgotten: null, ruby: null, evolved: null, runic: null }; %>
-    <div class="inventory-stats tracker-top-summary-grid" id="inventoryStats" aria-label="Inventory summary">
-      <div class="tracker-top-summary-card tracker-top-summary-card--online">
-        <div class="tracker-top-summary-icon tracker-top-summary-icon--avatar"><img class="tracker-top-summary-img" src="<%= TTS.online %>" alt="Online accounts" decoding="async"></div>
-        <div class="tracker-top-summary-label">Online / Accounts</div>
-        <div class="tracker-top-summary-value tracker-online-value js-count-up" id="statOnlineAccounts" data-count-format="ratio" data-count-ratio-styled data-count-duration="1200"><span class="online-count">0</span><span class="separator"> / </span><span class="total-count">0</span></div>
-      </div>
-      <div class="tracker-top-summary-card tracker-top-summary-card--secret">
-        <div class="tracker-top-summary-icon"><% if (TTS.secret) { %><img class="tracker-top-summary-img" src="<%= TTS.secret %>" alt="Secret fish" decoding="async"><% } %></div>
-        <div class="tracker-top-summary-label">Secret Fish</div>
-        <div class="tracker-top-summary-value js-count-up" id="statSecretFish" data-count-format="integer" data-count-duration="1200">0</div>
-      </div>
-      <div class="tracker-top-summary-card tracker-top-summary-card--forgotten">
-        <div class="tracker-top-summary-icon"><% if (TTS.forgotten) { %><img class="tracker-top-summary-img" src="<%= TTS.forgotten %>" alt="Forgotten fish" decoding="async"><% } %></div>
-        <div class="tracker-top-summary-label">Forgotten Fish</div>
-        <div class="tracker-top-summary-value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="1200">0</div>
-      </div>
-      <div class="tracker-top-summary-card tracker-top-summary-card--ruby">
-        <div class="tracker-top-summary-icon"><% if (TTS.ruby) { %><img class="tracker-top-summary-img" src="<%= TTS.ruby %>" alt="Ruby Gemstone" decoding="async"><% } %></div>
-        <div class="tracker-top-summary-label">Ruby Gemstone</div>
-        <div class="tracker-top-summary-value js-count-up" id="statRubyGemstone" data-count-format="integer" data-count-duration="1200">0</div>
-      </div>
-      <div class="tracker-top-summary-card tracker-top-summary-card--stones">
-        <div class="tracker-top-summary-icon"><% if (TTS.evolved) { %><img class="tracker-top-summary-img" src="<%= TTS.evolved %>" alt="Evolved Enchant Stone" decoding="async"><% } %></div>
-        <div class="tracker-top-summary-label">Evolved Enchant Stone</div>
-        <div class="tracker-top-summary-value js-count-up" id="statEvolvedStones" data-count-format="integer" data-count-duration="1200">0</div>
-      </div>
-      <div class="tracker-top-summary-card tracker-top-summary-card--runic">
-        <div class="tracker-top-summary-icon"><% if (TTS.runic) { %><img class="tracker-top-summary-img" src="<%= TTS.runic %>" alt="Runic Stone" decoding="async"><% } %></div>
-        <div class="tracker-top-summary-label">Runic Stone</div>
-        <div class="tracker-top-summary-value js-count-up" id="statRunicStone" data-count-format="integer" data-count-duration="1200">0</div>
-      </div>
-    </div>
-
-    <div class="summary-bar" id="summaryBar">
-      <span id="summaryText">No players added yet</span>
-    </div>
-
-    <div id="multipleAddModal" class="modal-overlay" hidden aria-hidden="true">
-      <div class="modal-dialog" role="dialog" aria-labelledby="multipleAddModalTitle" aria-modal="true">
-        <h2 id="multipleAddModalTitle" class="modal-title">Add Multiple Accounts</h2>
-        <p class="modal-helper">Enter usernames separated by comma or new line.</p>
-        <p class="modal-example">Example: denghub2, player123, testaccount</p>
-        <textarea id="multipleAddTextarea" class="modal-textarea" rows="5" placeholder="denghub2, player123&#10;testaccount" spellcheck="false" autocomplete="off"></textarea>
-        <p class="modal-error" id="multipleAddError" role="alert" hidden></p>
-        <div class="modal-actions">
-          <button type="button" class="btn-modal-cancel" id="multipleAddCancel">Cancel</button>
-          <button type="button" class="btn-modal-submit" id="multipleAddSubmit">Add Accounts</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="pageSizeModal" class="modal-overlay" hidden aria-hidden="true">
-      <div class="modal-dialog" role="dialog" aria-labelledby="pageSizeModalTitle" aria-modal="true">
-        <h2 id="pageSizeModalTitle" class="modal-title">Players per page</h2>
-        <p class="modal-helper">Choose how many accounts to show per page.</p>
-        <div class="page-size-options" role="group" aria-label="Page size options">
-          <button type="button" class="page-size-option" data-page-size="20">20 players</button>
-          <button type="button" class="page-size-option" data-page-size="50">50 players</button>
-          <button type="button" class="page-size-option" data-page-size="100">100 players</button>
-          <button type="button" class="page-size-option" data-page-size="1000">1000 players</button>
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="btn-modal-cancel" id="pageSizeCancel">Close</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="removeAllModal" class="modal-overlay" hidden aria-hidden="true">
-      <div class="modal-dialog" role="dialog" aria-labelledby="removeAllModalTitle" aria-modal="true">
-        <h2 id="removeAllModalTitle" class="modal-title">Remove all usernames?</h2>
-        <p class="modal-helper">This will remove every username from your tracker list. This will not delete your Discord account.</p>
-        <p class="modal-error" id="removeAllError" role="alert" hidden></p>
-        <div class="modal-actions">
-          <button type="button" class="btn-modal-cancel" id="removeAllCancel">Cancel</button>
-          <button type="button" class="btn-modal-submit btn-modal-submit--danger" id="removeAllConfirm">Remove All</button>
-        </div>
-      </div>
-    </div>
-
-    <section class="accounts-overview" id="accountsOverview" aria-label="Tracked accounts">
-      <div class="accounts-toolbar">
-        <label class="accounts-search" for="accountsSearchInput">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-          <input id="accountsSearchInput" type="search" placeholder="Search players..." autocomplete="off" spellcheck="false" aria-label="Search players">
-        </label>
-        <div class="accounts-toolbar__controls">
-        <div class="accounts-filters" role="group" aria-label="Account status filters">
-          <button type="button" class="accounts-filter is-active" data-account-filter="all">All</button>
-          <button type="button" class="accounts-filter" data-account-filter="online">Online</button>
-          <button type="button" class="accounts-filter" data-account-filter="offline">Offline</button>
-        </div>
-        <div class="accounts-actions">
-          <div class="accounts-view-group" role="group" aria-label="View mode">
-            <button type="button" class="accounts-icon-btn accounts-view-btn is-active" id="viewTableBtn" title="Table view" aria-label="Table view">
-              <span class="accounts-view-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path d="M12 3v18"></path>
-                  <path d="M3 12h18"></path>
-                  <path d="M3 3h18v18H3z"></path>
-                </svg>
-              </span>
-            </button>
-            <button type="button" class="accounts-icon-btn accounts-view-btn" id="viewFishGridBtn" title="Fish grid" aria-label="Fish grid">
-              <span class="accounts-view-icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-fish" focusable="false" data-toolbar-icon="fish">
-                  <path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"></path>
-                  <path d="M18 12v.5"></path>
-                  <path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"></path>
-                  <path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"></path>
-                  <path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"></path>
-                  <path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"></path>
-                </svg>
-              </span>
-            </button>
-            <button type="button" class="accounts-icon-btn accounts-view-btn" id="viewStoneGridBtn" title="Item grid" aria-label="Item grid">
-              <span class="accounts-view-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path d="M12 3 20 8v8l-8 5-8-5V8l8-5Z"></path>
-                  <path d="M12 12 20 8"></path>
-                  <path d="M12 12v9"></path>
-                  <path d="M12 12 4 8"></path>
-                </svg>
-              </span>
-            </button>
-          </div>
-          <button type="button" class="accounts-icon-btn" id="copyUsernamesBtn" title="Copy all usernames" aria-label="Copy all usernames">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-          </button>
-          <button type="button" class="accounts-icon-btn" id="refreshAccountsBtn" title="Refresh accounts" aria-label="Refresh accounts">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
-          </button>
-        </div>
-        </div>
-      </div>
-      <div class="accounts-table-wrap" id="accountsTableWrap">
-        <table class="accounts-table" aria-label="Account leaderboard">
-          <colgroup>
-            <col class="col-index">
-            <col class="col-status">
-            <col class="col-username">
-            <col class="col-coin">
-            <col class="col-caught">
-            <col class="col-rare">
-            <col class="col-backpack">
-            <col class="col-actions">
-          </colgroup>
-          <thead>
-            <tr>
-              <th scope="col" class="col-index">#</th>
-              <th scope="col" class="col-status">Status</th>
-              <th scope="col" class="col-username"><span class="th-full">Username</span><span class="th-short">User</span></th>
-              <th scope="col" class="col-coins col-coin" data-col="coin"><span class="th-full">Coins</span><span class="th-short">Coin</span></th>
-              <th scope="col" class="col-caught col-total-caught" data-col="total-caught"><span class="th-full">Total Caught</span><span class="th-short">Caught</span></th>
-              <th scope="col" class="col-rare col-rarest-fish" data-col="rarest-fish"><span class="th-full">Rarest Fish</span><span class="th-short">Rare</span></th>
-              <th scope="col" class="col-backpack">Backpack</th>
-              <th scope="col" class="col-actions">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="accountsTableBody"></tbody>
-        </table>
-      </div>
-      <div class="accounts-mobile-list" id="accountsMobileList" aria-label="Account cards"></div>
-      <div class="accounts-pagination" id="accountsPagination" hidden>
-        <div class="accounts-pagination__info">
-          <span id="accountsPaginationRange">Showing 0 of 0 players</span>
-          <span class="accounts-pagination__dot" aria-hidden="true">·</span>
-          <span id="accountsPaginationPage">Page 1 of 1</span>
-        </div>
-        <div class="accounts-pagination__controls" role="group" aria-label="Table pagination">
-          <button type="button" class="accounts-pagination__btn" id="accountsPageFirst" aria-label="First page">&laquo; First</button>
-          <button type="button" class="accounts-pagination__btn" id="accountsPagePrev" aria-label="Previous page">&lsaquo; Prev</button>
-          <button type="button" class="accounts-pagination__btn" id="accountsPageNext" aria-label="Next page">Next &rsaquo;</button>
-          <button type="button" class="accounts-pagination__btn" id="accountsPageLast" aria-label="Last page">Last &raquo;</button>
-          <button type="button" class="accounts-pagination__btn accounts-pagination__size" id="accountsPageSizeBtn" aria-haspopup="dialog" aria-controls="pageSizeModal">20 / page</button>
-        </div>
-      </div>
-    </section>
-
-    <div id="inventoryViewSection" class="inventory-view-section" hidden>
-    <div id="bulkInventoryPanel" class="bulk-inventory-panel" hidden>
-      <div class="inventory-search-row" data-bulk-search-row>
-        <div class="inventory-search" role="search">
-          <svg class="inventory-search__icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-            <circle cx="11" cy="11" r="7"></circle>
-            <path d="m20 20-3.5-3.5"></path>
-          </svg>
-          <input class="inventory-search__input" type="search" placeholder="Search fish or stones..." autocomplete="off" spellcheck="false" aria-label="Search fish or stones" data-bulk-search-input>
-          <button class="inventory-search__clear" type="button" aria-label="Clear search" data-bulk-search-clear>Clear</button>
-        </div>
-      </div>
-      <div id="bulkInventoryBody"></div>
-    </div>
-
-    <div id="trackerList"></div>
-    </div>
-
-    </section>
-
-    <div class="loadstring-box<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? ' is-compact' : ' loadstring-box--desktop-hidden' %>">
-      <h3>
-        <span class="loadstring-box__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <polyline points="16 18 22 12 16 6"></polyline>
-            <polyline points="8 6 2 12 8 18"></polyline>
-          </svg>
-        </span>
-        <span>Executor Script &mdash; copy &amp; run in-game</span>
-      </h3>
-      <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="1" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
-        <button class="btn-copy" id="copyBtn" type="button">Copy</button>
-      </div>
-      <div class="copy-status" id="copyStatus" aria-live="polite"></div>
-    </div>
-<% if (typeof debugInventory !== 'undefined' && debugInventory && typeof debugTrackerLoadstring !== 'undefined' && debugTrackerLoadstring) { %>
-    <div class="loadstring-box loadstring-box--debug">
-      <h3>
-        <span class="loadstring-box__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <polyline points="16 18 22 12 16 6"></polyline>
-            <polyline points="8 6 2 12 8 18"></polyline>
-          </svg>
-        </span>
-        <span>Debug loader &mdash; admin only</span>
-      </h3>
-      <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringDebugCode" readonly rows="3" spellcheck="false" aria-label="Debug tracker loader with build proof"><%- debugTrackerLoadstring %></textarea>
-      </div>
-    </div>
-<% } %>
-
-  </div>
-</div>
-  </div>
-</div>
-<script>
-(function () {
-  'use strict';
-
-  const LS_KEY        = 'fishit_tracked_users';
-  const LS_BULK_CACHE = 'fishit_bulk_inventory_cache_v1';
-  // Lane-revision poll cadence. Kept well under the 60s visible-update SLA (and
-  // far under the worst-case end-to-end pipeline) so a new real status/leaderstats/
-  // inventory revision is picked up and rendered within a few seconds, never a
-  // minute. The per-second SYNC_TICK only advances the local "ago" countup; it
-  // never fabricates freshness — timers reset to "1s ago" ONLY when a newer real
-  // *Revision/reportId arrives from the backend.
+(function(){'use strict';function readInventoryCfg(){const el=document.getElementById('inventory-runtime');if(!el)return{};try{return JSON.parse(el.textContent||'{}');}catch(_){return{};}}const __CFG__=readInventoryCfg();
+const LS_KEY        = 'fishit_tracked_users';
+  const LS_BULK_CACHE = 'fishit_bulk_inventory_cache_v1';
   const TRACKER_POLL_INTERVAL_MS = 4_000;
   const POLL_MS = TRACKER_POLL_INTERVAL_MS;
   const SYNC_TICK_MS  = 1000;
@@ -3996,11 +8,9 @@
   let perfFirstApiMs = null;
   let perfApiPayloadBytes = 0;
   let perfInitialRequests = 0;
-  const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
-  const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
-  const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  // BLOCKER H — opt-in metadata debug overlay. Clean normal page; only active
-  // when ?debug=metadata is present in the URL.
+  const DEBUG_INVENTORY = !!__CFG__.debugInventory;
+  const APK_EMBED = !!__CFG__.apkEmbed;
+  const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
   const FT_DEBUG_METADATA = /(?:^|[?&])debug=metadata(?:&|$)/i.test(window.location.search);
   function ftRenderMetadataDebug(key, info) {
     if (!FT_DEBUG_METADATA) return;
@@ -4029,44 +39,31 @@
     }
     el.textContent = lines.join('\n');
   }
-  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11" %>';
-  const INITIAL_USERNAME = <%- JSON.stringify(typeof initialUsername !== 'undefined' ? initialUsername : '') %>;
-  const CSRF_CFG = <%- JSON.stringify(typeof csrfToken !== 'undefined' ? csrfToken : '') %>;
-  function readRuntimeCsrfToken() {
-    if (CSRF_CFG) return CSRF_CFG;
-    try {
-      const hidden = document.querySelector('input[name="_csrf"]');
-      if (hidden && hidden.value) return hidden.value;
-    } catch (_) { /* ignore */ }
-    return '';
-  }
+  const TRACKER_UI_DEPLOY = __CFG__.trackerUiDeployMarker || '';
+  const INITIAL_USERNAME = __CFG__.initialUsername || '';
+  const CSRF_CFG = __CFG__.csrfToken || '';
+  function readRuntimeCsrfToken(){if(CSRF_CFG)return CSRF_CFG;try{const hidden=document.querySelector('input[name=\"_csrf\"]');if(hidden&&hidden.value)return hidden.value;}catch(_){}return '';}
   const CSRF_TOKEN = readRuntimeCsrfToken();
   const LS_MIGRATED_KEY = 'fishit_tracked_users_migrated_v1';
-  const RENDER_BUILD  = DEBUG_INVENTORY
-    ? (document.documentElement.getAttribute('data-render-build') || '')
-    : '';
-  const PUBLIC_API_BUILD = DEBUG_INVENTORY
-    ? (document.documentElement.getAttribute('data-public-api-build') || '')
-    : '';
+  const RENDER_BUILD = DEBUG_INVENTORY ? (__CFG__.renderBuild || '') : '';
+  const PUBLIC_API_BUILD = DEBUG_INVENTORY ? (__CFG__.publicApiBuild || '') : '';
   const RARITY_NAME_COLORS = {
     common:'#f8fafc', uncommon:'#84cc16', rare:'#1e3a8a', epic:'#a855f7',
     legendary:'#ff8c00', legend:'#ff8c00', mythic:'#ef4444', secret:'#00ff7f', forgotten:'#e5e7eb',
   };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
-  const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
-  <%- typeof trackerRarityJsBootstrap !== 'undefined' ? trackerRarityJsBootstrap : 'const FT_RARITY_CLASS = { common:\'ft-rarity-COMMON\', uncommon:\'ft-rarity-UNCOMMON\', rare:\'ft-rarity-RARE\', epic:\'ft-rarity-EPIC\', legendary:\'ft-rarity-LEGENDARY\', legend:\'ft-rarity-LEGENDARY\', mythic:\'ft-rarity-MYTHIC\', secret:\'ft-rarity-SECRET\', forgotten:\'ft-rarity-FORGOTTEN\' }; function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || \'ft-rarity-COMMON\') : \'ft-rarity-COMMON\'; }' %>
+  const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };const FT_RARITY_CLASS = {"common":"ft-rarity-COMMON","uncommon":"ft-rarity-UNCOMMON","rare":"ft-rarity-RARE","epic":"ft-rarity-EPIC","legendary":"ft-rarity-LEGENDARY","legend":"ft-rarity-LEGENDARY","mythic":"ft-rarity-MYTHIC","secret":"ft-rarity-SECRET","forgotten":"ft-rarity-FORGOTTEN"};
+  function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || 'ft-rarity-COMMON') : 'ft-rarity-COMMON'; }
   const RARITY_ORDER = {
     Forgotten: 800, Secret: 700, Mythic: 600, Legendary: 500, Epic: 400,
     Rare: 300, Uncommon: 200, Common: 100, Unknown: 0,
   };
-  const STONE_TYPE_ORDER = { Normal: 10, Double: 20, Evolved: 30, Eggy: 40, Runic: 50 };
-  <%- typeof trackerStoneJsBootstrap !== 'undefined' ? trackerStoneJsBootstrap : 'const STONE_DISPLAY_NAMES = { Double: \'Transcended Stone\' };' %>
+  const STONE_TYPE_ORDER = { Normal: 10, Double: 20, Evolved: 30, Eggy: 40, Runic: 50 };const STONE_DISPLAY_NAMES = {"Normal":"Normal Enchant Stone","Double":"Transcended Stone","Evolved":"Evolved Enchant Stone","Eggy":"Eggy Enchant Stone","Runic":"Runic Enchant Stone"};
   const PEOPLE_ICON_SVG = '<svg class="card-chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>';
   const TIER_TO_RARITY = {
     1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic',
     5: 'Legendary', 6: 'Mythic', 7: 'Secret', 8: 'Forgotten',
   };
-
   const trackers       = new Map();
   let bulkSearchQuery  = '';
   let accountSearchQuery = '';
@@ -4134,8 +131,7 @@
   const loadstringCodeEl = document.getElementById('loadstringCode');
   const usernameErrorEl = document.getElementById('usernameError');
   const CLEAN_LOADSTRING = (loadstringCodeEl && loadstringCodeEl.value)
-    || '<%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring.replace(/'/g, "\\'").replace(/\\/g, "\\\\") : "" %>';
-
+    || (__CFG__.trackerLoadstring || '');
   function loadLegacyLocalUsernames() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
   }
@@ -4277,7 +273,6 @@
   async function persistTrackerRemoveAll() {
     const res = await inventoryAccountsRequest('', { method: 'DELETE' });
     if (!res.ok) return false;
-    // Tear down every local tracker entry; the server now reports an empty list.
     [...trackers.keys()].forEach((localKey) => {
       const entry = trackers.get(localKey);
       if (entry && entry.timer) clearInterval(entry.timer);
@@ -4291,21 +286,15 @@
     }
     return true;
   }
-
   const EMPTY_STAT = '\u2014';
   const TRACKER_READ_API = '/api/tracker';
   const EN_DASH = '\u2013';
-  const EM_DASH = '\u2014';
-  // Build marker — proves which bundle the logged-in /tracker actually loaded
-  // (console + window global) so a stale Cloudflare/browser-cached bundle is
-  // immediately detectable during live verification.
+  const EM_DASH = '\u2014';
   const TRACKER_BUILD_MARKER = 'INVENTORY_TEXT_ONLY_P0_2026_06_19';
   try {
     window.__TRACKER_BUILD_MARKER = TRACKER_BUILD_MARKER;
-    // eslint-disable-next-line no-console
     console.log('[tracker] build ' + TRACKER_BUILD_MARKER);
-  } catch (_) { /* non-browser */ }
-
+  } catch (_) {  }
   function trackerReadPath(pathOrUrl) {
     const value = String(pathOrUrl || '');
     if (value.startsWith('/api/fishit-tracker/')) {
@@ -4313,11 +302,9 @@
     }
     return value;
   }
-
   function isEmptyStatValue(value) {
     return value === EMPTY_STAT || value === '-' || value === '\u2014';
   }
-
   function markCardEnterAnimation(card) {
     if (!card || card.dataset.enterBound === '1') return;
     card.dataset.enterBound = '1';
@@ -4326,13 +313,11 @@
       card.classList.remove('ft-card--enter');
     }, { once: true });
   }
-
   function placeGridCardAtIndex(grid, card, idx) {
     if (!grid || !card) return;
     if (grid.children[idx] === card) return;
     grid.insertBefore(card, grid.children[idx] || null);
   }
-
   function setElementTextIfChanged(el, text, title) {
     if (!el) return;
     const next = String(text == null ? '' : text);
@@ -4342,7 +327,6 @@
       if (el.title !== t) el.title = t;
     }
   }
-
   function patchHtmlIfChanged(el, html) {
     if (!el) return;
     const next = String(html || '');
@@ -4350,7 +334,6 @@
     el.innerHTML = next;
     el.setAttribute('data-render-sig', next);
   }
-
   function patchCardImage(img, item, imgSrc, isFish, eagerLoad) {
     if (!img) return;
     const src = imgSrc || ITEM_IMAGES.Default;
@@ -4377,7 +360,6 @@
     if (assetId) img.setAttribute('data-asset-id', assetId);
     else img.removeAttribute('data-asset-id');
   }
-
   function patchFishCardDom(card, item, opts) {
     opts = opts || {};
     const cardKeyVal = card && card.getAttribute('data-card-key');
@@ -4417,7 +399,6 @@
       weightEl.remove();
     }
   }
-
   function patchStoneCardDom(card, item, opts) {
     opts = opts || {};
     const title = stoneDisplayName(item);
@@ -4437,7 +418,6 @@
     setElementTextIfChanged(card.querySelector('.ft-card-name'), title, title);
     patchHtmlIfChanged(card.querySelector('.ft-card-stats'), buildStoneStatsHtml(item, opts));
   }
-
   function escHtml(s) {
     return String(s)
       .replace(/&/g, '\u0026amp;')
@@ -4445,7 +425,6 @@
       .replace(/>/g, '\u0026gt;')
       .replace(/"/g, '\u0026quot;');
   }
-
   function formatQuantity(value) {
     const n = Number(value || 0);
     if (!Number.isFinite(n)) return '0';
@@ -4644,10 +623,7 @@
         });
         reconcileEntryPresence(entry, st, accountStatusServerNowMs);
         refreshLiveSnapshotInventoryFromEntry(entry, entry.lastData);
-        applyLiveSnapshotToPublicUi(entry, key, entry.lastData);
-        // Signature-gated resets: leaderstats/tracker reset only if the displayed
-        // coins/totalCaught actually changed; inventory keeps counting because a
-        // status-only payload reuses the preserved inventory (identical signature).
+        applyLiveSnapshotToPublicUi(entry, key, entry.lastData);
         maybeResetSectionTimers(entry);
       }
     });
@@ -4721,10 +697,7 @@
       }
     }
     return snapshot.hasLeaderstatsSnapshot === true;
-  }
-  // Looser leaderstats probe for raw account-status rows, which carry stats as
-  // top-level fields (coinsText/totalCaughtText/statsProven) rather than the
-  // nested playerStats/liveAccountStats shape hasLeaderstats() expects.
+  }
   function payloadHasLeaderstats(src) {
     if (!src || typeof src !== 'object') return false;
     if (hasLeaderstats(src)) return true;
@@ -4777,7 +750,6 @@
   function mergePreservedInventorySnapshot(previous, incoming) {
     if (!incoming || typeof incoming !== 'object') return previous || null;
     if (!previous) return incoming;
-
     if (entryHasInventoryRows(incoming)) {
       const merged = { ...previous, ...incoming, provenEmptyInventory: false };
       if (entryHasInventoryRows(previous) && !shouldReplaceCurrentSnapshot(incoming, previous)) {
@@ -4788,11 +760,9 @@
       }
       return merged;
     }
-
     if (incoming.provenEmptyInventory === true && !entryHasInventoryRows(previous)) {
       return { ...previous, ...incoming };
     }
-
     const merged = { ...previous, ...incoming };
     if (entryHasInventoryRows(previous) && !entryHasInventoryRows(incoming)) {
       for (let i = 0; i < INVENTORY_PRESERVE_KEYS.length; i += 1) {
@@ -4847,7 +817,6 @@
       }
       return merged;
     }
-
     return merged;
   }
   function resolveEntryPublicSnapshot(entry, dataOverride) {
@@ -4908,13 +877,7 @@
   function inventoryUploadStaleAfterSeconds(intervalSeconds) {
     const interval = Number(intervalSeconds) > 0 ? Number(intervalSeconds) : DEFAULT_UPLOAD_INTERVAL_SEC;
     return Math.max(interval + inventoryUploadGraceSeconds(interval), interval * 2.5);
-  }
-  // Canonical ONLINE threshold — mirrors backend ACCOUNT_ONLINE_THRESHOLD_MS
-  // (150s = 2.5x the 60s upload interval). GREEN only while a real heartbeat is
-  // within this window; past it the dot is RED. This is a presence threshold,
-  // NOT a poll interval, and must never be confused with the 10s live poll
-  // cadence. Kept tight so an account that stops uploading flips RED in ~2-3
-  // minutes instead of staying falsely green for 10 minutes.
+  }
   var ACCOUNT_PRESENCE_GRACE_MS = 150 * 1000;
   function presenceContactMsFrom(src) {
     if (!src || typeof src !== 'object') return 0;
@@ -4923,20 +886,14 @@
     if (!ts) return 0;
     var ms = new Date(ts).getTime();
     return Number.isFinite(ms) ? ms : 0;
-  }
-  // Monotonic + grace protection: an older/stale poll response must never flip a
-  // newer green account state to red, and within the 10-minute grace a fresh
-  // successful contact keeps the account green unless the server reports a
-  // confirmed offline (accountPresenceReason === 'client_offline').
+  }
   function reconcileEntryPresence(entry, incoming, serverNowMs) {
     if (!entry || !incoming || typeof incoming !== 'object') return;
     if (typeof incoming.accountPresenceLive !== 'boolean') return;
     var incomingLive = incoming.accountPresenceLive;
     var incomingMs = presenceContactMsFrom(incoming);
     var prevMs = Number(entry._presenceContactMs) || 0;
-    var nowMs = Number(serverNowMs) || Date.now();
-    // Server-asserted hard-red states that legitimately override the grace window:
-    // a confirmed client offline, an outdated loader, or an error status.
+    var nowMs = Number(serverNowMs) || Date.now();
     var serverHardRed = incoming.accountPresenceReason === 'client_offline'
       || incoming.accountStatusReason === 'client_offline'
       || incoming.accountPresenceReason === 'outdated_loader'
@@ -4946,12 +903,9 @@
       entry._presenceLive = true;
       entry._presenceContactMs = Math.max(prevMs, incomingMs);
     } else if (withinGrace && !serverHardRed) {
-      // Fresh contact within grace, not a confirmed offline — keep green.
       entry._presenceLive = true;
       entry._presenceContactMs = Math.max(prevMs, incomingMs);
-    } else if (incomingMs >= prevMs) {
-      // Honor the downgrade only when it is at least as fresh as the newest
-      // contact we already applied (defeats stale red-over-green poll races).
+    } else if (incomingMs >= prevMs) {
       entry._presenceLive = false;
       entry._presenceContactMs = Math.max(prevMs, incomingMs);
     }
@@ -4959,14 +913,7 @@
     if (entry.uploadStatus && typeof entry.uploadStatus === 'object') entry.uploadStatus.accountPresenceLive = live;
     if (entry.lastData && typeof entry.lastData === 'object') entry.lastData.accountPresenceLive = live;
   }
-  function isAccountPresent(entry) {
-    // Indicator 1: account is GREEN only when online and in game (binary
-    // presence), RED otherwise. No orange/stale state, never derived from
-    // fish/stone upload or stats freshness.
-    // AUTHORITATIVE FIRST: the read API computes presence fresh at serve time
-    // from the real heartbeat timestamp (tight 150s window). It overrides any
-    // client latch or stale baked accountPresenceLive so an offline account can
-    // never stay falsely green and a churn-frozen body can never lie.
+  function isAccountPresent(entry) {
     if (entry && entry._auth && typeof entry._auth.isOnline === 'boolean') return entry._auth.isOnline;
     if (entry && typeof entry._presenceLive === 'boolean') return entry._presenceLive;
     const st = entryUploadStatus(entry);
@@ -4978,7 +925,6 @@
   function isEntryStatusGreen(entry) {
     return isTrackerAccountOnline(entry, Date.now());
   }
-  // Newest successful presence contact across every signal we hold for an entry.
   function trackerPresenceContactMs(entry) {
     if (!entry) return 0;
     let best = Number(entry._presenceContactMs) || 0;
@@ -4988,18 +934,9 @@
       if (ms > best) best = ms;
     }
     return best;
-  }
-  // SINGLE source of truth for "is this account online?" — used by BOTH the
-  // visible row/dot status AND the ONLINE/ACCOUNTS summary count so they can
-  // never disagree. Green when any authoritative presence signal is live, or
-  // when the last successful contact is still inside the 10-minute grace and
-  // the server has not confirmed a hard-offline. A failed/intermittent refresh
-  // within grace does NOT drop the account.
+  }
   function isTrackerAccountOnline(entry, nowMs) {
-    if (!entry) return false;
-    // AUTHORITATIVE FIRST: serve-time presence from the read API. No client grace
-    // or latch can override it — green strictly mirrors a real heartbeat inside
-    // the backend online window.
+    if (!entry) return false;
     if (entry._auth && typeof entry._auth.isOnline === 'boolean') return entry._auth.isOnline;
     const now = Number(nowMs) || Date.now();
     const st = entryUploadStatus(entry);
@@ -5034,9 +971,7 @@
     if (!data) return null;
     return data.lastSnapshotUploadAt || data.lastInventoryAt || null;
   }
-  function entryInventoryRedSince(entry) {
-    // Indicator 3 red duration: tied only to the fish/stone upload window,
-    // never to account online/offline status.
+  function entryInventoryRedSince(entry) {
     const st = entryUploadStatus(entry);
     if (st && typeof st.inventoryUploadFresh === 'boolean') {
       if (st.inventoryUploadFresh) return null;
@@ -5053,9 +988,7 @@
     if (data && data.statsUploadFresh === false) return false;
     return syncFreshnessFromTimestamp(entryStatsUploadTimestamp(entry)) === 'live';
   }
-  function isInventoryUploadFresh(entry) {
-    // Indicator 3: GREEN only when the fish/stone snapshot upload succeeded
-    // this interval. Decoupled from account presence and stats freshness.
+  function isInventoryUploadFresh(entry) {
     const st = entryUploadStatus(entry);
     if (st && typeof st.inventoryUploadFresh === 'boolean') return st.inventoryUploadFresh;
     const data = entry && entry.lastData;
@@ -5094,16 +1027,7 @@
   }
   function pad2(value) {
     return String(Math.max(0, Math.floor(Number(value) || 0))).padStart(2, '0');
-  }
-  // SINGLE canonical timer formatter shared by the status, leaderstats and
-  // inventory timers. Renders "<age> ago" with at most TWO units and no
-  // unnecessary zero unit:
-  //   seconds:        "1s ago", "59s ago"
-  //   minutes+secs:   "1m 2s ago", "6m 30s ago"   (drops " 0s" → "5m ago")
-  //   hours+minutes:  "1H 2m ago", "5H 10m ago"   (drops " 0m" → "2H ago")
-  //   days only:      "1D ago", "2D ago"          (no smaller unit)
-  // Driven only by an authoritative backend age (ms / seconds) so it is identical
-  // across devices, sessions, refreshes and browsers.
+  }
   function formatAgeAgo(ms) {
     const totalSecs = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
     if (totalSecs < 60) {
@@ -5122,9 +1046,7 @@
     const d = Math.floor(totalSecs / 86400);
     return `${d}D ago`;
   }
-  function formatAgeAgoSeconds(secs) {
-    // null/undefined/'' mean "no authoritative event timestamp" -> render blank.
-    // Never coerce a missing age to 0 (would fake a fresh "1s ago").
+  function formatAgeAgoSeconds(secs) {
     if (secs == null || secs === '') return '';
     const n = Number(secs);
     if (!Number.isFinite(n) || n < 0) return '';
@@ -5359,10 +1281,7 @@
     const rare = s.rarestFishChance || '';
     return `${caught}|${coins}|${rare}`;
   }
-  function touchCaughtActivityState(entry, stats, nowIso) {
-    // Indicator 2 timer: reset to 1s only when a tracked stat value
-    // (Total Caught / Coin / Rarest Fish) actually changes; otherwise keep
-    // counting up from the last change.
+  function touchCaughtActivityState(entry, stats, nowIso) {
     if (!entry) return;
     const sig = statsActivitySignature(stats);
     if (sig == null) return;
@@ -5377,9 +1296,7 @@
       entry._lastCaughtIncreaseAt = now;
     }
   }
-  function entryStatsChangeAt(entry) {
-    // Prefer the backend-saved change timestamp so a browser refresh keeps the
-    // real elapsed time instead of resetting the timer.
+  function entryStatsChangeAt(entry) {
     const data = entry && entry.lastData;
     if (data && data.lastStatsChangeAt) return data.lastStatsChangeAt;
     const st = entryUploadStatus(entry);
@@ -5400,11 +1317,7 @@
       return `${hrs}h ${pad2(remMins)}m`;
     }
     return `${Math.floor(secs / 86400)}D`;
-  }
-  // User-facing refresh timer: tracks when THIS browser last successfully
-  // received renderable tracker data for the entry. In-memory only — never
-  // persisted to localStorage and never seeded from a cached/local snapshot,
-  // so a reload starts fresh and only resets once a real fetch succeeds.
+  }
   function markEntryFrontendRefreshed(entry) {
     if (!entry) return;
     entry._frontendRefreshAt = Date.now();
@@ -5415,15 +1328,9 @@
   }
   function formatFrontendRefreshAgeText(entry) {
     const ageMs = getEntryFrontendRefreshAgeMs(entry);
-    if (ageMs == null) return '';
-    // Layer 1 format: "1s ago" / "1m 2s ago" / "1H 2m ago" / "1D ago".
-    // formatAgeAgoSeconds already emits exactly that for s/m/H/D ranges.
+    if (ageMs == null) return '';
     return formatAgeAgoSeconds(Math.max(1, Math.floor(ageMs / 1000)));
-  }
-  // Per-section frontend-receive timers. Same in-memory-only contract as the
-  // tracker timer above: each resets only when THIS browser renders fresh data
-  // for that specific section, is never seeded from a cached snapshot and is
-  // never persisted, so a reload starts blank and a refresh shows ~1s.
+  }
   function markEntryLeaderstatsRefreshed(entry) {
     if (!entry) return;
     entry._leaderstatsFrontendRefreshAt = Date.now();
@@ -5449,14 +1356,7 @@
     const ageMs = getEntryInventoryRefreshAgeMs(entry);
     if (ageMs == null) return '';
     return formatAgeAgoSeconds(Math.max(1, Math.floor(ageMs / 1000)));
-  }
-  // ---------------------------------------------------------------------------
-  // Displayed-dataset signatures. The visible freshness timers must reset ONLY
-  // when the data shown on screen actually changes to a newer effective dataset
-  // — never on a bare successful poll, a preserved/fallback snapshot, a status-
-  // only payload, or a cache-bust fetch that returned identical data. We capture
-  // a stable signature of what the user sees and only mark a section refreshed
-  // when its signature changes.
+  }
   function stableStringify(value) {
     if (value === null || typeof value !== 'object') return JSON.stringify(value);
     if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
@@ -5497,14 +1397,7 @@
       leaderstats: buildLeaderstatsSignature(entry),
       inventory: buildInventorySignature(data),
     });
-  }
-  // Reset each visible timer only when its displayed signature changes. Gated on
-  // renderability so empty/status-only payloads never seed a phantom timer, and
-  // a preserved-snapshot merge that produced identical displayed data leaves the
-  // timer counting up. Pure 4394cfd frontend-receive model: every signature
-  // change marks "this browser just rendered fresher data" via plain
-  // markEntry*Refreshed — NEVER seeded from backend age (backend age is for the
-  // dot only, Layer 2).
+  }
   function maybeResetSectionTimers(entry) {
     if (!entry) return;
     const data = entry.lastData;
@@ -5529,24 +1422,14 @@
         markEntryInventoryRefreshed(entry);
       }
     }
-  }
-  // Debug/proof only: real time since the last status/leaderstats/inventory
-  // upload. Kept so backend freshness stays inspectable even though it no longer
-  // drives the visible Status/leaderstats/inventory timers.
-  // Age computed from an absolute authoritative backend timestamp (ISO string).
-  // Advances only with real elapsed time, identical across sessions/devices, and
-  // never resets on refresh/poll. Returns null for missing/invalid timestamps so
-  // the formatter renders a blank timer (never a fake "1s ago").
+  }
   function authAgeSecondsFromTs(ts) {
     if (!ts) return null;
     const ms = Date.parse(ts);
     if (!Number.isFinite(ms)) return null;
     return Math.max(0, Math.floor((Date.now() - ms) / 1000));
   }
-  function backendPresenceAgeSeconds(entry) {
-    // AUTHORITATIVE: prefer the read API's real last-status timestamp. This is the
-    // single source the dot's online window is derived from, so timer and dot can
-    // never disagree, and a churn-frozen/baked value can never fake a fresh age.
+  function backendPresenceAgeSeconds(entry) {
     if (entry && entry._auth && entry._auth.lastRealStatusAt) {
       const a = authAgeSecondsFromTs(entry._auth.lastRealStatusAt);
       if (a != null) return a;
@@ -5568,41 +1451,22 @@
       if (a != null) return a;
     }
     return liveSecondsSinceInventorySuccess(entry);
-  }
-  // Server-timestamp freshness (2026-06-19 P0). The visible per-lane timer is the
-  // age of the lane's last REAL successful upload/snapshot, computed as
-  // now - serverTimestamp. Source of truth = the read API's identity-gated
-  // lastReal* timestamps (which advance on every FRESH upload regardless of
-  // whether fish/item/stat CONTENT changed — an online idle user stays fresh),
-  // and NEVER reset on page load, login, new device, poll, or render. Frontend
-  // receive time is no longer a freshness source.
+  }
   function formatBackendAgeText(ageSeconds) {
     if (ageSeconds == null || !Number.isFinite(ageSeconds)) return '';
     return formatAgeAgoSeconds(Math.max(1, Math.floor(ageSeconds)));
   }
-  function formatPresenceStatusText(entry) {
-    // Status lane timer: age since the last real status/heartbeat report
-    // (lastRealStatusAt). Does not decide the dot color (that is isTrackerAccountOnline),
-    // but shares the same authoritative server timestamp so they can never disagree.
+  function formatPresenceStatusText(entry) {
     return formatBackendAgeText(backendPresenceAgeSeconds(entry));
   }
-  function formatStatsUploadDurationText(entry) {
-    // Leaderstats lane timer: age since the last real leaderstats upload
-    // (lastRealLeaderstatsAt). Resets on every successful leaderstats upload even
-    // if coins/totalCaught/rarest are unchanged.
+  function formatStatsUploadDurationText(entry) {
     return formatBackendAgeText(backendStatsAgeSeconds(entry));
   }
   function formatCaughtActivitySub(entry) {
     return formatStatsUploadDurationText(entry);
-  }
-  // Layer 1 (4394cfd model) is pure frontend-receive: visible timers are NEVER
-  // seeded from backend age. A reload starts blank and only resets once this
-  // browser actually receives renderable data. The dot (Layer 2) is the only
-  // surface that reads backend age, so offline/no-data accounts read "" here
-  // and the dot stays red regardless. These no-ops are kept so any latent call
-  // site is harmless; the real seeding has been removed.
-  function seedTimersFromBackend(_entry) { /* no-op (Layer 1 = frontend-receive) */ }
-  function seedOfflineTimersFromBackend(_entry) { /* no-op (Layer 1 = frontend-receive) */ }
+  }
+  function seedTimersFromBackend(_entry) {  }
+  function seedOfflineTimersFromBackend(_entry) {  }
   function formatMinimalSyncDuration(timestamp) {
     const label = formatTableSyncAge(timestamp);
     if (!label || label === 'no sync') return '';
@@ -5616,12 +1480,7 @@
     return formatStatsSyncAgeSub(entry);
   }
   function formatEntrySyncStatusText(entry) {
-    if (!entry) return '';
-    // Inventory lane timer (fish grid / item grid / individual backpack): age
-    // since the last real inventory snapshot/precompute (lastRealInventoryAt).
-    // Resets on every successful inventory upload even when fish/item content is
-    // unchanged; status-only polls do not advance it (server keeps the lane
-    // timestamp separate).
+    if (!entry) return '';
     return formatBackendAgeText(backendInventoryAgeSeconds(entry));
   }
   function formatInventoryUploadLabel(entry) {
@@ -5638,10 +1497,7 @@
   function formatEntrySyncStatusLine(entry) {
     return formatEntrySyncStatusText(entry);
   }
-  function entryConnectionFreshness(entry) {
-    // Binary account-state freshness routed through the SAME shared online
-    // predicate as the summary count so the green dot and the ONLINE/ACCOUNTS
-    // tally are always consistent.
+  function entryConnectionFreshness(entry) {
     return isTrackerAccountOnline(entry, Date.now()) ? 'live' : 'dead';
   }
   function formatStatsSyncAgeSub(entry) {
@@ -5678,10 +1534,7 @@
     const statusEl = root.querySelector('[data-table-status-dot]');
     const syncEl = ensureSinglePresenceSyncEl(root);
     const fresh = entryConnectionFreshness(entry);
-    if (statusEl) {
-      // Only mutate the class when the state actually changes. Re-adding the same
-      // class every 1s tick restarts the CSS pulse animation and makes the dot
-      // visibly blink; guarding it keeps the animation continuous.
+    if (statusEl) {
       const want = fresh === 'live' ? 'live' : 'dead';
       if (!statusEl.classList.contains(want)) {
         statusEl.classList.remove('live', 'stale', 'dead');
@@ -5694,9 +1547,7 @@
       }
     }
     if (syncEl) {
-      const txt = formatPresenceStatusText(entry);
-      // Authoritative age only. No fake "1s" fallback — a never-seen / no-data
-      // account shows no fabricated fresh timer.
+      const txt = formatPresenceStatusText(entry);
       if (syncEl.textContent !== txt) syncEl.textContent = txt;
       const backendSecs = backendPresenceAgeSeconds(entry);
       if (backendSecs != null) syncEl.setAttribute('data-backend-presence-age', String(backendSecs));
@@ -5914,10 +1765,7 @@
     syncEntryFromLiveSnapshot(entry);
     touchCaughtActivityState(entry, getEntryPlayerStats(entry), pollAt);
     captureEntrySync(entry, data);
-    applyLiveSnapshotToPublicUi(entry, key, data);
-    // Reset visible timers only when the displayed dataset actually changed.
-    // Runs AFTER the preserved-inventory merge + live-snapshot sync so the
-    // signatures reflect exactly what the user sees (not the raw response).
+    applyLiveSnapshotToPublicUi(entry, key, data);
     maybeResetSectionTimers(entry);
     if (entry.liveSnapshot && entry.liveSnapshot.playerStats) {
       entry._statRefreshCycleProof = {
@@ -6138,7 +1986,6 @@
     if (accountsPageLastBtn) accountsPageLastBtn.disabled = onLast;
   }
   function renderAccountsTable() {
-    // Correct order: filtered+sorted accounts -> paginate -> render current page.
     const rows = getFilteredAccountEntries();
     const totalRows = rows.length;
     clampAccountsPage(totalRows);
@@ -6159,7 +2006,6 @@
       }
     }
     renderAccountsPagination(totalRows, startIndex, pageRows.length);
-    // Only the rendered (current-page) rows have DOM nodes to sync.
     pageRows.forEach(({ key, entry }) => refreshEntryTableSyncDisplay(entry, key));
     updateInventoryUploadIndicator();
   }
@@ -6179,7 +2025,6 @@
   function setAccountsPageSize(size) {
     const n = Number(size);
     if (!PAGE_SIZE_OPTIONS.includes(n)) return;
-    // Keep the first currently-visible row visible after a size change.
     const firstVisible = (accountsCurrentPage - 1) * accountsPageSize;
     accountsPageSize = n;
     accountsCurrentPage = Math.floor(firstVisible / accountsPageSize) + 1;
@@ -6233,9 +2078,7 @@
     else if (isBulkStone) renderBulkInventory('stone');
   }
   function setAccountViewMode(mode, opts) {
-    opts = opts || {};
-    // Any view/tab switch clears an open inline detail so we never render the
-    // previous fish/stone detail on top of the newly selected grid/table.
+    opts = opts || {};
     clearInlineDetailState('set-view-mode:' + String(mode));
     if (mode === 'account' && opts.key) {
       accountViewMode = 'account';
@@ -6351,12 +2194,7 @@
     }
     if (accountsOverviewEl) accountsOverviewEl.addEventListener('click', handleAccountsActionClick);
     setAccountViewMode('table');
-  }
-  // ---- Mutation / weight scanning helpers (shared by detail panel + stats) ----
-  // Colors follow the mutation, with a safe neutral default for unknowns.
-  // Known mutation accent colors. Every entry is readable on the neutral detail
-  // card surface. Unknown mutations fall back to a deterministic hashed color
-  // (see ftMutationHashColor) so they are never left plain/default white.
+  }
   const FT_MUTATION_COLORS = {
     gold: '#fbbf24', golden: '#fbbf24',
     albino: '#ffffff',
@@ -6377,9 +2215,7 @@
     rainbow: '#f0abfc', galaxy: '#a78bfa', cosmic: '#a78bfa',
     fire: '#fb923c', molten: '#fb923c', lava: '#fb923c',
     normal: '#94a3b8',
-  };
-  // Deterministic, readable accent color for any mutation name (stable hash so
-  // the same name always maps to the same color, different names usually differ).
+  };
   function ftMutationHashColor(name) {
     const s = String(name || '');
     let h = 0;
@@ -6388,9 +2224,7 @@
     const sat = 60 + (h >> 9) % 22;   // 60-81%
     const light = 62 + (h >> 17) % 10; // 62-71% — readable on dark neutral card
     return `hsl(${hue},${sat}%,${light}%)`;
-  }
-  // Resolve a flat accent color for a mutation (used where only `color` applies,
-  // e.g. owner-breakdown rows / tags). Exact key, then keyword contains, then hash.
+  }
   function ftMutationColor(mut) {
     const key = String(mut || '').toLowerCase().trim();
     if (!key) return '';
@@ -6399,12 +2233,7 @@
       if (k.indexOf(' ') === -1 && key.indexOf(k) !== -1) return FT_MUTATION_COLORS[k];
     }
     return ftMutationHashColor(key);
-  }
-  // Centralized mutation label style resolver shared by fish + item/stone/gem
-  // detail cards. Returns a full inline CSS string. Specials: Gemstone uses a
-  // green→red gradient (with a solid fallback color first so unsupported
-  // browsers still show green), Albino is intentional white with an outline so
-  // it never looks like unstyled default text.
+  }
   function ftMutationStyle(mut) {
     const key = String(mut || '').toLowerCase().trim();
     if (!key) return '';
@@ -6417,9 +2246,7 @@
       return 'color:#ffffff;text-shadow:0 0 4px rgba(255,255,255,.55),0 1px 2px rgba(0,0,0,.65);';
     }
     return `color:${ftMutationColor(key)};`;
-  }
-  // Reject placeholder/empty mutation values so the detail card never shows
-  // `nil`/`null`/`None`/`undefined` as if it were a real mutation.
+  }
   function ftNormalizeNonNil(value) {
     if (value == null) return '';
     const raw = String(value).trim();
@@ -6556,12 +2383,7 @@
   }
   function ftDetailMutationSemanticPalette(mutation) {
     let key = String(mutation || '').toLowerCase().trim();
-    if (!key) return null;
-    // Swap ONLY the Fairy Dust <-> Midnight color themes: each adopts the theme
-    // the other resolves to today (both currently fall through to the hash-based
-    // fallback keyed on their name). Done by swapping the lookup key, so every
-    // downstream rule, slug and the readable-contrast/rarity-distance guards in
-    // ftDetailMutationThemeVars still apply. No other mutation is affected.
+    if (!key) return null;
     if (key === 'fairy dust') key = 'midnight';
     else if (key === 'midnight') key = 'fairy dust';
     const mk = (slug, accent, bgA, bgB, border, text, pillBg, pillText, muted, owner) => ({
@@ -6648,19 +2470,16 @@
     }
     return String(a.cleanName || a.name || '').localeCompare(String(b.cleanName || b.name || ''));
   }
-  // Canonical rarity key for detail-card coloring (matches overview rarity).
   function ftRarityKey(item) {
     const r = String((item && (item.rarity || item.Rarity || item.tierName)) || '').toLowerCase().trim();
     if (!r) return 'common';
     if (r === 'legend') return 'legendary';
     return r;
   }
-  // Pull a leading bracketed token from a raw name, e.g. "[Gold] Fish" -> "Gold".
   function ftBracketToken(rawName) {
     const m = String(rawName || '').match(/^\s*\[([^\]]+)\]/);
     return m ? m[1].trim() : '';
   }
-  // Resolve the mutation NAME (not gemstone/category) for any item type.
   function ftExtractMutation(item) {
     if (!item || typeof item !== 'object') return '';
     let m = String(item.mutation || item.Mutation || '').trim();
@@ -6676,17 +2495,12 @@
     }
     if (/^(normal|none|default|no\s*mutation)$/i.test(m)) m = '';
     return m;
-  }
-  // Clean base name with bracket prefix + leading mutation token removed and any
-  // immediately-doubled word collapsed (no "Gold Gold Fish" / "Shiny Shiny Totem").
+  }
   function ftExtractBaseName(item) {
     let name = String(
       (item && (item.baseFishName || item.cardName || item.name || item.displayName || item.Name)) || '',
     ).trim();
-    name = name.replace(/^\[[^\]]*\]\s*/, '').trim();
-    // Collapse an immediately-doubled word first ("Shiny Shiny Totem" ->
-    // "Shiny Totem"), THEN drop the leading mutation token ("Shiny Totem" ->
-    // "Totem"), so a double-prefixed payload still yields a clean base name.
+    name = name.replace(/^\[[^\]]*\]\s*/, '').trim();
     name = name.replace(/\b([\p{L}\p{N}]+)(\s+\1\b)+/giu, '$1');
     const m = ftExtractMutation(item);
     if (m && name.toLowerCase().startsWith(`${m.toLowerCase()} `) && name.length > m.length + 1) {
@@ -6696,25 +2510,15 @@
   }
   function ftItemWeightText(item) {
     return (typeof formatCardWeight === 'function') ? formatCardWeight(item) : '';
-  }
-  // Shared token normalizer used by the Ruby gemstone matcher and the displayed
-  // dataset signature: trim, lowercase, collapse whitespace.
+  }
   function normalizeToken(value) {
     return String(value == null ? '' : value)
       .trim()
       .toLowerCase()
       .replace(/\s+/g, ' ');
-  }
-  // The real Fish It "Ruby" payload is a FISH whose base/clean name is "Ruby"
-  // carrying the per-instance mutation "Gemstone" (card-level mutation is null).
-  // So the top card must match fish instances where name == Ruby AND mutation is
-  // a gemstone alias — NOT a card literally labelled "Ruby Gemstone" and NOT a
-  // mutation literally named "Ruby".
+  }
   const RUBY_FISH_NAME_ALIASES = new Set(['ruby']);
-  const GEMSTONE_MUTATION_ALIASES = new Set(['gemstone', 'gem stone', 'ruby gemstone']);
-  // Returns true when a single fish row/instance is a Ruby fish carrying the
-  // Gemstone mutation. Reads every plausible name + mutation field so it works
-  // on both card rows and expanded per-instance rows.
+  const GEMSTONE_MUTATION_ALIASES = new Set(['gemstone', 'gem stone', 'ruby gemstone']);
   function isRubyGemstoneFishInstance(row) {
     if (!row || typeof row !== 'object') return false;
     const nameCandidates = [
@@ -6735,24 +2539,14 @@
     const isRubyName = nameCandidates.some((name) => RUBY_FISH_NAME_ALIASES.has(name));
     const isGemstoneMutation = mutationCandidates.some((mutation) => GEMSTONE_MUTATION_ALIASES.has(mutation));
     return isRubyName && isGemstoneMutation;
-  }
-  // Aliases for the Ruby gemstone mutation. The detail/list view treats "Ruby"
-  // as a gemstone-family MUTATION carried per-instance, so the top card must
-  // recognize the same names. Matched trimmed + case-insensitive.
+  }
   const RUBY_GEMSTONE_ALIASES = ['Ruby', 'Ruby Gemstone', 'Ruby gemstone', 'ruby', 'ruby gemstone'];
   const RUBY_GEMSTONE_ALIAS_SET = new Set(RUBY_GEMSTONE_ALIASES.map((a) => String(a).trim().toLowerCase()));
   function isRubyGemstoneMutationName(value) {
     return RUBY_GEMSTONE_ALIAS_SET.has(String(value || '').trim().toLowerCase());
-  }
-  // Normalized detector for the Ruby Mutation Gemstone. Reads bracket prefixes,
-  // mutation/category metadata and separated base-name fields so it counts the
-  // real gemstone payload shapes ("Ruby Mutation Gemstone", "Ruby Gemstone",
-  // "[Gemstone] Ruby", baseName=Ruby+category=Gemstone, mutation=Ruby) the SAME
-  // way the detail/list view does.
+  }
   function isRubyGemstoneItem(item) {
-    if (!item || typeof item !== 'object') return false;
-    // Match the detail/list view first: any item whose resolved mutation is a
-    // Ruby alias is a Ruby gemstone, regardless of how its base name reads.
+    if (!item || typeof item !== 'object') return false;
     if (isRubyGemstoneMutationName(ftExtractMutation(item))) return true;
     const rawName = String(item.name || item.displayName || item.baseFishName || item.Name || '');
     const bracket = ftBracketToken(rawName).toLowerCase();
@@ -6768,23 +2562,14 @@
     if (!hasRuby) return false;
     if (nameStripped === 'ruby mutation gemstone' || nameStripped === 'ruby gemstone') return true;
     return hasGemstone;
-  }
-  // Count Ruby gemstones in one item/card using the SAME source the detail/list
-  // view uses. The real payload is a fish card named "Ruby" whose per-instance
-  // mutation is "Gemstone" (the card-level mutation is null), so we expand
-  // ownedInstances and count each instance whose merged name+mutation matches
-  // isRubyGemstoneFishInstance. If a row is an aggregated single line (no
-  // instances) we fall back to its amount, and finally to the legacy
-  // standalone-item detector so a literal "Ruby Gemstone" item still counts.
+  }
   function rubyGemstoneCountForItem(item) {
     if (!item || typeof item !== 'object') return 0;
     const list = Array.isArray(item.ownedInstances) ? item.ownedInstances : null;
     if (list && list.length) {
       let n = 0;
       for (const inst of list) {
-        if (!inst || typeof inst !== 'object') continue;
-        // Merge instance over card so a name carried only by the card and a
-        // mutation carried only by the instance are both visible to the matcher.
+        if (!inst || typeof inst !== 'object') continue;
         const merged = {
           cleanName: inst.cleanName != null ? inst.cleanName : item.cleanName,
           baseFishName: inst.baseFishName != null ? inst.baseFishName : item.baseFishName,
@@ -6805,20 +2590,15 @@
       }
       if (n > 0) return n;
     }
-    // No matching instances: aggregated single row carrying the gemstone shape.
     if (isRubyGemstoneFishInstance(item)) {
       const amount = Number(resolveItemAmount(item));
       return Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 1;
     }
-    // Legacy standalone "Ruby Gemstone" item (kept so existing data still counts).
     if (isRubyGemstoneItem(item)) {
       return Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0)) || 1;
     }
     return 0;
-  }
-  // Authoritative Ruby Gemstone top-card count over a snapshot/state. Sums the
-  // per-card count across fish + items so the top card and detail view agree.
-  // Records a guarded proof when inventory debug is enabled.
+  }
   function getRubyGemstoneTopCardCount(snapshotOrState) {
     if (!snapshotOrState || typeof snapshotOrState !== 'object') return 0;
     const rows = []
@@ -6895,10 +2675,7 @@
     };
   }
   function updateInventoryStats() {
-    const localStats = computeInventoryStats();
-    // ONLINE/ACCOUNTS must reflect the SAME live row status the user sees, not a
-    // separate (often stale) server summary timer. Always use the locally
-    // computed count/total derived from isTrackerAccountOnline.
+    const localStats = computeInventoryStats();
     const stats = lastValidTrackerSummary
       ? {
         totalAccounts: localStats.totalAccounts,
@@ -6911,12 +2688,7 @@
       }
       : localStats;
     const countUp = window.DengCountUpStats;
-    if (statOnlineAccountsEl) {
-      // Online/Accounts must equal the live row dots on EVERY poll. The 1.2s
-      // count-up animation made the displayed ratio trail the row state during
-      // online<->offline transitions (card said "1" while rows already showed 2
-      // live). Snap this card directly to the authoritative computed count so it
-      // is always consistent with the table rows the same instant.
+    if (statOnlineAccountsEl) {
       statOnlineAccountsEl.innerHTML = `<span class="online-count">${escHtml(formatQuantity(stats.onlineCount))}</span><span class="separator"> / </span><span class="total-count">${escHtml(formatQuantity(stats.totalAccounts))}</span>`;
     }
     if (statEvolvedStonesEl) {
@@ -7072,19 +2844,11 @@
       tickIndicator2Stats(entry, key);
       tickIndicator3Inventory(entry);
     });
-    updateInventoryUploadIndicator();
-    // The row status dots flip purely on the clock (age crossing the online
-    // threshold) inside tickIndicator1Presence. Recompute the Online/Accounts
-    // count on the SAME tick so the top card never trails the row dots — they
-    // must agree on every poll.
+    updateInventoryUploadIndicator();
     updateInventoryStats();
   }
   function resolveInventoryIndicatorEntry(preferredEntry) {
-    if (preferredEntry) return preferredEntry;
-    // The inventory upload indicator must ONLY ever represent the account whose
-    // inventory is currently being viewed. It must never fall back to a global
-    // "worst"/stalest entry, which could surface an OFFLINE username's stale/red
-    // state on top of the online inventory you are actually looking at.
+    if (preferredEntry) return preferredEntry;
     if (accountViewMode === 'account' && activeAccountKey) {
       const active = trackers.get(activeAccountKey);
       if (active) return active;
@@ -7222,19 +2986,14 @@
       const stoneType = String(item?.stoneType || item?.StoneType || '').trim();
       return `${cat}:${name.toLowerCase()}:${stoneType.toLowerCase() || normalizeRarityLabel(item).toLowerCase()}`;
     }
-    if (cat === 'totem') {
-      // Group by canonical totem identity (name + type itemId) so the SAME totem
-      // owned by multiple usernames merges into one card. Never key on the
-      // per-instance uuid — that produced a duplicate card per username.
+    if (cat === 'totem') {
       const stable = String(item?.itemId || '').trim().toLowerCase();
       return stable ? `${cat}:${name.toLowerCase()}:${stable}` : `${cat}:${name.toLowerCase()}`;
     }
     return `${cat}:${name.toLowerCase()}:${normalizeRarityLabel(item).toLowerCase()}`;
   }
   function mergeBulkItem(existing, item, username, category) {
-    const amount = Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0));
-    // Representative quantity per distinct owner — a username re-sending the same
-    // backpack item must not inflate the total or the contributor (person) count.
+    const amount = Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0));
     const ownerAmounts = Object.assign({}, existing.ownerAmounts);
     const ownerKey = String(username || '').trim();
     if (ownerKey) {
@@ -7377,9 +3136,7 @@
     patchBulkItemGrid(container, items, [], opts);
   }
   function renderBulkInventory(showCategory) {
-    if (!bulkBodyEl) return;
-    // Don't re-render (and wipe) the grid while the inline detail panel is open
-    // on top of it; the user is reading instance cards.
+    if (!bulkBodyEl) return;
     if (ftDetailPanelEl && !ftDetailPanelEl.hidden && ftDetailHostEl === bulkBodyEl) return;
     const sessions = collectBulkSessions();
     const bulk = aggregateBulkInventory(sessions);
@@ -7508,7 +3265,7 @@
     const color = data.statusColor || data.currentStatus;
     return color === 'green' || color === 'yellow';
   }
-  /** Public fish-only list (BLOCKER10K1). Never reads mixed enrichedItems or full inventory groups. */
+  
   function getPublicFishItems(data) {
     let items = [];
     if (!data) return items;
@@ -7573,11 +3330,7 @@
     }
     return sortInventoryStones(items);
   }
-  function totemCardKey(item) {
-    // Aggregated bulk cards carry a stable groupKey (name + type itemId); use it
-    // so one merged totem reconciles to one DOM card regardless of which
-    // username's instance uuid happened to be first. Backpack rows have no
-    // groupKey and fall back to the per-instance identity as before.
+  function totemCardKey(item) {
     if (item && item.groupKey) return String(item.groupKey).toLowerCase();
     return `totem|${String(item.uuid || item.itemId || item.name || 'unknown').toLowerCase()}`;
   }
@@ -7639,10 +3392,7 @@
       existing.set(el.getAttribute('data-card-key'), el);
     });
     items.forEach((item, idx) => {
-      const key = stoneCardKey(item);
-      // Apply per-item opts (e.g. aggregated accountCount) when a buildOpts
-      // factory is supplied by the bulk grid; the per-account backpack path
-      // passes a plain opts object (no buildOpts) and is unaffected.
+      const key = stoneCardKey(item);
       const itemOpts = typeof opts.buildOpts === 'function'
         ? Object.assign({}, opts, opts.buildOpts(item, idx))
         : opts;
@@ -7686,10 +3436,7 @@
       existing.set(el.getAttribute('data-card-key'), el);
     });
     items.forEach((item, idx) => {
-      const key = totemCardKey(item);
-      // Apply per-item opts (e.g. aggregated accountCount) when a buildOpts
-      // factory is supplied by the bulk grid; the per-account backpack path
-      // passes a plain opts object (no buildOpts) and is unaffected.
+      const key = totemCardKey(item);
       const itemOpts = typeof opts.buildOpts === 'function'
         ? Object.assign({}, opts, opts.buildOpts(item, idx))
         : opts;
@@ -8075,7 +3822,6 @@
     const incomingUrlOk = isUsableImageUrl(incoming && incoming.imageUrl);
     const incomingTracker = isTrackerBackedImageItem(incoming);
     const existingTracker = isTrackerBackedImageItem(existing);
-    // Never keep a stale placeholder when the server sent a real inventory image.
     if (incomingUrlOk && (incomingTracker || !existingUrlOk || isPlaceholderImageUrl(existing && existing.imageUrl))) {
       return base;
     }
@@ -8114,10 +3860,7 @@
     if (item.shiny === true && rarityLow !== 'secret') cls.push('shiny');
     return cls;
   }
-
-  const ITEM_IMAGES = {
-    // Add real hosted/local URLs here as they become available, e.g.
-    // 'Cactus Pufferfish': '/assets/img/fishit/cactus-pufferfish.png',
+  const ITEM_IMAGES = {
     fish: '/assets/img/fishit/fallback-fish.svg',
     rod: '/assets/img/fishit/fallback-rod.svg',
     rods: '/assets/img/fishit/fallback-rod.svg',
@@ -8129,7 +3872,6 @@
     forgotten: '/assets/img/fishit/fallback-forgotten.svg',
     Default: '/assets/img/fishit/fallback-fish.svg'
   };
-
   function isPlaceholderImageUrl(url) {
     if (!url || typeof url !== 'string') return true;
     const u = url.trim().toLowerCase();
@@ -8154,9 +3896,7 @@
     if (u.startsWith('/api/fishit-tracker/assets/fish/')) return true;
     if (u.startsWith('/api/fishit-tracker/assets/stones/')) return true;
     if (u.startsWith('/api/fishit-tracker/assets/totems/')) return true;
-    if (u.startsWith('/api/fishit-tracker/assets/')) return true;
-    // Dashboard stats-fish images share the inventory resolver/cache and must
-    // render the same as inventory cards.
+    if (u.startsWith('/api/fishit-tracker/assets/')) return true;
     if (u.startsWith('/api/fishit/assets/stats-fish/')) return true;
     if (u.startsWith('http')) return true;
     if (u.startsWith('/assets/')) return true;
@@ -8189,7 +3929,6 @@
     img.src = ITEM_IMAGES.Default;
     img.setAttribute('data-placeholder', 'true');
   }
-
   function updateSummary() {
     const n = trackers.size;
     if (n === 0) {
@@ -8204,22 +3943,16 @@
     renderAccountsTable();
     syncViewModeUi();
   }
-
   function cardTitle(item) {
     return item.cardName || item.baseFishName || item.name || 'Unknown';
   }
-
-  // ── Inline card detail (clickable fish/stone/totem/item cards) ──
   function attachFtCardItem(card, item, kind) {
     if (!card) return;
     try { card.__ftItem = item; card.__ftKind = kind; } catch (_) {}
     card.classList.add('ft-card--interactive');
     if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '0');
     card.setAttribute('role', 'button');
-  }
-  // Strip bracket prefixes and a leading mutation/category token, then collapse
-  // any immediately repeated word so a mutated item never renders a doubled name
-  // like "Shiny Shiny Totem" or "Mutation Mutation Totem".
+  }
   function ftCleanDetailName(rawName, tag) {
     let name = String(rawName || '').trim();
     name = name.replace(/^\[[^\]]*\]\s*/, '').trim();
@@ -8250,7 +3983,6 @@
       rarity: (typeof publicRarity === 'function') ? publicRarity(item) : '',
     };
   }
-  // Owner rows sorted by username ascending, case-insensitive + stable.
   function ftDetailOwnerRows(item) {
     const rows = [];
     const amounts = item && item.ownerAmounts && typeof item.ownerAmounts === 'object' ? item.ownerAmounts : null;
@@ -8268,10 +4000,7 @@
       if (cmp) return cmp;
       return a.username.localeCompare(b.username);
     });
-  }
-  // ---- Inline detail panel (replaces the old modal/overlay) ----------------
-  // Gathers the raw item ROWS for a clicked group so the detail can list every
-  // individual instance (e.g. 20 fish -> 20 cards) instead of an aggregate.
+  }
   function collectGroupInstances(item, kind) {
     const k = String(kind || (item && item.category) || 'fish').toLowerCase();
     let targetKey;
@@ -8294,14 +4023,9 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
   const FT_MAX_INSTANCE_CARDS = 800;
-  // Legacy alias — fish detail cards use formatFishWeight (thousand separators).
   function ftWeightKgText(kg) {
     return formatFishWeight(kg);
-  }
-  // One card per individual fish, carrying that instance's OWN mutation +
-  // weight + the group's resolved image. Prefers the server-provided
-  // ownedInstances array (real per-instance data); falls back to expanding the
-  // aggregate amount for older payloads. Sorted: mutated first, then weight desc.
+  }
   function ftFishInstanceCards(instances) {
     const cards = [];
     const pushCard = (card) => {
@@ -8340,9 +4064,7 @@
       }
     }
     return cards.sort(sortFishDetailInstances);
-  }
-  // Case-insensitive filter over clean name + mutation (and the combined
-  // "mutation name", so "Gold King" matches a Gold King Crab instance).
+  }
   function ftFilterInstanceCards(cards, query) {
     const q = String(query || '').toLowerCase().trim();
     if (!q) return cards;
@@ -8377,9 +4099,7 @@
       ? `<div class="tracker-detail-fish-mutation">${escHtml(realMut)}</div>`
       : '';
     return `<div class="${escHtml(classes.join(' '))}"${styleAttr}>${img}<div class="tracker-detail-fish-card__body">${mut}<div class="tracker-detail-fish-name">${escHtml(card.name)}</div>${weight}<div class="tracker-detail-fish-owner">${escHtml(card.owner || '-')}</div></div></div>`;
-  }
-  // Quantity/owner breakdown for non-fish items (stones/totems). Keeps mutation
-  // above the clean name; sorted by username ascending.
+  }
   function ftBreakdownRows(instances, item) {
     const map = new Map();
     for (const { owner, row } of instances) {
@@ -8456,9 +4176,7 @@
     }
     ftDetailPanelEl = panel;
     return panel;
-  }
-  // Render (or re-render filtered) fish instance cards into the detail body,
-  // showing a small empty state when a search matches nothing.
+  }
   function ftRenderFishInstances(panel, cards, query) {
     const bodyEl = panel.querySelector('[data-ft-detail-body]');
     if (!bodyEl) return;
@@ -8485,10 +4203,7 @@
     }
     document.querySelectorAll('[data-ft-hidden="1"]').forEach((el) => el.removeAttribute('data-ft-hidden'));
     ftDetailHostEl = null;
-  }
-  // Central reset for the inline detail view. Must be called on ANY view/tab/
-  // category switch (table <-> fish grid <-> stone grid <-> account) so the
-  // user is never stuck in a stale detail and does not have to press Back.
+  }
   function clearInlineDetailState(reason) {
     if (ftDetailPanelEl) ftDetailPanelEl.__ftCards = null;
     closeFtDetail();
@@ -8706,7 +4421,6 @@
       img.onerror = () => onFishImageError(img, item);
     });
   }
-
   function createCard(username) {
     const el = document.createElement('div');
     el.className = 'tracker-card tracker-card--account-inventory';
@@ -8714,11 +4428,9 @@
     el.innerHTML = `
 ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
 <div class="card-body" data-card-body></div>`;
-
     el.style.display = 'none';
     return el;
   }
-
   function updateCard(card, data) {
     card.classList.remove('state-waiting','state-error');
     card.classList.add('state-live');
@@ -8738,7 +4450,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (accountViewMode === 'fish') renderBulkInventory('fish');
     else if (accountViewMode === 'stone') renderBulkInventory('stone');
   }
-
   function setCardWaiting(card, name) {
     card.classList.remove('state-live','state-error');
     card.classList.add('state-waiting');
@@ -8751,8 +4462,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       ? `<div class="card-empty">Waiting for ${escHtml(name)} to execute the script in-game...</div>`
       : publicWaitingHtml();
   }
-
-  // Map a tracker_status discovery phase to a human-readable message.
   function phaseMessage(phase) {
     switch (phase) {
       case 'replion_client_found':
@@ -8775,7 +4484,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         return `Script running ${EM_DASH} locating Replion data...`;
     }
   }
-
   function setCardRunning(card, name, data) {
     const fishList = getPublicFishItems(data);
     const stoneList = getPublicStoneItems(data);
@@ -8815,7 +4523,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     setCardSyncDisplay(card, data);
     if (b) b.innerHTML = publicLiveEmptyHtml(data);
   }
-
   function setCardOffline(card, name, lastData) {
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
@@ -8834,7 +4541,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (accountViewMode === 'fish') renderBulkInventory('fish');
     else if (accountViewMode === 'stone') renderBulkInventory('stone');
   }
-
   function setCardError(card) {
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
@@ -8845,7 +4551,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (!entry || !entry.el) return;
     if (!entry.lastData) setCardError(entry.el);
   }
-
   function backpackQuerySuffix(forceFresh) {
     const useLite = !(DEBUG_INVENTORY && DEBUG_GLOBAL);
     const params = new URLSearchParams();
@@ -8856,7 +4561,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const qs = params.toString();
     return qs ? `?${qs}` : '';
   }
-
   function notePerfFetch(responseText) {
     perfInitialRequests += 1;
     if (responseText) perfApiPayloadBytes += responseText.length;
@@ -8865,12 +4569,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         ? performance.now()
         : Date.now()) - PERF_STARTED_AT);
     }
-  }
-
-  // Read the authoritative presence/age contract the read API computes FRESH at
-  // serve time and ships as response headers. This is the single source of truth
-  // for the dot + the status/leaderstats/inventory timers; it cannot be faked by
-  // a stale precompute body or a client latch.
+  }
   function readReadApiPresence(res) {
     if (!res || !res.headers || !res.headers.get) return null;
     const g = (n) => res.headers.get(n);
@@ -8889,9 +4588,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       leaderstatsAgeSeconds: numOrNull(g('X-DENG-Leaderstats-Age')),
       lastRealStatusAt: g('X-DENG-Last-Real-Status-At') || null,
       lastRealInventoryAt: g('X-DENG-Last-Real-Inventory-At') || null,
-      lastRealLeaderstatsAt: g('X-DENG-Last-Real-Leaderstats-At') || null,
-      // Source-of-truth identity. The status timer resets ONLY when statusRevision
-      // changes to a newer real Roblox report — never on poll/refresh/login.
+      lastRealLeaderstatsAt: g('X-DENG-Last-Real-Leaderstats-At') || null,
       statusRevision: numOrNull(g('X-DENG-Status-Revision')),
       statusReportId: g('X-DENG-Status-Report-Id') || null,
       statusSeq: numOrNull(g('X-DENG-Status-Seq')),
@@ -8909,26 +4606,16 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
   }
   function applyAuthPresence(entry, key, contract) {
     if (!entry || !contract) return;
-    entry._auth = contract;
-    // Mirror onto the latch field so any legacy reader stays consistent; the
-    // authoritative _auth is always checked first regardless.
+    entry._auth = contract;
     entry._presenceLive = contract.isOnline === true;
     refreshEntryTableSyncDisplay(entry, key);
   }
-
   async function pollUser(key, opts) {
     const entry = trackers.get(key);
     if (!entry) return;
-    const forceFresh = opts && opts.forceFresh === true;
-    // Per-entry request ordering: tag this request and ignore its response if a
-    // newer pollUser for the same account started while it was in flight, so a
-    // slow stale response can never overwrite newer rendered state.
+    const forceFresh = opts && opts.forceFresh === true;
     const requestId = (entry._pollReqSeq = (entry._pollReqSeq || 0) + 1);
-    const isStaleResponse = () => !trackers.has(key) || entry._pollReqSeq !== requestId;
-    // Content-hash conditional fetch: tell the read API which snapshot we already
-    // hold. When unchanged it returns a tiny presence-only envelope instead of the
-    // full (no-cap, possibly multi-MB) body — eliminating the repeated large
-    // JSON.parse that caused slow updates and the 10-minute frontend degradation.
+    const isStaleResponse = () => !trackers.has(key) || entry._pollReqSeq !== requestId;
     const hashSuffix = entry._snapshotHash ? `&h=${encodeURIComponent(entry._snapshotHash)}` : '';
     const reqUrl = `${TRACKER_READ_API}/get-backpack/${encodeURIComponent(key)}${backpackQuerySuffix(forceFresh)}${hashSuffix}`;
     try {
@@ -8947,16 +4634,12 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         }
         return;
       }
-      if (!res.ok) {
-        // Transient read failure: NEVER wipe a valid displayed snapshot. Keep the
-        // last good data and authoritative presence; just note the failed probe.
+      if (!res.ok) {
         ftRenderMetadataDebug(key, { url: reqUrl, status: res.status, empty: true, reason: `http_${res.status}` });
         if (!entry.lastData) setCardRefreshFailed(entry);
         return;
       }
-      const contract = readReadApiPresence(res);
-      // Unchanged: snapshot identical to what we already render. Apply the fresh
-      // presence/ages ONLY — do not touch inventory/top cards/leaderstats.
+      const contract = readReadApiPresence(res);
       if (contract && contract.unchanged) {
         applyAuthPresence(entry, key, contract);
         return;
@@ -8978,40 +4661,31 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         });
       }
       debugLogEntryPlayerStats(entry);
-      applyInventoryPollPayload(entry, key, data);
-      // Authoritative presence/timers from serve-time headers win over anything
-      // baked into the body, applied AFTER the merge so the dot/timer reflect the
-      // freshly computed heartbeat window, not the (possibly churn-frozen) body.
+      applyInventoryPollPayload(entry, key, data);
       if (contract) applyAuthPresence(entry, key, contract);
     } catch (_) { if (trackers.has(key) && !entry.lastData) setCardRefreshFailed(entry); }
   }
-
   function normalizeUsername(raw) {
     return String(raw || '').trim().replace(/\s+/g, '');
   }
-
   function isValidUsername(raw) {
     const key = normalizeUsername(raw).toLowerCase();
     return /^[a-z0-9_]{3,20}$/.test(key);
   }
-
   function showUsernameError(message) {
     if (!usernameErrorEl) return;
     usernameErrorEl.textContent = message || '';
     usernameErrorEl.classList.remove('tracker-username-action-notice');
     if (inputEl) inputEl.classList.toggle('is-invalid', !!message);
   }
-
   function clearUsernameError() {
     showUsernameError('');
   }
-
   function selectLoadstringField() {
     if (!loadstringCodeEl) return;
     loadstringCodeEl.focus();
     loadstringCodeEl.select();
   }
-
   function fallbackCopyText(text) {
     return new Promise((resolve, reject) => {
       if (loadstringCodeEl) {
@@ -9047,7 +4721,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }
     });
   }
-
   function copyTrackerScript() {
     const text = CLEAN_LOADSTRING;
     if (!text) {
@@ -9071,33 +4744,28 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       return false;
     });
   }
-
   function setCopyStatus(message, isError, isSuccess) {
     if (!copyStatusEl) return;
     copyStatusEl.textContent = message || '';
     copyStatusEl.classList.toggle('is-error', !!isError);
     copyStatusEl.classList.toggle('is-success', !!isSuccess);
   }
-
   let liveTrackerPollingActive = false;
   let globalStatusPollTimer = null;
   let dashboardPollTimer = null;
   let syncTickTimer = null;
-
   function startTrackerPollForKey(key) {
     const entry = trackers.get(key);
     if (!entry || entry.timer) return;
     entry.timer = setInterval(() => pollUser(key), POLL_MS);
     pollUser(key);
   }
-
   function stopTrackerPollForKey(key) {
     const entry = trackers.get(key);
     if (!entry || !entry.timer) return;
     clearInterval(entry.timer);
     entry.timer = null;
   }
-
   function startLiveTrackerPolling() {
     if (liveTrackerPollingActive) return;
     liveTrackerPollingActive = true;
@@ -9109,7 +4777,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     globalStatusPollTimer = setInterval(() => pollAccountStatuses(false), POLL_MS);
     requestAnimationFrame(() => pollAccountStatuses(true));
   }
-
   function stopLiveTrackerPolling() {
     liveTrackerPollingActive = false;
     trackers.forEach((_, key) => stopTrackerPollForKey(key));
@@ -9118,14 +4785,12 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       globalStatusPollTimer = null;
     }
   }
-
   function startDashboardPolling() {
     if (dashboardPollTimer) return;
     dashboardPollTimer = setInterval(() => {
       if (activeInventorySection === 'dashboard') loadDashboardRange(false);
     }, POLL_MS);
   }
-
   function ensureBackgroundPolling() {
     if (trackers.size > 0) startLiveTrackerPolling();
     else if (!globalStatusPollTimer) {
@@ -9134,7 +4799,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     startDashboardPolling();
   }
-
   function addTrackerLocal(username) {
     clearUsernameError();
     const raw = normalizeUsername(username);
@@ -9147,7 +4811,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     startTrackerPollForKey(key);
     return true;
   }
-
   async function addTracker(username) {
     clearUsernameError();
     const raw = normalizeUsername(username);
@@ -9177,7 +4840,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (inputEl) inputEl.value = '';
     return true;
   }
-
   async function removeTracker(key) {
     if (!trackers.has(key)) return;
     const removed = await persistTrackerRemove(key);
@@ -9187,7 +4849,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     reconcileActiveAccountAfterRemoval();
   }
-
   function safeBind(name, fn) {
     try {
       fn();
@@ -9195,12 +4856,10 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       console.error('[inventory] failed to bind ' + name, error);
     }
   }
-
   function bindCopyScript() {
     if (!copyBtn) return;
     copyBtn.addEventListener('click', () => { copyTrackerScript(); });
   }
-
   function bindSidebarProfileControls() {
     if (hideUsernamesBtn) {
       hideUsernamesBtn.addEventListener('click', () => {
@@ -9216,7 +4875,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     } catch {}
     updateHideUsernamesUi();
   }
-
   function bindSidebarScript() {
     if (!sidebarScriptBtn) return;
     sidebarScriptBtn.addEventListener('click', () => {
@@ -9233,7 +4891,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }).catch(() => {});
     });
   }
-
   function bindAddPlayer() {
     if (!addBtn || !inputEl) return;
     addBtn.addEventListener('click', (e) => {
@@ -9255,7 +4912,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     });
     inputEl.addEventListener('input', () => { if (inputEl.value.trim()) clearUsernameError(); });
   }
-
   function parseMultipleUsernames(raw) {
     const seen = new Set();
     const names = [];
@@ -9346,7 +5002,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }
     });
   }
-
   function showRemoveAllError(message) {
     if (!removeAllErrorEl) return;
     if (message) {
@@ -9405,7 +5060,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }
     });
   }
-
   function bindUsernameBulkActions() {
     bindRemoveAllModal();
     if (removeOfflineBtn) {
@@ -9428,7 +5082,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       });
     }
   }
-
   const dashboardPanelEl = document.getElementById('inventoryDashboardPanel');
   const accountsPanelEl = document.getElementById('inventoryAccountsPanel');
   const dashboardToolbarEl = document.querySelector('.dashboard-toolbar');
@@ -9451,22 +5104,18 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
   let dashboardFetchGen = 0;
   let dashboardRangeDebounceTimer = null;
   let dashboardInitialLoaded = false;
-
   function dashboardCountUp() {
     return window.DengCountUpStats || null;
   }
-
   function isDesktopSidebarNavLayout() {
     if (document.body.classList.contains('inventory-apk-embed')) return false;
     return window.matchMedia('(min-width: 769px)').matches;
   }
-
   let mobileTrackerNavLayoutTimer = null;
   function scheduleMobileTrackerNavLayoutSync() {
     if (mobileTrackerNavLayoutTimer) clearTimeout(mobileTrackerNavLayoutTimer);
     mobileTrackerNavLayoutTimer = setTimeout(syncMobileTrackerNavVisibility, 50);
   }
-
   function syncMobileTrackerNavVisibility() {
     const mobileNav = document.querySelector('[data-mobile-tracker-tabs]');
     if (!mobileNav) return;
@@ -9474,7 +5123,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     mobileNav.hidden = hideMobileNav;
     mobileNav.setAttribute('aria-hidden', hideMobileNav ? 'true' : 'false');
   }
-
   function setInventorySection(section) {
     activeInventorySection = section === 'dashboard' ? 'dashboard' : 'accounts';
     syncMobileTrackerNavVisibility();
@@ -9488,7 +5136,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     ensureBackgroundPolling();
   }
-
   function dashboardPeriodQuery() {
     const params = new URLSearchParams();
     if (dashboardPeriod === 'custom') {
@@ -9501,13 +5148,11 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (DEBUG_INVENTORY) params.set('debug', '1');
     return params.toString();
   }
-
   function dashboardStatsState(data) {
     if (!data || data.ok === false) return 'error';
     if (data.statsState === 'error' || data.available === false) return 'error';
     return data.statsState || 'ok';
   }
-
   const DASHBOARD_EMPTY_REASON_LABELS = {
     bot_db_not_connected: 'Catch stats unavailable — bot database is not connected.',
     fish_cache_missing_or_empty: 'Catch stats unavailable — bot fish cache is empty.',
@@ -9517,7 +5162,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     missing_auth_discord_id: 'Could not resolve your Discord account for catch stats.',
     dashboard_unavailable: 'Catch stats are temporarily unavailable.',
   };
-
   function dashboardEmptyReasonMessage(reason, debug) {
     if (!reason) return '';
     if (DEBUG_INVENTORY && debug) {
@@ -9534,7 +5178,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     return DASHBOARD_EMPTY_REASON_LABELS[reason] || DASHBOARD_EMPTY_REASON_LABELS.dashboard_unavailable;
   }
-
   function renderDashboardStatusNotice(data) {
     const notice = document.getElementById('dashboardStatusNotice');
     if (!notice) return;
@@ -9542,44 +5185,35 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     notice.textContent = '';
     notice.classList.remove('is-error', 'is-debug');
     if (!data) return;
-
     const state = dashboardStatsState(data);
     if (state !== 'error') return;
-
     const reason = data.emptyReason || 'dashboard_unavailable';
     notice.textContent = dashboardEmptyReasonMessage(reason, data.debug);
     notice.classList.add('is-error');
     notice.classList.toggle('is-debug', !!(DEBUG_INVENTORY && data.debug));
     notice.hidden = false;
   }
-
   function dashboardRangeKey() {
     if (dashboardPeriod === 'custom') {
       return `custom|${dashboardCustomFrom}|${dashboardCustomTo}`;
     }
     return dashboardPeriod || 'all';
   }
-
   function setDashboardToolbarLoading(loading) {
     if (dashboardToolbarEl) dashboardToolbarEl.classList.toggle('is-loading', !!loading);
   }
-
   function getDashboardMemEntry(key) {
     return dashboardMemCache.get(key) || null;
   }
-
   function isDashboardMemFresh(entry) {
     return !!(entry && (Date.now() - entry.at) < DASHBOARD_MEM_TTL_MS);
   }
-
   function isDashboardMemStale(entry) {
     return !entry || (Date.now() - entry.at) > DASHBOARD_SWR_STALE_MS;
   }
-
   function storeDashboardMemCache(key, data) {
     dashboardMemCache.set(key, { data, at: Date.now() });
   }
-
   function applyDashboardPresetActiveUI(period, btn) {
     clearDashboardPresetActive();
     if (period === 'custom') {
@@ -9592,11 +5226,9 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (match) match.classList.add('is-active');
     }
   }
-
   function clearDashboardPresetActive() {
     dashboardPeriodBtns.forEach((item) => item.classList.remove('is-active'));
   }
-
   function scheduleDashboardRangeFetch(immediate) {
     if (dashboardRangeDebounceTimer) {
       clearTimeout(dashboardRangeDebounceTimer);
@@ -9624,7 +5256,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     if (dashboardCustomToggleEl) dashboardCustomToggleEl.setAttribute('aria-expanded', 'false');
   }
-
   function setDashboardPresetPeriod(period, btn) {
     dashboardPeriod = period || 'all';
     if (dashboardCustomToggleEl) dashboardCustomToggleEl.classList.remove('is-active');
@@ -9636,7 +5267,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     applyDashboardPresetActiveUI(period, btn);
     scheduleDashboardRangeFetch(true);
   }
-
   function setDashboardCustomPeriod(from, to) {
     dashboardPeriod = 'custom';
     dashboardCustomFrom = from || '';
@@ -9644,7 +5274,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     applyDashboardPresetActiveUI('custom');
     scheduleDashboardRangeFetch(true);
   }
-
   function renderDashboardChart(dailyCaught, opts) {
     opts = opts || {};
     const svg = document.getElementById('dashboardChart');
@@ -9764,11 +5393,9 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       return `<span>${short}</span>`;
     }).join('');
   }
-
   function sortDashboardFishCards(cards) {
     return sortInventoryFish(Array.isArray(cards) ? cards : []);
   }
-
   function renderDashboardFishGrid(fishCards, opts) {
     opts = opts || {};
     const host = document.getElementById('dashboardFishGrid');
@@ -9790,7 +5417,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       rarity: card.rarity,
       amount: card.count || card.amount || 0,
       imageUrl: card.imageUrl,
-      // Reuse inventory's proxy fallback when the direct URL is unusable.
       imageAssetId: card.imageAssetId || null,
       dataSource: 'dashboard_owner',
     }));
@@ -9799,7 +5425,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       buildOpts: () => ({ includeOwnerChip: false, includeRarity: true }),
     });
   }
-
   function applyDashboardData(data, opts) {
     opts = opts || {};
     renderDashboardStatusNotice(data);
@@ -9828,14 +5453,12 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     renderDashboardChart((data && data.dailyCaught) || [], { failed, patchChart: opts.patchChart });
     renderDashboardFishGrid((data && data.fishCards) || [], { failed });
   }
-
   async function loadDashboardRange(forceRefresh) {
     if (activeInventorySection !== 'dashboard') return;
     const rangeKey = dashboardRangeKey();
     const cachedEntry = getDashboardMemEntry(rangeKey);
     const hasFreshCache = isDashboardMemFresh(cachedEntry);
     const requestKey = rangeKey;
-
     if (cachedEntry && !forceRefresh) {
       applyDashboardData(cachedEntry.data, { animate: false, patchChart: true });
       if (!isDashboardMemStale(cachedEntry)) {
@@ -9843,7 +5466,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         return;
       }
     }
-
     if (dashboardFetchAbort) {
       dashboardFetchAbort.abort();
       dashboardFetchAbort = null;
@@ -9852,7 +5474,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const ac = new AbortController();
     dashboardFetchAbort = ac;
     setDashboardToolbarLoading(!cachedEntry);
-
     try {
       const res = await fetch(`/api/tracker/dashboard?${dashboardPeriodQuery()}`, {
         headers: { Accept: 'application/json' },
@@ -9898,13 +5519,11 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }
     }
   }
-
   async function loadDashboardData(force) {
     if (dashboardInitialLoaded && !force) return;
     await new Promise((resolve) => requestAnimationFrame(resolve));
     await loadDashboardRange(!!force);
   }
-
   function bindMainSectionNav() {
     mainSectionNavTabs.forEach((tab) => {
       tab.addEventListener('click', () => {
@@ -9941,7 +5560,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       });
     }
   }
-
   function initDashboardSectionFromQuery() {
     initDashboardDefaultPeriod();
     const params = new URLSearchParams(window.location.search);
@@ -9952,7 +5570,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     setInventorySection('accounts');
   }
-
   function bindInventoryTabs() {
     const bulkSearchInput = document.querySelector('[data-bulk-search-input]');
     const bulkSearchClear = document.querySelector('[data-bulk-search-clear]');
@@ -9975,7 +5592,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       });
     }
   }
-
   function initFromQueryUsername() {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = INITIAL_USERNAME
@@ -9994,7 +5610,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (inputEl) inputEl.value = fromQuery;
     }
   }
-
   function initInventoryUi() {
     safeBind('main section nav', bindMainSectionNav);
     safeBind('dashboard section init', initDashboardSectionFromQuery);
@@ -10026,9 +5641,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       syncTickTimer = setInterval(tickAllCardSyncStatus, SYNC_TICK_MS);
       tickAllCardSyncStatus();
     });
-    safeBind('visibility refetch', () => {
-      // Leading-edge debounce so focus + visibilitychange firing together (common
-      // when returning to a tab) trigger ONE immediate fresh fetch, not a burst.
+    safeBind('visibility refetch', () => {
       let resumeRefreshAt = 0;
       const refreshTrackerNow = (reason) => {
         const now = Date.now();
@@ -10159,11 +5772,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     ftAuditTopSummaryImages();
     console.log('[inventory] UI initialized');
-  }
-
-  // Detection-only broken-image guard for the top summary cards. Logs a clear
-  // error if any required DB asset fails to load; never swaps in a placeholder
-  // or hides the image (strict no-fallback policy).
+  }
   function ftAuditTopSummaryImages() {
     try {
       const imgs = document.querySelectorAll('.tracker-top-summary-card img');
@@ -10185,13 +5794,9 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       console.error('[tracker-top-summary] image audit failed:', err && err.message ? err.message : err);
     }
   }
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initInventoryUi);
   } else {
     initInventoryUi();
   }
 }());
-</script>
-</body>
-</html>

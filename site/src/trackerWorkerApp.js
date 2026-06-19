@@ -553,6 +553,11 @@ async function tick() {
   running = true;
   try {
     metrics.ticks += 1;
+    // Ingest (8792) persists session shards to disk; this worker process keeps
+    // its own in-memory liveTrackDB. Without reloading every tick, presence_json
+    // and precompute bodies serve stale lane timestamps (false red + frozen
+    // leaderstats/inventory ages) while the on-disk session is fresh.
+    try { routes.syncLiveTrackFromDisk(); } catch (_) { /* non-fatal: next tick */ }
     const dirty = computeDirty();
     metrics.queueLength = dirty.length;
     metrics.oldestJobAgeMs = dirty.length ? (Date.now() - dirty[dirty.length - 1].firstSeen) : 0;
