@@ -38,8 +38,33 @@ function makeTimerEnv(source) {
   const block = source.slice(open, close);
   const clock = { now: 0 };
   const sandbox = { Math, Number, String, Date: { now: () => clock.now } };
+  // Restored 4394cfd model: the three frontend-receive formatters call
+  // formatAgeAgoSeconds. Shim it into the sandbox so the extracted block
+  // resolves correctly (the real formatAgeAgo helper lives in a different
+  // section of the source).
   const script = `(function(){
     const pad2 = (n) => String(n).padStart(2, '0');
+    function formatAgeAgo(ms) {
+      const totalSecs = Math.max(0, Math.floor(Number(ms) / 1000));
+      if (totalSecs < 60) return Math.max(1, totalSecs) + 's ago';
+      if (totalSecs < 3600) {
+        const m = Math.floor(totalSecs / 60);
+        const s = totalSecs % 60;
+        return s > 0 ? (m + 'm ' + s + 's ago') : (m + 'm ago');
+      }
+      if (totalSecs < 86400) {
+        const h = Math.floor(totalSecs / 3600);
+        const m = Math.floor((totalSecs % 3600) / 60);
+        return m > 0 ? (h + 'H ' + m + 'm ago') : (h + 'H ago');
+      }
+      return Math.floor(totalSecs / 86400) + 'D ago';
+    }
+    function formatAgeAgoSeconds(secs) {
+      if (secs == null || secs === '') return '';
+      const n = Number(secs);
+      if (!Number.isFinite(n) || n < 0) return '';
+      return formatAgeAgo(n * 1000);
+    }
 ${block}
     return {
       markEntryFrontendRefreshed, formatFrontendRefreshAgeText,
@@ -53,20 +78,21 @@ ${block}
 }
 
 describe('per-section frontend-receive timers (2026-06-16)', () => {
-  test('all three section timers read ~1s right after a refresh, even with a 6m-old backend snapshot', () => {
+  test('all three section timers read ~1s ago right after a refresh, even with a 6m-old backend snapshot', () => {
     const { api, setNow } = makeTimerEnv(readSource());
     const entry = {};
     setNow(6 * 60 * 1000); // backend snapshot is 6 minutes old; browser receives "now"
     api.markEntryFrontendRefreshed(entry);
     api.markEntryLeaderstatsRefreshed(entry);
     api.markEntryInventoryRefreshed(entry);
-    assert.equal(api.formatFrontendRefreshAgeText(entry), '1s');
-    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '1s');
-    assert.equal(api.formatInventoryRefreshAgeText(entry), '1s');
+    // Restored 4394cfd format: "<n>s ago" / "<n>m ago" / etc.
+    assert.equal(api.formatFrontendRefreshAgeText(entry), '1s ago');
+    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '1s ago');
+    assert.equal(api.formatInventoryRefreshAgeText(entry), '1s ago');
     // None of them leaked the 6m backend age.
-    assert.notEqual(api.formatFrontendRefreshAgeText(entry), '6m');
-    assert.notEqual(api.formatLeaderstatsRefreshAgeText(entry), '6m');
-    assert.notEqual(api.formatInventoryRefreshAgeText(entry), '6m');
+    assert.notEqual(api.formatFrontendRefreshAgeText(entry), '6m ago');
+    assert.notEqual(api.formatLeaderstatsRefreshAgeText(entry), '6m ago');
+    assert.notEqual(api.formatInventoryRefreshAgeText(entry), '6m ago');
   });
 
   test('each section timer counts up independently from its own receive time', () => {
@@ -77,9 +103,9 @@ describe('per-section frontend-receive timers (2026-06-16)', () => {
     setNow(2000); api.markEntryLeaderstatsRefreshed(entry);
     setNow(4000); api.markEntryInventoryRefreshed(entry);
     setNow(5000); // tracker +5s, leaderstats +3s, inventory +1s
-    assert.equal(api.formatFrontendRefreshAgeText(entry), '5s');
-    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '3s');
-    assert.equal(api.formatInventoryRefreshAgeText(entry), '1s');
+    assert.equal(api.formatFrontendRefreshAgeText(entry), '5s ago');
+    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '3s ago');
+    assert.equal(api.formatInventoryRefreshAgeText(entry), '1s ago');
   });
 
   test('a failed poll (no mark) does not reset any section timer', () => {
@@ -90,9 +116,9 @@ describe('per-section frontend-receive timers (2026-06-16)', () => {
     api.markEntryLeaderstatsRefreshed(entry);
     api.markEntryInventoryRefreshed(entry);
     setNow(9000); // failed poll -> nothing re-marked
-    assert.equal(api.formatFrontendRefreshAgeText(entry), '9s');
-    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '9s');
-    assert.equal(api.formatInventoryRefreshAgeText(entry), '9s');
+    assert.equal(api.formatFrontendRefreshAgeText(entry), '9s ago');
+    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '9s ago');
+    assert.equal(api.formatInventoryRefreshAgeText(entry), '9s ago');
   });
 
   test('a status-only poll resets leaderstats but leaves the inventory timer counting', () => {
@@ -103,17 +129,17 @@ describe('per-section frontend-receive timers (2026-06-16)', () => {
     setNow(10000);
     // Status-only poll: leaderstats arrives, inventory does NOT.
     api.markEntryLeaderstatsRefreshed(entry);
-    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '1s');
-    assert.equal(api.formatInventoryRefreshAgeText(entry), '10s'); // not reset
+    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '1s ago');
+    assert.equal(api.formatInventoryRefreshAgeText(entry), '10s ago'); // not reset
   });
 
-  test('section timers are in-memory only (no localStorage) and the visible Status text uses the authoritative backend age', () => {
+  test('the visible text uses the real SERVER lane upload age (server timestamps, no localStorage freshness)', () => {
     const source = readSource();
-    assert.match(source, /function formatPresenceStatusText\(entry\) \{[\s\S]*?return formatAgeAgoSeconds\(backendPresenceAgeSeconds\(entry\)\);/);
-    assert.match(source, /function formatStatsUploadDurationText\(entry\) \{[\s\S]*?return formatAgeAgoSeconds\(backendStatsAgeSeconds\(entry\)\);/);
-    assert.match(source, /function formatEntrySyncStatusText\(entry\) \{[\s\S]*?return formatAgeAgoSeconds\(backendInventoryAgeSeconds\(entry\)\);/);
-    ['_frontendRefreshAt', '_leaderstatsFrontendRefreshAt', '_inventoryFrontendRefreshAt'].forEach((field) => {
-      assert.ok(!new RegExp(`localStorage[\\s\\S]{0,160}${field}`).test(source), `${field} must not be persisted`);
+    assert.match(source, /function formatPresenceStatusText\(entry\) \{[\s\S]*?return formatBackendAgeText\(backendPresenceAgeSeconds\(entry\)\);/);
+    assert.match(source, /function formatStatsUploadDurationText\(entry\) \{[\s\S]*?return formatBackendAgeText\(backendStatsAgeSeconds\(entry\)\);/);
+    assert.match(source, /function formatEntrySyncStatusText\(entry\) \{[\s\S]*?return formatBackendAgeText\(backendInventoryAgeSeconds\(entry\)\);/);
+    ['lastRealStatusAt', 'lastRealLeaderstatsAt', 'lastRealInventoryAt'].forEach((field) => {
+      assert.ok(!new RegExp(`localStorage[\\s\\S]{0,160}${field}`).test(source), `${field} must not be a localStorage freshness source`);
       assert.ok(!new RegExp(`${field}[\\s\\S]{0,160}localStorage`).test(source), `${field} must not be read from localStorage`);
     });
   });
@@ -127,36 +153,25 @@ describe('per-section frontend-receive timers (2026-06-16)', () => {
 });
 
 describe('per-section timer reset wiring', () => {
-  test('the get-backpack poll resets timers via the signature-gated maybeResetSectionTimers, AFTER merge', () => {
+  test('applyAuthPresence refreshes table + inventory indicators when headers update', () => {
     const source = readSource();
-    const fn = source.indexOf('function applyInventoryPollPayload(entry, key, data) {');
-    assert.ok(fn > 0, 'applyInventoryPollPayload missing');
-    const body = source.slice(fn, fn + 4200);
-    const mergeIdx = body.indexOf('entry.lastData = mergePreservedInventorySnapshot(entry.lastData, data);');
-    const resetIdx = body.indexOf('maybeResetSectionTimers(entry);');
-    assert.ok(mergeIdx >= 0, 'snapshot merge must exist');
-    assert.ok(resetIdx > mergeIdx, 'timer reset must run AFTER the merge so it sees the displayed dataset');
-    // No more unconditional per-poll marks inside the poll handler.
-    assert.ok(!body.includes('if (hasRenderableTrackerData(data)) markEntryFrontendRefreshed(entry);'), 'unconditional mark removed');
+    const fn = source.match(/function applyAuthPresence\(entry, key, contract\) \{[\s\S]*?\n  \}/)[0];
+    assert.match(fn, /refreshEntryTableSyncDisplay\(entry, key\)/);
+    assert.match(fn, /refreshEntrySyncDisplay\(entry\)/);
+    assert.match(fn, /laneTimestampAdvanced/);
   });
 
-  test('account-status poll routes through maybeResetSectionTimers (no unconditional leaderstats mark)', () => {
+  test('unchanged get-backpack poll still applies auth headers (lane ts can advance)', () => {
     const source = readSource();
-    const fn = source.indexOf('function applyAccountStatusPayload(payload) {');
-    const end = source.indexOf('function entrySnapshotData(', fn);
-    const body = source.slice(fn, end);
-    assert.match(body, /maybeResetSectionTimers\(entry\);/);
-    assert.ok(!/if \(payloadHasLeaderstats\(st\)\) markEntryLeaderstatsRefreshed\(entry\);/.test(body), 'must not unconditionally mark leaderstats');
+    const fn = source.indexOf('async function pollUser(key, opts) {');
+    const body = source.slice(fn, fn + 4000);
+    assert.match(body, /contract\.unchanged/);
+    assert.match(body, /applyAuthPresence\(entry, key, contract\)/);
   });
 
-  test('maybeResetSectionTimers gates every section mark behind a per-section signature change', () => {
+  test('maybeResetSectionTimers is a no-op (timers follow server lane timestamps)', () => {
     const source = readSource();
-    const fn = source.indexOf('function maybeResetSectionTimers(entry) {');
-    assert.ok(fn > 0, 'maybeResetSectionTimers missing');
-    const body = source.slice(fn, fn + 1700);
-    assert.match(body, /buildDisplayedDatasetSignature\(entry\)[\s\S]*?_trackerDisplaySig[\s\S]*?markEntryFrontendRefreshed\(entry\)/);
-    assert.match(body, /buildLeaderstatsSignature\(entry\)[\s\S]*?_leaderstatsDisplaySig[\s\S]*?markEntryLeaderstatsRefreshed\(entry\)/);
-    assert.match(body, /buildInventorySignature\(data\)[\s\S]*?_inventoryDisplaySig[\s\S]*?markEntryInventoryRefreshed\(entry\)/);
+    assert.match(source, /function maybeResetSectionTimers\(_entry\) \{ \/\* no-op/);
   });
 });
 

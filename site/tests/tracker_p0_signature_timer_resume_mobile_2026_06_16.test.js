@@ -20,129 +20,45 @@ const SOURCE_PATH = path.join(__dirname, '..', 'src', 'inventory', 'fishit_track
 const readSource = () => fs.readFileSync(SOURCE_PATH, 'utf8');
 
 // ---------------------------------------------------------------------------
-// P2: signature-gated timer resets (functional)
+// P2: server-lane timestamp timer resets (functional)
 // ---------------------------------------------------------------------------
-function makeSignatureEnv(source) {
-  const open = source.indexOf('  function stableStringify(value) {');
-  const close = source.indexOf('  function backendPresenceAgeSeconds(entry) {');
-  assert.ok(open > 0 && close > open, 'signature helper block missing');
-  const block = source.slice(open, close);
-  const marks = { tracker: 0, leaderstats: 0, inventory: 0 };
-  const sandbox = { Math, Number, String, Array, Object, JSON };
-  const script = `(function(){
-    const marks = { tracker: 0, leaderstats: 0, inventory: 0 };
-    // Stubs mirroring the real helpers the signature reads.
-    function normalizeToken(v){ return String(v == null ? '' : v).trim().toLowerCase().replace(/\\s+/g, ' '); }
-    function resolveItemAmount(it){ return (it && (it.amount ?? it.quantity)) ?? 1; }
-    function getEntryPlayerStats(entry){ return entry && entry.lastData ? entry.lastData.__stats : null; }
-    function displayCoinsStat(stats){ return stats ? String(stats.coins ?? '') : ''; }
-    function displayTotalCaughtStat(stats){ return stats ? String(stats.totalCaught ?? '') : ''; }
-    function displayRarestFishStat(stats){ return stats ? String(stats.rarest ?? '') : ''; }
-    function getPublicFishItems(d){ return (d && d.fishItems) || []; }
-    function getPublicStoneItems(d){ return (d && d.stoneItems) || []; }
-    function getPublicTotemItems(d){ return (d && d.totemItems) || []; }
-    function getRubyGemstoneTopCardCount(d){ return (d && d.__ruby) || 0; }
-    function hasRenderableTrackerData(d){ return !!(d && (d.__stats || (d.fishItems && d.fishItems.length))); }
-    function payloadHasLeaderstats(d){ return !!(d && d.__stats); }
-    function entryHasInventoryRows(d){ return !!(d && d.fishItems && d.fishItems.length); }
-    function markEntryFrontendRefreshed(){ marks.tracker++; }
-    function markEntryLeaderstatsRefreshed(){ marks.leaderstats++; }
-    function markEntryInventoryRefreshed(){ marks.inventory++; }
-${block}
-    return { maybeResetSectionTimers, buildDisplayedDatasetSignature, buildInventorySignature, buildLeaderstatsSignature, marks };
-  })()`;
-  const api = vm.runInNewContext(script, sandbox, { filename: 'signatures.js' });
-  return api;
+function makeLaneTimerEnv(source) {
+  const names = [
+    'authAgeSecondsFromTs', 'backendInventoryAgeSeconds', 'formatCompactAgeAgoSeconds',
+    'formatInventoryUploadLabel', 'laneTimestampAdvanced',
+  ];
+  const blocks = names.map((n) => {
+    const m = source.match(new RegExp(`function ${n}\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n  \\}`));
+    assert.ok(m, `${n} missing`);
+    return m[0];
+  });
+  return vm.runInNewContext(`(function(){
+    function liveSecondsSinceInventorySuccess(){return null;}
+    ${blocks.join('\n')}
+    return { formatInventoryUploadLabel, laneTimestampAdvanced };
+  })()`, { Math, Number, Date }, { filename: 'lane-timer.js' });
 }
 
-describe('P2 — visible timers reset only on real displayed-data change', () => {
-  test('initial renderable data marks all three sections once', () => {
-    const env = makeSignatureEnv(readSource());
-    const entry = { displayName: 'u', lastData: { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 } };
-    env.maybeResetSectionTimers(entry);
-    assert.equal(env.marks.tracker, 1);
-    assert.equal(env.marks.leaderstats, 1);
-    assert.equal(env.marks.inventory, 1);
+describe('P2 — visible timers reset on real server lane timestamp advance', () => {
+  test('advanced lastRealInventoryAt resets inventory age even when content unchanged', () => {
+    const env = makeLaneTimerEnv(readSource());
+    const now = Date.now();
+    const prev = { lastRealInventoryAt: new Date(now - 300_000).toISOString(), inventoryRevision: 5 };
+    const next = { lastRealInventoryAt: new Date(now - 5000).toISOString(), inventoryRevision: 6 };
+    assert.equal(env.laneTimestampAdvanced(prev, next, 'inventory'), true);
+    assert.equal(env.formatInventoryUploadLabel({ _auth: next }), '5s ago');
   });
 
-  test('an identical poll after 10s does NOT reset any timer', () => {
-    const env = makeSignatureEnv(readSource());
-    const data = { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 };
-    const entry = { displayName: 'u', lastData: data };
-    env.maybeResetSectionTimers(entry);
-    // Same effective data again (cache-bust returned identical snapshot).
-    entry.lastData = { ...data, fishItems: [{ name: 'A', amount: 1 }], __stats: { coins: 100, totalCaught: 5 } };
-    env.maybeResetSectionTimers(entry);
-    assert.equal(env.marks.tracker, 1);
-    assert.equal(env.marks.leaderstats, 1);
-    assert.equal(env.marks.inventory, 1);
+  test('identical lane timestamp does not count as advance', () => {
+    const env = makeLaneTimerEnv(readSource());
+    const ts = new Date().toISOString();
+    const auth = { lastRealInventoryAt: ts, inventoryRevision: 3 };
+    assert.equal(env.laneTimestampAdvanced(auth, { ...auth }, 'inventory'), false);
   });
 
-  test('changed coins resets leaderstats + tracker but not inventory', () => {
-    const env = makeSignatureEnv(readSource());
-    const entry = { displayName: 'u', lastData: { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 } };
-    env.maybeResetSectionTimers(entry);
-    entry.lastData = { username: 'u', __stats: { coins: 250, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 };
-    env.maybeResetSectionTimers(entry);
-    assert.equal(env.marks.leaderstats, 2);
-    assert.equal(env.marks.tracker, 2);
-    assert.equal(env.marks.inventory, 1); // unchanged inventory
-  });
-
-  test('changed totalCaught resets leaderstats + tracker', () => {
-    const env = makeSignatureEnv(readSource());
-    const entry = { displayName: 'u', lastData: { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 } };
-    env.maybeResetSectionTimers(entry);
-    entry.lastData = { username: 'u', __stats: { coins: 100, totalCaught: 6 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 };
-    env.maybeResetSectionTimers(entry);
-    assert.equal(env.marks.leaderstats, 2);
-    assert.equal(env.marks.tracker, 2);
-    assert.equal(env.marks.inventory, 1);
-  });
-
-  test('changed fish/item count resets inventory + tracker but not leaderstats', () => {
-    const env = makeSignatureEnv(readSource());
-    const entry = { displayName: 'u', lastData: { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 } };
-    env.maybeResetSectionTimers(entry);
-    entry.lastData = { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 2 }], __ruby: 0 };
-    env.maybeResetSectionTimers(entry);
-    assert.equal(env.marks.inventory, 2);
-    assert.equal(env.marks.tracker, 2);
-    assert.equal(env.marks.leaderstats, 1);
-  });
-
-  test('changed Ruby Gemstone count resets inventory + tracker', () => {
-    const env = makeSignatureEnv(readSource());
-    const entry = { displayName: 'u', lastData: { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 } };
-    env.maybeResetSectionTimers(entry);
-    entry.lastData = { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 1 };
-    env.maybeResetSectionTimers(entry);
-    assert.equal(env.marks.inventory, 2);
-    assert.equal(env.marks.tracker, 2);
-    assert.equal(env.marks.leaderstats, 1);
-  });
-
-  test('status-only payload (no inventory rows) reuses preserved inventory and does NOT reset inventory timer', () => {
-    const env = makeSignatureEnv(readSource());
-    const entry = { displayName: 'u', lastData: { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 } };
-    env.maybeResetSectionTimers(entry);
-    // Status poll merges new stats but the SAME preserved inventory rows.
-    entry.lastData = { username: 'u', __stats: { coins: 100, totalCaught: 9 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 };
-    env.maybeResetSectionTimers(entry);
-    assert.equal(env.marks.leaderstats, 2); // stats changed
-    assert.equal(env.marks.inventory, 1);  // inventory unchanged
-  });
-
-  test('a fallback/preserved snapshot with no renderable change does not reset', () => {
-    const env = makeSignatureEnv(readSource());
-    const data = { username: 'u', __stats: { coins: 100, totalCaught: 5 }, fishItems: [{ name: 'A', amount: 1 }], __ruby: 0 };
-    const entry = { displayName: 'u', lastData: data };
-    env.maybeResetSectionTimers(entry);
-    // Three more identical polls (preserved data reused each time).
-    for (let i = 0; i < 3; i++) { entry.lastData = { ...data }; env.maybeResetSectionTimers(entry); }
-    assert.equal(env.marks.tracker, 1);
-    assert.equal(env.marks.leaderstats, 1);
-    assert.equal(env.marks.inventory, 1);
+  test('maybeResetSectionTimers no longer gates on content signature', () => {
+    const src = readSource();
+    assert.match(src, /function maybeResetSectionTimers\(_entry\) \{ \/\* no-op/);
   });
 });
 
@@ -154,7 +70,9 @@ describe('P2C — first-load / resume freshness + stale-response guard', () => {
     const source = readSource();
     const fn = source.indexOf('async function pollUser(key, opts) {');
     assert.ok(fn > 0, 'pollUser missing');
-    const body = source.slice(fn, fn + 1600);
+    // Slice generously — the two stale-response guards are ~50 lines apart and
+    // CRLF line endings inflate the offset on Windows checkouts.
+    const body = source.slice(fn, fn + 4000);
     assert.match(body, /entry\._pollReqSeq = \(entry\._pollReqSeq \|\| 0\) \+ 1/);
     assert.match(body, /const isStaleResponse = \(\) =>/);
     // Guard runs after the fetch resolves AND after the body is read.

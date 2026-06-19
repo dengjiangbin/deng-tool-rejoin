@@ -63,14 +63,9 @@ describe('T3 — visible timer is frontend-receive (restored 4394cfd)', () => {
     assert.ok(!/seedOfflineTimersFromBackend\(entry\);/.test(stBody), 'status poll must not seed from backend');
   });
 
-  test('signature-gated reset calls markEntry*Refreshed only — never seeds from backend', () => {
+  test('server-lane timer model: maybeResetSectionTimers is a no-op', () => {
     const src = readSource();
-    const fn = src.match(/function maybeResetSectionTimers\(entry\) \{[\s\S]*?\n  \}/)[0];
-    assert.match(fn, /markEntryFrontendRefreshed\(entry\);/);
-    assert.match(fn, /markEntryLeaderstatsRefreshed\(entry\);/);
-    assert.match(fn, /markEntryInventoryRefreshed\(entry\);/);
-    assert.doesNotMatch(fn, /seedSectionBaseFromBackendAge/);
-    assert.doesNotMatch(fn, /backendPresenceAgeSeconds/);
+    assert.match(src, /function maybeResetSectionTimers\(_entry\) \{ \/\* no-op/);
   });
 
   test('timer base time is in-memory only (never persisted to localStorage)', () => {

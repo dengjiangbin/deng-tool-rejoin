@@ -23,12 +23,13 @@ describe('P0 warn streak + denghub2 freshness + inventory text-only (2026-06-19)
     assert.ok(syncIdx > 0 && dirtyIdx > syncIdx, 'disk sync must run before computeDirty');
   });
 
-  test('inventory section badges are text-only neutral (no dot / no green-red)', () => {
+  test('inventory section badges show compact age text only (no dot / no green-red / no prefix words)', () => {
     const src = fs.readFileSync(TRACKER_SRC, 'utf8');
     assert.match(src, /function formatInventoryUploadLabel/);
-    assert.match(src, /Inventory updated \$\{ageText\}/);
-    assert.match(src, /Inventory stale \$\{ageText\}/);
-    assert.match(src, /Inventory waiting for upload/);
+    assert.match(src, /function formatCompactAgeAgoSeconds/);
+    const labelFn = src.match(/function formatInventoryUploadLabel\(entry\) \{[\s\S]*?\n  \}/)[0];
+    assert.doesNotMatch(labelFn, /Inventory updated|Inventory stale|waiting for upload/i);
+    assert.match(labelFn, /formatCompactAgeAgoSeconds\(backendInventoryAgeSeconds/);
     const patch = src.match(/function patchInventoryUploadIndicatorDom\(root, entry\) \{[\s\S]*?\n {2}\}/);
     assert.ok(patch, 'patchInventoryUploadIndicatorDom missing');
     assert.match(patch[0], /dotEl\.remove\(\)/);
