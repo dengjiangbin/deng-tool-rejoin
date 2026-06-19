@@ -15,6 +15,11 @@ const {
 const ENRICHMENT_MAX = Number(process.env.TRACKER_ENRICHMENT_MAX_CONCURRENT || 4);
 const QUEUE_MAX = Number(process.env.TRACKER_QUEUE_MAX || 1000);
 const LAG_WARN_MS = Number(process.env.TRACKER_EVENT_LOOP_LAG_WARN_MS || 250);
+// Shed deep enrichment only when event-loop lag clears this bound. The threshold must
+// stay ABOVE the steady-state lag floor produced by periodic shard flush / cache
+// refresh (~800ms with ~600 live accounts); setting it below that floor would make
+// shouldShedWork() permanently true and starve all deferred enrichment. The three
+// fast-path lanes (status/leaderstats/inventory raw persist) always bypass this gate.
 const LAG_SHED_MS = Number(process.env.TRACKER_EVENT_LOOP_LAG_SHED_MS || 1000);
 const HEAP_SHED_RATIO = Number(process.env.TRACKER_HEAP_SHED_RATIO || 0.92);
 
