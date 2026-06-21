@@ -40,12 +40,19 @@ def _result_used_root(result: android.CommandResult) -> bool:
 
 
 def _proc_scan_alive(package: str) -> bool:
-    """Pure Python /proc scan — no subprocess, no fork, no segfault risk.
-
-    Returns True when any running process has ``package`` in its cmdline.
-    This is the safest possible alive check for Termux/Python 3.13 where
-    ``fork()`` in threaded processes can produce SIGSEGV.
-    """
+    """Return True when process or foreground evidence exists (root-aware)."""
+    if os.name == "nt":
+        return True
+    try:
+        evidence = android.get_package_alive_evidence(package)
+        return bool(
+            evidence.get("running")
+            or evidence.get("root_running")
+            or evidence.get("foreground")
+            or evidence.get("window")
+        )
+    except Exception:  # noqa: BLE001
+        pass
     try:
         for entry in os.listdir("/proc"):
             if not entry.isdigit():
@@ -100,6 +107,10 @@ def _launch_wait_seconds(cfg: dict[str, Any], key: str, default: float, minimum:
     return min(max(value, minimum), maximum)
 
 
+def _launch_verify_wait_seconds(cfg: dict[str, Any]) -> float:
+    return _launch_wait_seconds(cfg, "launch_verify_wait_sec", 15.0, 5.0, 25.0)
+
+
 def _command_for_log(args: tuple[str, ...]) -> str:
     return mask_urls_in_text(" ".join(str(a) for a in args))[:500]
 
@@ -149,18 +160,15 @@ def _read_launch_state(package: str) -> dict[str, Any]:
 
 
 def _wait_for_launch_ready(package: str, cfg: dict[str, Any]) -> dict[str, Any]:
-    process_deadline = time.monotonic() + _launch_wait_seconds(
-        cfg, "launch_wait_process_sec", 3.0, 0.5, 8.0,
-    )
-    activity_deadline = time.monotonic() + _launch_wait_seconds(
-        cfg, "launch_wait_activity_sec", 5.0, 0.5, 12.0,
-    )
+    verify_wait = _launch_verify_wait_seconds(cfg)
+    process_deadline = time.monotonic() + verify_wait
+    activity_deadline = time.monotonic() + verify_wait
     last = _read_launch_state(package)
     while time.monotonic() < process_deadline:
         last = _read_launch_state(package)
         if last["process_alive"]:
             break
-        time.sleep(0.25)
+        time.sleep(0.35)
     while time.monotonic() < activity_deadline:
         last = _read_launch_state(package)
         if last["activity_visible"] or last["surface_present"]:
@@ -431,7 +439,19 @@ def perform_rejoin(
             error = mask_urls_in_text(result.summary or "Android launch command failed")
             raise RuntimeError(error)
 
+        from . import launch_verify
+
+        verification = launch_verify.verify_launch(
+            package,
+            launch_result=result,
+            launch_method=_method,
+            wait_seconds=_launch_verify_wait_seconds(cfg),
+        )
         readiness = _wait_for_launch_ready(package, cfg)
+        if not verification.success and not readiness.get("process_alive"):
+            raise RuntimeError(verification.failure_message())
+        if verification.success and not readiness.get("process_alive"):
+            readiness = _read_launch_state(package)
         retry_count = 0
         if readiness.get("black_screen_suspected"):
             retry_count = 1
@@ -486,6 +506,8 @@ def perform_rejoin(
             final_state="ready" if not readiness.get("black_screen_suspected") else "suspect",
         )
         if not readiness.get("process_alive"):
+            if not verification.success:
+                raise RuntimeError(verification.failure_message())
             raise RuntimeError("Android launch returned success but package process was not detected")
         if readiness.get("black_screen_suspected"):
             raise RuntimeError("Android launch returned success but no visible activity or surface was detected")

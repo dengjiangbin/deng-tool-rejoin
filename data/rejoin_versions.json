@@ -1,6 +1,6 @@
 [
   {
-    "stable_latest": "v1.0.1",
+    "stable_latest": "v1.0.2",
     "test_latest": "main-dev",
     "kind": "channel_pointers"
   },
@@ -41,6 +41,24 @@
     "enabled": true
   },
   {
+    "version": "v1.0.2",
+    "id": "v1.0.2",
+    "channel": "stable",
+    "title": "Version 1.0.2",
+    "label": "v1.0.2",
+    "recommended": true,
+    "visibility": "public",
+    "install_ref": "refs/tags/v1.0.2",
+    "git_ref": "refs/tags/v1.0.2",
+    "release_stage": "stable",
+    "frozen": true,
+    "artifact_path": "releases/v1.0.2/deng-tool-rejoin-v1.0.2.tar.gz",
+    "artifact_sha256": "d7179acc6373b8444aaee1859c7a42af8b62cfec75753560e9aa1996b7a748b7",
+    "installer_endpoint": "/install/v1.0.2",
+    "notes": "Frozen public stable release. Immutable artifact built for v1.0.2.",
+    "enabled": true
+  },
+  {
     "version": "main-dev",
     "channel": "dev",
     "recommended": false,
@@ -53,6 +71,6 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "e5088937216c29c7ad52698f271e0b48946eca3a4d069da72648f2964c2cf4a5"
+    "artifact_sha256": "23e2128766b4c330c9036975a7e5f1ebd0dc3cf50c23afc6d2bbe502964ef0ea"
   }
 ]

@@ -122,6 +122,11 @@ COMMANDS = {
     "new-user-help",
     "enable-boot",
     "update",
+    "scan",
+    "map",
+    "list",
+    "unmap",
+    "launch",
 }
 
 # ─── ANSI color constants (used only when a tty is available) ─────────────────
@@ -1291,14 +1296,31 @@ def _gather_roblox_candidates_for_ui(config_data: dict[str, Any]) -> list[androi
     return candidates
 
 
-def _print_full_discovery_table(candidates: list[android.RobloxPackageCandidate]) -> None:
+def _print_full_discovery_table(candidates: list[android.RobloxPackageCandidate], config_data: dict[str, Any] | None = None) -> None:
     print()
     print("Detected Roblox Packages")
-    print(f"{'#':<4} {'Package':<40} {'App Name':<22} {'Launchable':<10}")
-    print(f"{'-'*4} {'-'*40} {'-'*22} {'-'*10}")
+    print(f"{'#':<4} {'Package':<36} {'App Name':<18} {'Launch':<8} {'Username':<16} {'Source':<12}")
+    print(f"{'-'*4} {'-'*36} {'-'*18} {'-'*8} {'-'*16} {'-'*12}")
     for idx, c in enumerate(candidates, start=1):
         launch_cell = "Yes" if c.launchable else "No"
-        print(f"{idx:<4} {c.package:<40} {c.app_name[:20]:<22} {launch_cell:<10}")
+        username = "Unknown"
+        source = "-"
+        reason = ""
+        if config_data is not None:
+            scan = package_username.scan_package_username(c.package, config_data)
+            if scan.username:
+                username = scan.username[:15]
+                source = scan.source[:11]
+            elif scan.reason:
+                reason = scan.reason[:40]
+                username = "unavailable"
+                source = "blocked"
+        print(
+            f"{idx:<4} {c.package:<36} {c.app_name[:16]:<18} {launch_cell:<8} "
+            f"{username:<16} {source:<12}"
+        )
+        if reason:
+            print(f"     username note: {reason}")
 
 
 def _safe_package_detect_progress() -> None:
@@ -1337,7 +1359,7 @@ def _interactive_discover_package_entries(
         print(f"Auto-selected: {c0.package}")
         entry = _entry_for_package(c0.package, existing_entries, app_name=c0.app_name)
         return [entry], "ok"
-    _print_full_discovery_table(candidates)
+    _print_full_discovery_table(candidates, config_data)
     print("  A. Select all")
     _raw = safe_io.safe_prompt("Choose packages (e.g. 1,2 or A) [1]: ", default="1")
     if _raw is None:
@@ -2783,7 +2805,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
 
     if fresh_candidates:
         print(f"Detected {len(fresh_candidates)} new Roblox-like package(s):")
-        _print_full_discovery_table(fresh_candidates)
+        _print_full_discovery_table(fresh_candidates, draft)
         print(f"  A. Add all ({len(fresh_candidates)})")
         print("  M. Enter package name manually")
         print("  B. Back")
@@ -3068,7 +3090,7 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
     )
     current_pkgs = {e["package"] for e in current_entries}
 
-    _print_full_discovery_table(candidates)
+    _print_full_discovery_table(candidates, config_data)
     new_candidates = [c for c in candidates if c.package not in current_pkgs]
     already_all = len(new_candidates) == 0
     if already_all:
@@ -3996,6 +4018,100 @@ def _cmd_doctor_root_state(cfg: dict[str, Any] | None) -> int:
     return 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    """List detected Roblox packages with honest username scan results."""
+    cfg = None
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+    candidates = _gather_roblox_candidates_for_ui(cfg)
+    if not candidates:
+        print("No Roblox-like packages detected.")
+        print("Install/open a Roblox clone once, then retry.")
+        return 1
+    _print_full_discovery_table(candidates, cfg)
+    return 0
+
+
+def cmd_list_packages(args: argparse.Namespace) -> int:
+    from . import package_mapping as _pm
+
+    cfg = load_config()
+    rows = _pm.list_mapped_packages(cfg)
+    print(f"{'Username':<18} {'Source':<16} Package")
+    print(f"{'-'*18} {'-'*16} {'-'*40}")
+    for row in rows:
+        print(f"{row['username']:<18} {row['source']:<16} {row['package']}")
+    return 0
+
+
+def cmd_map(args: argparse.Namespace) -> int:
+    from . import package_mapping as _pm
+
+    rest = list(getattr(args, "extra_args", []) or [])
+    if len(rest) < 2:
+        print("Usage: deng-rejoin map <package> <username>")
+        return 1
+    package, username = rest[0], " ".join(rest[1:]).strip()
+    try:
+        _pm.map_package_username(package, username)
+    except Exception as exc:  # noqa: BLE001
+        print(f"map failed: {exc}")
+        return 1
+    print(f"mapped {package} -> {username}")
+    return 0
+
+
+def cmd_unmap(args: argparse.Namespace) -> int:
+    from . import package_mapping as _pm
+
+    rest = list(getattr(args, "extra_args", []) or [])
+    if not rest:
+        print("Usage: deng-rejoin unmap <package>")
+        return 1
+    try:
+        _pm.unmap_package(rest[0])
+    except Exception as exc:  # noqa: BLE001
+        print(f"unmap failed: {exc}")
+        return 1
+    print(f"unmapped {rest[0]}")
+    return 0
+
+
+def cmd_launch(args: argparse.Namespace) -> int:
+    from . import launch_verify
+
+    rest = list(getattr(args, "extra_args", []) or [])
+    if not rest:
+        print("Usage: deng-rejoin launch <package>")
+        return 1
+    package = rest[0].strip()
+    try:
+        validate_package_name(package)
+    except Exception as exc:  # noqa: BLE001
+        print(f"invalid package: {exc}")
+        return 1
+    if not android.package_installed(package):
+        print(f"package not installed: {package}")
+        return 1
+    cfg = load_config()
+    result, method = android.launch_package_with_options(package, None)
+    verification = launch_verify.verify_launch(
+        package,
+        launch_result=result,
+        launch_method=method,
+        wait_seconds=15.0,
+    )
+    for line in verification.summary_lines():
+        print(line)
+    if verification.success:
+        print("Launch verified.")
+        return 0
+    print("Launch failed.")
+    return 1
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Doctor command (internal).  Public users normally do NOT see this output.
 
@@ -4038,6 +4154,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     if getattr(args, "doctor_versions", False):
         return _cmd_doctor_versions()
+
+    doctor_package = str(getattr(args, "doctor_package", "") or "").strip()
+    if doctor_package:
+        from . import launch_verify
+
+        for line in launch_verify.doctor_package_report(doctor_package):
+            print(line)
+        return 0
 
     # Default doctor: show standard health check
     print_banner(use_color=use_color)
@@ -5838,7 +5962,15 @@ def cmd_start(args: argparse.Namespace) -> int:
             print()
             print("  Package was selected but Android did not launch it.")
             print()
-            print(f"  Detail: {best_reason}")
+            detail = best_reason
+            if len(detail) > 240 and "\n" not in detail:
+                detail = detail[:240] + "..."
+            print(f"  Detail: {detail}")
+            if "\n" in best_reason:
+                print()
+                print("  Evidence:")
+                for ln in best_reason.splitlines()[1:12]:
+                    print(f"    {ln}")
             _release_start_lock("normal_exit")
             _start_session.finish("launch_failed")
             return 1
@@ -6520,6 +6652,19 @@ def cmd_probe(args: argparse.Namespace) -> int:
         if ok:
             sys.stdout.write(f"probe uploaded: {info}\n")
             sys.stdout.write(f"probe path: {path}\n")
+            fetch_ok = False
+            try:
+                from . import safe_http as _sh
+                from .constants import DEFAULT_LICENSE_SERVER_URL
+                fetch_url = DEFAULT_LICENSE_SERVER_URL.rstrip("/") + f"/api/dev-probe/{info}"
+                status, body = _sh.get_raw(fetch_url, timeout=20)
+                fetch_ok = status == 200 and info.encode() in (body or b"")
+            except Exception:  # noqa: BLE001
+                fetch_ok = False
+            sys.stdout.write(
+                f"probe fetch verify: {'ok' if fetch_ok else 'failed'} ({info})\n"
+            )
+            sys.stdout.write(f"probe admin URL: https://rejoin.deng.my.id/api/dev-probe/{info}\n")
         else:
             bundle_path = ""
             try:
@@ -7589,12 +7734,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # cap even after long test sessions.
     parser.add_argument("--diag", dest="diag", action="store_true",
                         help=argparse.SUPPRESS)
+    parser.add_argument("--package", dest="doctor_package", default="",
+                        help=argparse.SUPPRESS)
 
     # Pre-process argv so hidden positional subcommands don't trip choices validation.
     import sys as _sys
     if argv is None:
         argv = _sys.argv[1:]
     argv = list(argv)
+
+    ns_extra_args: list[str] = []
+    if argv and argv[0] in {"map", "unmap", "launch"}:
+        ns_extra_args = argv[1:]
+        argv = [argv[0]]
+    elif argv and argv[0] == "doctor":
+        cleaned: list[str] = []
+        skip_next = False
+        for i, tok in enumerate(argv):
+            if skip_next:
+                skip_next = False
+                continue
+            if tok == "--package" and i + 1 < len(argv):
+                skip_next = True
+                continue
+            cleaned.append(tok)
+        argv = cleaned
 
     # Standalone aliases: hidden subcommand spellings → flag.
     if argv and argv[0] in ("support-bundle", "support_bundle"):
@@ -7644,7 +7808,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             ns.doctor_install = True
         elif sub in ("versions", "version_info"):
             ns.doctor_versions = True
+        elif sub.startswith("com.") or "." in sub:
+            ns.doctor_package = _unknown[0]
         # Any other doctor sub is just dropped silently — no traceback.
+
+    ns.extra_args = ns_extra_args
 
     flag_to_command = {
         "setup": ns.setup,
@@ -7754,6 +7922,11 @@ def _handlers() -> dict[str, Any]:
         "doctor-install": cmd_doctor_install,
         "probe": cmd_probe,
         "diag-startup": cmd_diag_startup,
+        "scan": cmd_scan,
+        "map": cmd_map,
+        "list": cmd_list_packages,
+        "unmap": cmd_unmap,
+        "launch": cmd_launch,
     }
 
 

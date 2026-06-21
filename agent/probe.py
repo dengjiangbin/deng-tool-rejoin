@@ -1078,6 +1078,7 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
     try:
         from .config import get_package_display_username
+        from . import package_username as _pu
         menu_diag = []
         if isinstance(cfg, dict):
             for entry in pkg_entries:
@@ -1086,12 +1087,16 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
                 pkg = str(entry.get("package") or "")
                 if not pkg:
                     continue
+                scan = _pu.scan_package_username(pkg, cfg)
                 menu_diag.append({
                     "package": pkg,
-                    "display_username": get_package_display_username(entry, cfg),
-                    "username_source": entry.get("username_source") or "not_set",
-                    "detector_used": False,
-                    "detector_duration_ms": 0,
+                    "display_username": scan.username or get_package_display_username(entry, cfg),
+                    "username_source": scan.source if scan.username else (entry.get("username_source") or "not_set"),
+                    "username_supported": scan.supported,
+                    "username_reason": scan.reason,
+                    "methods_attempted": list(scan.methods_attempted),
+                    "detector_used": bool(scan.methods_attempted),
+                    "detector_duration_ms": scan.duration_ms,
                     "mapping_refresh_called": False,
                 })
         out["package_menu_diagnostics"] = menu_diag

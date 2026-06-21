@@ -45,8 +45,8 @@ class PackageUsernameSafeTests(unittest.TestCase):
         read_root.assert_called_once()
         args, kwargs = read_root.call_args
         self.assertEqual(args[0], "/data/data/com.moons.litesc/shared_prefs/prefs.xml")
-        self.assertLessEqual(kwargs["timeout"], 1)
-        self.assertLessEqual(kwargs["detect_timeout"], 1)
+        self.assertLessEqual(kwargs["timeout"], 2)
+        self.assertLessEqual(kwargs["detect_timeout"], 2)
 
     def test_detector_failure_falls_back_to_unknown(self) -> None:
         cfg = validate_config(default_config())
