@@ -5,44 +5,41 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from agent import launch_verify, package_username
+from agent import launch_verify, package_username, root_access
 
 
 class LaunchVerifyTests(unittest.TestCase):
     def test_not_launchable_when_no_launcher(self) -> None:
-        with mock.patch("agent.launch_verify.android.package_installed", return_value=True), \
-             mock.patch("agent.launch_verify.android.is_launchable_package", return_value=False):
+        with mock.patch("agent.launch_verify.root_preflight_error", return_value=""), \
+             mock.patch("agent.launch_verify.resolve_launcher_activity", return_value=("", False, "not launchable")):
             result = launch_verify.verify_launch("com.test.nolaunch")
         self.assertFalse(result.success)
         self.assertIn("not launchable", result.failure_reason)
 
     def test_success_when_root_running_detected(self) -> None:
-        fake_result = mock.Mock(ok=True, returncode=0, stdout="Starting", stderr="", args=("am", "start"))
-        with mock.patch("agent.launch_verify.resolve_launcher_activity", return_value=("com.test/.Main", True, "")), \
+        fake_result = mock.Mock(ok=True, returncode=0, stdout="Starting", stderr="", args=("su", "start"))
+        with mock.patch("agent.launch_verify.root_preflight_error", return_value=""), \
+             mock.patch("agent.launch_verify.resolve_launcher_activity", return_value=("com.test/.Main", True, "")), \
              mock.patch("agent.launch_verify.collect_process_evidence", return_value={
-                 "running": False,
                  "root_running": True,
-                 "proc_scan": "1234",
              }), \
              mock.patch("agent.launch_verify._foreground_lines", return_value=(None, "", "")), \
              mock.patch("agent.launch_verify._recent_logcat_for_package", return_value=[]):
             result = launch_verify.verify_launch(
                 "com.test.app",
                 launch_result=fake_result,
-                launch_method="am_or_resolve",
+                launch_method="root_monkey",
                 wait_seconds=1.0,
                 poll_interval=0.01,
             )
         self.assertTrue(result.success)
 
     def test_failure_includes_evidence_when_am_ok_but_no_process(self) -> None:
-        fake_result = mock.Mock(ok=True, returncode=0, stdout="ok", stderr="", args=("am", "start"))
-        with mock.patch("agent.launch_verify.resolve_launcher_activity", return_value=("", True, "")), \
+        fake_result = mock.Mock(ok=True, returncode=0, stdout="ok", stderr="", args=("su", "start"))
+        with mock.patch("agent.launch_verify.root_preflight_error", return_value=""), \
+             mock.patch("agent.launch_verify.resolve_launcher_activity", return_value=("", True, "")), \
              mock.patch("agent.launch_verify.collect_process_evidence", return_value={
-                 "running": False,
                  "root_running": False,
-                 "proc_scan": "rc=1",
-                 "pidof": "rc=1",
              }), \
              mock.patch("agent.launch_verify._foreground_lines", return_value=(None, "", "")), \
              mock.patch("agent.launch_verify._recent_logcat_for_package", return_value=[]):
@@ -53,7 +50,7 @@ class LaunchVerifyTests(unittest.TestCase):
                 poll_interval=0.01,
             )
         self.assertFalse(result.success)
-        self.assertIn("process was not detected", result.failure_reason)
+        self.assertEqual(result.failure_reason, "launch_accepted_but_not_alive")
         self.assertIn("launch_rc: 0", result.failure_message())
 
 
@@ -69,26 +66,43 @@ class UsernameScanTests(unittest.TestCase):
         }
         report = package_username.scan_package_username("com.moons.litesc", cfg)
         self.assertEqual(report.username, "JBDENG8")
-        self.assertEqual(report.source, "manual")
+        self.assertEqual(report.source, "manual_mapping")
 
     def test_auto_detected_pref_source(self) -> None:
-        with mock.patch("agent.package_username.detect_package_username_quick") as det:
-            det.return_value = package_username.PackageUsernameResult(
-                "autouser", "detected_safe_pref", True, 5,
+        pre = root_access.RootCheckReport(
+            ok=True, tool="su", uid="uid=0(root)", whoami="root",
+            data_dir_readable=True, steps=(), detail="ok",
+        )
+        with mock.patch("agent.package_username.scan_package_username_root") as scan_fn:
+            scan_fn.return_value = package_username.UsernameScanReport(
+                package="com.test.app",
+                username="autouser",
+                source="root_shared_prefs",
+                supported=True,
+                reason="",
+                root_used=True,
             )
-            with mock.patch("agent.package_username.root_access.detect") as rd:
-                rd.return_value = mock.Mock(available=True, detail="ok")
-                report = package_username.scan_package_username("com.test.app", {})
+            report = package_username.scan_package_username("com.test.app", {})
         self.assertEqual(report.username, "autouser")
-        self.assertEqual(report.source, "detected_safe_pref")
+        self.assertEqual(report.source, "root_shared_prefs")
 
     def test_unknown_without_root_is_honest(self) -> None:
-        with mock.patch("agent.package_username.root_access.detect") as rd:
-            rd.return_value = mock.Mock(available=False, detail="su not found")
+        pre = root_access.RootCheckReport(
+            ok=False, tool=None, uid="", whoami="", data_dir_readable=False,
+            steps=(), detail="su not found", error="su not found",
+        )
+        with mock.patch("agent.package_username.scan_package_username_root") as scan_fn:
+            scan_fn.return_value = package_username.UsernameScanReport(
+                package="com.test.app",
+                username="",
+                source="unknown",
+                supported=False,
+                reason=pre.public_error(),
+                root_used=False,
+            )
             report = package_username.scan_package_username("com.test.app", {})
         self.assertEqual(report.username, "")
-        self.assertEqual(report.source, "unknown")
-        self.assertIn("username unavailable", report.reason)
+        self.assertIn("unsupported: root is required", report.reason)
 
 
 if __name__ == "__main__":

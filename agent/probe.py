@@ -1018,7 +1018,76 @@ def _capture_landscape_debug_state(errors: list[dict[str, str]]) -> dict[str, An
 # ─── Public entrypoint ────────────────────────────────────────────────────────
 
 
-def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]:
+def _build_probe_summary(
+    out: dict[str, Any],
+    *,
+    selftest: dict[str, Any] | None = None,
+    last_command: str = "",
+) -> dict[str, Any]:
+    build = out.get("build") if isinstance(out.get("build"), dict) else {}
+    device = out.get("device") if isinstance(out.get("device"), dict) else {}
+    root = device.get("root") if isinstance(device.get("root"), dict) else {}
+    menu = out.get("package_menu_diagnostics") if isinstance(out.get("package_menu_diagnostics"), list) else []
+    usernames_found = sum(
+        1 for row in menu
+        if isinstance(row, dict) and str(row.get("display_username") or "").strip()
+        and str(row.get("display_username")) not in {"Unknown", "unavailable", ""}
+    )
+    summary: dict[str, Any] = {
+        "probe_id": out.get("probe_id") or "",
+        "product_version": build.get("product_version") or build.get("version") or "",
+        "artifact_sha256": build.get("artifact_sha256_short") or build.get("artifact_sha256") or "",
+        "git_commit": build.get("git_commit_short") or build.get("git_commit") or "",
+        "install_time_iso": build.get("install_time_iso") or "",
+        "root_available": bool(root.get("available")),
+        "root_required_mode": True,
+        "packages_found": len(menu),
+        "usernames_found": usernames_found,
+        "selected_package": "",
+        "last_command": last_command or "probe",
+        "launch_attempted": False,
+        "launch_state": "",
+        "launch_reason": "",
+        "strong_success_evidence": False,
+        "blocking_errors": [
+            str(e.get("error") or e.get("step") or "")[:120]
+            for e in (out.get("errors") or [])
+            if isinstance(e, dict) and (e.get("error") or e.get("step"))
+        ][:8],
+    }
+    if selftest:
+        summary.update({
+            k: selftest.get(k)
+            for k in (
+                "selected_package",
+                "launch_attempted",
+                "launch_state",
+                "launch_reason",
+                "strong_success_evidence",
+                "username_scan",
+                "launch",
+            )
+            if k in selftest
+        })
+        if selftest.get("package"):
+            summary["selected_package"] = selftest.get("package")
+        launch = selftest.get("launch") if isinstance(selftest.get("launch"), dict) else {}
+        if launch:
+            summary["launch_attempted"] = bool(launch.get("attempted"))
+            summary["launch_state"] = launch.get("state") or ""
+            summary["launch_reason"] = launch.get("reason") or ""
+            summary["strong_success_evidence"] = bool(launch.get("strong_success_evidence"))
+    return summary
+
+
+def collect_probe(
+    *,
+    include_diag_startup: bool | None = None,
+    include_heavy: bool = False,
+    mode: str = "summary",
+    selftest: dict[str, Any] | None = None,
+    last_command: str = "",
+) -> dict[str, Any]:
     """Run every capture step and return the full probe dict.
 
     ``include_diag_startup`` (default: env ``DENG_PROBE_DIAG_STARTUP``,
@@ -1045,7 +1114,13 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
     out["device"] = _capture_device(errors)
     out["screen"] = _capture_screen(errors)
     out["settings"] = _capture_settings(errors)
-    out["command_help"] = _capture_command_help(errors)
+    if include_heavy or mode == "full":
+        out["command_help"] = _capture_command_help(errors)
+    else:
+        out["command_help"] = {
+            "skipped": True,
+            "reason": "default summary mode; use probe --full or --debug-heavy",
+        }
     out["config"] = _capture_config(errors)
     # Per-package details.
     pkgs: dict[str, Any] = {}
@@ -1087,7 +1162,7 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
                 pkg = str(entry.get("package") or "")
                 if not pkg:
                     continue
-                scan = _pu.scan_package_username(pkg, cfg)
+                scan = _pu.scan_package_username_root(pkg)
                 menu_diag.append({
                     "package": pkg,
                     "display_username": scan.username or get_package_display_username(entry, cfg),
@@ -1095,7 +1170,10 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
                     "username_supported": scan.supported,
                     "username_reason": scan.reason,
                     "methods_attempted": list(scan.methods_attempted),
-                    "detector_used": bool(scan.methods_attempted),
+                    "detector_used": scan.root_used,
+                    "root_used": scan.root_used,
+                    "confidence": scan.confidence,
+                    "root_read_status": scan.root_read_status,
                     "detector_duration_ms": scan.duration_ms,
                     "mapping_refresh_called": False,
                 })
@@ -1137,12 +1215,18 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
         out["diag_startup"] = {"skipped": True,
                                "reason": "default off; use --diag to enable"}
 
-    # v1.0.6 — SNAPSHOT PROOF: actually run the fullscreen capture ladder so
-    # the operator can see which provider works on THIS device (and the exact
-    # reason if none do). This is the evidence required to declare snapshot
-    # fixed. Plus the bridge's own backend-visible view via monitor status.
     out["snapshot_proof"] = _capture_snapshot_proof(errors)
-    return out
+    if not include_heavy and mode != "full":
+        out["logcat"] = {"skipped": True, "reason": "summary mode; use --full for logcat"}
+    summary = _build_probe_summary(out, selftest=selftest, last_command=last_command)
+    out["summary"] = summary
+    if selftest:
+        out["selftest"] = selftest
+    ordered: dict[str, Any] = {"summary": summary}
+    for key, value in out.items():
+        if key != "summary":
+            ordered[key] = value
+    return ordered
 
 
 def _capture_snapshot_proof(errors: list[dict[str, str]]) -> dict[str, Any]:
@@ -1203,6 +1287,7 @@ _UPLOAD_SOFT_BUDGET_BYTES      = 3 * 1024 * 1024  # leave headroom
 # lowest-signal fields first.  Per-package shared_prefs/dumpsys win over
 # the global captures because they're scoped to the user's installation.
 _PROBE_DROP_ORDER: tuple[str, ...] = (
+    "command_help",
     "logcat",                       # ~80 KB, situational
     "dumpsys_global.surfaceflinger_full",
     "dumpsys_global.activity_starter",

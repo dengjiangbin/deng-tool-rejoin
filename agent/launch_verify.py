@@ -1,9 +1,4 @@
-"""Multi-step Android launch verification with honest evidence.
-
-``am start`` returning exit code 0 is never treated as proof of launch.
-Success requires process and/or foreground/resumed-activity evidence after
-polling.
-"""
+"""Root-first Android launch verification with honest evidence."""
 
 from __future__ import annotations
 
@@ -12,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import android
+from . import android, root_access
 from .config import validate_package_name
 
 
@@ -36,11 +31,15 @@ class LaunchVerificationResult:
     poll_seconds: float = 0.0
     failure_reason: str = ""
     possible_causes: list[str] = field(default_factory=list)
+    root_used: bool = True
+    game_joined: bool | None = None
+    game_join_reason: str = ""
 
     def summary_lines(self) -> list[str]:
         lines = [
             f"package: {self.package}",
             f"launchable: {'yes' if self.launchable else 'no'}",
+            f"root_used: {'yes' if self.root_used else 'no'}",
         ]
         if self.not_launchable_reason:
             lines.append(f"not_launchable: {self.not_launchable_reason}")
@@ -57,11 +56,11 @@ class LaunchVerificationResult:
         pe = self.process_evidence or {}
         lines.append(
             "process_checks: "
-            f"pidof={pe.get('pidof', '')!s} "
-            f"pgrep={pe.get('pgrep', '')!s} "
-            f"proc_scan={pe.get('proc_scan', '')!s} "
+            f"root_pidof={pe.get('root_pidof', '')!s} "
+            f"root_pgrep={pe.get('root_pgrep', '')!s} "
+            f"root_ps={pe.get('root_ps', '')!s} "
             f"root_running={pe.get('root_running', False)!s} "
-            f"running={pe.get('running', False)!s}"
+            f"foreground={pe.get('foreground', False)!s}"
         )
         if self.foreground_package:
             lines.append(f"foreground_package: {self.foreground_package}")
@@ -74,6 +73,10 @@ class LaunchVerificationResult:
             lines.extend(f"  {ln[:300]}" for ln in self.logcat_lines[:6])
         lines.append(f"poll_seconds: {self.poll_seconds:.1f}")
         lines.append(f"verified_success: {'yes' if self.success else 'no'}")
+        if self.game_joined is not None:
+            lines.append(f"game_joined: {'yes' if self.game_joined else 'no'}")
+        if self.game_join_reason:
+            lines.append(f"game_join_note: {self.game_join_reason}")
         if self.failure_reason:
             lines.append(f"failure: {self.failure_reason}")
         for cause in self.possible_causes[:4]:
@@ -85,71 +88,91 @@ class LaunchVerificationResult:
             return ""
         base = self.failure_reason or "launch verification failed"
         detail = self.summary_lines()
-        return base + "\n" + "\n".join(detail[:14])
+        return base + "\n" + "\n".join(detail[:16])
+
+
+def root_preflight_error() -> str:
+    report = root_access.root_required_preflight()
+    if report.ok:
+        return ""
+    return report.public_error()
+
+
+def _root_shell(cmd: str, *, timeout: int = 8) -> root_access.RootResult:
+    return root_access.run_root(cmd, timeout=timeout)
 
 
 def resolve_launcher_activity(package: str) -> tuple[str, bool, str]:
-    """Return (component_or_empty, launchable, reason_if_not)."""
     package = validate_package_name(package)
+    list_res = _root_shell(f"cmd package list packages --user current | grep -F {package} | head -1")
+    if list_res.ok and package not in (list_res.stdout or ""):
+        return "", False, f"package not installed for current user: {package}"
     if not android.package_installed(package):
         return "", False, f"package not installed: {package}"
-    if not android.is_launchable_package(package):
-        return "", False, "not launchable: no launcher activity found"
-    cmd_bin = android._find_command("cmd", "/system/bin/cmd")  # noqa: SLF001
-    if not cmd_bin:
-        return "", True, ""
-    res = android.run_command(
-        [cmd_bin, "package", "resolve-activity", "--brief", package],
-        timeout=android.PROCESS_TIMEOUT_SECONDS,
+
+    resolve = _root_shell(
+        f"cmd package resolve-activity --brief --user current -a android.intent.action.MAIN "
+        f"-c android.intent.category.LAUNCHER {package} 2>/dev/null | tail -1"
     )
-    if not res.ok:
+    component = (resolve.stdout or "").strip().splitlines()[-1].strip() if resolve.stdout else ""
+    if component and "/" in component and package in component:
+        return component, True, ""
+    dump = _root_shell(f"dumpsys package {package} 2>/dev/null | grep -E 'android.intent.action.MAIN' | head -3")
+    if dump.stdout and "MAIN" in dump.stdout:
         return "", True, ""
-    component = android._parse_activity_component(res.stdout, package)  # noqa: SLF001
-    return component or "", True, ""
+    return "", False, "no_launcher_activity"
 
 
 def collect_process_evidence(package: str) -> dict[str, Any]:
-    """Run pidof/ps/proc/root checks; never raises."""
     package = validate_package_name(package)
     out: dict[str, Any] = {
-        "pidof": "",
-        "pgrep": "",
-        "proc_scan": "",
-        "ps_filtered": "",
-        "running": False,
+        "root_pidof": "",
+        "root_pgrep": "",
+        "root_ps": "",
+        "root_proc_grep": "",
         "root_running": False,
+        "foreground": False,
+        "resumed_line": "",
+        "window_line": "",
     }
-    try:
-        pidof = android.run_command(["pidof", package], timeout=4)
-        out["pidof"] = (pidof.stdout or "").strip() if pidof.ok else f"rc={pidof.returncode}"
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        pgrep = android.run_command(["pgrep", "-f", package], timeout=4)
-        out["pgrep"] = (pgrep.stdout or "").strip() if pgrep.ok else f"rc={pgrep.returncode}"
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        scan = android.run_command(android.process_cmdline_scan_args(package), timeout=5)
-        out["proc_scan"] = (scan.stdout or "").strip() if scan.ok else f"rc={scan.returncode}"
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        ps = android.run_command(["ps", "-A"], timeout=5)
-        if ps.ok:
-            hits = [ln for ln in ps.stdout.splitlines() if package in ln]
-            out["ps_filtered"] = hits[0][:200] if hits else ""
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        alive = android.get_package_alive_evidence(package)
-        out["running"] = bool(alive.get("running"))
-        out["root_running"] = bool(alive.get("root_running"))
-        out["foreground"] = bool(alive.get("foreground"))
-        out["window"] = bool(alive.get("window"))
-        out["alive"] = bool(alive.get("alive"))
-    except Exception:  # noqa: BLE001
-        pass
+    pidof = _root_shell(f"pidof {package} 2>/dev/null || true")
+    out["root_pidof"] = (pidof.stdout or "").strip()[:120]
+    pgrep = _root_shell(f"pgrep -f {package} 2>/dev/null | head -5 || true")
+    out["root_pgrep"] = (pgrep.stdout or "").strip()[:120]
+    ps = _root_shell(
+        f"ps -A -o PID,USER,NAME,ARGS 2>/dev/null | grep -F {package} | head -3 || true"
+    )
+    out["root_ps"] = (ps.stdout or "").strip()[:200]
+    proc = _root_shell(
+        f"for f in /proc/[0-9]*/cmdline; do tr '\\0' ' ' < \"$f\" 2>/dev/null; done "
+        f"| grep -F {package} | head -2 || true",
+        timeout=10,
+    )
+    out["root_proc_grep"] = (proc.stdout or "").strip()[:200]
+    out["root_running"] = bool(out["root_pidof"] or out["root_pgrep"] or out["root_ps"] or out["root_proc_grep"])
+
+    activity = _root_shell(
+        "dumpsys activity activities 2>/dev/null | "
+        "grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' | head -5"
+    )
+    for line in (activity.stdout or "").splitlines():
+        if package in line:
+            out["resumed_line"] = line.strip()[:300]
+            out["foreground"] = True
+            break
+    window = _root_shell(
+        "dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -5"
+    )
+    for line in (window.stdout or "").splitlines():
+        if package in line:
+            out["window_line"] = line.strip()[:300]
+            out["foreground"] = True
+            break
+    processes = _root_shell(
+        f"dumpsys activity processes 2>/dev/null | grep -F {package} | head -5 || true"
+    )
+    if processes.stdout.strip():
+        out["root_running"] = True
     return out
 
 
@@ -157,54 +180,88 @@ def _foreground_lines(package: str) -> tuple[str | None, str, str]:
     fg_pkg = None
     resumed = ""
     focus = ""
-    try:
-        fg_pkg = android.current_foreground_package()
-    except Exception:  # noqa: BLE001
-        pass
-    for args, markers in (
-        (("dumpsys", "activity", "activities"), ("mResumedActivity", "topResumedActivity", "ResumedActivity")),
-        (("dumpsys", "window", "windows"), ("mCurrentFocus", "mFocusedApp")),
-    ):
+    pe = collect_process_evidence(package)
+    resumed = str(pe.get("resumed_line") or "")
+    focus = str(pe.get("window_line") or "")
+    if pe.get("foreground"):
+        fg_pkg = package
+    if not fg_pkg:
         try:
-            res = android.run_command(list(args), timeout=4)
-            if not res.ok:
-                continue
-            for line in res.stdout.splitlines():
-                if package not in line:
-                    continue
-                for marker in markers:
-                    if marker in line:
-                        if marker in ("mResumedActivity", "topResumedActivity", "ResumedActivity"):
-                            resumed = line.strip()[:400]
-                        else:
-                            focus = line.strip()[:400]
+            fg_pkg = android.current_foreground_package()
         except Exception:  # noqa: BLE001
-            continue
+            pass
     return fg_pkg, resumed, focus
 
 
 def _recent_logcat_for_package(package: str, *, limit: int = 8) -> list[str]:
     lines: list[str] = []
-    try:
-        res = android.run_command(
-            ["logcat", "-d", "-t", "120", "ActivityTaskManager:I", "ActivityManager:I", "*:S"],
-            timeout=6,
-        )
-        if not res.ok:
-            res = android.run_command(["logcat", "-d", "-t", "80"], timeout=6)
-        if not res.ok:
-            return lines
-        for line in reversed(res.stdout.splitlines()):
-            low = line.lower()
-            if package not in line and "start" not in low and "crash" not in low:
-                continue
-            if package in line or "ActivityManager" in line or "ActivityTaskManager" in line:
-                lines.append(line.strip()[:400])
-            if len(lines) >= limit:
-                break
-    except Exception:  # noqa: BLE001
-        pass
+    res = _root_shell(
+        "logcat -d -t 300 2>/dev/null | "
+        "grep -E 'ActivityTaskManager|ActivityManager|AndroidRuntime|FATAL|ANR' | tail -80"
+    )
+    if not res.ok and not res.stdout:
+        return lines
+    for line in reversed((res.stdout or "").splitlines()):
+        low = line.lower()
+        if package not in line and "fatal" not in low and "crash" not in low:
+            continue
+        lines.append(line.strip()[:400])
+        if len(lines) >= limit:
+            break
     return list(reversed(lines))
+
+
+def launch_package_root(
+    package: str,
+    *,
+    activity: str = "",
+    force_stop: bool = False,
+) -> tuple[android.CommandResult, str]:
+    package = validate_package_name(package)
+    pre = root_access.root_required_preflight()
+    if not pre.ok:
+        return android.CommandResult(
+            ("su", "-c", "launch"),
+            126,
+            "",
+            pre.public_error(),
+        ), "root_preflight_failed"
+
+    component = activity or resolve_launcher_activity(package)[0]
+    if force_stop:
+        _root_shell(f"am force-stop {package}")
+
+    if component and "/" in component:
+        cmd = f"am start -W --user current -n {component}"
+        res = _root_shell(cmd, timeout=20)
+        if res.ok:
+            return android.CommandResult((pre.tool or "su", "-c", cmd), 0, res.stdout, res.stderr), "root_am_start_n"
+    monkey = _root_shell(
+        f"monkey -p {package} -c android.intent.category.LAUNCHER 1",
+        timeout=15,
+    )
+    if monkey.ok:
+        return android.CommandResult(
+            (pre.tool or "su", "-c", "monkey"),
+            0,
+            monkey.stdout,
+            monkey.stderr,
+        ), "root_monkey"
+    if component:
+        cmd = f"am start -W --user current -n {component}"
+        res = _root_shell(cmd, timeout=20)
+        return android.CommandResult(
+            (pre.tool or "su", "-c", cmd),
+            res.returncode,
+            res.stdout,
+            res.stderr or res.error,
+        ), "root_am_start_n"
+    return android.CommandResult(
+        ("su", "-c", "launch"),
+        1,
+        "",
+        "no_launcher_activity",
+    ), "no_launcher_activity"
 
 
 def _has_launch_proof(
@@ -214,9 +271,7 @@ def _has_launch_proof(
     resumed: str,
     focus: str,
 ) -> bool:
-    if process_evidence.get("running") or process_evidence.get("root_running"):
-        return True
-    if process_evidence.get("proc_scan") and not str(process_evidence.get("proc_scan", "")).startswith("rc="):
+    if process_evidence.get("root_running"):
         return True
     if fg_pkg and (fg_pkg == package or package in fg_pkg):
         return True
@@ -232,11 +287,12 @@ def verify_launch(
     *,
     launch_result: android.CommandResult | None = None,
     launch_method: str = "",
-    wait_seconds: float = 15.0,
-    poll_interval: float = 0.5,
+    wait_seconds: float = 20.0,
+    poll_interval: float = 0.75,
     require_launch_command_ok: bool = True,
+    private_url: str | None = None,
 ) -> LaunchVerificationResult:
-    """Poll after launch and return structured verification evidence."""
+    pre_err = root_preflight_error()
     package = validate_package_name(package)
     component, launchable, not_launch_reason = resolve_launcher_activity(package)
     result = LaunchVerificationResult(
@@ -246,9 +302,14 @@ def verify_launch(
         launchable=launchable,
         not_launchable_reason=not_launch_reason,
         launch_method=launch_method,
+        root_used=True,
     )
+    if pre_err:
+        result.failure_reason = pre_err
+        result.launchable = False
+        return result
     if not launchable:
-        result.failure_reason = not_launch_reason or "not launchable"
+        result.failure_reason = not_launch_reason or "no_launcher_activity"
         return result
 
     if launch_result is not None:
@@ -261,7 +322,8 @@ def verify_launch(
             result.process_evidence = collect_process_evidence(package)
             return result
 
-    deadline = time.monotonic() + max(3.0, min(float(wait_seconds), 25.0))
+    deadline = time.monotonic() + max(5.0, min(float(wait_seconds), 30.0))
+    started = time.monotonic()
     last_pe: dict[str, Any] = {}
     while time.monotonic() < deadline:
         last_pe = collect_process_evidence(package)
@@ -272,64 +334,81 @@ def verify_launch(
         result.window_focus_line = focus
         if _has_launch_proof(package, last_pe, fg_pkg, resumed, focus):
             result.success = True
-            result.poll_seconds = max(0.0, max(3.0, min(float(wait_seconds), 25.0)) - (deadline - time.monotonic()))
+            result.poll_seconds = time.monotonic() - started
             result.logcat_lines = _recent_logcat_for_package(package)
+            if private_url:
+                result.game_joined = None
+                result.game_join_reason = (
+                    "launch success; game join not externally verifiable without place/server proof"
+                )
+            else:
+                result.game_joined = None
+                result.game_join_reason = "package launch only (no deep link configured)"
             return result
         time.sleep(max(0.25, float(poll_interval)))
 
-    result.poll_seconds = max(3.0, min(float(wait_seconds), 25.0))
+    result.poll_seconds = time.monotonic() - started
     result.logcat_lines = _recent_logcat_for_package(package)
     log_text = "\n".join(result.logcat_lines).lower()
-    if re.search(r"(fatal|crash|died|force finishing).*?" + re.escape(package), log_text):
-        result.failure_reason = "launched then exited/crashed"
+    fg_now = result.foreground_package or ""
+    if re.search(r"(fatal exception|has died|force finishing).*?" + re.escape(package), log_text):
+        result.failure_reason = "launched_then_crashed"
         result.possible_causes.append("logcat shows crash/force-finish for target package")
+    elif fg_now and package not in fg_now:
+        result.failure_reason = "foreground_not_target"
+        result.possible_causes.append(f"foreground is {fg_now}, not {package}")
     elif launch_result is not None and launch_result.ok:
-        result.failure_reason = (
-            "Android launch returned success but package process was not detected"
-        )
+        result.failure_reason = "launch_accepted_but_not_alive"
         result.possible_causes.extend([
-            "process may be hidden from Termux without root — root scan also found nothing",
-            "app may have exited immediately after am start",
-            "clone package may use a process name suffix; check dumpsys activity/window above",
+            "root process checks found no pid/pgrep/ps match",
+            "resumed/window dumpsys did not show target package",
+            "app may have exited immediately after launch",
         ])
     else:
-        result.failure_reason = "launch verification failed: no process or foreground evidence"
+        result.failure_reason = "launch verification failed: no root process or foreground evidence"
     return result
 
 
 def doctor_package_report(package: str) -> list[str]:
-    """Human-readable diagnostics for ``deng-rejoin doctor --package``."""
     package = validate_package_name(package)
     lines: list[str] = [f"Doctor: {package}", ""]
+    pre = root_access.root_required_preflight()
+    lines.append(f"  root_available: {'yes' if pre.ok else 'no'}")
+    lines.append(f"  root_uid: {pre.uid or '-'}")
+    if not pre.ok:
+        lines.append(f"  root_error: {pre.public_error()}")
+        return lines
     component, launchable, nl_reason = resolve_launcher_activity(package)
     lines.append(f"  installed: {'yes' if android.package_installed(package) else 'no'}")
     lines.append(f"  launchable: {'yes' if launchable else 'no'}")
     if nl_reason:
         lines.append(f"  launchability: {nl_reason}")
     if component:
-        lines.append(f"  resolved_activity: {component}")
+        lines.append(f"  launcher_activity: {component}")
+    from . import package_username as _pu
+
+    scan = _pu.scan_package_username_root(package)
+    lines.append(f"  username: {scan.username or 'unknown'}")
+    lines.append(f"  username_source: {scan.source}")
+    lines.append(f"  username_confidence: {scan.confidence or '-'}")
+    if scan.reason:
+        lines.append(f"  username_reason: {scan.reason}")
+    lines.append(f"  root_read_status: {scan.root_read_status or '-'}")
     pe = collect_process_evidence(package)
     lines.append(
-        f"  process: running={pe.get('running')} root_running={pe.get('root_running')} "
-        f"pidof={pe.get('pidof') or '-'} proc_scan={pe.get('proc_scan') or '-'}"
+        f"  process_before_launch: root_running={pe.get('root_running')} "
+        f"root_pidof={pe.get('root_pidof') or '-'} foreground={pe.get('foreground')}"
     )
     fg, resumed, focus = _foreground_lines(package)
-    lines.append(f"  foreground: {fg or '-'}")
+    lines.append(f"  foreground_before_launch: {fg or '-'}")
     if resumed:
-        lines.append(f"  resumed: {resumed[:200]}")
-    if focus:
-        lines.append(f"  window_focus: {focus[:200]}")
-    root = android.detect_root()
-    lines.append(f"  root: {'yes (' + str(root.tool) + ')' if root.available else 'no'}")
-    try:
-        from . import package_username as _pu
-
-        scan = _pu.scan_package_username(package)
-        lines.append(f"  username_supported: {'yes' if scan.supported else 'no'}")
-        if scan.username:
-            lines.append(f"  username: {scan.username} ({scan.source})")
-        elif scan.reason:
-            lines.append(f"  username: unavailable — {scan.reason}")
-    except Exception as exc:  # noqa: BLE001
-        lines.append(f"  username_scan_error: {exc}")
+        lines.append(f"  resumed_before_launch: {resumed[:180]}")
+    launch_cmd = f"monkey -p {package} -c android.intent.category.LAUNCHER 1"
+    if component:
+        launch_cmd = f"am start -W --user current -n {component}"
+    lines.append(f"  launch_command: su -c '{launch_cmd}'")
+    if not launchable:
+        lines.append("  status: NOT OK — not launchable")
+    else:
+        lines.append("  status: root preflight OK; ready to launch")
     return lines

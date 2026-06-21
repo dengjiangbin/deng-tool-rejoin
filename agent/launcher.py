@@ -215,6 +215,21 @@ def perform_rejoin(
         )
         db.insert_event("ERROR", "rejoin_failed", _err, {"reason": reason, "package": _pkg_fallback})
         return RejoinResult(False, root_used=False, error=_err)
+    from . import launch_verify as _lv
+
+    root_err = _lv.root_preflight_error()
+    if root_err:
+        db.insert_rejoin_attempt(
+            reason=reason,
+            package=str(config_data.get("roblox_package") or "unknown"),
+            launch_mode=str(config_data.get("launch_mode") or "app"),
+            masked_launch_url=None,
+            root_used=False,
+            success=False,
+            error=root_err,
+        )
+        db.insert_event("ERROR", "rejoin_failed", root_err, {"reason": reason})
+        return RejoinResult(False, root_used=False, error=root_err)
     logger = configure_logging(level=cfg.get("log_level", "INFO"))
     ents = enabled_package_entries(cfg)
     entry = package_entry

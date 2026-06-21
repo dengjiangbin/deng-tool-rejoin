@@ -127,6 +127,7 @@ COMMANDS = {
     "list",
     "unmap",
     "launch",
+    "selftest",
 }
 
 # ─── ANSI color constants (used only when a tty is available) ─────────────────
@@ -1298,29 +1299,27 @@ def _gather_roblox_candidates_for_ui(config_data: dict[str, Any]) -> list[androi
 
 def _print_full_discovery_table(candidates: list[android.RobloxPackageCandidate], config_data: dict[str, Any] | None = None) -> None:
     print()
-    print("Detected Roblox Packages")
-    print(f"{'#':<4} {'Package':<36} {'App Name':<18} {'Launch':<8} {'Username':<16} {'Source':<12}")
-    print(f"{'-'*4} {'-'*36} {'-'*18} {'-'*8} {'-'*16} {'-'*12}")
+    print("Detected Roblox Packages (root-first scan)")
+    print(f"{'#':<4} {'Package':<32} {'Username':<16} {'Source':<18} {'State':<8}")
+    print(f"{'-'*4} {'-'*32} {'-'*16} {'-'*18} {'-'*8}")
     for idx, c in enumerate(candidates, start=1):
-        launch_cell = "Yes" if c.launchable else "No"
-        username = "Unknown"
+        username = "unknown"
         source = "-"
         reason = ""
+        state = "ready" if c.launchable else "no_launch"
         if config_data is not None:
             scan = package_username.scan_package_username(c.package, config_data)
             if scan.username:
                 username = scan.username[:15]
-                source = scan.source[:11]
+                source = (scan.source or "unknown")[:17]
             elif scan.reason:
-                reason = scan.reason[:40]
-                username = "unavailable"
+                reason = scan.reason[:60]
                 source = "blocked"
         print(
-            f"{idx:<4} {c.package:<36} {c.app_name[:16]:<18} {launch_cell:<8} "
-            f"{username:<16} {source:<12}"
+            f"[{idx}] {c.package:<32} username: {username:<16} source: {source:<18} state: {state}"
         )
         if reason:
-            print(f"     username note: {reason}")
+            print(f"     reason: {reason}")
 
 
 def _safe_package_detect_progress() -> None:
@@ -2595,18 +2594,19 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         )
         username_diag: list[dict[str, Any]] = []
         for entry in entries:
-            updated, diag = package_username.resolve_package_display_username(
-                entry,
-                draft,
-                allow_detect=False,
-                timeout_seconds=1.0,
-            )
+            scan = package_username.scan_package_username(entry.get("package", ""), draft)
             username_diag.append({
-                "package": updated.get("package", ""),
-                "display_username": get_package_display_username(updated, draft),
-                "username_source": updated.get("username_source", "not_set"),
-                "detector_used": diag.detector_used,
-                "detector_duration_ms": diag.duration_ms,
+                "package": entry.get("package", ""),
+                "display_username": scan.username or get_package_display_username(entry, draft),
+                "username_source": scan.source if scan.username else (entry.get("username_source") or "not_set"),
+                "username_supported": scan.supported,
+                "username_reason": scan.reason,
+                "methods_attempted": list(scan.methods_attempted),
+                "detector_used": scan.root_used,
+                "root_used": scan.root_used,
+                "confidence": scan.confidence,
+                "root_read_status": scan.root_read_status,
+                "detector_duration_ms": scan.duration_ms,
                 "mapping_refresh_called": False,
             })
         draft["_package_menu_username_diag"] = username_diag
@@ -2614,8 +2614,11 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         current_lines = ["Current Packages:"]
         if enabled_entries:
             for idx, entry in enumerate(enabled_entries, start=1):
+                scan = package_username.scan_package_username(entry["package"], draft)
+                uname = scan.username or "unknown"
+                src = scan.source if scan.username else (scan.reason[:24] if scan.reason else "unknown")
                 current_lines.append(
-                    f"  {idx}. {entry['package']} — username: {_package_username_display_for_config(entry, draft)}"
+                    f"  [{idx}] {entry['package']} | username: {uname} | source: {src} | state: ready"
                 )
         else:
             current_lines.append("  No Packages Configured.")
@@ -4020,6 +4023,12 @@ def _cmd_doctor_root_state(cfg: dict[str, Any] | None) -> int:
 
 def cmd_scan(args: argparse.Namespace) -> int:
     """List detected Roblox packages with honest username scan results."""
+    from . import launch_verify
+
+    pre_err = launch_verify.root_preflight_error()
+    if pre_err:
+        print(pre_err)
+        return 1
     cfg = None
     try:
         cfg = load_config()
@@ -4087,6 +4096,10 @@ def cmd_launch(args: argparse.Namespace) -> int:
         print("Usage: deng-rejoin launch <package>")
         return 1
     package = rest[0].strip()
+    pre_err = launch_verify.root_preflight_error()
+    if pre_err:
+        print(pre_err)
+        return 1
     try:
         validate_package_name(package)
     except Exception as exc:  # noqa: BLE001
@@ -4095,13 +4108,12 @@ def cmd_launch(args: argparse.Namespace) -> int:
     if not android.package_installed(package):
         print(f"package not installed: {package}")
         return 1
-    cfg = load_config()
-    result, method = android.launch_package_with_options(package, None)
+    result, method = launch_verify.launch_package_root(package)
     verification = launch_verify.verify_launch(
         package,
         launch_result=result,
         launch_method=method,
-        wait_seconds=15.0,
+        wait_seconds=20.0,
     )
     for line in verification.summary_lines():
         print(line)
@@ -4110,6 +4122,38 @@ def cmd_launch(args: argparse.Namespace) -> int:
         return 0
     print("Launch failed.")
     return 1
+
+
+def cmd_selftest(args: argparse.Namespace) -> int:
+    from . import selftest as _selftest
+
+    rest = list(getattr(args, "extra_args", []) or [])
+    package = ""
+    first = False
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--package" and i + 1 < len(rest):
+            package = rest[i + 1].strip()
+            i += 2
+            continue
+        if tok == "--first":
+            first = True
+            i += 1
+            continue
+        if tok.startswith("com."):
+            package = tok
+        i += 1
+    upload = bool(getattr(args, "upload", False))
+    summary_mode = not bool(getattr(args, "probe_full", False))
+    result = _selftest.run_selftest(
+        package=package,
+        first=first,
+        upload=upload,
+        summary_probe=summary_mode,
+    )
+    _selftest.print_selftest_report(result)
+    return 0 if result.ok else 1
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -6620,7 +6664,12 @@ def cmd_probe(args: argparse.Namespace) -> int:
     except Exception:  # noqa: BLE001
         pass
     try:
-        data = _p.collect_probe(include_diag_startup=include_diag)
+        data = _p.collect_probe(
+            include_diag_startup=include_diag,
+            include_heavy=bool(getattr(args, "probe_full", False) or getattr(args, "debug_heavy", False)),
+            mode="full" if getattr(args, "probe_full", False) else "summary",
+            last_command="probe --upload" if getattr(args, "upload", False) else "probe",
+        )
     except Exception as exc:  # noqa: BLE001 — should be impossible, but be safe.
         sys.stdout.write(f"probe failed: {exc}\n")
         return 1
@@ -7734,6 +7783,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # cap even after long test sessions.
     parser.add_argument("--diag", dest="diag", action="store_true",
                         help=argparse.SUPPRESS)
+    parser.add_argument("--full", dest="probe_full", action="store_true",
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--summary", dest="probe_summary", action="store_true",
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--debug-heavy", dest="debug_heavy", action="store_true",
+                        help=argparse.SUPPRESS)
     parser.add_argument("--package", dest="doctor_package", default="",
                         help=argparse.SUPPRESS)
 
@@ -7744,7 +7799,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     argv = list(argv)
 
     ns_extra_args: list[str] = []
-    if argv and argv[0] in {"map", "unmap", "launch"}:
+    if argv and argv[0] in {"map", "unmap", "launch", "selftest"}:
         ns_extra_args = argv[1:]
         argv = [argv[0]]
     elif argv and argv[0] == "doctor":
@@ -7927,6 +7982,7 @@ def _handlers() -> dict[str, Any]:
         "list": cmd_list_packages,
         "unmap": cmd_unmap,
         "launch": cmd_launch,
+        "selftest": cmd_selftest,
     }
 
 

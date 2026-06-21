@@ -33,6 +33,10 @@ COMMAND_TIMEOUT: int = 10  # default timeout for root commands
 READ_TIMEOUT: int = 8      # timeout for file-read commands
 LIST_TIMEOUT: int = 8      # timeout for glob-list commands
 
+ROOT_REQUIRED_PUBLIC_MESSAGE = (
+    "unsupported: root is required for DENG Rejoin on cloudphone"
+)
+
 _MAX_DETECT_CACHE_AGE: float = 120.0  # 2 minutes
 
 # Root tool candidates in priority order.
@@ -98,6 +102,38 @@ class RootCapability:
     @property
     def available(self) -> bool:
         return self.status == RootStatus.AVAILABLE
+
+
+@dataclass(frozen=True)
+class RootCheckStep:
+    command: str
+    returncode: int
+    stdout: str
+    stderr: str
+    duration_ms: int
+    timed_out: bool = False
+
+
+@dataclass(frozen=True)
+class RootCheckReport:
+    """Result of :func:`root_check` / :func:`root_required_preflight`."""
+    ok: bool
+    tool: str | None
+    uid: str
+    whoami: str
+    data_dir_readable: bool
+    steps: tuple[RootCheckStep, ...]
+    detail: str
+    error: str = ""
+
+    def public_error(self) -> str:
+        if self.ok:
+            return ""
+        base = ROOT_REQUIRED_PUBLIC_MESSAGE
+        detail = (self.error or self.detail or "").strip()
+        if detail:
+            return f"{base} ({detail})"
+        return base
 
 
 # --------------------------------------------------------------------------- #
@@ -218,6 +254,88 @@ def detect(*, force: bool = False, timeout: int = DETECT_TIMEOUT) -> RootCapabil
 def has_root(*, force: bool = False) -> bool:
     """Return True if a working root tool is available. Never raises."""
     return detect(force=force).available
+
+
+def run_root(
+    cmd: str | Iterable[str],
+    *,
+    timeout: int = COMMAND_TIMEOUT,
+    detect_timeout: int | None = None,
+) -> RootResult:
+    """Run one shell command via ``su -c``. Accepts a string or argv list."""
+    if isinstance(cmd, str):
+        return run_root_command(["sh", "-c", cmd], timeout=timeout, detect_timeout=detect_timeout)
+    return run_root_command(cmd, timeout=timeout, detect_timeout=detect_timeout)
+
+
+def root_check(*, timeout: int = DETECT_TIMEOUT) -> RootCheckReport:
+    """Verify root with ``id``, ``whoami``, and ``/data/data`` access."""
+    cap = detect(force=True, timeout=timeout)
+    if not cap.available or not cap.tool:
+        return RootCheckReport(
+            ok=False,
+            tool=cap.tool,
+            uid="",
+            whoami="",
+            data_dir_readable=False,
+            steps=(),
+            detail=cap.detail,
+            error=cap.detail,
+        )
+    steps: list[RootCheckStep] = []
+    uid_text = ""
+    whoami_text = ""
+    data_ok = False
+    for shell_cmd in ("id", "whoami", "ls /data/data >/dev/null 2>&1 && echo ok"):
+        started = time.monotonic()
+        result = run_root_command(["sh", "-c", shell_cmd], timeout=timeout, detect_timeout=timeout)
+        step = RootCheckStep(
+            command=shell_cmd,
+            returncode=result.returncode,
+            stdout=(result.stdout or "")[:200],
+            stderr=(result.stderr or result.error or "")[:200],
+            duration_ms=int((time.monotonic() - started) * 1000),
+            timed_out=result.timed_out,
+        )
+        steps.append(step)
+        if shell_cmd == "id" and result.ok:
+            uid_text = (result.stdout or result.stderr or "").strip()[:120]
+        elif shell_cmd == "whoami" and result.ok:
+            whoami_text = (result.stdout or "").strip()[:40]
+        elif "data/data" in shell_cmd:
+            data_ok = result.ok and "ok" in (result.stdout or "")
+
+    ok = bool(uid_text and "uid=0" in uid_text and data_ok)
+    detail = f"tool={cap.tool} uid={uid_text[:60]} whoami={whoami_text or '?'} data_dir={'ok' if data_ok else 'denied'}"
+    error = "" if ok else (cap.detail if not uid_text else f"data_dir={'ok' if data_ok else 'unreadable'}")
+    return RootCheckReport(
+        ok=ok,
+        tool=cap.tool,
+        uid=uid_text,
+        whoami=whoami_text,
+        data_dir_readable=data_ok,
+        steps=tuple(steps),
+        detail=detail,
+        error=error,
+    )
+
+
+def root_required_preflight(*, timeout: int = DETECT_TIMEOUT) -> RootCheckReport:
+    """Fail fast when root is unavailable. Never raises."""
+    report = root_check(timeout=timeout)
+    if report.ok:
+        return report
+    err = (report.error or report.detail or "root unavailable").strip()
+    return RootCheckReport(
+        ok=False,
+        tool=report.tool,
+        uid=report.uid,
+        whoami=report.whoami,
+        data_dir_readable=report.data_dir_readable,
+        steps=report.steps,
+        detail=report.detail,
+        error=err,
+    )
 
 
 def run_root_command(

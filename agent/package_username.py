@@ -1,18 +1,9 @@
-"""Bounded package username display detection.
-
-This module is intentionally narrow: it reads only known, non-secret
-Roblox preference keys from the selected package's exact prefs file.
-It does not scan cookies, WebView data, databases, or unrelated apps.
-
-NEVER imported or called from the live supervisor Start loop.  NEVER
-calls any legacy ``account_mapping`` / Refresh Mapping helpers.  Every
-subprocess invocation has a strict timeout — failure or timeout always
-falls back to ``Unknown`` so the caller's UI stays responsive.
-"""
+"""Root-first package username detection for cloud-phone clones."""
 
 from __future__ import annotations
 
 import logging
+import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -28,10 +19,30 @@ from .config import (
 
 _log = logging.getLogger("deng.rejoin.package_username")
 
-USERNAME_DETECT_TIMEOUT_SECONDS = 2.0
-SAFE_DETECT_DEFAULT_TIMEOUT_SECONDS = 1.5
-_PREF_MAX_BYTES = 16 * 1024
-_PREF_KEYS = ("username", "displayName")
+USERNAME_DETECT_TIMEOUT_SECONDS = 8.0
+SAFE_DETECT_DEFAULT_TIMEOUT_SECONDS = 2.0
+_PREF_MAX_BYTES = 32 * 1024
+_FILE_MAX_BYTES = 64 * 1024
+
+_USERNAME_XML_KEYS = (
+    "username",
+    "userName",
+    "displayName",
+    "accountName",
+    "authenticatedUser",
+    "playerName",
+)
+
+_USERNAME_TEXT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("username", re.compile(r'(?i)(?:^|[\s"\'<>])username[\s"\'=:>]+([A-Za-z0-9_]{3,20})')),
+    ("displayName", re.compile(r'(?i)(?:^|[\s"\'<>])displayName[\s"\'=:>]+([A-Za-z0-9_]{3,20})')),
+    ("accountName", re.compile(r'(?i)(?:^|[\s"\'<>])accountName[\s"\'=:>]+([A-Za-z0-9_]{3,20})')),
+    ("playerName", re.compile(r'(?i)(?:^|[\s"\'<>])playerName[\s"\'=:>]+([A-Za-z0-9_]{3,20})')),
+)
+
+_SECRET_SUB = re.compile(
+    r"(?i)(roblosecurity|cookie|token|session|password|authheader|deviceid)\s*[=:]\s*\S+"
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +52,8 @@ class PackageUsernameResult:
     detector_used: bool
     duration_ms: int
     error: str = ""
+    root_used: bool = False
+    confidence: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,84 +66,157 @@ class UsernameScanReport:
     methods_attempted: tuple[str, ...] = ()
     app_label: str = ""
     duration_ms: int = 0
+    root_used: bool = False
+    confidence: str = ""
+    root_read_status: str = ""
+    launcher_activity: str = ""
+    installed: bool | None = None
+    enabled: bool | None = None
 
 
-def _parse_known_pref_username(xml_text: str) -> str:
+def _redact_secrets(text: str) -> str:
+    return _SECRET_SUB.sub("<redacted>", text or "")
+
+
+def _parse_known_pref_username(xml_text: str) -> tuple[str, str]:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
-        return ""
+        return "", ""
     values: dict[str, str] = {}
     for child in root:
-        if child.tag != "string":
+        if child.tag not in ("string", "int"):
             continue
         name = str(child.attrib.get("name") or "")
-        if name not in _PREF_KEYS:
+        if name not in _USERNAME_XML_KEYS:
             continue
         cleaned = validate_account_username(child.text or "")
         if cleaned:
             values[name] = cleaned
-    return values.get("username") or values.get("displayName") or ""
+    if values.get("username"):
+        return values["username"], "username"
+    if values.get("userName"):
+        return values["userName"], "userName"
+    for key in ("displayName", "accountName", "authenticatedUser", "playerName"):
+        if values.get(key):
+            return values[key], key
+    return "", ""
 
 
-def _read_prefs_via_root(pkg: str, *, timeout_seconds: float) -> tuple[str, str]:
-    """Return (username, error). Tries prefs.xml then package-specific prefs."""
-    remaining = max(1, min(float(timeout_seconds), USERNAME_DETECT_TIMEOUT_SECONDS))
-    paths = (
-        f"/data/data/{pkg}/shared_prefs/prefs.xml",
-        f"/data/data/{pkg}/shared_prefs/{pkg}_preferences.xml",
-        f"/data/data/{pkg}/shared_prefs/pkg_preferences.xml",
+def _grep_username_in_text(text: str) -> tuple[str, str]:
+    safe = _redact_secrets(text or "")
+    for key, pattern in _USERNAME_TEXT_PATTERNS:
+        match = pattern.search(safe)
+        if not match:
+            continue
+        candidate = validate_account_username(match.group(1))
+        if candidate:
+            return candidate, key
+    return "", ""
+
+
+def _normalize_source(raw: str) -> str:
+    mapping = {
+        "detected_safe_pref": "root_shared_prefs",
+        "manual": "manual_mapping",
+        "cache": "manual_mapping",
+        "detected_file": "root_file",
+        "detected_database": "root_database",
+    }
+    return mapping.get(raw, raw or "unknown")
+
+
+def _root_scan_paths(pkg: str, *, budget_seconds: float) -> tuple[str, str, str, tuple[str, ...], str]:
+    """Return (username, source, confidence, methods, root_read_status)."""
+    methods: list[str] = []
+    deadline = time.monotonic() + max(1.0, budget_seconds)
+    status_bits: list[str] = []
+
+    pref_patterns = (
+        f"/data/data/{pkg}/shared_prefs/*.xml",
+        f"/data/data/{pkg}/shared_prefs/*preferences*.xml",
     )
-    last_err = ""
-    for path in paths:
-        try:
-            content = root_access.read_root_file(
-                path,
-                max_bytes=_PREF_MAX_BYTES,
-                timeout=max(2, int(remaining)),
-                detect_timeout=max(2, int(min(remaining, 3))),
+    for pattern in pref_patterns:
+        if time.monotonic() >= deadline:
+            break
+        methods.append("root_shared_prefs_glob")
+        paths = root_access.list_root_glob(pattern, timeout=6, max_results=24)
+        for path in paths:
+            content = root_access.read_root_file(path, max_bytes=_PREF_MAX_BYTES, timeout=6)
+            if not content:
+                status_bits.append(f"unreadable:{path.split('/')[-1]}")
+                continue
+            username, key = _parse_known_pref_username(content)
+            if username:
+                status_bits.append(f"ok:{path.split('/')[-1]}:{key}")
+                return username, "root_shared_prefs", "high", tuple(methods), "; ".join(status_bits[-3:])
+            text_user, text_key = _grep_username_in_text(content)
+            if text_user:
+                status_bits.append(f"ok:{path.split('/')[-1]}:{text_key}")
+                return text_user, "root_shared_prefs", "medium", tuple(methods), "; ".join(status_bits[-3:])
+
+    file_patterns = (
+        f"/data/data/{pkg}/files/*",
+        f"/data/data/{pkg}/files/**/*",
+        f"/data/data/{pkg}/app_*/*",
+        f"/sdcard/Android/data/{pkg}/files/*",
+        f"/storage/emulated/0/Android/data/{pkg}/files/*",
+    )
+    for pattern in file_patterns:
+        if time.monotonic() >= deadline:
+            break
+        methods.append("root_file_glob")
+        for path in root_access.list_root_glob(pattern, timeout=6, max_results=16):
+            if path.endswith((".png", ".jpg", ".webp", ".so", ".apk")):
+                continue
+            content = root_access.read_root_file(path, max_bytes=_FILE_MAX_BYTES, timeout=6)
+            if not content:
+                continue
+            text_user, text_key = _grep_username_in_text(content)
+            if text_user:
+                status_bits.append(f"ok:file:{path.split('/')[-1]}:{text_key}")
+                return text_user, "root_file", "medium", tuple(methods), "; ".join(status_bits[-3:])
+
+    db_patterns = (f"/data/data/{pkg}/databases/*.db",)
+    for pattern in db_patterns:
+        if time.monotonic() >= deadline:
+            break
+        methods.append("root_database_glob")
+        for path in root_access.list_root_glob(pattern, timeout=6, max_results=8):
+            safe_path = path.replace("'", "'\"'\"'")
+            probe = root_access.run_root(
+                f"command -v sqlite3 >/dev/null 2>&1 && sqlite3 '{safe_path}' "
+                "\"SELECT username FROM sqlite_master LIMIT 0;\" 2>/dev/null; "
+                f"sqlite3 '{safe_path}' \"SELECT username,userName,displayName,accountName,playerName "
+                "FROM users LIMIT 5\" 2>/dev/null | head -5",
+                timeout=8,
             )
-        except Exception as exc:  # noqa: BLE001
-            last_err = str(exc)[:120]
-            continue
-        if not content:
-            last_err = f"unreadable or missing: {path}"
-            continue
-        username = _parse_known_pref_username(content)
-        if username:
-            return username, ""
-        last_err = f"no username/displayName keys in {path.split('/')[-1]}"
-    return "", last_err
+            if probe.ok and probe.stdout.strip():
+                for line in probe.stdout.splitlines():
+                    for token in re.split(r"[|,]", line):
+                        candidate = validate_account_username(token.strip())
+                        if candidate:
+                            status_bits.append(f"ok:db:{path.split('/')[-1]}")
+                            return candidate, "root_database", "medium", tuple(methods), "; ".join(status_bits[-3:])
+            content = root_access.read_root_file(path, max_bytes=8192, timeout=6)
+            if content:
+                text_user, text_key = _grep_username_in_text(content)
+                if text_user:
+                    status_bits.append(f"ok:dbscan:{path.split('/')[-1]}:{text_key}")
+                    return text_user, "root_database", "low", tuple(methods), "; ".join(status_bits[-3:])
+
+    if not status_bits:
+        status_bits.append("no username key found in root-readable data")
+    return "", "unknown", "", tuple(methods), "; ".join(status_bits[:4])
 
 
-def detect_package_username_quick(
+def scan_package_username_root(
     package: str,
-    *,
-    timeout_seconds: float = USERNAME_DETECT_TIMEOUT_SECONDS,
-) -> PackageUsernameResult:
-    start = time.monotonic()
-    try:
-        pkg = validate_package_name(package)
-    except Exception as exc:  # noqa: BLE001
-        return PackageUsernameResult("", "unknown", False, 0, str(exc)[:80])
-    username, err = _read_prefs_via_root(pkg, timeout_seconds=timeout_seconds)
-    duration = int((time.monotonic() - start) * 1000)
-    if username:
-        return PackageUsernameResult(username, "detected_safe_pref", True, duration)
-    if err:
-        return PackageUsernameResult("", "unknown", True, duration, err[:120])
-    return PackageUsernameResult("", "unknown", True, duration)
-
-
-def scan_package_username(
-    package: str,
-    config_data: dict[str, Any] | None = None,
     *,
     timeout_seconds: float = USERNAME_DETECT_TIMEOUT_SECONDS,
 ) -> UsernameScanReport:
-    """Scan one package and report username source or an honest Android limitation."""
+    """Root-required username scan with explicit evidence."""
     start = time.monotonic()
-    methods: list[str] = []
     try:
         pkg = validate_package_name(package)
     except Exception as exc:  # noqa: BLE001
@@ -140,115 +226,161 @@ def scan_package_username(
             source="unknown",
             supported=False,
             reason=str(exc)[:160],
-            methods_attempted=tuple(methods),
-            duration_ms=0,
+            root_used=False,
+            confidence="",
+            root_read_status="invalid package",
+        )
+
+    pre = root_access.root_required_preflight(timeout=max(3, int(min(timeout_seconds, 6))))
+    if not pre.ok:
+        return UsernameScanReport(
+            package=pkg,
+            username="",
+            source="unknown",
+            supported=False,
+            reason=pre.public_error(),
+            methods_attempted=("root_required_preflight",),
+            duration_ms=int((time.monotonic() - start) * 1000),
+            root_used=False,
+            confidence="",
+            root_read_status=pre.detail[:160],
         )
 
     app_label = ""
+    launcher_activity = ""
+    installed = None
+    enabled = None
     try:
         from . import android
 
         app_label = str(android.get_application_label(pkg) or "")[:120]
+        installed = android.package_installed(pkg)
+        from . import launch_verify
+
+        component, launchable, _ = launch_verify.resolve_launcher_activity(pkg)
+        launcher_activity = component or ""
+        enabled = launchable
     except Exception:  # noqa: BLE001
         pass
 
-    if config_data:
-        from .config import get_package_display_username
+    username, source, confidence, methods, root_status = _root_scan_paths(
+        pkg,
+        budget_seconds=max(1.0, timeout_seconds - 1.0),
+    )
+    duration = int((time.monotonic() - start) * 1000)
+    if username:
+        return UsernameScanReport(
+            package=pkg,
+            username=username,
+            source=source,
+            supported=True,
+            reason="",
+            methods_attempted=methods,
+            app_label=app_label,
+            duration_ms=duration,
+            root_used=True,
+            confidence=confidence,
+            root_read_status=root_status,
+            launcher_activity=launcher_activity,
+            installed=installed,
+            enabled=enabled,
+        )
+    return UsernameScanReport(
+        package=pkg,
+        username="",
+        source="unknown",
+        supported=True,
+        reason=f"no username key found in root-readable data ({root_status})",
+        methods_attempted=methods,
+        app_label=app_label,
+        duration_ms=duration,
+        root_used=True,
+        confidence="",
+        root_read_status=root_status,
+        launcher_activity=launcher_activity,
+        installed=installed,
+        enabled=enabled,
+    )
 
+
+def _read_prefs_via_root(pkg: str, *, timeout_seconds: float) -> tuple[str, str]:
+    report = scan_package_username_root(pkg, timeout_seconds=timeout_seconds)
+    if report.username:
+        return report.username, ""
+    return "", report.reason[:120]
+
+
+def detect_package_username_quick(
+    package: str,
+    *,
+    timeout_seconds: float = USERNAME_DETECT_TIMEOUT_SECONDS,
+) -> PackageUsernameResult:
+    start = time.monotonic()
+    report = scan_package_username_root(package, timeout_seconds=timeout_seconds)
+    duration = int((time.monotonic() - start) * 1000)
+    if report.username:
+        return PackageUsernameResult(
+            report.username,
+            _normalize_source(report.source),
+            True,
+            duration,
+            root_used=True,
+            confidence=report.confidence or "high",
+        )
+    return PackageUsernameResult(
+        "",
+        "unknown",
+        report.root_used,
+        duration,
+        report.reason[:120],
+        root_used=report.root_used,
+    )
+
+
+def scan_package_username(
+    package: str,
+    config_data: dict[str, Any] | None = None,
+    *,
+    timeout_seconds: float = USERNAME_DETECT_TIMEOUT_SECONDS,
+) -> UsernameScanReport:
+    """Scan one package; manual mapping is fallback only after root scan."""
+    start = time.monotonic()
+    try:
+        pkg = validate_package_name(package)
+    except Exception as exc:  # noqa: BLE001
+        return UsernameScanReport(
+            package=str(package or "")[:120],
+            username="",
+            source="unknown",
+            supported=False,
+            reason=str(exc)[:160],
+            duration_ms=0,
+        )
+
+    if config_data:
         for entry in config_data.get("roblox_packages") or ():
             if not isinstance(entry, dict) or str(entry.get("package") or "") != pkg:
                 continue
             saved = get_package_display_username(entry, config_data)
             source = str(entry.get("username_source") or "not_set")
             if saved != "Unknown" and source == "manual":
-                methods.append("config_manual")
                 return UsernameScanReport(
                     package=pkg,
                     username=saved,
-                    source="manual",
+                    source="manual_mapping",
                     supported=True,
                     reason="",
-                    methods_attempted=tuple(methods),
-                    app_label=app_label,
+                    methods_attempted=("config_manual",),
                     duration_ms=int((time.monotonic() - start) * 1000),
-                )
-            if saved != "Unknown" and source.startswith("detected"):
-                methods.append("config_cached_auto")
-                return UsernameScanReport(
-                    package=pkg,
-                    username=saved,
-                    source=source,
-                    supported=True,
-                    reason="",
-                    methods_attempted=tuple(methods),
-                    app_label=app_label,
-                    duration_ms=int((time.monotonic() - start) * 1000),
+                    root_used=False,
+                    confidence="high",
+                    root_read_status="manual map",
                 )
 
-    cache = {}
-    if config_data and isinstance(config_data.get("package_username_cache"), dict):
-        cache = config_data["package_username_cache"]
-    cached = validate_account_username(str(cache.get(pkg) or ""))
-    if cached:
-        methods.append("package_username_cache")
-        return UsernameScanReport(
-            package=pkg,
-            username=cached,
-            source="cache",
-            supported=True,
-            reason="",
-            methods_attempted=tuple(methods),
-            app_label=app_label,
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-
-    methods.append("root_shared_prefs")
-    root_cap = root_access.detect()
-    if not root_cap.available:
-        methods.append("root_unavailable")
-        reason = (
-            "username unavailable: Android private app data is not readable from "
-            "Termux without root/debug/exported source"
-        )
-        if root_cap.detail:
-            reason += f" ({root_cap.detail[:80]})"
-        return UsernameScanReport(
-            package=pkg,
-            username="",
-            source="unknown",
-            supported=False,
-            reason=reason,
-            methods_attempted=tuple(methods),
-            app_label=app_label,
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-
-    quick = detect_package_username_quick(pkg, timeout_seconds=timeout_seconds)
-    if quick.username:
-        return UsernameScanReport(
-            package=pkg,
-            username=quick.username,
-            source="detected_safe_pref",
-            supported=True,
-            reason="",
-            methods_attempted=tuple(methods),
-            app_label=app_label,
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-
-    reason = quick.error or (
-        "username unavailable: prefs.xml readable via root but username/displayName not present"
-    )
-    return UsernameScanReport(
-        package=pkg,
-        username="",
-        source="unknown",
-        supported=bool(root_cap.available),
-        reason=reason[:200],
-        methods_attempted=tuple(methods),
-        app_label=app_label,
-        duration_ms=int((time.monotonic() - start) * 1000),
-    )
+    root_report = scan_package_username_root(pkg, timeout_seconds=timeout_seconds)
+    if root_report.username:
+        return root_report
+    return root_report
 
 
 def resolve_package_display_username(
@@ -262,16 +394,19 @@ def resolve_package_display_username(
     saved = get_package_display_username(updated, config_data)
     source = str(updated.get("username_source") or "not_set")
     if saved != "Unknown":
-        return updated, PackageUsernameResult(saved, source, False, 0)
+        return updated, PackageUsernameResult(saved, _normalize_source(source), False, 0, root_used=False)
     if not allow_detect:
-        return updated, PackageUsernameResult("Unknown", "unknown", False, 0)
+        return updated, PackageUsernameResult("Unknown", "unknown", False, 0, root_used=False)
     result = detect_package_username_quick(
         str(updated.get("package") or ""),
         timeout_seconds=timeout_seconds,
     )
     if result.username:
         updated["account_username"] = result.username
-        updated["username_source"] = validate_username_source(result.source, result.username)
+        updated["username_source"] = validate_username_source(
+            _normalize_source(result.source),
+            result.username,
+        )
         cache = dict(config_data.get("package_username_cache") or {})
         cache[str(updated["package"])] = result.username
         config_data["package_username_cache"] = cache
@@ -281,6 +416,7 @@ def resolve_package_display_username(
         result.detector_used,
         result.duration_ms,
         result.error,
+        root_used=result.root_used,
     )
 
 
@@ -289,66 +425,25 @@ def safe_detect_username_for_package(
     *,
     timeout_seconds: float = SAFE_DETECT_DEFAULT_TIMEOUT_SECONDS,
 ) -> str:
-    """Best-effort per-package username detector.
-
-    Strictly per-package: never scans other apps, never lists installed
-    packages, never invokes the legacy Refresh Mapping flow.  Wraps the
-    bounded ``detect_package_username_quick`` so callers (Auto Detect and
-    Manual Add Package) can populate display labels without risking a
-    Termux freeze.
-
-    Returns the detected username or ``"Unknown"`` on any failure,
-    timeout, permission denial, missing file, or parse error.
-    """
     safe_pkg = str(package_name or "").strip()
     if not safe_pkg:
         return "Unknown"
     bounded = max(0.5, min(float(timeout_seconds), USERNAME_DETECT_TIMEOUT_SECONDS))
-    started = time.monotonic()
     try:
-        result = detect_package_username_quick(
-            safe_pkg,
-            timeout_seconds=bounded,
-        )
+        result = detect_package_username_quick(safe_pkg, timeout_seconds=bounded)
     except Exception as exc:  # noqa: BLE001
-        elapsed = int((time.monotonic() - started) * 1000)
-        _log.debug(
-            "safe_detect_username_for_package failed for %s after %dms: %s",
-            safe_pkg[:64],
-            elapsed,
-            str(exc)[:120],
-        )
+        _log.debug("safe_detect failed for %s: %s", safe_pkg[:64], str(exc)[:120])
         return "Unknown"
-    if result.error:
-        _log.debug(
-            "safe_detect_username_for_package timeout/error %s after %dms: %s",
-            safe_pkg[:64],
-            result.duration_ms,
-            result.error[:120],
-        )
     name = validate_account_username(result.username or "")
-    if name:
-        return name
-    if result.error and "unavailable" in result.error.lower():
-        return "Unknown"
-    return "Unknown"
+    return name or "Unknown"
 
 
 def collect_safe_usernames_for_packages(
     packages: list[str],
     *,
     per_package_timeout_seconds: float = SAFE_DETECT_DEFAULT_TIMEOUT_SECONDS,
-    total_deadline_seconds: float = 5.0,
+    total_deadline_seconds: float = 8.0,
 ) -> dict[str, str]:
-    """Run :func:`safe_detect_username_for_package` for each package.
-
-    Stops early once the global ``total_deadline_seconds`` budget is hit
-    so the caller (Auto Detect / Manual Add post-processing) cannot stall
-    Termux when there are many packages or root is slow.
-
-    The returned mapping always contains every requested package: those
-    that hit the deadline or fail simply map to ``"Unknown"``.
-    """
     deadline = time.monotonic() + max(0.5, float(total_deadline_seconds))
     out: dict[str, str] = {}
     for raw in packages or ():
