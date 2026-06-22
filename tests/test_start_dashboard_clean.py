@@ -5,7 +5,7 @@ Verifies:
   2. Start output contains a table.
   3. Start output does NOT contain raw package setup text.
   4. Start output does NOT contain raw debug/monitor text.
-  5. build_start_table produces Package | Username | State columns.
+  5. build_start_table produces Package | Username columns only.
   6. build_start_verbose_details is NOT printed to stdout in normal mode.
   7. State progression appears only inside the table, not as bare text.
 """
@@ -103,21 +103,18 @@ class TestBuildStartTable(unittest.TestCase):
         table = build_start_table(rows, use_color=False)
         self.assertIn("Username", table)
 
-    def test_has_state_column(self):
-        rows = [(1, "com.roblox.client", "User1", "Launching")]
+    def test_no_state_runtime_or_usage_headers(self):
+        rows = [(1, "com.roblox.client", "User1", "Launching", "1m", "12MB")]
         table = build_start_table(rows, use_color=False)
-        self.assertIn("State", table)
+        self.assertNotIn("State", table)
+        self.assertNotIn("Runtime", table)
+        self.assertNotIn("Usage", table)
 
-    def test_state_shown_in_table(self):
+    def test_legacy_state_not_shown_in_table(self):
         rows = [(1, "com.roblox.client", "User1", "Join Unconfirmed")]
         table = build_start_table(rows, use_color=False)
-        self.assertIn("Join Unconfirmed", table)
-
-    def test_dead_state_shown_in_table(self):
-        """Dead is a distinct state (process gone) and must appear in the table."""
-        rows = [(1, "com.moons.litesc", "Alice", "Dead")]
-        table = build_start_table(rows, use_color=False)
-        self.assertIn("Dead", table)
+        self.assertNotIn("Join Unconfirmed", table)
+        self.assertIn("User1", table)
 
     def test_multiple_packages_all_shown(self):
         rows = [
@@ -126,9 +123,7 @@ class TestBuildStartTable(unittest.TestCase):
         ]
         table = build_start_table(rows, use_color=False)
         self.assertIn("Alice", table)
-        self.assertIn("Bob",   table)
-        self.assertIn("Lobby", table)
-        self.assertIn("In Server", table)
+        self.assertIn("Bob", table)
 
 
 class TestBuildStartVerboseDetails(unittest.TestCase):
@@ -190,7 +185,7 @@ class TestStartOutputClean(unittest.TestCase):
     def test_table_present_in_output(self):
         out = self._get_output()
         self.assertTrue(
-            "Package" in out or "State" in out or "─" in out or "|" in out,
+            "Package" in out or "Username" in out or "─" in out or "|" in out,
             f"Table must be present in Start output. Got:\n{out[:500]}",
         )
 

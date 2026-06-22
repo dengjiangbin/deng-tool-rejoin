@@ -205,57 +205,29 @@ class TestClonePrefsUserPath(unittest.TestCase):
 # TASK 4 — Usage column render
 # ---------------------------------------------------------------------------
 
-class TestUsageColumn(unittest.TestCase):
-    """build_start_table must include a Usage column."""
+class TestStreamlinedStartTable(unittest.TestCase):
+    """build_start_table renders only #, Package, Username."""
 
-    def _make_table(self, usage: str = "0MB") -> str:
+    def _make_table(self) -> str:
         from agent.commands import build_start_table
         rows = [
-            (1, "com.test.pkg0", "TestUser", "Online", "2m 5s", usage),
+            (1, "com.test.pkg0", "TestUser", "Online", "2m 5s", "256MB"),
         ]
         return build_start_table(rows, use_color=False)
 
-    def test_usage_column_header_present(self) -> None:
+    def test_only_three_headers(self) -> None:
         table = self._make_table()
-        self.assertIn("Usage", table, "Usage column header missing from table")
-
-    def test_usage_column_shows_value(self) -> None:
-        table = self._make_table("256MB")
-        self.assertIn("256MB", table, "Usage value not rendered in table")
-
-    def test_usage_column_shows_zero_for_dead(self) -> None:
-        table = self._make_table("0MB")
-        self.assertIn("0MB", table, "0MB not rendered for dead package")
-
-    def test_runtime_column_still_present(self) -> None:
-        table = self._make_table()
-        self.assertIn("Runtime", table, "Runtime column must still be present")
-
-    def test_table_has_six_columns(self) -> None:
-        """Header row must contain exactly 6 column headers."""
-        from agent.commands import build_start_table
-        rows = [(1, "com.test.pkg0", "user", "Online", "1m", "128MB")]
-        table = build_start_table(rows, use_color=False)
-        # Count '│'-separated cells in the header row
         header_line = [ln for ln in table.splitlines() if "Package" in ln][0]
         cols = [c.strip() for c in header_line.split("│") if c.strip()]
-        self.assertEqual(len(cols), 6,
-                         f"Expected 6 columns, got {len(cols)}: {cols}")
+        self.assertEqual(cols, ["#", "Package", "Username"])
 
-    def test_four_tuple_backward_compat(self) -> None:
-        """Old 4-tuple rows still render without crash (Runtime and Usage blank)."""
-        from agent.commands import build_start_table
-        rows = [(1, "com.test.pkg0", "user", "Online")]
-        table = build_start_table(rows, use_color=False)
-        self.assertIn("Usage", table)
-        self.assertIn("Runtime", table)
-
-    def test_five_tuple_backward_compat(self) -> None:
-        """Old 5-tuple rows still render without crash (Usage blank)."""
-        from agent.commands import build_start_table
-        rows = [(1, "com.test.pkg0", "user", "Online", "3m 5s")]
-        table = build_start_table(rows, use_color=False)
-        self.assertIn("Usage", table)
+    def test_legacy_trailing_fields_not_rendered(self) -> None:
+        table = self._make_table()
+        self.assertIn("TestUser", table)
+        self.assertNotIn("Online", table)
+        self.assertNotIn("256MB", table)
+        self.assertNotIn("Runtime", table)
+        self.assertNotIn("Usage", table)
 
 
 # ---------------------------------------------------------------------------
@@ -412,9 +384,10 @@ class TestPublicUICleanliness(unittest.TestCase):
             self.assertIn(v, allowed,
                           f"_STATE_DISPLAY_MAP maps to forbidden display state: '{v}'")
 
-    def test_usage_column_in_public_output(self) -> None:
+    def test_usage_column_omitted_from_public_output(self) -> None:
         table = self._make_table()
-        self.assertIn("Usage", table)
+        self.assertNotIn("Usage", table)
+        self.assertNotIn("128MB", table)
 
     def test_no_noisy_layout_tags_in_public_table(self) -> None:
         table = self._make_table()

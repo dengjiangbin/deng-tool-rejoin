@@ -540,35 +540,19 @@ class TestStateSummaryNewStates(unittest.TestCase):
         text = build_final_summary(entries, {"com.roblox.client": "Joining"})
         self.assertIn("launching", text.lower())
 
-    def test_start_table_shows_lobby(self):
+    def test_start_table_omits_state_labels(self):
         from agent.commands import build_start_table
-        rows = [(1, "com.roblox.client", "TestUser", "Lobby")]
-        table = build_start_table(rows)
-        self.assertIn("Lobby", table)
-
-    def test_start_table_shows_joining(self):
-        from agent.commands import build_start_table
-        rows = [(1, "com.roblox.client", "TestUser", "Joining")]
-        table = build_start_table(rows)
-        self.assertIn("Joining", table)
-
-    def test_start_table_shows_in_server(self):
-        from agent.commands import build_start_table
-        rows = [(1, "com.roblox.client", "TestUser", "In Server")]
-        table = build_start_table(rows)
-        self.assertIn("In Server", table)
+        for state in ("Lobby", "Joining", "In Server", "Join Unconfirmed"):
+            rows = [(1, "com.roblox.client", "TestUser", state)]
+            table = build_start_table(rows)
+            self.assertIn("TestUser", table)
+            self.assertNotIn(state, table)
 
     def test_join_unconfirmed_counts_as_launching(self):
         from agent.commands import build_final_summary
         entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
         text = build_final_summary(entries, {"com.roblox.client": "Join Unconfirmed"})
         self.assertIn("launching", text.lower())
-
-    def test_start_table_shows_join_unconfirmed(self):
-        from agent.commands import build_start_table
-        rows = [(1, "com.roblox.client", "TestUser", "Join Unconfirmed")]
-        table = build_start_table(rows)
-        self.assertIn("Join Unconfirmed", table)
 
 
 class TestEvidenceBasedStateTransitions(unittest.TestCase):
@@ -680,19 +664,18 @@ class TestEvidenceBasedStateTransitions(unittest.TestCase):
         # After a healthy check from JOIN_UNCONFIRMED, it should stay in a healthy state
         self.assertIn(result, _HEALTHY_STATES)
 
-    def test_public_table_has_only_package_username_state(self):
-        """build_start_table output must have only Package, Username, State columns."""
+    def test_public_table_has_only_package_username(self):
+        """build_start_table output must have only Package and Username columns."""
         from agent.commands import build_start_table
         rows = [(1, "com.roblox.client", "TestUser", "Join Unconfirmed")]
         table = build_start_table(rows)
-        # Table headers must include exactly these four columns
         self.assertIn("Package", table)
         self.assertIn("Username", table)
-        self.assertIn("State", table)
-        # No debug columns
+        self.assertNotIn("State", table)
+        self.assertNotIn("Runtime", table)
+        self.assertNotIn("Usage", table)
+        self.assertNotIn("Join Unconfirmed", table)
         self.assertNotIn("Evidence", table)
-        self.assertNotIn("logcat", table)
-        self.assertNotIn("dumpsys", table)
 
 
 if __name__ == "__main__":

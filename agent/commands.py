@@ -1307,26 +1307,22 @@ def _gather_roblox_candidates_for_ui(config_data: dict[str, Any]) -> list[androi
 def _print_full_discovery_table(candidates: list[android.RobloxPackageCandidate], config_data: dict[str, Any] | None = None) -> None:
     print()
     print("Detected Roblox Packages (root-first scan)")
-    print(f"{'#':<4} {'Package':<32} {'Username':<16} {'Source':<18} {'State':<8}")
-    print(f"{'-'*4} {'-'*32} {'-'*16} {'-'*18} {'-'*8}")
+    print(termux_ui.fit_line("# | Package | Username"))
+    print(termux_ui.fit_line("-" * min(40, safe_io.terminal_columns())))
     for idx, c in enumerate(candidates, start=1):
         username = "unknown"
-        source = "-"
         reason = ""
-        state = "ready" if c.launchable else "no_launch"
         if config_data is not None:
             scan = package_username.scan_package_username(c.package, config_data)
             if scan.username:
-                username = scan.username[:15]
-                source = (scan.source or "unknown")[:17]
+                username = scan.username
             elif scan.reason:
                 reason = scan.reason[:60]
-                source = "blocked"
         print(
-            f"[{idx}] {c.package:<32} username: {username:<16} source: {source:<18} state: {state}"
+            termux_ui.fit_line(f"[{idx}] {c.package} | username: {username}")
         )
         if reason:
-            print(f"     reason: {reason}")
+            print(termux_ui.fit_line(f"     reason: {reason}"))
 
 
 def _safe_package_detect_progress() -> None:
@@ -2634,10 +2630,10 @@ def _config_menu_package_loop(draft: dict[str, Any]) -> dict[str, Any]:
             for idx, entry in enumerate(enabled_entries, start=1):
                 pkg = entry["package"]
                 scan = menu_scans.get(pkg) or package_username.scan_package_username_for_menu(pkg, draft)
-                uname, src = package_username.menu_username_display(scan, entry, draft)
+                uname, _src = package_username.menu_username_display(scan, entry, draft)
                 current_lines.append(
                     termux_ui.fit_line(
-                        f"  [{idx}] {pkg} | username: {uname} | source: {src} | state: ready"
+                        f"  [{idx}] {pkg} | username: {uname}"
                     )
                 )
         else:
@@ -4506,42 +4502,38 @@ def _cap_plain_cell(raw: str, max_w: int) -> str:
 
 
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
-    """Build the public start summary table: #, Package, Username, State, Runtime, Usage.
+    """Build the public start summary table: #, Package, Username only.
 
-    Rows may be 4-tuples (idx, pkg, username, state) for backward compatibility,
-    5-tuples (idx, pkg, username, state, runtime), or
-    6-tuples (idx, pkg, username, state, runtime, usage).
-    Missing trailing columns are shown as empty cells.
-
-    Table width is clamped to ``shutil.get_terminal_size().columns`` so cells
-    hard-truncate with ``...`` instead of wrapping to the next line.
+    Rows may include legacy trailing fields (state/runtime/usage); only the
+    first three values are rendered.  Every line is hard-clamped to terminal
+    width via ``termux_ui.fit_line()`` to prevent wrap cascades on cloudphones.
     """
-    headers = ("#", "Package", "Username", "State", "Runtime", "Usage")
+    headers = ("#", "Package", "Username")
     str_rows = [
         (
-            str(r[0]), _short_package_display(r[1]), str(r[2]), str(r[3]),
-            str(r[4]) if len(r) > 4 else "",
-            str(r[5]) if len(r) > 5 else "",
+            str(r[0]),
+            _short_package_display(r[1]),
+            str(r[2]) if len(r) > 2 else "",
         )
         for r in rows
     ]
 
     term_cols = safe_io.terminal_columns()
     border_budget = 2 + (len(headers) * 3)
-    data_budget = max(24, term_cols - border_budget)
-    col_caps = [4, 14, 16, 14, 8, 8]
+    data_budget = max(20, term_cols - border_budget)
+    col_caps = [4, 16, 18]
     capped_total = sum(col_caps)
     if capped_total > data_budget:
         scale = data_budget / capped_total
-        col_caps = [max(4, int(c * scale)) for c in col_caps]
+        col_caps = [max(3, int(c * scale)) for c in col_caps]
     str_rows = [
-        tuple(_cap_plain_cell(str_rows[i][j], col_caps[j]) for j in range(6))
+        tuple(_cap_plain_cell(str_rows[i][j], col_caps[j]) for j in range(3))
         for i in range(len(str_rows))
     ]
 
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
-        for i in range(6)
+        for i in range(3)
     ]
 
     def _bold(text: str) -> str:
@@ -4550,14 +4542,7 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
         return f"{_ANSI_BOLD}{text}{_ANSI_RESET}"
 
     colored_rows = [
-        (
-            _bold(r[0]),
-            _bold(r[1]),
-            _bold(r[2]),
-            _colorize_status(r[3], use_color=use_color),
-            _bold(r[4]),
-            _bold(r[5]),
-        )
+        (_bold(r[0]), _bold(r[1]), _bold(r[2]))
         for r in str_rows
     ]
 
@@ -5585,8 +5570,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             from prior phases never bleed through on slow Termux terminals.
             """
             rows = [
-                (i + 1, e["package"], _account_username_for_table(e),
-                 phase.get(e["package"], "Preparing"), "", "")
+                (i + 1, e["package"], _account_username_for_table(e))
                 for i, e in enumerate(entries)
             ]
             lines = [banner_text(use_color=use_color), ""]
@@ -6192,63 +6176,17 @@ def cmd_start(args: argparse.Namespace) -> int:
             return f"{s}s"
 
         def _live_dashboard() -> None:
-            """Clear screen and redraw banner + table with live status values.
-
-            Uses clear_scrollback=True so the prep-phase banner/table cannot
-            bleed through at the Start→supervisor transition (dirty-UI fix).
-            Checking Package X/Y text is removed from public UI (probe-only).
-            Runtime column shows elapsed time since package first became Online.
-            Usage column shows per-package RAM consumption.
-            """
+            """Clear screen and redraw banner + compact package table (#, pkg, user)."""
             safe_io.set_crash_context(phase="render_loop", session_id=_start_session_id)
-            import time as _ts_time
-            _now_ts = _ts_time.time()
-            _usage_cache = getattr(_live_dashboard, "_usage_cache", None)
-            if not isinstance(_usage_cache, dict):
-                _usage_cache = {}
-                setattr(_live_dashboard, "_usage_cache", _usage_cache)
-
-            def _get_runtime(pkg: str) -> str:
-                raw_state = _live_map.get(pkg, "Unknown")
-                disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
-                if disp != "Online":
-                    return ""
-                start_ts = getattr(_supervisor, "_online_start_ts", {}).get(pkg, 0.0)
-                if not start_ts:
-                    return ""
-                return _fmt_runtime(max(0.0, _now_ts - start_ts))
-
-            def _get_usage(pkg: str) -> str:
-                """Return cached per-package RAM usage; never leave the table blank."""
-                raw_state = _live_map.get(pkg, "Unknown")
-                disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
-                if disp in ("Dead", "Preparing", "Clear Cache"):
-                    return "N/A"
-                cached = _usage_cache.get(pkg)
-                if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:
-                    return str(cached[1] or "N/A")
-                try:
-                    usage = android.get_package_ram_usage(pkg, getattr(_supervisor, "_root_info", None))
-                    label = str(usage.get("usage_mb") or "").strip() or "N/A"
-                except Exception:  # noqa: BLE001
-                    label = "N/A"
-                _usage_cache[pkg] = (_now_ts, label)
-                return label
 
             lines = [banner_text(use_color=use_color), ""]
             ram_label = _get_ram_label()
             if ram_label:
                 for _ram_line in ram_label.split("\n"):
-                    lines.append(f"  {_ram_line}")
+                    lines.append(termux_ui.fit_line(f"  {_ram_line}"))
                 lines.append("")
             live_rows = [
-                (i + 1, e["package"], _account_username_for_table(e),
-                 _STATE_DISPLAY_MAP.get(
-                     _live_map.get(e["package"], "Unknown"),
-                     _live_map.get(e["package"], "Unknown"),
-                 ),
-                 _get_runtime(e["package"]),
-                 _get_usage(e["package"]))
+                (i + 1, e["package"], _account_username_for_table(e))
                 for i, e in enumerate(entries)
             ]
             lines.append(build_start_table(live_rows, use_color=use_color))
