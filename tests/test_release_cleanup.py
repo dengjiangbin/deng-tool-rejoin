@@ -416,35 +416,34 @@ class TestCheckingPackageAbsentFromUI(unittest.TestCase):
                          "_live_dashboard still reads checking_label for display")
 
 
-# ── TASK 7 — Streamlined start table (runtime omitted from public UI) ────────
+# ── TASK 7 — Live start table telemetry columns ──────────────────────────────
 
-class TestStreamlinedStartTableRelease(unittest.TestCase):
-    """Public start table shows only #, Package, Username."""
+class TestLiveStartTableRelease(unittest.TestCase):
+    """Live start table shows State, Runtime, and Usage."""
 
-    def test_table_omits_runtime_header(self) -> None:
-        rows = [(1, "com.roblox.client", "User1", "Online", "5m 3s")]
+    def test_table_has_runtime_header(self) -> None:
+        rows = [(1, "com.roblox.client", "User1", "Online", "5m 3s", "128MB")]
         table = build_start_table(rows, use_color=False)
-        self.assertNotIn("Runtime", table)
-        self.assertNotIn("5m 3s", table)
+        self.assertIn("Runtime", table)
+        self.assertIn("5m 3s", table)
 
-    def test_runtime_value_not_shown_in_table(self) -> None:
-        rows = [(1, "com.roblox.client", "User1", "Online", "1h 2m 5s")]
+    def test_runtime_value_shown_in_table(self) -> None:
+        rows = [(1, "com.roblox.client", "User1", "Online", "1h 2m 5s", "256MB")]
         table = build_start_table(rows, use_color=False)
-        self.assertNotIn("1h 2m 5s", table)
+        self.assertIn("1h 2m 5s", table)
         self.assertIn("User1", table)
 
-    def test_state_not_shown_for_non_online(self) -> None:
-        rows = [(1, "com.roblox.client", "User1", "Dead", "")]
+    def test_state_shown_for_dead(self) -> None:
+        rows = [(1, "com.roblox.client", "User1", "Dead", "", "N/A")]
         table = build_start_table(rows, use_color=False)
-        self.assertNotIn("Dead", table)
+        self.assertIn("Dead", table)
         self.assertIn("User1", table)
 
     def test_backward_compat_4_tuple_rows(self) -> None:
-        """4-tuple rows must still render package + username."""
         rows = [(1, "com.roblox.client", "User1", "Online")]
         table = build_start_table(rows, use_color=False)
-        self.assertNotIn("Runtime", table)
-        self.assertNotIn("Online", table)
+        self.assertIn("Runtime", table)
+        self.assertIn("Online", table)
         self.assertIn("User1", table)
 
     def test_online_start_ts_set_on_first_online(self) -> None:
@@ -692,9 +691,9 @@ class TestCleanPublicUI(unittest.TestCase):
             with self.subTest(state=state):
                 table = self._table_for_state(state)
                 self.assertIn("User1", table)
-                self.assertNotIn(state, table)
-                self.assertNotIn("Runtime", table)
-                self.assertNotIn("Usage", table)
+                self.assertIn(state, table)
+                self.assertIn("Runtime", table)
+                self.assertIn("Usage", table)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,7 @@
-"""Regression: package dashboard shows only #, package name, and username."""
+"""Regression: static package menus stay compact; live table keeps telemetry."""
 
 from __future__ import annotations
 
-import os
 import unittest
 from unittest import mock
 
@@ -11,16 +10,16 @@ from agent.commands import build_start_table
 
 
 class PackageLayoutStreamlineTests(unittest.TestCase):
-    def test_build_start_table_three_columns_only(self) -> None:
+    def test_build_start_table_has_live_telemetry_columns(self) -> None:
         table = build_start_table(
             [(1, "com.moons.litesc", "JBDENG8", "Online", "01:02:03", "120 MB")],
             use_color=False,
         )
         header = next(line for line in table.splitlines() if "Package" in line)
         cols = [c.strip() for c in header.split("│") if c.strip()]
-        self.assertEqual(cols, ["#", "Package", "Username"])
-        self.assertNotIn("Online", table)
-        self.assertNotIn("120 MB", table)
+        self.assertEqual(cols, ["#", "Package", "Username", "State", "Runtime", "Usage"])
+        self.assertIn("Online", table)
+        self.assertIn("120 MB", table)
 
     def test_fit_line_clamps_package_menu_row(self) -> None:
         long_pkg = "com.moons.litesc" + ("X" * 64)

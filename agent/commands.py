@@ -4532,38 +4532,45 @@ def _cap_plain_cell(raw: str, max_w: int) -> str:
 
 
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
-    """Build the public start summary table: #, Package, Username only.
+    """Build the live start/runtime table: #, Package, Username, State, Runtime, Usage.
 
-    Rows may include legacy trailing fields (state/runtime/usage); only the
-    first three values are rendered.  Every line is hard-clamped to terminal
-    width via ``termux_ui.fit_line()`` to prevent wrap cascades on cloudphones.
+    Rows may be 4-tuples (idx, pkg, username, state) for backward compatibility,
+    5-tuples (idx, pkg, username, state, runtime), or
+    6-tuples (idx, pkg, username, state, runtime, usage).
+    Missing trailing columns are shown as empty cells.
+
+    Every line is hard-clamped via ``termux_ui.fit_line()`` for narrow screens.
+    Static package management lists use separate simplified renderers.
     """
-    headers = ("#", "Package", "Username")
+    headers = ("#", "Package", "Username", "State", "Runtime", "Usage")
     str_rows = [
         (
             str(r[0]),
             _short_package_display(r[1]),
             str(r[2]) if len(r) > 2 else "",
+            str(r[3]) if len(r) > 3 else "",
+            str(r[4]) if len(r) > 4 else "",
+            str(r[5]) if len(r) > 5 else "",
         )
         for r in rows
     ]
 
     term_cols = safe_io.terminal_columns()
     border_budget = 2 + (len(headers) * 3)
-    data_budget = max(20, term_cols - border_budget)
-    col_caps = [4, 16, 18]
+    data_budget = max(24, term_cols - border_budget)
+    col_caps = [4, 12, 14, 14, 8, 8]
     capped_total = sum(col_caps)
     if capped_total > data_budget:
         scale = data_budget / capped_total
         col_caps = [max(3, int(c * scale)) for c in col_caps]
     str_rows = [
-        tuple(_cap_plain_cell(str_rows[i][j], col_caps[j]) for j in range(3))
+        tuple(_cap_plain_cell(str_rows[i][j], col_caps[j]) for j in range(6))
         for i in range(len(str_rows))
     ]
 
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
-        for i in range(3)
+        for i in range(6)
     ]
 
     def _bold(text: str) -> str:
@@ -4572,7 +4579,14 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
         return f"{_ANSI_BOLD}{text}{_ANSI_RESET}"
 
     colored_rows = [
-        (_bold(r[0]), _bold(r[1]), _bold(r[2]))
+        (
+            _bold(r[0]),
+            _bold(r[1]),
+            _bold(r[2]),
+            _colorize_status(r[3], use_color=use_color),
+            _bold(r[4]),
+            _bold(r[5]),
+        )
         for r in str_rows
     ]
 
@@ -6161,6 +6175,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             # Live watchdog states — keep as-is.
             "No Heartbeat":     "Dead",
             "Online":           "Online",
+            "In Game":          "In Game",
+            "In Lobby":         "In Lobby",
             "Join Failed":      "Failed",
             "Wrong Game / Wrong Server": "Failed",
             "Dead":             "Dead",
@@ -6207,8 +6223,44 @@ def cmd_start(args: argparse.Namespace) -> int:
             return f"{s}s"
 
         def _live_dashboard() -> None:
-            """Clear screen and redraw banner + compact package table (#, pkg, user)."""
+            """Clear screen and redraw banner + live telemetry table."""
             safe_io.set_crash_context(phase="render_loop", session_id=_start_session_id)
+            import time as _ts_time
+            _now_ts = _ts_time.time()
+            _usage_cache = getattr(_live_dashboard, "_usage_cache", None)
+            if not isinstance(_usage_cache, dict):
+                _usage_cache = {}
+                setattr(_live_dashboard, "_usage_cache", _usage_cache)
+
+            _metric_states = {"Online", "In Game", "In Lobby"}
+
+            def _get_runtime(pkg: str) -> str:
+                raw_state = _live_map.get(pkg, "Unknown")
+                disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
+                if disp not in _metric_states and raw_state not in _metric_states:
+                    return ""
+                start_ts = getattr(_supervisor, "_online_start_ts", {}).get(pkg, 0.0)
+                if not start_ts:
+                    return ""
+                return _fmt_runtime(max(0.0, _now_ts - start_ts))
+
+            def _get_usage(pkg: str) -> str:
+                raw_state = _live_map.get(pkg, "Unknown")
+                disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
+                if disp in ("Dead", "Preparing", "Clear Cache", "Failed"):
+                    return "N/A"
+                cached = _usage_cache.get(pkg)
+                if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:
+                    return str(cached[1] or "N/A")
+                try:
+                    usage = android.get_package_ram_usage(
+                        pkg, getattr(_supervisor, "_root_info", None),
+                    )
+                    label = str(usage.get("usage_mb") or "").strip() or "N/A"
+                except Exception:  # noqa: BLE001
+                    label = "N/A"
+                _usage_cache[pkg] = (_now_ts, label)
+                return label
 
             lines = [banner_text(use_color=use_color), ""]
             ram_label = _get_ram_label()
@@ -6217,7 +6269,17 @@ def cmd_start(args: argparse.Namespace) -> int:
                     lines.append(termux_ui.fit_line(f"  {_ram_line}"))
                 lines.append("")
             live_rows = [
-                (i + 1, e["package"], _account_username_for_table(e))
+                (
+                    i + 1,
+                    e["package"],
+                    _account_username_for_table(e),
+                    _STATE_DISPLAY_MAP.get(
+                        _live_map.get(e["package"], "Unknown"),
+                        _live_map.get(e["package"], "Unknown"),
+                    ),
+                    _get_runtime(e["package"]),
+                    _get_usage(e["package"]),
+                )
                 for i, e in enumerate(entries)
             ]
             lines.append(build_start_table(live_rows, use_color=use_color))

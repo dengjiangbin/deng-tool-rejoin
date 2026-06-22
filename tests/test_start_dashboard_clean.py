@@ -5,7 +5,7 @@ Verifies:
   2. Start output contains a table.
   3. Start output does NOT contain raw package setup text.
   4. Start output does NOT contain raw debug/monitor text.
-  5. build_start_table produces Package | Username columns only.
+  5. build_start_table produces Package | Username | State | Runtime | Usage columns.
   6. build_start_verbose_details is NOT printed to stdout in normal mode.
   7. State progression appears only inside the table, not as bare text.
 """
@@ -103,17 +103,17 @@ class TestBuildStartTable(unittest.TestCase):
         table = build_start_table(rows, use_color=False)
         self.assertIn("Username", table)
 
-    def test_no_state_runtime_or_usage_headers(self):
+    def test_has_state_runtime_usage_columns(self):
         rows = [(1, "com.roblox.client", "User1", "Launching", "1m", "12MB")]
         table = build_start_table(rows, use_color=False)
-        self.assertNotIn("State", table)
-        self.assertNotIn("Runtime", table)
-        self.assertNotIn("Usage", table)
+        self.assertIn("State", table)
+        self.assertIn("Runtime", table)
+        self.assertIn("Usage", table)
 
-    def test_legacy_state_not_shown_in_table(self):
+    def test_state_value_shown_in_table(self):
         rows = [(1, "com.roblox.client", "User1", "Join Unconfirmed")]
         table = build_start_table(rows, use_color=False)
-        self.assertNotIn("Join Unconfirmed", table)
+        self.assertIn("Join Unconf", table)
         self.assertIn("User1", table)
 
     def test_multiple_packages_all_shown(self):

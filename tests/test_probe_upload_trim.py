@@ -18,9 +18,11 @@ import unittest
 
 from agent.probe import (
     _PROBE_DROP_ORDER,
+    _UPLOAD_GZIP_MAX_BYTES,
     _UPLOAD_HARD_CAP_BYTES,
     _UPLOAD_SOFT_BUDGET_BYTES,
     _drop_field,
+    prepare_probe_upload_payload,
     trim_probe_for_upload,
 )
 
@@ -133,6 +135,40 @@ class TrimProbeForUploadTest(unittest.TestCase):
                          _UPLOAD_HARD_CAP_BYTES)
         self.assertEqual(trimmed["_upload_trim"]["soft_budget"],
                          _UPLOAD_SOFT_BUDGET_BYTES)
+
+
+class UploadPayloadIsolationTest(unittest.TestCase):
+
+    def test_prepare_probe_upload_payload_under_200kb(self) -> None:
+        probe = TrimProbeForUploadTest()._build_oversized_probe()
+        payload, report = prepare_probe_upload_payload(probe)
+        self.assertLessEqual(len(payload), 200_000)
+        self.assertLessEqual(report["gzip_bytes"], _UPLOAD_GZIP_MAX_BYTES)
+        gz_path = report.get("gzip_path") or ""
+        if gz_path:
+            from pathlib import Path
+            self.assertTrue(Path(gz_path).is_file())
+            self.assertLessEqual(Path(gz_path).stat().st_size, 200_000)
+
+    def test_upload_probe_uses_prepared_buffer(self) -> None:
+        from unittest import mock
+        from agent import probe as _p
+
+        captured: dict[str, bytes] = {}
+
+        def fake_prepare(probe):  # noqa: ANN001
+            payload = b"x" * 1024
+            captured["payload"] = payload
+            return payload, {"gzip_bytes": len(payload), "dropped": []}
+
+        with mock.patch.object(_p, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
+             mock.patch.object(_p, "prepare_probe_upload_payload", side_effect=fake_prepare), \
+             mock.patch("agent.safe_http.post_raw", return_value=(200, b'{"probe_id":"p-ok"}')) as post_raw:
+            ok, info = _p.upload_probe({"probe_version": 1})
+        self.assertTrue(ok)
+        self.assertEqual(info, "p-ok")
+        self.assertLessEqual(len(captured["payload"]), 200_000)
+        self.assertEqual(post_raw.call_args.args[1], captured["payload"])
 
 
 class CollectProbeRespectsDiagFlagTest(unittest.TestCase):

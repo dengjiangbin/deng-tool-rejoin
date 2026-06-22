@@ -37,33 +37,19 @@ class StartTableUxTests(unittest.TestCase):
             _row(2, "com.example.robloxclone", "AltAccount1", "Failed"),
         ]
 
-    def test_start_table_has_only_public_columns(self):
+    def test_start_table_has_live_telemetry_columns(self):
         rows = self._make_rows()
         table = build_start_table(rows)
-        for col in ("#", "Package", "Username"):
+        for col in ("#", "Package", "Username", "State", "Runtime", "Usage"):
             self.assertIn(col, table)
-        for banned in ("State", "Runtime", "Usage", "Cache", "Graphics", "Status", "Method", "Reason", "Private URL", "Label"):
+        for banned in ("Cache", "Graphics", "Status", "Method", "Reason", "Private URL", "Label"):
             self.assertNotIn(banned, table)
 
-    def test_start_table_shows_username_and_package_separately(self):
+    def test_start_table_shows_state(self):
         rows = self._make_rows()
         table = build_start_table(rows)
-        self.assertIn("deng1629", table)
-        self.assertIn("..client", table)
-        self.assertIn("AltAccount1", table)
-        self.assertIn("..robloxclone", table)
-
-    def test_start_table_not_label_column(self):
-        rows = [_row(1, "com.roblox.client", "Main", "Launching")]
-        table = build_start_table(rows)
-        self.assertNotIn("Label", table)
-        self.assertIn("Username", table)
-
-    def test_start_table_omits_state(self):
-        rows = self._make_rows()
-        table = build_start_table(rows)
-        self.assertNotIn("Online", table)
-        self.assertNotIn("Failed", table)
+        self.assertIn("Online", table)
+        self.assertIn("Failed", table)
 
     def test_start_table_has_box_borders(self):
         rows = [_row(1, "com.roblox.client", "Main", "Online")]
@@ -246,25 +232,19 @@ class StartTableUxTests(unittest.TestCase):
         self.assertTrue(callable(_clear_terminal))
 
     def test_new_state_lobby_in_start_table(self):
-        """build_start_table must render rows without exposing Lobby state."""
         rows = [_row(1, "com.roblox.client", "Main", "Lobby")]
         table = build_start_table(rows)
-        self.assertIn("Main", table)
-        self.assertNotIn("Lobby", table)
+        self.assertIn("Lobby", table)
 
     def test_new_state_joining_in_start_table(self):
-        """build_start_table must render rows without exposing Joining state."""
         rows = [_row(1, "com.roblox.client", "Main", "Joining")]
         table = build_start_table(rows)
-        self.assertIn("Main", table)
-        self.assertNotIn("Joining", table)
+        self.assertIn("Joining", table)
 
     def test_new_state_in_server_in_start_table(self):
-        """build_start_table must render rows without exposing In Server state."""
         rows = [_row(1, "com.roblox.client", "Main", "In Server")]
         table = build_start_table(rows)
-        self.assertIn("Main", table)
-        self.assertNotIn("In Server", table)
+        self.assertIn("In Server", table)
 
     def test_final_summary_lobby_maps_to_dead(self):
         from agent.commands import build_final_summary
@@ -306,12 +286,10 @@ class SinglePackageLaunchTests(unittest.TestCase):
             mock_launch.assert_called_once()
         self.assertTrue(result.success)
 
-    def test_single_package_start_table_row_shows_username_only(self):
-        """Table rows show package + username; state is omitted from public table."""
+    def test_single_package_start_table_row_shows_online(self):
         rows = [_row(1, "com.roblox.client", "Main", "Online")]
         table = build_start_table(rows)
-        self.assertIn("Main", table)
-        self.assertNotIn("Online", table)
+        self.assertIn("Online", table)
         self.assertNotIn("Launch skipped", table)
 
     def test_launch_skipped_phrase_not_in_table(self):

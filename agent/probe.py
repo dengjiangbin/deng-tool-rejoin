@@ -1297,12 +1297,16 @@ def _capture_snapshot_proof(errors: list[dict[str, str]]) -> dict[str, Any]:
 
 # ── Payload trimming for upload ─────────────────────────────────────────────
 
-# curl error 63 / server-side limits reject payloads over ~1.1 MB.  Keep a
-# conservative 500 KB raw JSON budget before gzip so Termux uploads succeed.
-_PROBE_ERROR_MAX = 50
-_UPLOAD_RAW_MAX_BYTES = 500 * 1024
-_UPLOAD_HARD_CAP_BYTES = 500 * 1024
-_UPLOAD_SOFT_BUDGET_BYTES = 450 * 1024
+# curl error 63 rejects payloads over ~1.1 MB on some Termux builds.
+# Upload transmission must stay under 200 KB gzip — never stream the raw
+# on-disk probe file directly.
+_PROBE_ERROR_MAX = 20
+_PROBE_TRACE_MAX_LEN = 200
+_UPLOAD_GZIP_MAX_BYTES = 200 * 1024
+_UPLOAD_RAW_MAX_BYTES = 180 * 1024
+_UPLOAD_HARD_CAP_BYTES = _UPLOAD_GZIP_MAX_BYTES
+_UPLOAD_SOFT_BUDGET_BYTES = 180 * 1024
+_UPLOAD_TMP_DIR = PROBE_DIR / "upload_tmp"
 
 # Order matters — when over budget, we drop the highest-cost,
 # lowest-signal fields first.  Per-package shared_prefs/dumpsys win over
@@ -1331,7 +1335,7 @@ def compact_probe_errors(errors: list[Any]) -> list[dict[str, str]]:
         if not isinstance(item, dict):
             continue
         step = str(item.get("step") or "")[:120]
-        error = str(item.get("error") or "")[:200]
+        error = str(item.get("error") or "")[: _PROBE_TRACE_MAX_LEN]
         key = (step, error)
         if not (step or error) or key in seen:
             continue
@@ -1340,6 +1344,16 @@ def compact_probe_errors(errors: list[Any]) -> list[dict[str, str]]:
         if len(out) >= _PROBE_ERROR_MAX:
             break
     return out
+
+
+def _strip_verbose_probe_lists(probe: dict[str, Any]) -> None:
+    """Truncate list-heavy diagnostic sections in-place."""
+    for key in ("errors", "steps", "traces", "blocking_errors"):
+        val = probe.get(key)
+        if isinstance(val, list):
+            probe[key] = compact_probe_errors(val) if key == "errors" else val[:_PROBE_ERROR_MAX]
+        elif isinstance(val, str) and len(val) > _PROBE_TRACE_MAX_LEN:
+            probe[key] = val[:_PROBE_TRACE_MAX_LEN]
 
 
 def clamp_probe_payload_size(
@@ -1398,6 +1412,72 @@ def clamp_probe_payload_size(
         "trim_dropped": dropped,
     }
     return slim
+
+
+def prepare_probe_upload_payload(
+    probe: dict[str, Any],
+) -> tuple[bytes, dict[str, Any]]:
+    """Build an isolated gzip upload buffer under the 200 KB cap.
+
+    Writes a minimized JSON temp file and a gzipped sibling — never reads
+    the full historical probe file from disk for upload.
+    """
+    import gzip as _gz
+
+    working = clamp_probe_payload_size(sanitize_probe(probe))
+    _strip_verbose_probe_lists(working)
+    trimmed, trim_report = trim_probe_for_upload(
+        working,
+        hard_cap=_UPLOAD_GZIP_MAX_BYTES,
+        soft_budget=_UPLOAD_SOFT_BUDGET_BYTES,
+    )
+    _strip_verbose_probe_lists(trimmed)
+
+    body = json.dumps(trimmed, separators=(",", ":")).encode("utf-8")
+    payload = _gz.compress(body)
+    passes = 0
+    while len(payload) > _UPLOAD_GZIP_MAX_BYTES and passes < 24:
+        passes += 1
+        dropped = False
+        for field in _PROBE_DROP_ORDER:
+            if _drop_field(trimmed, field):
+                dropped = True
+                break
+        if not dropped:
+            for key in list(trimmed.keys()):
+                if key in {"summary", "probe_version", "captured_at_iso", "errors"}:
+                    continue
+                trimmed.pop(key, None)
+                dropped = True
+                break
+        if not dropped:
+            break
+        body = json.dumps(trimmed, separators=(",", ":")).encode("utf-8")
+        payload = _gz.compress(body)
+
+    if len(payload) > _UPLOAD_GZIP_MAX_BYTES:
+        raise ValueError(
+            f"probe upload payload {len(payload)} bytes exceeds "
+            f"{_UPLOAD_GZIP_MAX_BYTES} byte cap after trim",
+        )
+
+    _UPLOAD_TMP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    json_path = _UPLOAD_TMP_DIR / f"probe_upload_tmp-{stamp}-{_short_id()}.json"
+    gz_path = _UPLOAD_TMP_DIR / f"{json_path.name}.gz"
+    json_path.write_bytes(body)
+    gz_path.write_bytes(payload)
+
+    report = {
+        "dropped": trim_report.get("dropped") or [],
+        "gzip_bytes": len(payload),
+        "raw_bytes": len(body),
+        "json_path": str(json_path),
+        "gzip_path": str(gz_path),
+        "passes": passes,
+        "hard_cap": _UPLOAD_GZIP_MAX_BYTES,
+    }
+    return payload, report
 
 
 def _drop_field(probe: dict[str, Any], dotted: str) -> bool:
@@ -1529,7 +1609,12 @@ def save_upload_bundle(probe: dict[str, Any], *, reason: str = "") -> Path:
     UPLOAD_BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = UPLOAD_BUNDLE_DIR / f"probe-upload-bundle-{ts}-{_short_id()}.json"
-    trimmed, trim_report = trim_probe_for_upload(clamp_probe_payload_size(sanitize_probe(probe)))
+    try:
+        _, trim_report = prepare_probe_upload_payload(probe)
+        json_path = Path(str(trim_report.get("json_path") or ""))
+        trimmed = json.loads(json_path.read_text(encoding="utf-8")) if json_path.is_file() else probe
+    except (ValueError, OSError, json.JSONDecodeError):
+        trimmed, trim_report = trim_probe_for_upload(clamp_probe_payload_size(sanitize_probe(probe)))
     bundle = {
         "bundle_version": 1,
         "created_at_iso": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1551,19 +1636,11 @@ def _resolve_install_api() -> str:
 
 
 def upload_probe(probe: dict[str, Any], *, timeout: float = 15.0) -> tuple[bool, str]:
-    """POST the probe JSON to the install API's dev-probe endpoint.
+    """POST a trimmed probe to the install API dev-probe endpoint.
 
-    Trims the payload first so it fits the 4 MB compressed cap, then
-    POSTs the gzipped JSON.  Returns ``(ok, info)`` where ``info`` is a
-    short probe id on success, or a short, USER-ACTIONABLE error string
-    on failure.  Never raises.
-
-    Network I/O uses :mod:`safe_http` with strict connect (5s) and total
-    (15s) timeouts so a slow link cannot freeze the Termux TTY thread.
+    Builds an isolated temp gzip buffer (never streams the raw on-disk probe
+    file).  Returns ``(ok, info)``.  Never raises.
     """
-    import gzip
-    import json
-
     from . import safe_http
 
     api = _resolve_install_api()
@@ -1571,14 +1648,17 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 15.0) -> tuple[bool,
         return False, "install API URL not configured (set DENG_REJOIN_INSTALL_API)"
     url = api.rstrip("/") + "/api/dev-probe/upload"
 
-    trimmed, trim_report = trim_probe_for_upload(clamp_probe_payload_size(sanitize_probe(probe)))
-    body = json.dumps(trimmed, separators=(",", ":")).encode("utf-8")
-    payload = gzip.compress(body)
+    try:
+        payload, trim_report = prepare_probe_upload_payload(probe)
+    except ValueError as exc:
+        return False, f"probe payload too large after trim: {exc}"
+    except OSError as exc:
+        return False, f"OS error preparing upload: {exc}"
 
-    if len(payload) > _UPLOAD_HARD_CAP_BYTES:
+    if len(payload) > _UPLOAD_GZIP_MAX_BYTES:
         return False, (
-            f"payload still {len(payload)/1024/1024:.1f} MB after trim — "
-            f"server cap is {_UPLOAD_HARD_CAP_BYTES/1024/1024:.0f} MB. "
+            f"payload still {len(payload)/1024:.1f} KB after trim — "
+            f"cap is {_UPLOAD_GZIP_MAX_BYTES/1024:.0f} KB. "
             f"Dropped: {trim_report.get('dropped') or []!r}"
         )
 

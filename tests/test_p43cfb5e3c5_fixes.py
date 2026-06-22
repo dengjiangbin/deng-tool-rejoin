@@ -205,8 +205,8 @@ class TestClonePrefsUserPath(unittest.TestCase):
 # TASK 4 — Usage column render
 # ---------------------------------------------------------------------------
 
-class TestStreamlinedStartTable(unittest.TestCase):
-    """build_start_table renders only #, Package, Username."""
+class TestLiveStartTable(unittest.TestCase):
+    """build_start_table renders live telemetry columns."""
 
     def _make_table(self) -> str:
         from agent.commands import build_start_table
@@ -215,19 +215,17 @@ class TestStreamlinedStartTable(unittest.TestCase):
         ]
         return build_start_table(rows, use_color=False)
 
-    def test_only_three_headers(self) -> None:
+    def test_six_headers(self) -> None:
         table = self._make_table()
         header_line = [ln for ln in table.splitlines() if "Package" in ln][0]
         cols = [c.strip() for c in header_line.split("│") if c.strip()]
-        self.assertEqual(cols, ["#", "Package", "Username"])
+        self.assertEqual(cols, ["#", "Package", "Username", "State", "Runtime", "Usage"])
 
-    def test_legacy_trailing_fields_not_rendered(self) -> None:
+    def test_state_runtime_usage_rendered(self) -> None:
         table = self._make_table()
         self.assertIn("TestUser", table)
-        self.assertNotIn("Online", table)
-        self.assertNotIn("256MB", table)
-        self.assertNotIn("Runtime", table)
-        self.assertNotIn("Usage", table)
+        self.assertIn("Online", table)
+        self.assertIn("256MB", table)
 
 
 # ---------------------------------------------------------------------------
@@ -386,8 +384,8 @@ class TestPublicUICleanliness(unittest.TestCase):
 
     def test_usage_column_omitted_from_public_output(self) -> None:
         table = self._make_table()
-        self.assertNotIn("Usage", table)
-        self.assertNotIn("128MB", table)
+        self.assertIn("Usage", table)
+        self.assertIn("128MB", table)
 
     def test_no_noisy_layout_tags_in_public_table(self) -> None:
         table = self._make_table()

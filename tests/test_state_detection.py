@@ -540,13 +540,13 @@ class TestStateSummaryNewStates(unittest.TestCase):
         text = build_final_summary(entries, {"com.roblox.client": "Joining"})
         self.assertIn("launching", text.lower())
 
-    def test_start_table_omits_state_labels(self):
+    def test_start_table_shows_state_labels(self):
         from agent.commands import build_start_table
         for state in ("Lobby", "Joining", "In Server", "Join Unconfirmed"):
             rows = [(1, "com.roblox.client", "TestUser", state)]
             table = build_start_table(rows)
             self.assertIn("TestUser", table)
-            self.assertNotIn(state, table)
+            self.assertIn(state, table)
 
     def test_join_unconfirmed_counts_as_launching(self):
         from agent.commands import build_final_summary
@@ -664,17 +664,17 @@ class TestEvidenceBasedStateTransitions(unittest.TestCase):
         # After a healthy check from JOIN_UNCONFIRMED, it should stay in a healthy state
         self.assertIn(result, _HEALTHY_STATES)
 
-    def test_public_table_has_only_package_username(self):
-        """build_start_table output must have only Package and Username columns."""
+    def test_public_table_has_live_telemetry_columns(self):
+        """build_start_table output includes State, Runtime, and Usage."""
         from agent.commands import build_start_table
-        rows = [(1, "com.roblox.client", "TestUser", "Join Unconfirmed")]
+        rows = [(1, "com.roblox.client", "TestUser", "Join Unconfirmed", "1m", "64MB")]
         table = build_start_table(rows)
         self.assertIn("Package", table)
         self.assertIn("Username", table)
-        self.assertNotIn("State", table)
-        self.assertNotIn("Runtime", table)
-        self.assertNotIn("Usage", table)
-        self.assertNotIn("Join Unconfirmed", table)
+        self.assertIn("State", table)
+        self.assertIn("Runtime", table)
+        self.assertIn("Usage", table)
+        self.assertIn("Join Unconfirmed", table)
         self.assertNotIn("Evidence", table)
 
 
