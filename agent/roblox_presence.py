@@ -552,7 +552,7 @@ def resolve_presence_state(
 
     if is_lobby:
         return PresenceResolution(
-            state="Dead",
+            state="In Lobby",
             reason="presence_online_not_playing",
             server_verification="not_playing",
             **common,
@@ -564,6 +564,19 @@ def resolve_presence_state(
         server_verification="unavailable",
         **common,
     )
+
+
+def map_presence_profile(result: PresenceResult | None) -> str:
+    """Map Roblox presence API result to a public profile label."""
+    if result is None or result.is_unknown:
+        return ""
+    if result.is_in_game:
+        return "In Game"
+    if result.is_lobby:
+        return "In Lobby"
+    if result.is_offline:
+        return "Offline"
+    return "Online"
 
 
 def get_presence_state_for_package(package_entry: dict | None) -> str:  # type: ignore[type-arg]
@@ -593,7 +606,8 @@ def get_presence_state_for_package(package_entry: dict | None) -> str:  # type: 
                 user_id = lookup_user_id(username)
         if not user_id:
             return "unavailable"
-        result = fetch_presence_one(user_id)
+        cookie = str(package_entry.get("roblox_cookie") or "").strip() or None
+        result = fetch_presence_one(user_id, cookie=cookie)
         return classify_presence_result(result)
     except Exception:  # noqa: BLE001
         return "unavailable"

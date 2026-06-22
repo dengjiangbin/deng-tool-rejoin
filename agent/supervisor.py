@@ -150,6 +150,8 @@ def _reapply_layout_for_package(package: str) -> None:
 # ─── Status constants (shown in terminal and webhook) ─────────────────────────
 
 STATUS_ONLINE            = "Online"
+STATUS_IN_GAME           = "In Game"           # Roblox presence type 2 (in experience)
+STATUS_IN_LOBBY          = "In Lobby"          # Roblox presence type 1 (home/lobby)
 STATUS_OFFLINE           = "Offline"
 STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
 STATUS_LAUNCHING         = "Launching"
@@ -160,7 +162,6 @@ STATUS_RECONNECTING      = "Reconnecting"
 STATUS_WARNING           = "Warning"
 STATUS_FAILED            = "Failed"
 STATUS_UNKNOWN           = "Unknown"
-STATUS_IN_LOBBY          = STATUS_DEAD
 STATUS_JOIN_FAILED       = "Join Failed"
 STATUS_WRONG_GAME        = "Wrong Game / Wrong Server"
 # Richer state constants for improved UX
@@ -188,6 +189,13 @@ STATUS_DISCONNECTED      = "Disconnected"
 #   Dead          — process not running
 # Running-but-not-in-game now maps directly to No Heartbeat.
 STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running but not actively playing
+
+# Presence-confirmed steady states that kick off RAM/runtime metric loops.
+_METRIC_ACTIVE_STATES = frozenset({
+    STATUS_ONLINE,
+    STATUS_IN_GAME,
+    STATUS_IN_LOBBY,
+})
 
 # All healthy states — used for legacy _PackageWorker state-machine guards.
 # WatchdogSupervisor never reads _HEALTHY_STATES; only _PackageWorker uses it.
@@ -1261,7 +1269,7 @@ class WatchdogSupervisor:
         self._ram_last_trim_at: dict[str, float] = {}    # last cache trim ts
         self._ram_cooldown_until: dict[str, float] = {}  # no RAM restart until this ts
 
-        # ── Per-package presence tracking (disabled in this release) ──────────
+        # ── Per-package presence tracking ─────────────────────────────────────
         self._presence_user_ids: dict[str, int] = {}
         self._presence_usernames: dict[str, str] = {}
         self._presence_cookies: dict[str, str | None] = {}
@@ -1273,8 +1281,21 @@ class WatchdogSupervisor:
         self._root_info = android.detect_root()
 
         for e in self.entries:
-            pkg = str(e["package"])
-            self._presence_cookies[pkg] = None
+            pkg = str(e.get("package") or "").strip()
+            if not pkg:
+                continue
+            uname = str(e.get("account_username") or "").strip()
+            if uname:
+                self._presence_usernames[pkg] = uname
+            raw_uid = e.get("roblox_user_id")
+            try:
+                uid = int(raw_uid) if raw_uid not in (None, "") else 0
+            except (TypeError, ValueError):
+                uid = 0
+            if uid > 0:
+                self._presence_user_ids[pkg] = uid
+            cookie = str(e.get("roblox_cookie") or "").strip()
+            self._presence_cookies[pkg] = cookie or None
             try:
                 from .url_utils import parse_expected_target_from_url
                 self._presence_expected_targets[pkg] = parse_expected_target_from_url(
@@ -1285,6 +1306,11 @@ class WatchdogSupervisor:
                 )
             except Exception:  # noqa: BLE001
                 self._presence_expected_targets[pkg] = None
+
+        for e in self.entries:
+            pkg = str(e.get("package") or "")
+            if pkg and pkg not in self._presence_cookies:
+                self._presence_cookies[pkg] = None
 
         self._logger = configure_logging(level=cfg.get("log_level", "INFO"))
         self.stop_source: str = ""
@@ -1447,13 +1473,18 @@ class WatchdogSupervisor:
     # ─── Presence fetching (process-check-first; presence is supplementary) ──
 
     def _fetch_presence(self, pkg: str) -> Any:
-        """Presence/account mapping is disabled; use local package evidence."""
+        """Fetch Roblox presence for the package account via isolated HTTP.
+
+        Returns a PresenceResult or None.  Called only when the Android
+        process is alive — force-close is detected by PID loss first.
+        """
         detail: dict[str, Any] = {
             "roblox_api_used": "false",
-            "roblox_api_status": "disabled",
-            "roblox_user_id": 0,
-            "roblox_user_id_source": "",
+            "roblox_api_status": "skipped",
+            "roblox_user_id": self._presence_user_ids.get(pkg, 0),
+            "roblox_user_id_source": "config" if self._presence_user_ids.get(pkg) else "",
             "roblox_presence_type": "",
+            "roblox_presence_profile": "",
             "roblox_place_id": "",
             "roblox_root_place_id": "",
             "roblox_universe_id": "",
@@ -1465,39 +1496,288 @@ class WatchdogSupervisor:
             "server_verification": "unavailable",
             "presence_error": "",
         }
+        target = self._presence_expected_targets.get(pkg)
+        if target is not None:
+            detail["expected_place_id"] = getattr(target, "expected_place_id", None) or ""
+            detail["expected_root_place_id"] = getattr(target, "expected_root_place_id", None) or ""
+            detail["expected_universe_id"] = getattr(target, "expected_universe_id", None) or ""
+            detail["expected_private_code"] = "configured" if getattr(target, "expected_private_code", "") else ""
         self._presence_last_detail[pkg] = detail
-        return None
+        try:
+            from . import roblox_presence as _rp
+        except Exception as exc:  # noqa: BLE001
+            detail["roblox_api_status"] = "failed"
+            detail["presence_error"] = f"import_failed:{exc}"[:160]
+            return None
+        try:
+            uid = int(self._presence_user_ids.get(pkg) or 0)
+
+            if uid <= 0 and pkg not in self._presence_id_resolved:
+                try:
+                    pref_uid = android.discover_roblox_user_id_from_prefs(pkg, timeout=3)
+                    if pref_uid:
+                        uid = int(pref_uid)
+                        self._presence_user_ids[pkg] = uid
+                        detail["roblox_user_id_source"] = "prefs"
+                except Exception:  # noqa: BLE001
+                    pass
+
+            if uid <= 0:
+                uname = self._presence_usernames.get(pkg, "")
+                last_attempt = self._presence_lookup_attempt_at.get(pkg, 0.0)
+                should_try = bool(uname) and (time.monotonic() - last_attempt) >= 30.0
+                if should_try:
+                    self._presence_lookup_attempt_at[pkg] = time.monotonic()
+                    try:
+                        uid_lookup = _rp.lookup_user_id(uname)
+                    except Exception:  # noqa: BLE001
+                        uid_lookup = None
+                    if uid_lookup:
+                        uid = int(uid_lookup)
+                        self._presence_user_ids[pkg] = uid
+                        detail["roblox_user_id_source"] = "username"
+
+            if uid > 0:
+                self._presence_id_resolved.add(pkg)
+                detail["roblox_user_id"] = uid
+            elif not self._presence_usernames.get(pkg):
+                self._presence_id_resolved.add(pkg)
+
+            if not uid:
+                detail["roblox_api_status"] = "skipped"
+                detail["presence_error"] = "missing_user_id"
+                return None
+
+            cookie = self._presence_cookies.get(pkg)
+            if not cookie:
+                last_cookie_attempt = self._presence_cookie_lookup_at.get(pkg, 0.0)
+                if (time.monotonic() - last_cookie_attempt) >= 120.0:
+                    self._presence_cookie_lookup_at[pkg] = time.monotonic()
+                    try:
+                        from . import roblox_cookie_detect as _rcd
+
+                        cookie = _rcd.detect_roblox_cookie(
+                            pkg,
+                            entry=self.entry_by_pkg.get(pkg),
+                            config=self.cfg,
+                            use_root=True,
+                        )
+                        if cookie:
+                            self._presence_cookies[pkg] = cookie
+                            detail["roblox_cookie_source"] = "auto_detect"
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            detail["roblox_api_used"] = "true"
+            presence = _rp.fetch_presence_one(uid, cookie=cookie)
+            ptype = getattr(presence, "presence_type", None)
+            detail["roblox_api_status"] = "success"
+            detail["roblox_presence_type"] = getattr(ptype, "name", str(ptype))
+            detail["roblox_presence_profile"] = _rp.map_presence_profile(presence)
+            detail["roblox_place_id"] = getattr(presence, "place_id", "") or ""
+            detail["roblox_root_place_id"] = getattr(presence, "root_place_id", "") or ""
+            detail["roblox_universe_id"] = getattr(presence, "universe_id", "") or ""
+            detail["roblox_game_id"] = getattr(presence, "game_id", "") or ""
+            return presence
+        except Exception as exc:  # noqa: BLE001
+            detail["roblox_api_used"] = "true" if detail.get("roblox_user_id") else "false"
+            detail["roblox_api_status"] = "failed"
+            detail["presence_error"] = str(exc)[:160]
+            return None
 
     # ─── State detection ─────────────────────────────────────────────────────
 
     def _detect_package_state(
         self, pkg: str, entry: dict[str, Any]
     ) -> tuple[str, dict[str, Any]]:
-        """Detect public state for one package using the root state scanner."""
+        """Detect public state: process check first, presence second.
+
+        A. Process not running (PID vanished)              → Dead
+        B. Process running + presence InGame                 → In Game
+        C. Process running + presence Online (lobby)       → In Lobby
+        D. Process running + local window/foreground hints   → Online
+        E. Process running + repeated offline after Online   → No Heartbeat
+        """
         del entry
         t0 = time.monotonic()
-        from . import package_state as _ps
+        try:
+            evidence = self._fast_alive_evidence(pkg)
+        except Exception:  # noqa: BLE001
+            evidence = {}
+        process_missing = bool(evidence.get("process_missing"))
+        process_running = bool(
+            not process_missing
+            and (
+                evidence.get("alive")
+                or evidence.get("running")
+                or evidence.get("root_running")
+            )
+        )
+        foreground_package = str(evidence.get("foreground_package") or "")
+        root_available = bool(getattr(self._root_info, "available", False))
+        local_in_game_hint = bool(
+            process_running
+            and evidence.get("foreground")
+            and (evidence.get("window") or evidence.get("surface") or evidence.get("task"))
+        )
 
-        row = _ps.scan_package_state_root(pkg, meta=_ps.get_launch_meta(pkg))
-        status = _ps.map_row_to_supervisor_status(row)
+        if not process_running:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            detail = {
+                "process_running": "false",
+                "in_game": "false",
+                "heartbeat_ok": "false",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "",
+                "in_game_proof": "false",
+                "reason": "process_not_running",
+            }
+            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_DEAD)
+            return STATUS_DEAD, detail
+
+        in_game = False
+        presence_offline = False
+        presence_unknown = False
+        presence = None
+        presence_lobby = False
+
+        try:
+            presence = self._fetch_presence(pkg)
+            if presence is not None:
+                if getattr(presence, "is_in_game", False):
+                    in_game = True
+                elif getattr(presence, "is_lobby", False):
+                    presence_lobby = True
+                elif getattr(presence, "is_offline", False):
+                    presence_offline = True
+                elif getattr(presence, "is_unknown", False):
+                    presence_unknown = True
+        except Exception:  # noqa: BLE001
+            pass
+
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+        last_online = self._last_online_ts.get(pkg, 0.0)
+        was_recently_online = (time.time() - last_online) < 300.0
+        heartbeat_age_sec = int(time.time() - last_online) if last_online else ""
+
+        pres_detail = self._presence_last_detail.get(pkg, {})
+        profile = str(pres_detail.get("roblox_presence_profile") or "")
+
+        if in_game:
+            self._nhb_offline_count[pkg] = 0
+            detail = {
+                "process_running": "true",
+                "in_game": "true",
+                "heartbeat_ok": "true",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": profile or "In Game",
+                "in_game_proof": "true",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": "roblox_presence_in_game",
+            }
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_IN_GAME)
+            return STATUS_IN_GAME, detail
+
+        if presence_lobby:
+            self._nhb_offline_count[pkg] = 0
+            detail = {
+                "process_running": "true",
+                "in_game": "false",
+                "heartbeat_ok": "true",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": profile or "In Lobby",
+                "in_game_proof": "false",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": "roblox_presence_in_lobby",
+            }
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_IN_LOBBY)
+            return STATUS_IN_LOBBY, detail
+
+        if presence_offline and was_recently_online:
+            count = self._nhb_offline_count.get(pkg, 0) + 1
+            self._nhb_offline_count[pkg] = count
+            if count >= self.NHB_OFFLINE_CONFIRMATIONS:
+                detail = {
+                    "process_running": "true",
+                    "in_game": "false",
+                    "heartbeat_ok": "false",
+                    "warning_detected": "false",
+                    "elapsed_ms": elapsed_ms,
+                    "root_available": str(root_available).lower(),
+                    "foreground_package": foreground_package,
+                    "activity": "",
+                    "in_game_proof": "true",
+                    "heartbeat_age_sec": heartbeat_age_sec,
+                    "reason": "presence_offline_after_recent_online",
+                }
+                self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+                return STATUS_NO_HEARTBEAT, detail
+
+        if not presence_offline and (presence is None or presence_unknown) and local_in_game_hint:
+            self._nhb_offline_count[pkg] = 0
+            detail = {
+                "process_running": "true",
+                "in_game": "true",
+                "heartbeat_ok": "true",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "Online",
+                "in_game_proof": "true",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": "foreground_window_surface_hint",
+            }
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_ONLINE)
+            return STATUS_ONLINE, detail
+
+        if presence is not None and not presence_unknown and not presence_offline:
+            self._nhb_offline_count[pkg] = 0
+            detail = {
+                "process_running": "true",
+                "in_game": "false",
+                "heartbeat_ok": "true",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": profile or "Online",
+                "in_game_proof": "false",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": "roblox_presence_online",
+            }
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_ONLINE)
+            return STATUS_ONLINE, detail
+
+        reason = (
+            "presence_not_in_game_no_heartbeat"
+            if presence is not None and not presence_unknown
+            else "missing_in_game_proof_no_heartbeat"
+        )
         detail = {
-            "process_running": "true" if row.root_alive else "false",
-            "in_game": "true" if row.state == _ps.STATE_ONLINE else "false",
-            "heartbeat_ok": "true" if row.state == _ps.STATE_ONLINE else "false",
-            "warning_detected": "true" if row.state == _ps.STATE_CRASHED else "false",
+            "process_running": "true",
+            "in_game": "false",
+            "heartbeat_ok": "false",
+            "warning_detected": "false",
             "elapsed_ms": elapsed_ms,
-            "root_available": "true",
-            "foreground_package": str(row.evidence.get("resumed_line") or row.evidence.get("window_line") or ""),
+            "root_available": str(root_available).lower(),
+            "foreground_package": foreground_package,
             "activity": "",
-            "in_game_proof": "true" if row.foreground or row.root_alive else "false",
-            "heartbeat_age_sec": "",
-            "reason": row.reason,
-            "scanner_state": row.state,
-            "launch_lock_active": str(row.launch_lock_active).lower(),
+            "in_game_proof": "unknown" if presence is None or presence_unknown else "false",
+            "heartbeat_age_sec": heartbeat_age_sec,
+            "reason": reason,
         }
-        self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), status)
-        return status, detail
+        self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+        return STATUS_NO_HEARTBEAT, detail
 
     def _log_state_evidence(
         self,
@@ -1721,13 +2001,13 @@ class WatchdogSupervisor:
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
-        elif state == STATUS_ONLINE:
+        elif state in _METRIC_ACTIVE_STATES:
             log_event(
                 logger, "info", "[DENG_REJOIN_ONLINE_STABLE]",
                 package=pkg,
+                state=state,
                 action="monitor_only",
             )
-            # Run adaptive RAM optimization while the package is healthy.
             self._check_ram_optimization(pkg, entry, now, render_callback=render_callback)
 
     # ─── RAM optimization ─────────────────────────────────────────────────────
@@ -1992,6 +2272,15 @@ class WatchdogSupervisor:
                 )
                 checked += 1
 
+                # Force-close must recover as Dead, never terminal Failed.
+                if state == STATUS_FAILED:
+                    try:
+                        ev = self._fast_alive_evidence(pkg)
+                        if ev.get("process_missing") or not ev.get("alive"):
+                            state = STATUS_DEAD
+                    except Exception:  # noqa: BLE001
+                        state = STATUS_DEAD
+
                 # Root scanner is authoritative: never pin Launching when the
                 # process is dead/offline or when Online evidence exists.
                 prev_pinned = self._prev_state.get(pkg)
@@ -2010,15 +2299,12 @@ class WatchdogSupervisor:
                 self._set_status(pkg, state)
                 self._prev_state[pkg] = state
 
-                # Update Online timestamp when confirmed in-game.
-                if state == STATUS_ONLINE:
+                # Track metric-active timestamps for RAM/runtime loops.
+                if state in _METRIC_ACTIVE_STATES:
                     self._last_online_ts[pkg] = now
-                    # Track when the package FIRST became Online this run
-                    # (for Runtime column in live dashboard).
-                    if prev != STATUS_ONLINE:
+                    if prev not in _METRIC_ACTIVE_STATES:
                         self._online_start_ts[pkg] = now
-                elif pkg in self._online_start_ts:
-                    # Package left Online state — clear its runtime start.
+                elif pkg in self._online_start_ts and state not in _METRIC_ACTIVE_STATES:
                     del self._online_start_ts[pkg]
                 if state == STATUS_DEAD:
                     self._last_online_ts.pop(pkg, None)
@@ -2104,16 +2390,26 @@ class WatchdogSupervisor:
         snapshot: list[dict[str, Any]] = []
         for pkg in self.packages:
             status = self.status_map.get(pkg, STATUS_DEAD)
+            ram_mb: str | None = None
+            if status in _METRIC_ACTIVE_STATES:
+                try:
+                    ram_result = android.get_package_ram_usage(pkg, self._root_info)
+                    ram_mb = str(ram_result.get("usage_mb") or "")
+                except Exception:  # noqa: BLE001
+                    ram_mb = None
+            pres = self._presence_last_detail.get(pkg, {})
             snapshot.append(
                 {
                     "package":      pkg,
                     "username":     entry_map.get(pkg, ""),
                     "status":       status,
+                    "presence_profile": pres.get("roblox_presence_profile") or "",
                     "revive_count": self._revive_count.get(pkg, 0),
                     "failure_count": self._failure_count.get(pkg, 0),
                     "last_error":   None,
-                    "online_since": self._last_online_ts.get(pkg),
+                    "online_since": self._online_start_ts.get(pkg) or self._last_online_ts.get(pkg),
                     "last_seen_at": self._last_online_ts.get(pkg),
+                    "ram_mb":       ram_mb,
                 }
             )
         return snapshot

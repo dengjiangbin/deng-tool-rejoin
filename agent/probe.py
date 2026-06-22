@@ -474,6 +474,7 @@ def _capture_presence(entry: dict[str, Any], errors: list[dict[str, str]]) -> di
 
     uid = int(entry.get("roblox_user_id") or 0)
     username = str(entry.get("account_username") or "").strip()
+    cookie = str(entry.get("roblox_cookie") or "").strip() or None
     out: dict[str, Any] = {"configured": False, "user_id": uid, "username": username}
     if uid <= 0 and not username:
         return out
@@ -483,12 +484,18 @@ def _capture_presence(entry: dict[str, Any], errors: list[dict[str, str]]) -> di
             uid = int(_safe("lookup_user_id", lambda: _rp.lookup_user_id(username), errors, default=0) or 0)
             out["resolved_user_id"] = uid
         if uid > 0:
-            p = _safe("fetch_presence_one", lambda: _rp.fetch_presence_one(uid), errors, default=None)
+            p = _safe(
+                "fetch_presence_one",
+                lambda: _rp.fetch_presence_one(uid, cookie=cookie),
+                errors,
+                default=None,
+            )
             if p is not None:
                 ptype = getattr(p, "presence_type", None)
                 out["presence"] = {
                     "presence_type": int(ptype) if ptype is not None else None,
                     "presence_type_name": getattr(ptype, "name", None),
+                    "presence_profile": _rp.map_presence_profile(p),
                     "last_location": mask(getattr(p, "last_location", "") or ""),
                     "place_id": getattr(p, "place_id", None),
                     "root_place_id": getattr(p, "root_place_id", None),
@@ -1238,6 +1245,7 @@ def collect_probe(
     for key, value in out.items():
         if key != "summary":
             ordered[key] = value
+    ordered["errors"] = compact_probe_errors(ordered.get("errors") or [])
     return ordered
 
 
@@ -1289,11 +1297,12 @@ def _capture_snapshot_proof(errors: list[dict[str, str]]) -> dict[str, Any]:
 
 # ── Payload trimming for upload ─────────────────────────────────────────────
 
-# The install API rejects payloads larger than this many bytes after
-# gzip compression.  Match the server's hard cap in license_api.py so we
-# can give the user a clear message instead of a 413.
-_UPLOAD_HARD_CAP_BYTES         = 4 * 1024 * 1024
-_UPLOAD_SOFT_BUDGET_BYTES      = 3 * 1024 * 1024  # leave headroom
+# curl error 63 / server-side limits reject payloads over ~1.1 MB.  Keep a
+# conservative 500 KB raw JSON budget before gzip so Termux uploads succeed.
+_PROBE_ERROR_MAX = 50
+_UPLOAD_RAW_MAX_BYTES = 500 * 1024
+_UPLOAD_HARD_CAP_BYTES = 500 * 1024
+_UPLOAD_SOFT_BUDGET_BYTES = 450 * 1024
 
 # Order matters — when over budget, we drop the highest-cost,
 # lowest-signal fields first.  Per-package shared_prefs/dumpsys win over
@@ -1312,6 +1321,83 @@ _PROBE_DROP_ORDER: tuple[str, ...] = (
     "dumpsys_global.activity_activities_full",
     "dumpsys_global.window_windows_full",
 )
+
+
+def compact_probe_errors(errors: list[Any]) -> list[dict[str, str]]:
+    """Dedupe and cap probe step errors before serialization."""
+    seen: set[tuple[str, str]] = set()
+    out: list[dict[str, str]] = []
+    for item in errors or []:
+        if not isinstance(item, dict):
+            continue
+        step = str(item.get("step") or "")[:120]
+        error = str(item.get("error") or "")[:200]
+        key = (step, error)
+        if not (step or error) or key in seen:
+            continue
+        seen.add(key)
+        out.append({"step": step, "error": error})
+        if len(out) >= _PROBE_ERROR_MAX:
+            break
+    return out
+
+
+def clamp_probe_payload_size(
+    probe: dict[str, Any],
+    *,
+    max_raw_bytes: int = _UPLOAD_RAW_MAX_BYTES,
+) -> dict[str, Any]:
+    """Ensure raw JSON size stays under ``max_raw_bytes`` before upload."""
+    trimmed = dict(probe)
+    trimmed["errors"] = compact_probe_errors(trimmed.get("errors") or [])
+
+    def _raw_size(p: dict[str, Any]) -> int:
+        try:
+            return len(json.dumps(p, separators=(",", ":")).encode("utf-8"))
+        except Exception:  # noqa: BLE001
+            return max_raw_bytes + 1
+
+    before = _raw_size(trimmed)
+    if before <= max_raw_bytes:
+        return trimmed
+
+    slim, report = trim_probe_for_upload(trimmed)
+    dropped = list(report.get("dropped") or [])
+    if _raw_size(slim) > max_raw_bytes:
+        for key in list(slim.keys()):
+            if key in {"summary", "probe_version", "captured_at_iso", "errors", "_upload_trim"}:
+                continue
+            val = slim.get(key)
+            if isinstance(val, str) and len(val) > 4000:
+                slim[key] = val[:4000] + "...<truncated>"
+                dropped.append(f"truncate:{key}")
+            elif isinstance(val, (dict, list)) and _raw_size(slim) > max_raw_bytes:
+                slim[key] = "<dropped: payload size budget>"
+                dropped.append(key)
+        while _raw_size(slim) > max_raw_bytes:
+            removed = False
+            for field in _PROBE_DROP_ORDER:
+                if _drop_field(slim, field):
+                    dropped.append(field)
+                    removed = True
+                    break
+            if not removed:
+                for key in list(slim.keys()):
+                    if key in {"summary", "probe_version", "captured_at_iso"}:
+                        continue
+                    slim.pop(key, None)
+                    dropped.append(f"pop:{key}")
+                    break
+            if _raw_size(slim) <= max_raw_bytes:
+                break
+
+    slim["_payload_clamp"] = {
+        "raw_bytes_before": before,
+        "raw_bytes_after": _raw_size(slim),
+        "raw_budget": max_raw_bytes,
+        "trim_dropped": dropped,
+    }
+    return slim
 
 
 def _drop_field(probe: dict[str, Any], dotted: str) -> bool:
@@ -1443,7 +1529,7 @@ def save_upload_bundle(probe: dict[str, Any], *, reason: str = "") -> Path:
     UPLOAD_BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = UPLOAD_BUNDLE_DIR / f"probe-upload-bundle-{ts}-{_short_id()}.json"
-    trimmed, trim_report = trim_probe_for_upload(sanitize_probe(probe))
+    trimmed, trim_report = trim_probe_for_upload(clamp_probe_payload_size(sanitize_probe(probe)))
     bundle = {
         "bundle_version": 1,
         "created_at_iso": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1485,7 +1571,7 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 15.0) -> tuple[bool,
         return False, "install API URL not configured (set DENG_REJOIN_INSTALL_API)"
     url = api.rstrip("/") + "/api/dev-probe/upload"
 
-    trimmed, trim_report = trim_probe_for_upload(sanitize_probe(probe))
+    trimmed, trim_report = trim_probe_for_upload(clamp_probe_payload_size(sanitize_probe(probe)))
     body = json.dumps(trimmed, separators=(",", ":")).encode("utf-8")
     payload = gzip.compress(body)
 

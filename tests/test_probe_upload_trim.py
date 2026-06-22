@@ -114,6 +114,7 @@ class TrimProbeForUploadTest(unittest.TestCase):
         # against typos that would make trim_probe_for_upload silently
         # no-op a key it can never drop.
         valid_top_level = {
+            "command_help",
             "logcat", "logs", "dumpsys_global", "third_party_evidence",
             "installed_packages",
         }

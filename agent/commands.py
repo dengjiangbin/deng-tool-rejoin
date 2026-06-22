@@ -2153,6 +2153,36 @@ def _run_account_mapping_table(
     return _apply_mapping_to_entries(entries, detected, presence_statuses, config=draft)
 
 
+def _ensure_presence_auth_for_entries(
+    entries: list[dict[str, Any]],
+    config: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Root-scan ROBLOSECURITY cookies for watchdog presence checks."""
+    from . import roblox_cookie_detect as _rcd
+
+    out: list[dict[str, Any]] = []
+    for entry in entries:
+        e = dict(entry)
+        pkg = str(e.get("package") or "").strip()
+        if not pkg:
+            out.append(e)
+            continue
+        if not str(e.get("roblox_cookie") or "").strip():
+            try:
+                cookie = _rcd.detect_roblox_cookie(
+                    pkg,
+                    entry=e,
+                    config=config,
+                    use_root=True,
+                )
+                if cookie:
+                    e["roblox_cookie"] = validate_roblosecurity_cookie(cookie)
+            except Exception:  # noqa: BLE001
+                pass
+        out.append(e)
+    return out
+
+
 def _auto_detect_cookies_for_entries(
     entries: list[dict[str, Any]],
     config: dict[str, Any] | None = None,
@@ -6105,6 +6135,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
         # [DENG_REJOIN_WATCHDOG_FIX] Use WatchdogSupervisor: sequential per-package
         # loop, process-check-first, 4 states only, never stops after Online.
+        runtime_entries = _ensure_presence_auth_for_entries(runtime_entries, cfg)
         _supervisor = WatchdogSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
         _supervisor_ref = _supervisor
         # Register the live supervisor with the monitor autostart so per-package

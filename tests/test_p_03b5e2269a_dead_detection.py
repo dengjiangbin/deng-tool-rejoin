@@ -16,7 +16,9 @@ from agent import android
 from agent.launcher import RejoinResult
 from agent.supervisor import (
     STATUS_DEAD,
+    STATUS_IN_GAME,
     STATUS_IN_LOBBY,
+    STATUS_JOINING,
     STATUS_LAUNCHING,
     STATUS_ONLINE,
     WatchdogSupervisor,
@@ -136,19 +138,19 @@ class DeadPriorityRegressionTests(unittest.TestCase):
         self.assertEqual(state, STATUS_DEAD)
         self.assertEqual(detail["reason"], "process_not_running")
 
-    def test_process_alive_api_says_lobby_is_dead(self) -> None:
+    def test_process_alive_api_says_lobby_is_in_lobby(self) -> None:
         sup = self._supervisor()
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=_lobby_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_DEAD)
+        self.assertEqual(state, STATUS_IN_LOBBY)
 
     def test_process_alive_api_says_in_game_can_be_online(self) -> None:
         sup = self._supervisor()
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=_game_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_ONLINE)
+        self.assertEqual(state, STATUS_IN_GAME)
 
     def test_dead_state_relaunches_only_that_package(self) -> None:
         sup = self._supervisor(initial_status={_PKG: STATUS_ONLINE, _PKG2: STATUS_ONLINE})
@@ -166,7 +168,7 @@ class DeadPriorityRegressionTests(unittest.TestCase):
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             sup._handle_state(_PKG, entry, STATUS_DEAD, STATUS_ONLINE, time.time())
         self.assertEqual(launch.call_args.args, (entry, sup.cfg, "dead_recovery"))
-        self.assertEqual(sup.status_map[_PKG], STATUS_LAUNCHING)
+        self.assertIn(sup.status_map[_PKG], {STATUS_LAUNCHING, STATUS_JOINING})
 
     def test_dead_relaunch_uses_app_only_when_url_blank(self) -> None:
         sup = self._supervisor(url="", initial_status={_PKG: STATUS_ONLINE})

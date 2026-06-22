@@ -261,59 +261,63 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail["process_running"], "false")
 
     # Test 12
-    def test_process_running_no_presence_returns_unknown(self):
+    def test_process_running_no_presence_returns_no_heartbeat(self):
         sup = _make_sup()
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_UNKNOWN)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail["process_running"], "true")
-        self.assertEqual(detail["heartbeat_ok"], "unknown")
+        self.assertEqual(detail["heartbeat_ok"], "false")
 
     # Test 13
-    def test_process_running_presence_in_game_returns_online(self):
+    def test_process_running_presence_in_game_returns_in_game(self):
         sup = _make_sup()
         presence = MagicMock()
         presence.is_in_game = True
         presence.is_offline = False
+        presence.is_lobby = False
+        presence.is_unknown = False
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_ONLINE)
+        from agent.supervisor import STATUS_IN_GAME
+        self.assertEqual(state, STATUS_IN_GAME)
         self.assertEqual(detail["in_game"], "true")
 
     # Test 14
     def test_was_online_presence_offline_twice_returns_no_heartbeat(self):
-        """Offline presence now immediately becomes No Heartbeat."""
+        """Offline presence after recent Online becomes No Heartbeat."""
         sup = _make_sup()
-        # Mark as recently Online
         sup._last_online_ts[_PKG] = time.time() - 5
         presence = MagicMock()
         presence.is_in_game = False
         presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state1, _ = sup._detect_package_state(_PKG, _make_entry())
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state2, detail2 = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state1, STATUS_UNKNOWN)
+        self.assertEqual(state1, STATUS_NO_HEARTBEAT)
         self.assertEqual(state2, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail2["heartbeat_ok"], "false")
 
     # Test 15
-    def test_process_alive_presence_lobby_returns_dead_not_joining(self):
-        """Presence Online/not Playing is Dead and eligible for recovery."""
+    def test_process_alive_presence_lobby_returns_in_lobby_not_joining(self):
+        """Presence Online/not Playing maps to In Lobby."""
         sup = _make_sup()
         presence = MagicMock()
         presence.is_in_game = False
-        presence.is_offline = False  # lobby, not offline
+        presence.is_offline = False
         presence.is_lobby = True
         presence.is_unknown = False
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state, _ = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_DEAD)
+        self.assertEqual(state, STATUS_IN_LOBBY)
         self.assertNotEqual(state, "Joining")
 
     def test_process_missing_presence_lobby_returns_dead(self):
@@ -359,30 +363,29 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(sup.status_map[_PKG], STATUS_LAUNCHING)
         self.assertEqual(sup.status_map[_PKG2], STATUS_ONLINE)
 
-    def test_missing_config_user_id_does_not_use_root_prefs_or_presence(self):
-        """Account mapping is disabled; local evidence drives state."""
+    def test_missing_config_user_id_falls_back_without_presence(self):
+        """Without resolvable user id, presence is skipped and NHB is reported."""
         sup = _make_sup()
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
              patch.object(android, "discover_roblox_user_id_from_prefs", side_effect=AssertionError("prefs scan")), \
+             patch("agent.roblox_presence.lookup_user_id", return_value=None), \
              patch("agent.roblox_presence.fetch_presence_one", side_effect=AssertionError("presence call")):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_UNKNOWN)
-        self.assertEqual(detail["reason"], "presence_unavailable_or_unknown")
-        self.assertNotIn(_PKG, sup._presence_user_ids)
-        self.assertEqual(sup._presence_last_detail[_PKG]["roblox_api_status"], "disabled")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertIn("heartbeat", detail["reason"])
+        self.assertEqual(sup._presence_last_detail[_PKG]["roblox_api_status"], "skipped")
 
-    def test_username_lookup_not_attempted_when_mapping_disabled(self):
-        """Username lookup must not run from watchdog/supervisor."""
+    def test_username_lookup_used_for_presence_when_user_id_missing(self):
+        """Watchdog resolves username → user id before presence fetch."""
         sup = _make_sup()
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
-             patch.object(android, "discover_roblox_user_id_from_prefs", side_effect=AssertionError("prefs scan")), \
-             patch("agent.roblox_presence.lookup_user_id", side_effect=AssertionError("username lookup")):
-            state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_UNKNOWN)
-        self.assertEqual(detail["reason"], "presence_unavailable_or_unknown")
-        self.assertNotIn(_PKG, sup._presence_id_resolved)
+             patch.object(android, "discover_roblox_user_id_from_prefs", return_value=None), \
+             patch("agent.roblox_presence.lookup_user_id", return_value=12345) as lookup, \
+             patch("agent.roblox_presence.fetch_presence_one", return_value=None):
+            sup._detect_package_state(_PKG, _make_entry())
+        lookup.assert_called_once_with("TestUser")
 
     def test_foreground_window_hint_online_when_api_missing(self):
         """Root/window foreground evidence can prove Online when API mapping is missing."""
@@ -689,8 +692,8 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
              patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_UNKNOWN)
-        self.assertEqual(detail["reason"], "presence_unavailable_or_unknown")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertIn("heartbeat", detail["reason"])
 
     def test_fast_alive_evidence_uses_short_root_timeouts(self):
         """Root process proof is bounded so Checking Package 1/3 cannot stall a round."""
