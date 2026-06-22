@@ -270,30 +270,14 @@ def validate_username_source(source: Any, username: str = "") -> str:
 
 
 def get_package_display_username(entry: dict[str, Any], config_data: dict[str, Any] | None = None) -> str:
-    """Return the safe display username/label for a package row.
+    """Return root-scanned username display text for one package row."""
+    del config_data
+    from . import package_username as _pu
 
-    This helper intentionally uses saved data only. It does not scan cookies,
-    WebView data, shared_prefs, SQLite databases, or any account-mapping flow.
-    """
-    candidates: list[Any] = [
-        entry.get("account_username"),
-        entry.get("username"),
-        entry.get("roblox_username"),
-        entry.get("label"),
-    ]
     package = str(entry.get("package") or "").strip()
-    if config_data and package:
-        cache = config_data.get("package_username_cache")
-        if isinstance(cache, dict):
-            candidates.append(cache.get(package))
-        legacy_cache = config_data.get("account_username_cache")
-        if isinstance(legacy_cache, dict):
-            candidates.append(legacy_cache.get(package))
-    for candidate in candidates:
-        cleaned = validate_account_username(candidate)
-        if cleaned:
-            return cleaned
-    return "Unknown"
+    if not package:
+        return f"{_pu.SCANNER_ERROR_PREFIX} missing package"
+    return _pu.username_display_for_package(package).username_display
 
 
 def validate_roblosecurity_cookie(value: Any) -> str:
@@ -528,13 +512,15 @@ def enabled_package_names(config_data: dict[str, Any]) -> list[str]:
 
 
 def package_display_name(entry: dict[str, Any], *, include_package: bool = True) -> str:
-    username = validate_account_username(entry.get("account_username", ""))
     package = validate_package_name(str(entry.get("package") or ""))
-    if username and include_package:
-        return f"{username} ({package})"
-    if username:
+    username = get_package_display_username(entry)
+    if username and username not in {"Unknown"} and not username.startswith("Scanner Error:"):
+        if include_package:
+            return f"{username} ({package})"
         return username
-    return f"Unknown ({package})" if include_package else "Unknown"
+    if include_package:
+        return f"{username} ({package})" if username else package
+    return username or package
 
 
 def normalize_package_detection_hint(value: str) -> str:

@@ -128,6 +128,7 @@ COMMANDS = {
     "unmap",
     "launch",
     "selftest",
+    "state",
 }
 
 # ─── ANSI color constants (used only when a tty is available) ─────────────────
@@ -1224,7 +1225,7 @@ def _account_username_value(entry: dict[str, Any]) -> str:
 
 
 def _package_username_display(entry: dict[str, Any]) -> str:
-    """Username for package menus / tables — empty becomes Unknown."""
+    """Username for package menus / tables — root scan, never Unknown."""
     return get_package_display_username(entry)
 
 
@@ -2615,8 +2616,10 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         if enabled_entries:
             for idx, entry in enumerate(enabled_entries, start=1):
                 scan = package_username.scan_package_username(entry["package"], draft)
-                uname = scan.username or "unknown"
-                src = scan.source if scan.username else (scan.reason[:24] if scan.reason else "unknown")
+                uname = scan.username or get_package_display_username(entry, draft)
+                src = scan.source if scan.username else (
+                    scan.reason[:24] if scan.reason else (entry.get("username_source") or "root_scan")
+                )
                 current_lines.append(
                     f"  [{idx}] {entry['package']} | username: {uname} | source: {src} | state: ready"
                 )
@@ -4130,6 +4133,7 @@ def cmd_selftest(args: argparse.Namespace) -> int:
     rest = list(getattr(args, "extra_args", []) or [])
     package = ""
     first = False
+    kill_relaunch = False
     i = 0
     while i < len(rest):
         tok = rest[i]
@@ -4139,6 +4143,10 @@ def cmd_selftest(args: argparse.Namespace) -> int:
             continue
         if tok == "--first":
             first = True
+            i += 1
+            continue
+        if tok == "--kill-relaunch":
+            kill_relaunch = True
             i += 1
             continue
         if tok.startswith("com."):
@@ -4151,9 +4159,45 @@ def cmd_selftest(args: argparse.Namespace) -> int:
         first=first,
         upload=upload,
         summary_probe=summary_mode,
+        kill_relaunch=kill_relaunch,
     )
     _selftest.print_selftest_report(result)
     return 0 if result.ok else 1
+
+
+def cmd_state(args: argparse.Namespace) -> int:
+    from . import package_state as _ps
+    from . import package_username as _pu
+    from .config import enabled_package_entries, load_config
+    from . import root_access
+
+    pre = root_access.root_required_preflight()
+    if not pre.ok:
+        print(pre.public_error())
+        return 1
+    try:
+        cfg = load_config()
+    except Exception as exc:  # noqa: BLE001
+        print(f"config error: {exc}")
+        return 1
+    packages = [str(e.get("package") or "") for e in enabled_package_entries(cfg)]
+    if not packages:
+        print("no enabled packages configured")
+        return 1
+    states = _ps.scan_all_package_states_root(packages)
+    usernames = _pu.scan_all_username_displays(packages)
+    print("package | username | account_status | state | root_alive | foreground | last_launch_age | reason")
+    for pkg in packages:
+        st = states.get(pkg)
+        un = usernames.get(pkg)
+        if not st or not un:
+            continue
+        age = "" if st.last_launch_age is None else str(st.last_launch_age)
+        print(
+            f"{pkg} | {un.username_display} | {un.account_status} | {st.state} | "
+            f"{str(st.root_alive).lower()} | {str(st.foreground).lower()} | {age} | {st.reason}"
+        )
+    return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -4348,7 +4392,7 @@ def cmd_once(args: argparse.Namespace) -> int:
 
 
 def _account_username_for_table(entry: dict[str, Any]) -> str:
-    """Return the display username for a Start table row — shows 'Unknown' if not set."""
+    """Return the display username for a Start table row via root scan."""
     return get_package_display_username(entry)
 
 
@@ -5911,9 +5955,12 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_log.debug("save start diagnostics error: %s", _exc)
 
         # ── Build initial status table ────────────────────────────────────────
+        from . import package_state as _ps
+
         initial_status: dict[str, str] = {}
         table_rows: list[tuple] = []
         detail_rows: list[dict[str, str]] = []
+        scanned_states = _ps.scan_all_package_states_root([e["package"] for e in entries])
         for index, entry in enumerate(entries, start=1):
             pkg      = entry["package"]
             username = _account_username_for_table(entry)
@@ -5924,14 +5971,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                 state = "Failed"
                 safe_err = mask_urls_in_text(err) or "Launch failed"
                 stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
-            elif android.is_process_running(pkg):
-                # Process is up.  WatchdogSupervisor will classify on first check.
-                # Use Launching for all cases.
-                state = "Launching"
-                stat_internal = "process running"
             else:
-                state = "Launching"
-                stat_internal = "launch command sent"
+                row = scanned_states.get(pkg)
+                state = _ps.map_row_to_supervisor_status(row) if row else "Launching"
+                stat_internal = row.reason if row else "launch command sent"
             initial_status[pkg] = state
             table_rows.append((index, pkg, username, state))
             detail_rows.append(
@@ -7983,6 +8026,7 @@ def _handlers() -> dict[str, Any]:
         "unmap": cmd_unmap,
         "launch": cmd_launch,
         "selftest": cmd_selftest,
+        "state": cmd_state,
     }
 
 

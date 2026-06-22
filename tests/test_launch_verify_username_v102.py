@@ -55,7 +55,7 @@ class LaunchVerifyTests(unittest.TestCase):
 
 
 class UsernameScanTests(unittest.TestCase):
-    def test_manual_mapping_source(self) -> None:
+    def test_manual_mapping_does_not_override_root_scan(self) -> None:
         cfg = {
             "roblox_packages": [{
                 "package": "com.moons.litesc",
@@ -64,9 +64,18 @@ class UsernameScanTests(unittest.TestCase):
             }],
             "package_username_cache": {},
         }
-        report = package_username.scan_package_username("com.moons.litesc", cfg)
-        self.assertEqual(report.username, "JBDENG8")
-        self.assertEqual(report.source, "manual_mapping")
+        with mock.patch("agent.package_username.scan_package_username_root") as scan_fn:
+            scan_fn.return_value = package_username.UsernameScanReport(
+                package="com.moons.litesc",
+                username="REALUSER",
+                source="root_shared_prefs",
+                supported=True,
+                reason="",
+                root_used=True,
+            )
+            report = package_username.scan_package_username("com.moons.litesc", cfg)
+        self.assertEqual(report.username, "REALUSER")
+        self.assertEqual(report.source, "root_shared_prefs")
 
     def test_auto_detected_pref_source(self) -> None:
         pre = root_access.RootCheckReport(

@@ -56,6 +56,19 @@ class PackageUsernameResult:
     confidence: str = ""
 
 
+NO_ACCOUNT_LABEL = "No Account"
+SCANNER_ERROR_PREFIX = "Scanner Error:"
+
+
+@dataclass(frozen=True)
+class UsernameDisplayRow:
+    package: str
+    username_display: str
+    account_status: str
+    username_source: str
+    reason: str = ""
+
+
 @dataclass(frozen=True)
 class UsernameScanReport:
     package: str
@@ -135,6 +148,10 @@ def _root_scan_paths(pkg: str, *, budget_seconds: float) -> tuple[str, str, str,
     pref_patterns = (
         f"/data/data/{pkg}/shared_prefs/*.xml",
         f"/data/data/{pkg}/shared_prefs/*preferences*.xml",
+        f"/data/user/0/{pkg}/shared_prefs/*.xml",
+        f"/data/user/0/{pkg}/shared_prefs/*preferences*.xml",
+        f"/data/user_de/0/{pkg}/shared_prefs/*.xml",
+        f"/data_mirror/data_ce/null/0/{pkg}/shared_prefs/*.xml",
     )
     for pattern in pref_patterns:
         if time.monotonic() >= deadline:
@@ -159,8 +176,12 @@ def _root_scan_paths(pkg: str, *, budget_seconds: float) -> tuple[str, str, str,
         f"/data/data/{pkg}/files/*",
         f"/data/data/{pkg}/files/**/*",
         f"/data/data/{pkg}/app_*/*",
+        f"/data/user/0/{pkg}/files/*",
+        f"/data/user/0/{pkg}/files/**/*",
         f"/sdcard/Android/data/{pkg}/files/*",
         f"/storage/emulated/0/Android/data/{pkg}/files/*",
+        f"/storage/emulated/0/Android/data/{pkg}/**/*",
+        f"/mnt/user/0/emulated/0/Android/data/{pkg}/files/*",
     )
     for pattern in file_patterns:
         if time.monotonic() >= deadline:
@@ -177,7 +198,10 @@ def _root_scan_paths(pkg: str, *, budget_seconds: float) -> tuple[str, str, str,
                 status_bits.append(f"ok:file:{path.split('/')[-1]}:{text_key}")
                 return text_user, "root_file", "medium", tuple(methods), "; ".join(status_bits[-3:])
 
-    db_patterns = (f"/data/data/{pkg}/databases/*.db",)
+    db_patterns = (
+        f"/data/data/{pkg}/databases/*.db",
+        f"/data/user/0/{pkg}/databases/*.db",
+    )
     for pattern in db_patterns:
         if time.monotonic() >= deadline:
             break
@@ -288,9 +312,9 @@ def scan_package_username_root(
     return UsernameScanReport(
         package=pkg,
         username="",
-        source="unknown",
+        source="root_scan_no_account",
         supported=True,
-        reason=f"no username key found in root-readable data ({root_status})",
+        reason=f"no_logged_in_account_found_in_root_readable_data ({root_status})",
         methods_attempted=methods,
         app_label=app_label,
         duration_ms=duration,
@@ -301,6 +325,93 @@ def scan_package_username_root(
         installed=installed,
         enabled=enabled,
     )
+
+
+def username_display_for_package(
+    package: str,
+    *,
+    timeout_seconds: float = SAFE_DETECT_DEFAULT_TIMEOUT_SECONDS,
+) -> UsernameDisplayRow:
+    """Root-first username display row — never returns Unknown."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return UsernameDisplayRow(
+            package="",
+            username_display=f"{SCANNER_ERROR_PREFIX} invalid package",
+            account_status="scanner_error",
+            username_source="invalid",
+            reason="empty package",
+        )
+    try:
+        validate_package_name(pkg)
+    except Exception as exc:  # noqa: BLE001
+        return UsernameDisplayRow(
+            package=pkg[:120],
+            username_display=f"{SCANNER_ERROR_PREFIX} {exc}",
+            account_status="scanner_error",
+            username_source="invalid",
+            reason=str(exc)[:160],
+        )
+
+    pre = root_access.root_required_preflight(timeout=max(3, int(min(timeout_seconds, 6))))
+    if not pre.ok:
+        return UsernameDisplayRow(
+            package=pkg,
+            username_display=f"{SCANNER_ERROR_PREFIX} {pre.public_error()}",
+            account_status="scanner_error",
+            username_source="root_preflight_failed",
+            reason=pre.detail[:160],
+        )
+
+    report = scan_package_username_root(pkg, timeout_seconds=timeout_seconds)
+    if report.username:
+        return UsernameDisplayRow(
+            package=pkg,
+            username_display=report.username,
+            account_status="logged_in",
+            username_source=report.source or "root_shared_prefs",
+            reason="",
+        )
+    reason = report.reason or "no_logged_in_account_found_in_root_readable_data"
+    if "package data" in reason.lower() or "no username key" in reason.lower():
+        reason = "no_logged_in_account_found_in_root_readable_data"
+    return UsernameDisplayRow(
+        package=pkg,
+        username_display=NO_ACCOUNT_LABEL,
+        account_status="no_account",
+        username_source="root_scan_no_account",
+        reason=reason[:160],
+    )
+
+
+def scan_all_username_displays(
+    packages: list[str],
+    *,
+    per_package_timeout_seconds: float = SAFE_DETECT_DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, UsernameDisplayRow]:
+    out: dict[str, UsernameDisplayRow] = {}
+    for raw in packages or ():
+        pkg = str(raw or "").strip()
+        if not pkg:
+            continue
+        out[pkg] = username_display_for_package(pkg, timeout_seconds=per_package_timeout_seconds)
+    return out
+
+
+def username_display_text(
+    entry: dict[str, Any] | None = None,
+    config_data: dict[str, Any] | None = None,
+    *,
+    timeout_seconds: float = SAFE_DETECT_DEFAULT_TIMEOUT_SECONDS,
+) -> str:
+    """Display username for menus/tables — root scan only."""
+    del config_data  # manual mapping must not override root scan
+    package = ""
+    if isinstance(entry, dict):
+        package = str(entry.get("package") or "").strip()
+    if not package:
+        return f"{SCANNER_ERROR_PREFIX} missing package"
+    return username_display_for_package(package, timeout_seconds=timeout_seconds).username_display
 
 
 def _read_prefs_via_root(pkg: str, *, timeout_seconds: float) -> tuple[str, str]:
@@ -343,7 +454,8 @@ def scan_package_username(
     *,
     timeout_seconds: float = USERNAME_DETECT_TIMEOUT_SECONDS,
 ) -> UsernameScanReport:
-    """Scan one package; manual mapping is fallback only after root scan."""
+    """Scan one package using root evidence only."""
+    del config_data  # legacy manual mapping must not override root scan
     start = time.monotonic()
     try:
         pkg = validate_package_name(package)
@@ -351,35 +463,19 @@ def scan_package_username(
         return UsernameScanReport(
             package=str(package or "")[:120],
             username="",
-            source="unknown",
+            source="invalid",
             supported=False,
             reason=str(exc)[:160],
             duration_ms=0,
         )
 
-    if config_data:
-        for entry in config_data.get("roblox_packages") or ():
-            if not isinstance(entry, dict) or str(entry.get("package") or "") != pkg:
-                continue
-            saved = get_package_display_username(entry, config_data)
-            source = str(entry.get("username_source") or "not_set")
-            if saved != "Unknown" and source == "manual":
-                return UsernameScanReport(
-                    package=pkg,
-                    username=saved,
-                    source="manual_mapping",
-                    supported=True,
-                    reason="",
-                    methods_attempted=("config_manual",),
-                    duration_ms=int((time.monotonic() - start) * 1000),
-                    root_used=False,
-                    confidence="high",
-                    root_read_status="manual map",
-                )
-
     root_report = scan_package_username_root(pkg, timeout_seconds=timeout_seconds)
-    if root_report.username:
-        return root_report
+    root_report = UsernameScanReport(
+        **{
+            **root_report.__dict__,
+            "duration_ms": int((time.monotonic() - start) * 1000),
+        }
+    )
     return root_report
 
 
@@ -391,32 +487,33 @@ def resolve_package_display_username(
     timeout_seconds: float = USERNAME_DETECT_TIMEOUT_SECONDS,
 ) -> tuple[dict[str, Any], PackageUsernameResult]:
     updated = dict(entry)
-    saved = get_package_display_username(updated, config_data)
-    source = str(updated.get("username_source") or "not_set")
-    if saved != "Unknown":
-        return updated, PackageUsernameResult(saved, _normalize_source(source), False, 0, root_used=False)
+    pkg = str(updated.get("package") or "").strip()
     if not allow_detect:
-        return updated, PackageUsernameResult("Unknown", "unknown", False, 0, root_used=False)
-    result = detect_package_username_quick(
-        str(updated.get("package") or ""),
-        timeout_seconds=timeout_seconds,
-    )
-    if result.username:
-        updated["account_username"] = result.username
-        updated["username_source"] = validate_username_source(
-            _normalize_source(result.source),
-            result.username,
+        row = username_display_for_package(pkg, timeout_seconds=timeout_seconds)
+        return updated, PackageUsernameResult(
+            row.username_display,
+            row.username_source,
+            False,
+            0,
+            row.reason[:120],
+            root_used=True,
         )
+
+    row = username_display_for_package(pkg, timeout_seconds=timeout_seconds)
+    if row.account_status == "logged_in":
+        updated["account_username"] = row.username_display
+        updated["username_source"] = validate_username_source(row.username_source, row.username_display)
         cache = dict(config_data.get("package_username_cache") or {})
-        cache[str(updated["package"])] = result.username
+        cache[pkg] = row.username_display
         config_data["package_username_cache"] = cache
-    return updated, result if result.username else PackageUsernameResult(
-        "Unknown",
-        "unknown",
-        result.detector_used,
-        result.duration_ms,
-        result.error,
-        root_used=result.root_used,
+    return updated, PackageUsernameResult(
+        row.username_display,
+        row.username_source,
+        True,
+        0,
+        row.reason[:120],
+        root_used=True,
+        confidence="high" if row.account_status == "logged_in" else "",
     )
 
 
@@ -427,15 +524,11 @@ def safe_detect_username_for_package(
 ) -> str:
     safe_pkg = str(package_name or "").strip()
     if not safe_pkg:
-        return "Unknown"
-    bounded = max(0.5, min(float(timeout_seconds), USERNAME_DETECT_TIMEOUT_SECONDS))
-    try:
-        result = detect_package_username_quick(safe_pkg, timeout_seconds=bounded)
-    except Exception as exc:  # noqa: BLE001
-        _log.debug("safe_detect failed for %s: %s", safe_pkg[:64], str(exc)[:120])
-        return "Unknown"
-    name = validate_account_username(result.username or "")
-    return name or "Unknown"
+        return f"{SCANNER_ERROR_PREFIX} invalid package"
+    return username_display_for_package(
+        safe_pkg,
+        timeout_seconds=max(0.5, min(float(timeout_seconds), USERNAME_DETECT_TIMEOUT_SECONDS)),
+    ).username_display
 
 
 def collect_safe_usernames_for_packages(
@@ -451,7 +544,7 @@ def collect_safe_usernames_for_packages(
         if not pkg:
             continue
         if time.monotonic() >= deadline:
-            out.setdefault(pkg, "Unknown")
+            out.setdefault(pkg, NO_ACCOUNT_LABEL)
             continue
         remaining = max(0.5, deadline - time.monotonic())
         budget = min(per_package_timeout_seconds, remaining)

@@ -1066,17 +1066,36 @@ def _build_probe_summary(
                 "strong_success_evidence",
                 "username_scan",
                 "launch",
+                "usernames",
+                "states_before",
+                "states_after",
+                "launch_attempt",
+                "kill_relaunch",
+                "packages_total",
+                "version",
+                "build_commit",
             )
             if k in selftest
         })
         if selftest.get("package"):
             summary["selected_package"] = selftest.get("package")
         launch = selftest.get("launch") if isinstance(selftest.get("launch"), dict) else {}
-        if launch:
-            summary["launch_attempted"] = bool(launch.get("attempted"))
-            summary["launch_state"] = launch.get("state") or ""
-            summary["launch_reason"] = launch.get("reason") or ""
-            summary["strong_success_evidence"] = bool(launch.get("strong_success_evidence"))
+        launch_attempt = selftest.get("launch_attempt") if isinstance(selftest.get("launch_attempt"), dict) else launch
+        if launch_attempt:
+            summary["launch_attempted"] = bool(launch_attempt.get("attempted"))
+            summary["launch_state"] = launch_attempt.get("state_after") or launch_attempt.get("state") or ""
+            summary["launch_reason"] = launch_attempt.get("failure_reason") or launch_attempt.get("reason") or ""
+            summary["strong_success_evidence"] = bool(
+                launch_attempt.get("success_evidence") or launch_attempt.get("strong_success_evidence")
+            )
+        usernames = selftest.get("usernames")
+        if isinstance(usernames, list):
+            summary["usernames_found"] = sum(
+                1 for row in usernames
+                if isinstance(row, dict)
+                and str(row.get("username_display") or "") not in {"", "Unknown"}
+                and row.get("account_status") == "logged_in"
+            )
     return summary
 
 

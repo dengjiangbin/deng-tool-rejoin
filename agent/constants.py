@@ -9,7 +9,7 @@ PRODUCT_NAME = "DENG Tool: Rejoin"
 PRODUCT_FAMILY = "DENG Tool"
 PRODUCT_MODULE = "Rejoin"
 ABBREVIATION_MEANING = "Device Engine for Networked Game Rejoin"
-VERSION = "1.0.3"
+VERSION = "1.0.0"
 
 GITHUB_OWNER = "dengjiangbin"
 GITHUB_REPO = "deng-tool-rejoin"

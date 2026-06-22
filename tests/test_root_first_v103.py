@@ -127,7 +127,7 @@ class LaunchVerifyRootTests(unittest.TestCase):
 class ProbeSummaryTests(unittest.TestCase):
     def test_probe_summary_contains_useful_fields(self) -> None:
         out = {
-            "build": {"product_version": "1.0.3", "artifact_sha256_short": "abc123"},
+            "build": {"product_version": "1.0.0", "artifact_sha256_short": "abc123"},
             "device": {"root": {"available": True}},
             "package_menu_diagnostics": [
                 {"display_username": "JBDENG8"},
@@ -135,7 +135,7 @@ class ProbeSummaryTests(unittest.TestCase):
             "errors": [],
         }
         summary = probe._build_probe_summary(out, last_command="selftest")
-        self.assertEqual(summary["product_version"], "1.0.3")
+        self.assertEqual(summary["product_version"], "1.0.0")
         self.assertTrue(summary["root_required_mode"])
         self.assertEqual(summary["usernames_found"], 1)
 
@@ -164,12 +164,21 @@ class SelftestTests(unittest.TestCase):
              mock.patch("agent.selftest.root_access.root_required_preflight", return_value=pre), \
              mock.patch("agent.selftest.package_username.scan_package_username_root", return_value=scan), \
              mock.patch("agent.selftest.launch_verify.doctor_package_report", return_value=["ok"]), \
-             mock.patch("agent.selftest.launch_verify.launch_package_root", return_value=(mock.Mock(ok=True), "root_monkey")), \
+             mock.patch("agent.selftest.launch_verify.launch_package_root", return_value=(mock.Mock(ok=True, returncode=0), "root_monkey")), \
+             mock.patch("agent.selftest.package_state.scan_all_package_states_root", return_value={}), \
+             mock.patch("agent.selftest.package_state.scan_package_state_root") as scan_one, \
+             mock.patch("agent.selftest.package_username.username_display_for_package") as urow, \
+             mock.patch("agent.selftest._discover_packages", return_value=["com.moons.litesc"]), \
+             mock.patch("agent.selftest._username_probe_rows", return_value=[{"package": "com.moons.litesc", "username_display": "JBDENG8", "account_status": "logged_in", "username_source": "root_shared_prefs", "reason": ""}]), \
              mock.patch("agent.selftest.launch_verify.verify_launch", return_value=verification), \
              mock.patch("agent.selftest.os.name", "linux"), \
-             mock.patch("agent.selftest.build_info.collect_version_info", return_value={"product_version": "1.0.3"}), \
+             mock.patch("agent.selftest.build_info.collect_version_info", return_value={"product_version": "1.0.0"}), \
              mock.patch("agent.probe.collect_probe", return_value={"summary": {}}), \
              mock.patch("agent.probe.upload_probe", return_value=(True, "p-test123")):
+            from agent import package_state as _ps
+            scan_one.return_value = _ps.PackageStateRow(
+                "com.moons.litesc", _ps.STATE_ONLINE, True, True, "mock"
+            )
             result = selftest.run_selftest(package="com.moons.litesc", upload=True)
         self.assertEqual(result.probe_id, "p-test123")
         self.assertIn("p-test123", result.probe_url)

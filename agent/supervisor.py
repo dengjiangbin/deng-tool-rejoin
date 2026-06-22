@@ -1123,10 +1123,10 @@ class MultiPackageSupervisor:
     def get_status_snapshot(self, entries: list[dict] | None = None) -> list[dict]:
         entry_map: dict[str, str] = {}
         use = entries or self.entries
+        from . import package_username as _pu
         for e in use:
             pkg = str(e.get("package") or "")
-            username = str(e.get("account_username") or "").strip()
-            entry_map[pkg] = username if username else "Unknown"
+            entry_map[pkg] = _pu.username_display_for_package(pkg).username_display
 
         snapshot: list[dict] = []
         worker_map = {w.package: w for w in self._workers}
@@ -1190,7 +1190,7 @@ class WatchdogSupervisor:
     """
 
     # ── Grace window after launch — do not check immediately ────────────────
-    DEFAULT_GRACE_SECONDS: int = 45
+    DEFAULT_GRACE_SECONDS: int = 30
 
     # ── No-Heartbeat relaunch cooldown — brief pause before force-stop ───────
     # Prevents instant force-stop/relaunch loops if the heartbeat check fires
@@ -1473,259 +1473,31 @@ class WatchdogSupervisor:
     def _detect_package_state(
         self, pkg: str, entry: dict[str, Any]
     ) -> tuple[str, dict[str, Any]]:
-        """Detect public state for one package.
-
-        Decision tree (deterministic):
-        A. Process not running                              → Dead
-        B. Process running + presence InGame                → Online
-        C. Process running + was recently Online
-           + presence offline N times consecutively         → No Heartbeat
-        D. Process running, no in-game evidence             → No Heartbeat
-
-        Process check runs FIRST.  Presence is supplementary and never overrides
-        a dead process.
-
-        [DENG_REJOIN_PACKAGE_CHECK] probe logged by caller.
-        """
+        """Detect public state for one package using the root state scanner."""
+        del entry
         t0 = time.monotonic()
-        # ── A. Process check (ALWAYS FIRST) ──────────────────────────────────
-        try:
-            evidence = self._fast_alive_evidence(pkg)
-        except Exception:  # noqa: BLE001
-            evidence = {}
-        process_missing = bool(evidence.get("process_missing"))
-        process_running = bool(
-            not process_missing
-            and (
-                evidence.get("alive")
-                or evidence.get("running")
-                or evidence.get("root_running")
-            )
-        )
+        from . import package_state as _ps
 
-        foreground_package = str(evidence.get("foreground_package") or "")
-        root_available = bool(getattr(self._root_info, "available", False))
-        local_in_game_hint = bool(
-            process_running
-            and evidence.get("foreground")
-            and (evidence.get("window") or evidence.get("surface") or evidence.get("task"))
-        )
-
+        row = _ps.scan_package_state_root(pkg, meta=_ps.get_launch_meta(pkg))
+        status = _ps.map_row_to_supervisor_status(row)
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        if not process_running:
-            detail = {
-                "process_running": "false",
-                "in_game": "false",
-                "heartbeat_ok": "false",
-                "warning_detected": "false",
-                "elapsed_ms": elapsed_ms,
-                "root_available": str(root_available).lower(),
-                "foreground_package": foreground_package,
-                "activity": "",
-                "in_game_proof": "false",
-                "reason": "process_not_running",
-            }
-            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_DEAD)
-            return STATUS_DEAD, detail
-
-        # ── B / C / D. Presence check (supplementary) ────────────────────────
-        in_game = False
-        presence_offline = False
-        presence_unknown = False
-        presence = None
-        presence_resolution = None
-
-        try:
-            presence = self._fetch_presence(pkg)
-            if presence is not None:
-                if getattr(presence, "is_in_game", False):
-                    in_game = True
-                elif getattr(presence, "is_offline", False):
-                    presence_offline = True
-                elif getattr(presence, "is_unknown", False):
-                    presence_unknown = True
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            from . import roblox_presence as _rp
-            presence_resolution = _rp.resolve_presence_state(
-                presence,
-                self._presence_expected_targets.get(pkg),
-                process_alive=True,
-                launch_elapsed_seconds=(
-                    time.time() - max(0.0, self._grace_until.get(pkg, 0.0) - self.DEFAULT_GRACE_SECONDS)
-                    if self._grace_until.get(pkg, 0.0) and time.time() >= self._grace_until.get(pkg, 0.0)
-                    else None
-                ),
-                join_timeout_seconds=float(self.cfg.get("foreground_grace_seconds", self.DEFAULT_GRACE_SECONDS)),
-                local_warning_detected=False,
-                local_stuck_detected=False,
-            )
-            pres_detail = self._presence_last_detail.get(pkg, {})
-            pres_detail["server_verification"] = presence_resolution.server_verification
-            pres_detail["expected_place_id"] = presence_resolution.expected_place_id or pres_detail.get("expected_place_id", "")
-            pres_detail["expected_root_place_id"] = presence_resolution.expected_root_place_id or pres_detail.get("expected_root_place_id", "")
-            pres_detail["expected_universe_id"] = presence_resolution.expected_universe_id or pres_detail.get("expected_universe_id", "")
-        except Exception:  # noqa: BLE001
-            presence_resolution = None
-
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-
-        if in_game and presence_resolution is not None and presence_resolution.state == STATUS_WRONG_GAME:
-            self._nhb_offline_count[pkg] = 0
-            detail = {
-                "process_running": "true",
-                "in_game": "true",
-                "heartbeat_ok": "false",
-                "warning_detected": "false",
-                "elapsed_ms": elapsed_ms,
-                "root_available": str(root_available).lower(),
-                "foreground_package": foreground_package,
-                "activity": "",
-                "in_game_proof": "true",
-                "heartbeat_age_sec": "",
-                "reason": presence_resolution.reason,
-            }
-            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_WRONG_GAME)
-            return STATUS_WRONG_GAME, detail
-
-        if in_game:
-            # Reset offline counter when confirmed in-game.
-            self._nhb_offline_count[pkg] = 0
-            detail = {
-                "process_running": "true",
-                "in_game": "true",
-                "heartbeat_ok": "true",
-                "warning_detected": "false",
-                "elapsed_ms": elapsed_ms,
-                "root_available": str(root_available).lower(),
-                "foreground_package": foreground_package,
-                "activity": "",
-                "in_game_proof": "true",
-                "heartbeat_age_sec": "",
-                "reason": getattr(presence_resolution, "reason", "roblox_presence_in_game"),
-            }
-            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_ONLINE)
-            return STATUS_ONLINE, detail
-
-        # Track consecutive offline presence signals (for No Heartbeat)
-        last_online = self._last_online_ts.get(pkg, 0.0)
-        was_recently_online = (time.time() - last_online) < 300.0  # 5 min
-        heartbeat_age_sec = int(time.time() - last_online) if last_online else ""
-
-        if presence_offline and was_recently_online:
-            count = self._nhb_offline_count.get(pkg, 0) + 1
-            self._nhb_offline_count[pkg] = count
-            if count >= self.NHB_OFFLINE_CONFIRMATIONS:
-                detail = {
-                    "process_running": "true",
-                    "in_game": "false",
-                    "heartbeat_ok": "false",
-                    "warning_detected": "false",
-                    "elapsed_ms": elapsed_ms,
-                    "root_available": str(root_available).lower(),
-                    "foreground_package": foreground_package,
-                    "activity": "",
-                    "in_game_proof": "true",
-                    "heartbeat_age_sec": heartbeat_age_sec,
-                    "reason": "presence_offline_after_recent_online",
-                }
-                self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_NO_HEARTBEAT)
-                return STATUS_NO_HEARTBEAT, detail
-
-        if presence_resolution is not None and presence_resolution.state == STATUS_IN_LOBBY:
-            self._nhb_offline_count[pkg] = 0
-            detail = {
-                "process_running": "true",
-                "in_game": "false",
-                "heartbeat_ok": "false",
-                "warning_detected": "false",
-                "elapsed_ms": elapsed_ms,
-                "root_available": str(root_available).lower(),
-                "foreground_package": foreground_package,
-                "activity": "",
-                "in_game_proof": "false",
-                "heartbeat_age_sec": heartbeat_age_sec,
-                "reason": presence_resolution.reason,
-            }
-            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_DEAD)
-            return STATUS_DEAD, detail
-
-        if presence_resolution is not None and presence_resolution.state == STATUS_JOIN_FAILED:
-            detail = {
-                "process_running": "true",
-                "in_game": "false",
-                "heartbeat_ok": "false",
-                "warning_detected": "true",
-                "elapsed_ms": elapsed_ms,
-                "root_available": str(root_available).lower(),
-                "foreground_package": foreground_package,
-                "activity": "",
-                "in_game_proof": "false",
-                "heartbeat_age_sec": heartbeat_age_sec,
-                "reason": presence_resolution.reason,
-            }
-            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_JOIN_FAILED)
-            return STATUS_JOIN_FAILED, detail
-
-        if not presence_offline and (presence is None or presence_unknown) and local_in_game_hint:
-            self._nhb_offline_count[pkg] = 0
-            detail = {
-                "process_running": "true",
-                "in_game": "true",
-                "heartbeat_ok": "true",
-                "warning_detected": "false",
-                "elapsed_ms": elapsed_ms,
-                "root_available": str(root_available).lower(),
-                "foreground_package": foreground_package,
-                "activity": "",
-                "in_game_proof": "true",
-                "heartbeat_age_sec": heartbeat_age_sec,
-                "reason": "foreground_window_surface_hint",
-            }
-            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_ONLINE)
-            return STATUS_ONLINE, detail
-
-        if presence_resolution is not None and presence_resolution.state == STATUS_UNKNOWN:
-            detail = {
-                "process_running": "true",
-                "in_game": "unknown",
-                "heartbeat_ok": "unknown",
-                "warning_detected": "false",
-                "elapsed_ms": elapsed_ms,
-                "root_available": str(root_available).lower(),
-                "foreground_package": foreground_package,
-                "activity": "",
-                "in_game_proof": "unknown",
-                "heartbeat_age_sec": heartbeat_age_sec,
-                "reason": presence_resolution.reason,
-            }
-            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_UNKNOWN)
-            return STATUS_UNKNOWN, detail
-
-        # D. Process alive, but no confirmed in-game signal.  This is a
-        # recovery state now: close/relaunch only this package instead of
-        # letting a clone sit at Roblox home.
-        reason = (
-            "presence_not_in_game_no_heartbeat"
-            if presence is not None and not presence_unknown
-            else "missing_in_game_proof_no_heartbeat"
-        )
         detail = {
-            "process_running": "true",
-            "in_game": "false",
-            "heartbeat_ok": "false",
-            "warning_detected": "false",
+            "process_running": "true" if row.root_alive else "false",
+            "in_game": "true" if row.state == _ps.STATE_ONLINE else "false",
+            "heartbeat_ok": "true" if row.state == _ps.STATE_ONLINE else "false",
+            "warning_detected": "true" if row.state == _ps.STATE_CRASHED else "false",
             "elapsed_ms": elapsed_ms,
-            "root_available": str(root_available).lower(),
-            "foreground_package": foreground_package,
+            "root_available": "true",
+            "foreground_package": str(row.evidence.get("resumed_line") or row.evidence.get("window_line") or ""),
             "activity": "",
-            "in_game_proof": "unknown" if presence is None or presence_unknown else "false",
-            "heartbeat_age_sec": heartbeat_age_sec,
-            "reason": reason,
+            "in_game_proof": "true" if row.foreground or row.root_alive else "false",
+            "heartbeat_age_sec": "",
+            "reason": row.reason,
+            "scanner_state": row.state,
+            "launch_lock_active": str(row.launch_lock_active).lower(),
         }
-        self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_NO_HEARTBEAT)
-        return STATUS_NO_HEARTBEAT, detail
+        self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), status)
+        return status, detail
 
     def _log_state_evidence(
         self,
@@ -2220,23 +1992,21 @@ class WatchdogSupervisor:
                 )
                 checked += 1
 
-                # v1.0.4 — sticky Launching / Joining during grace.
-                # Before this guard, _detect_package_state would report
-                # Dead/No Heartbeat for ~10–20s after a launch (process
-                # exists but not yet in-game), and that overwrite was
-                # propagating to the APK as Dead. Now we only let
-                # detection overwrite during grace if it confirms Online
-                # — otherwise we preserve the launch/join intent so the
-                # APK shows the real transition.
+                # Root scanner is authoritative: never pin Launching when the
+                # process is dead/offline or when Online evidence exists.
                 prev_pinned = self._prev_state.get(pkg)
                 pin_states = {STATUS_LAUNCHING, STATUS_JOINING, STATUS_RELAUNCHING}
                 if (
                     self._in_grace(pkg, now)
                     and prev_pinned in pin_states
-                    and state not in {STATUS_ONLINE, STATUS_JOIN_FAILED,
-                                      STATUS_WRONG_GAME}
+                    and state in pin_states
+                    and state not in {STATUS_ONLINE, STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_FAILED}
                 ):
                     state = prev_pinned
+                elif state in {STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED}:
+                    self._grace_until.pop(pkg, None)
+                    from . import package_state as _ps
+                    _ps.clear_launch_lock(pkg, "supervisor_dead_state")
                 self._set_status(pkg, state)
                 self._prev_state[pkg] = state
 
@@ -2259,8 +2029,9 @@ class WatchdogSupervisor:
                     _maybe_render(force=True)
                     continue
 
-                # Grace window: skip recovery immediately after a launch.
-                if not self._in_grace(pkg, now):
+                # Grace window: skip recovery immediately after a launch,
+                # except when the scanner proves the process is dead/offline.
+                if not self._in_grace(pkg, now) or state in {STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED}:
                     self._handle_state(pkg, entry, state, prev, now, render_callback=render_callback)
 
             # ── Watchdog continuity probe ─────────────────────────────────────
@@ -2325,10 +2096,10 @@ class WatchdogSupervisor:
     ) -> list[dict[str, Any]]:
         entry_map: dict[str, str] = {}
         use = entries or self.entries
+        from . import package_username as _pu
         for e in use:
             pkg = str(e.get("package") or "")
-            username = str(e.get("account_username") or "").strip()
-            entry_map[pkg] = username if username else "Unknown"
+            entry_map[pkg] = _pu.username_display_for_package(pkg).username_display
 
         snapshot: list[dict[str, Any]] = []
         for pkg in self.packages:

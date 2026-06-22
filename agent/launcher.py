@@ -431,6 +431,16 @@ def perform_rejoin(
         if _result_used_root(result) or _method.startswith("root_"):
             root_used = True
 
+        from . import package_state as _ps
+
+        _ps.record_launch_attempt(
+            package,
+            command=_command_for_log(result.args),
+            rc=int(getattr(result, "returncode", -1)),
+            ok=bool(result.ok),
+            failure_reason="" if result.ok else mask_urls_in_text(result.summary or "launch failed"),
+        )
+
         if url_for_launch:
             log_event(
                 logger,

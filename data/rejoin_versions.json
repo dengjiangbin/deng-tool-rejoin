@@ -1,6 +1,6 @@
 [
   {
-    "stable_latest": "v1.0.3",
+    "stable_latest": "v1.0.0",
     "test_latest": "main-dev",
     "kind": "channel_pointers"
   },
@@ -17,7 +17,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.0.0/deng-tool-rejoin-v1.0.0.tar.gz",
-    "artifact_sha256": "091ec7d0d54b4a7f73108639a3015e5636f65c2db17f019c4c66e5e8a68b4bc7",
+    "artifact_sha256": "0dd0998e2357d7879d22c714bd84007b35a6ae45866f351fafe3bb78089b0b18",
     "installer_endpoint": "/install/v1.0.0",
     "notes": "Frozen public stable release. Immutable artifact built from refs/tags/v1.0.0.",
     "enabled": true
@@ -28,8 +28,8 @@
     "channel": "stable",
     "title": "Version 1.0.1",
     "label": "v1.0.1",
-    "recommended": true,
-    "visibility": "public",
+    "recommended": false,
+    "visibility": "admin",
     "install_ref": "refs/tags/v1.0.1",
     "git_ref": "refs/tags/v1.0.1",
     "release_stage": "stable",
@@ -38,7 +38,7 @@
     "artifact_sha256": "867bee7a1956bd7cda8f49d028d5e65ac593447c2e370a17c9de648d02fdadb3",
     "installer_endpoint": "/install/v1.0.1",
     "notes": "Frozen public stable release for the monitor worker and snapshot latest hotfix.",
-    "enabled": true
+    "enabled": false
   },
   {
     "version": "v1.0.2",
@@ -46,8 +46,8 @@
     "channel": "stable",
     "title": "Version 1.0.2",
     "label": "v1.0.2",
-    "recommended": true,
-    "visibility": "public",
+    "recommended": false,
+    "visibility": "admin",
     "install_ref": "refs/tags/v1.0.2",
     "git_ref": "refs/tags/v1.0.2",
     "release_stage": "stable",
@@ -56,7 +56,7 @@
     "artifact_sha256": "d7179acc6373b8444aaee1859c7a42af8b62cfec75753560e9aa1996b7a748b7",
     "installer_endpoint": "/install/v1.0.2",
     "notes": "Frozen public stable release. Immutable artifact built for v1.0.2.",
-    "enabled": true
+    "enabled": false
   },
   {
     "version": "v1.0.3",
@@ -64,8 +64,8 @@
     "channel": "stable",
     "title": "Version 1.0.3",
     "label": "v1.0.3",
-    "recommended": true,
-    "visibility": "public",
+    "recommended": false,
+    "visibility": "admin",
     "install_ref": "refs/tags/v1.0.3",
     "git_ref": "refs/tags/v1.0.3",
     "release_stage": "stable",
@@ -74,7 +74,7 @@
     "artifact_sha256": "14c796362bef7eae04199fcb57c539d1ced6a39d62b61e87a15038164a71d06c",
     "installer_endpoint": "/install/v1.0.3",
     "notes": "Frozen public stable release. Immutable artifact built for v1.0.3.",
-    "enabled": true
+    "enabled": false
   },
   {
     "version": "main-dev",
@@ -89,6 +89,6 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "0029695aa5556c21b835c71ab110a30dc4f40fb798aa85ff7b8f138759e16eec"
+    "artifact_sha256": "cea132c20e4ce25f77bae90370242bb5dc9ff8cbfb07427f97e76bcfdf656cde"
   }
 ]
