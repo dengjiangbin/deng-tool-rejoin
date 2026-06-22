@@ -1,7 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from agent import roblox_cookie_detect as rcd
+import agent.roblox_cookie_detect as rcd
+from agent.roblox_cookie_detect import detect_roblox_cookie
 
 
 class RobloxCookieDetectTests(unittest.TestCase):

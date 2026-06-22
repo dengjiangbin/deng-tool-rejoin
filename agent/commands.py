@@ -2158,7 +2158,7 @@ def _ensure_presence_auth_for_entries(
     config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Root-scan ROBLOSECURITY cookies for watchdog presence checks."""
-    from . import roblox_cookie_detect as _rcd
+    from agent.roblox_cookie_detect import detect_roblox_cookie
 
     out: list[dict[str, Any]] = []
     for entry in entries:
@@ -2169,7 +2169,7 @@ def _ensure_presence_auth_for_entries(
             continue
         if not str(e.get("roblox_cookie") or "").strip():
             try:
-                cookie = _rcd.detect_roblox_cookie(
+                cookie = detect_roblox_cookie(
                     pkg,
                     entry=e,
                     config=config,
@@ -2193,7 +2193,7 @@ def _auto_detect_cookies_for_entries(
     """LEGACY DISABLED: cookie scanning is not run by setup/start."""
     if _ACCOUNT_MAPPING_DISABLED:
         return [dict(e) for e in entries if isinstance(e, dict)]
-    from . import roblox_cookie_detect as _rcd
+    from agent.roblox_cookie_detect import detect_roblox_cookie
 
     out: list[dict[str, Any]] = []
     detected_count = 0
@@ -2209,7 +2209,7 @@ def _auto_detect_cookies_for_entries(
             out.append(e)
             continue
         try:
-            cookie = _rcd.detect_roblox_cookie(
+            cookie = detect_roblox_cookie(
                 pkg,
                 entry=e,
                 config=config,
