@@ -8054,6 +8054,12 @@ def main(argv: list[str] | None = None) -> int:
     """
     safe_io.restore_terminal()
     try:
+        from . import signal_handler as _signal_handler  # noqa: PLC0415
+
+        _signal_handler.install_signal_handlers()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         args = parse_args(argv)
     except SystemExit as _parse_exc:
         _code = _parse_exc.code
