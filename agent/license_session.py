@@ -106,7 +106,10 @@ def ensure_session_for_feature(
     if not install_id:
         return False, "could not determine install ID for license validation"
 
-    server_url = str(lic.get("server_url") or "").strip() or DEFAULT_LICENSE_SERVER_URL
+    server_url = str(lic.get("server_url") or "").strip()
+    if not server_url:
+        from . import api_config as _api_cfg
+        server_url = _api_cfg.license_server_url()
     try:
         result, message = check_remote_license_status(
             server_url,

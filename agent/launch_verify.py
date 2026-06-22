@@ -325,7 +325,10 @@ def verify_launch(
     deadline = time.monotonic() + max(5.0, min(float(wait_seconds), 30.0))
     started = time.monotonic()
     last_pe: dict[str, Any] = {}
-    while time.monotonic() < deadline:
+    max_poll_iterations = 15
+    for _poll_idx in range(max_poll_iterations):
+        if time.monotonic() >= deadline:
+            break
         last_pe = collect_process_evidence(package)
         fg_pkg, resumed, focus = _foreground_lines(package)
         result.process_evidence = last_pe
@@ -345,7 +348,7 @@ def verify_launch(
                 result.game_joined = None
                 result.game_join_reason = "package launch only (no deep link configured)"
             return result
-        time.sleep(max(0.25, float(poll_interval)))
+        time.sleep(max(0.25, min(float(poll_interval), 2.0)))
 
     result.poll_seconds = time.monotonic() - started
     result.logcat_lines = _recent_logcat_for_package(package)

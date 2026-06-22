@@ -30,20 +30,34 @@ LICENSE_SUCCESS_VERIFIED = "[!] License Key Verified Successfully."
 LICENSE_SUCCESS_WELCOME = "[!] Welcome To DENG Tool: Rejoin."
 
 
+from . import safe_io as _safe_io
+
+
 def visible_len(text: str) -> int:
     """Return printable width after stripping ANSI escape codes."""
     return len(ANSI_RE.sub("", text))
 
 
+def truncate_visible(text: str, max_width: int, *, ellipsis: str = "...") -> str:
+    """Hard-truncate plain text to ``max_width`` with ellipsis — no wrap."""
+    if max_width <= 0:
+        return ""
+    plain = ANSI_RE.sub("", text or "")
+    if len(plain) <= max_width:
+        return text
+    if max_width <= len(ellipsis):
+        return plain[:max_width]
+    return plain[: max_width - len(ellipsis)] + ellipsis
+
+
+def fit_line(text: str, width: int | None = None) -> str:
+    """Ensure a single output line never exceeds terminal width."""
+    cols = width if width is not None else _safe_io.terminal_columns()
+    return truncate_visible(text, cols)
+
+
 def _emit(text: str = "") -> None:
-    try:
-        print(text)
-    except UnicodeEncodeError:
-        if hasattr(sys.stdout, "buffer"):
-            sys.stdout.buffer.write(text.encode("utf-8", errors="replace") + b"\n")
-            sys.stdout.buffer.flush()
-        else:
-            print(text.encode("ascii", errors="replace").decode("ascii"))
+    _safe_io.write_stdout(fit_line(text), end="\n")
 
 
 def separator(char: str = "=", width: int | None = None, ratio: float = 0.5) -> str:
@@ -200,7 +214,6 @@ def print_submenu(
     for number, label in items:
         _emit(menu_number(number, label))
     _emit(separator("-"))
-
 
 def print_invalid_option() -> None:
     print_warning("Invalid Option")

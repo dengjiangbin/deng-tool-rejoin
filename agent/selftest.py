@@ -291,7 +291,8 @@ def run_selftest(
         ok, info = _probe.upload_probe(probe_doc)
         if ok:
             probe_id = info
-            probe_url = f"https://rejoin.deng.my.id/api/dev-probe/{info}"
+            from . import api_config as _api_cfg
+            probe_url = _api_cfg.dev_probe_fetch_url(info)
             summary["probe_id"] = probe_id
         else:
             blocking.append(f"probe upload failed: {info}")

@@ -160,23 +160,23 @@ def _read_launch_state(package: str) -> dict[str, Any]:
 
 
 def _wait_for_launch_ready(package: str, cfg: dict[str, Any]) -> dict[str, Any]:
-    verify_wait = _launch_verify_wait_seconds(cfg)
-    process_deadline = time.monotonic() + verify_wait
-    activity_deadline = time.monotonic() + verify_wait
+    """Poll launch evidence with a rigid iteration cap (never unbounded)."""
+    max_polls = 15
+    poll_sleep = 2.0
     last = _read_launch_state(package)
-    while time.monotonic() < process_deadline:
-        last = _read_launch_state(package)
+    for _ in range(max_polls):
         if last["process_alive"]:
             break
-        time.sleep(0.35)
-    while time.monotonic() < activity_deadline:
         last = _read_launch_state(package)
+        time.sleep(poll_sleep)
+    for _ in range(max_polls):
         if last["activity_visible"] or last["surface_present"]:
             break
-        time.sleep(0.35)
+        last = _read_launch_state(package)
+        time.sleep(poll_sleep)
     settle = _launch_wait_seconds(cfg, "launch_settle_before_layout_sec", 1.0, 0.0, 4.0)
     if settle:
-        time.sleep(settle)
+        time.sleep(min(settle, 2.0))
         last = _read_launch_state(package)
     last["black_screen_suspected"] = bool(
         last["process_alive"] and not (last["activity_visible"] or last["surface_present"])

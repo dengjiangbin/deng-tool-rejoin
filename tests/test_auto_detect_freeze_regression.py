@@ -11,7 +11,7 @@ These tests pin the rules:
 * Opening the Packages submenu MUST NOT block on root or call any
   legacy mapping helpers, even when no package has a saved username.
 * ``safe_detect_username_for_package`` must always return a string and
-  return ``"Unknown"`` when root reads time out or fail.
+  never ``Unknown`` — use ``No Account`` or ``Scanner Error: ...``.
 * Auto Detect Package's bounded post-add username pass must respect a
   global deadline so it cannot stall the UI when there are many
   packages or root is slow.
@@ -28,7 +28,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from agent import package_username
+from agent import package_username, root_access
 from agent.commands import (
     _bounded_post_add_username_detection,
     _config_menu_package,
@@ -45,49 +45,73 @@ def _cfg(packages: list[dict] | None = None) -> dict:
     return cfg
 
 
+def _root_ok():
+    pre = root_access.RootCheckReport(
+        ok=True,
+        tool="su",
+        uid="uid=0(root)",
+        whoami="root",
+        data_dir_readable=True,
+        steps=(),
+        detail="ok",
+    )
+    return mock.patch(
+        "agent.package_username.root_access.root_required_preflight",
+        return_value=pre,
+    )
+
+
 class SafeDetectUsernameTests(unittest.TestCase):
     def test_safe_detect_returns_username_when_pref_has_value(self) -> None:
         xml = (
             "<map><string name=\"username\">deng1629</string>"
             "<string name=\"displayName\">DENG</string></map>"
         )
-        with mock.patch("agent.root_access.read_root_file", return_value=xml):
+        with _root_ok(), \
+             mock.patch(
+                 "agent.package_username.root_access.list_root_glob",
+                 return_value=["/data/data/com.moons.litesc/shared_prefs/prefs.xml"],
+             ), \
+             mock.patch("agent.package_username.root_access.read_root_file", return_value=xml), \
+             mock.patch("agent.launch_verify.resolve_launcher_activity", return_value=("", True, "")), \
+             mock.patch("agent.android.package_installed", return_value=True):
             self.assertEqual(
-                package_username.safe_detect_username_for_package(
-                    "com.moons.litesc"
-                ),
+                package_username.safe_detect_username_for_package("com.moons.litesc"),
                 "deng1629",
             )
 
-    def test_safe_detect_returns_unknown_on_missing_file(self) -> None:
-        with mock.patch("agent.root_access.read_root_file", return_value=None):
+    def test_safe_detect_returns_no_account_on_missing_file(self) -> None:
+        with _root_ok(), \
+             mock.patch("agent.package_username.root_access.list_root_glob", return_value=[]), \
+             mock.patch("agent.launch_verify.resolve_launcher_activity", return_value=("", True, "")), \
+             mock.patch("agent.android.package_installed", return_value=True):
             self.assertEqual(
-                package_username.safe_detect_username_for_package(
-                    "com.moons.litesc"
-                ),
-                "Unknown",
+                package_username.safe_detect_username_for_package("com.moons.litesc"),
+                package_username.NO_ACCOUNT_LABEL,
             )
 
-    def test_safe_detect_returns_unknown_on_root_exception(self) -> None:
+    def test_safe_detect_returns_scanner_error_on_root_exception(self) -> None:
         def _boom(*_a, **_k):
             raise RuntimeError("simulated root failure")
 
-        with mock.patch("agent.root_access.read_root_file", side_effect=_boom):
-            self.assertEqual(
-                package_username.safe_detect_username_for_package(
-                    "com.moons.litesc"
-                ),
-                "Unknown",
-            )
+        with mock.patch(
+            "agent.package_username.root_access.root_required_preflight",
+            side_effect=_boom,
+        ):
+            result = package_username.safe_detect_username_for_package("com.moons.litesc")
+        self.assertTrue(result.startswith(package_username.SCANNER_ERROR_PREFIX))
 
-    def test_safe_detect_returns_unknown_on_blank_package(self) -> None:
+    def test_safe_detect_returns_scanner_error_on_blank_package(self) -> None:
         self.assertEqual(
             package_username.safe_detect_username_for_package(""),
-            "Unknown",
+            f"{package_username.SCANNER_ERROR_PREFIX} invalid package",
         )
 
     def test_safe_detect_does_not_call_legacy_mapping_helpers(self) -> None:
-        with mock.patch("agent.root_access.read_root_file", return_value=None), \
+        with _root_ok(), \
+             mock.patch("agent.package_username.root_access.list_root_glob", return_value=[]), \
+             mock.patch("agent.launch_verify.resolve_launcher_activity", return_value=("", True, "")), \
+             mock.patch("agent.android.package_installed", return_value=True), \
              mock.patch(
                  "agent.account_detect.detect_account_username",
                  side_effect=AssertionError("legacy username scan"),
@@ -98,7 +122,7 @@ class SafeDetectUsernameTests(unittest.TestCase):
              ):
             self.assertEqual(
                 package_username.safe_detect_username_for_package("com.x.y"),
-                "Unknown",
+                package_username.NO_ACCOUNT_LABEL,
             )
 
 
@@ -106,11 +130,14 @@ class CollectSafeUsernamesTests(unittest.TestCase):
     def test_collect_respects_total_deadline(self) -> None:
         slow_packages = [f"com.moons.lites{c}" for c in "abcdef"]
 
-        def _slow_read(*_a, **_k):
+        def _slow_detect(pkg: str, *, timeout_seconds: float = 2.0):
             time.sleep(0.4)
-            return None
+            return package_username.NO_ACCOUNT_LABEL
 
-        with mock.patch("agent.root_access.read_root_file", side_effect=_slow_read):
+        with mock.patch(
+            "agent.package_username.safe_detect_username_for_package",
+            side_effect=_slow_detect,
+        ):
             started = time.monotonic()
             result = package_username.collect_safe_usernames_for_packages(
                 slow_packages,
@@ -121,7 +148,7 @@ class CollectSafeUsernamesTests(unittest.TestCase):
 
         self.assertLess(elapsed, 2.0)
         for pkg in slow_packages:
-            self.assertEqual(result[pkg], "Unknown")
+            self.assertNotEqual(result[pkg], "Unknown")
 
 
 class PackageMenuRenderingFreezeTests(unittest.TestCase):
@@ -134,9 +161,7 @@ class PackageMenuRenderingFreezeTests(unittest.TestCase):
              mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
              mock.patch(
                  "agent.package_username.detect_package_username_quick",
-                 side_effect=AssertionError(
-                     "menu render must not run detector"
-                 ),
+                 side_effect=AssertionError("menu render must not run detector"),
              ), \
              mock.patch(
                  "agent.root_access.read_root_file",
@@ -149,6 +174,10 @@ class PackageMenuRenderingFreezeTests(unittest.TestCase):
              mock.patch(
                  "agent.commands._package_menu_refresh_mapping",
                  side_effect=AssertionError("legacy refresh mapping menu"),
+             ), \
+             mock.patch(
+                 "agent.commands._package_username_display",
+                 return_value=package_username.NO_ACCOUNT_LABEL,
              ), \
              redirect_stdout(io.StringIO()) as out:
             started = time.monotonic()
@@ -164,7 +193,7 @@ class PackageMenuRenderingFreezeTests(unittest.TestCase):
         self.assertNotIn("Edit Username Label", text)
         plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
         self.assertIsNone(re.search(r"(?m)^\s*4\.\s+Edit Username", plain))
-        self.assertIn("Unknown", text)
+        self.assertNotIn("Unknown", plain)
         self.assertNotIn("Refresh Mapping", text)
         self.assertNotIn("Account Mapping", text)
         self.assertNotIn("Detect / Refresh", text)
@@ -185,13 +214,8 @@ class AutoDetectFreezeRegressionTests(unittest.TestCase):
             "agent.commands._gather_roblox_candidates_for_ui",
             return_value=candidates,
         ), \
-             mock.patch(
-                 "agent.commands.safe_io.safe_prompt", return_value="a"
-             ), \
-             mock.patch(
-                 "agent.commands.save_config",
-                 side_effect=lambda data: data,
-             ), \
+             mock.patch("agent.commands.safe_io.safe_prompt", return_value="a"), \
+             mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
              mock.patch(
                  "agent.commands._safe_refresh_account_mapping_entries",
                  side_effect=AssertionError("legacy refresh mapping"),
@@ -218,7 +242,7 @@ class AutoDetectFreezeRegressionTests(unittest.TestCase):
              ), \
              mock.patch(
                  "agent.package_username.safe_detect_username_for_package",
-                 return_value="Unknown",
+                 return_value=package_username.NO_ACCOUNT_LABEL,
              ) as safe_detector:
             result = _package_menu_auto_detect(cfg)
 
@@ -226,9 +250,7 @@ class AutoDetectFreezeRegressionTests(unittest.TestCase):
         for c in candidates:
             self.assertIn(c.package, added)
         for c in candidates:
-            safe_detector.assert_any_call(
-                c.package, timeout_seconds=mock.ANY
-            )
+            safe_detector.assert_any_call(c.package, timeout_seconds=mock.ANY)
 
     def test_auto_detect_caches_safe_username_for_new_packages(self) -> None:
         cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
@@ -239,12 +261,8 @@ class AutoDetectFreezeRegressionTests(unittest.TestCase):
             "agent.commands._gather_roblox_candidates_for_ui",
             return_value=[candidate],
         ), \
-             mock.patch(
-                 "agent.commands.safe_io.safe_prompt", return_value="a"
-             ), \
-             mock.patch(
-                 "agent.commands.save_config", side_effect=lambda data: data
-             ), \
+             mock.patch("agent.commands.safe_io.safe_prompt", return_value="a"), \
+             mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
              mock.patch(
                  "agent.package_username.safe_detect_username_for_package",
                  return_value="deng1629",
@@ -254,9 +272,7 @@ class AutoDetectFreezeRegressionTests(unittest.TestCase):
         cache = result.get("package_username_cache") or {}
         self.assertEqual(cache.get("com.moons.litesc"), "deng1629")
         entry = next(
-            e
-            for e in result["roblox_packages"]
-            if e["package"] == "com.moons.litesc"
+            e for e in result["roblox_packages"] if e["package"] == "com.moons.litesc"
         )
         self.assertEqual(entry["account_username"], "deng1629")
         self.assertEqual(entry["username_source"], "detected_safe_pref")
@@ -274,18 +290,14 @@ class AutoDetectFreezeRegressionTests(unittest.TestCase):
 
         def _slow_safe(*_a, **_k):
             time.sleep(0.6)
-            return "Unknown"
+            return package_username.NO_ACCOUNT_LABEL
 
         with mock.patch(
             "agent.commands._gather_roblox_candidates_for_ui",
             return_value=candidates,
         ), \
-             mock.patch(
-                 "agent.commands.safe_io.safe_prompt", return_value="a"
-             ), \
-             mock.patch(
-                 "agent.commands.save_config", side_effect=lambda data: data
-             ), \
+             mock.patch("agent.commands.safe_io.safe_prompt", return_value="a"), \
+             mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
              mock.patch(
                  "agent.package_username.safe_detect_username_for_package",
                  side_effect=_slow_safe,
@@ -304,23 +316,11 @@ class ManualAddFreezeRegressionTests(unittest.TestCase):
     def test_manual_add_does_not_call_refresh_mapping(self) -> None:
         cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
         prompts = iter(["m", "y"])
-        with mock.patch(
-            "agent.commands._gather_roblox_candidates_for_ui", return_value=[]
-        ), \
-             mock.patch(
-                 "agent.commands._prompt_manual_package",
-                 return_value="com.moons.litesc",
-             ), \
-             mock.patch(
-                 "agent.commands.android.package_installed", return_value=True
-             ), \
-             mock.patch(
-                 "agent.commands.safe_io.safe_prompt",
-                 side_effect=lambda *_a, **_k: next(prompts),
-             ), \
-             mock.patch(
-                 "agent.commands.save_config", side_effect=lambda data: data
-             ), \
+        with mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=[]), \
+             mock.patch("agent.commands._prompt_manual_package", return_value="com.moons.litesc"), \
+             mock.patch("agent.commands.android.package_installed", return_value=True), \
+             mock.patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *_a, **_k: next(prompts)), \
+             mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
              mock.patch(
                  "agent.commands._safe_refresh_account_mapping_entries",
                  side_effect=AssertionError("refresh mapping"),
@@ -343,7 +343,7 @@ class ManualAddFreezeRegressionTests(unittest.TestCase):
              ), \
              mock.patch(
                  "agent.package_username.safe_detect_username_for_package",
-                 return_value="Unknown",
+                 return_value=package_username.NO_ACCOUNT_LABEL,
              ):
             result = _package_menu_add(cfg)
         added = result["roblox_packages"][-1]
@@ -352,23 +352,11 @@ class ManualAddFreezeRegressionTests(unittest.TestCase):
     def test_manual_add_saves_detected_username_automatically(self) -> None:
         cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
         prompts = iter(["m", "y"])
-        with mock.patch(
-            "agent.commands._gather_roblox_candidates_for_ui", return_value=[]
-        ), \
-             mock.patch(
-                 "agent.commands._prompt_manual_package",
-                 return_value="com.moons.litesc",
-             ), \
-             mock.patch(
-                 "agent.commands.android.package_installed", return_value=True
-             ), \
-             mock.patch(
-                 "agent.commands.safe_io.safe_prompt",
-                 side_effect=lambda *_a, **_k: next(prompts),
-             ), \
-             mock.patch(
-                 "agent.commands.save_config", side_effect=lambda data: data
-             ), \
+        with mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=[]), \
+             mock.patch("agent.commands._prompt_manual_package", return_value="com.moons.litesc"), \
+             mock.patch("agent.commands.android.package_installed", return_value=True), \
+             mock.patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *_a, **_k: next(prompts)), \
+             mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
              mock.patch(
                  "agent.package_username.safe_detect_username_for_package",
                  return_value="dengauto",
@@ -391,47 +379,29 @@ class BoundedPostAddHelperTests(unittest.TestCase):
         self.assertIs(result, cfg)
 
     def test_bounded_helper_writes_cache_and_account_username(self) -> None:
-        cfg = _cfg([
-            package_entry("com.moons.litesc", "", True, "not_set"),
-        ])
+        cfg = _cfg([package_entry("com.moons.litesc", "", True, "not_set")])
         with mock.patch(
             "agent.package_username.collect_safe_usernames_for_packages",
             return_value={"com.moons.litesc": "deng1629"},
-        ), \
-             mock.patch(
-                 "agent.commands.save_config", side_effect=lambda data: data
-             ):
-            result = _bounded_post_add_username_detection(
-                cfg, ["com.moons.litesc"]
-            )
+        ), mock.patch("agent.commands.save_config", side_effect=lambda data: data):
+            result = _bounded_post_add_username_detection(cfg, ["com.moons.litesc"])
         cache = result.get("package_username_cache") or {}
         self.assertEqual(cache.get("com.moons.litesc"), "deng1629")
         entry = next(
-            e
-            for e in result["roblox_packages"]
-            if e["package"] == "com.moons.litesc"
+            e for e in result["roblox_packages"] if e["package"] == "com.moons.litesc"
         )
         self.assertEqual(entry["account_username"], "deng1629")
         self.assertEqual(entry["username_source"], "detected_safe_pref")
 
     def test_bounded_helper_replaces_legacy_manual_label_when_detected(self) -> None:
-        cfg = _cfg([
-            package_entry("com.moons.litesc", "DENGLABEL", True, "manual"),
-        ])
+        cfg = _cfg([package_entry("com.moons.litesc", "DENGLABEL", True, "manual")])
         with mock.patch(
             "agent.package_username.collect_safe_usernames_for_packages",
             return_value={"com.moons.litesc": "detected"},
-        ), \
-             mock.patch(
-                 "agent.commands.save_config", side_effect=lambda data: data
-             ):
-            result = _bounded_post_add_username_detection(
-                cfg, ["com.moons.litesc"]
-            )
+        ), mock.patch("agent.commands.save_config", side_effect=lambda data: data):
+            result = _bounded_post_add_username_detection(cfg, ["com.moons.litesc"])
         entry = next(
-            e
-            for e in result["roblox_packages"]
-            if e["package"] == "com.moons.litesc"
+            e for e in result["roblox_packages"] if e["package"] == "com.moons.litesc"
         )
         self.assertEqual(entry["account_username"], "detected")
         self.assertEqual(entry["username_source"], "detected_safe_pref")

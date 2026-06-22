@@ -15,12 +15,15 @@ No hanging if su shows a permission prompt.
 from __future__ import annotations
 
 import logging
+import os
 import shlex
-import subprocess
+import shutil
 import threading
 import time
 from dataclasses import dataclass
 from typing import Iterable
+
+from . import subprocess_isolated as _iso
 
 _log = logging.getLogger("deng.rejoin.root_access")
 
@@ -30,8 +33,9 @@ _log = logging.getLogger("deng.rejoin.root_access")
 
 DETECT_TIMEOUT: int = 5    # seconds for root detection test
 COMMAND_TIMEOUT: int = 10  # default timeout for root commands
-READ_TIMEOUT: int = 8      # timeout for file-read commands
-LIST_TIMEOUT: int = 8      # timeout for glob-list commands
+READ_TIMEOUT: int = 3      # timeout for file-read commands (menu-safe)
+LIST_TIMEOUT: int = 3      # timeout for glob-list commands (menu-safe)
+MENU_ROOT_TIMEOUT: int = 3  # hard cap per root shell invocation in UI paths
 
 ROOT_REQUIRED_PUBLIC_MESSAGE = (
     "unsupported: root is required for DENG Rejoin on cloudphone"
@@ -144,22 +148,50 @@ _cache_lock = threading.Lock()
 _cached: RootCapability | None = None
 
 
+def _subprocess_lock() -> threading.Lock | None:
+    try:
+        from . import android as _android  # noqa: PLC0415
+
+        return _android.subprocess_lock()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _run_raw(args: list[str], timeout: int) -> tuple[int, str, str, bool]:
     """Run a subprocess. Returns (returncode, stdout, stderr, timed_out). Never raises."""
+    return _iso.run_isolated_text(
+        args,
+        timeout=float(max(1, int(timeout))),
+        lock=_subprocess_lock(),
+    )
+
+
+def _timeout_binary() -> str | None:
+    """Return path to coreutils ``timeout`` when available."""
+    if os.name == "nt":
+        return None
     try:
-        proc = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+        path = shutil.which("timeout")
+        if path:
+            return path
+        for candidate in ("/data/data/com.termux/files/usr/bin/timeout",):
+            if os.path.isfile(candidate):
+                return candidate
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _wrap_root_invocation(tool: str, command: str, timeout: int) -> tuple[list[str], int]:
+    """Build argv for ``tool -c command`` with optional Linux ``timeout`` wrapper."""
+    parent_timeout = max(1, int(timeout)) + 2
+    timeout_bin = _timeout_binary()
+    if timeout_bin:
+        return (
+            [timeout_bin, f"{max(1, int(timeout))}s", tool, "-c", command],
+            parent_timeout + 1,
         )
-        return proc.returncode, proc.stdout or "", proc.stderr or "", False
-    except subprocess.TimeoutExpired:
-        return -1, "", "timed out", True
-    except (FileNotFoundError, PermissionError, OSError):
-        return 127, "", "not found", False
-    except Exception as exc:  # noqa: BLE001
-        return -1, "", str(exc)[:200], False
+    return [tool, "-c", command], parent_timeout
 
 
 def _probe_tool(tool: str, timeout: int) -> tuple[bool, str, str]:
@@ -360,7 +392,10 @@ def run_root_command(
     try:
         tokens = list(str(a) for a in args)
         command = shlex.join(tokens)
-        rc, out, err, timed_out = _run_raw([cap.tool, "-c", command], timeout=timeout)
+        argv, parent_timeout = _wrap_root_invocation(cap.tool, command, timeout)
+        rc, out, err, timed_out = _run_raw(argv, timeout=parent_timeout)
+        if timed_out and "timed out" not in (err or ""):
+            err = (err or "timed out")[:200]
         return RootResult(
             returncode=rc,
             stdout=(out or "").rstrip("\n"),

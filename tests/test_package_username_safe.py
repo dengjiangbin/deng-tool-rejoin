@@ -24,7 +24,8 @@ class PackageUsernameSafeTests(unittest.TestCase):
         cfg["roblox_packages"] = [package_entry("com.moons.litesc", "deng1629", True, "manual")]
         with mock.patch("agent.commands._is_interactive", return_value=True), \
              mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
-             mock.patch("agent.package_username.scan_package_username") as scan_fn, \
+             mock.patch("agent.commands.safe_io.tty_session"), \
+             mock.patch("agent.commands.package_username.scan_package_username_for_menu") as scan_fn, \
              redirect_stdout(io.StringIO()) as out:
             scan_fn.return_value = package_username.UsernameScanReport(
                 package="com.moons.litesc",
@@ -46,7 +47,8 @@ class PackageUsernameSafeTests(unittest.TestCase):
         cfg["package_username_cache"] = {"com.moons.litesc": "cacheduser"}
         with mock.patch("agent.commands._is_interactive", return_value=True), \
              mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
-             mock.patch("agent.package_username.scan_package_username") as scan_fn, \
+             mock.patch("agent.commands.safe_io.tty_session"), \
+             mock.patch("agent.commands.package_username.scan_package_username_for_menu") as scan_fn, \
              mock.patch("agent.commands.get_package_display_username", return_value=package_username.NO_ACCOUNT_LABEL), \
              redirect_stdout(io.StringIO()) as out:
             scan_fn.return_value = package_username.UsernameScanReport(
@@ -110,6 +112,7 @@ class PackageUsernameSafeTests(unittest.TestCase):
         )
         with mock.patch("agent.commands._is_interactive", return_value=True), \
              mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
+             mock.patch("agent.commands.safe_io.tty_session"), \
              mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=AssertionError("cookie scan")), \
              mock.patch("agent.commands._safe_refresh_account_mapping_entries", side_effect=AssertionError("refresh mapping")), \
              mock.patch("agent.commands.account_detect.detect_account_username", side_effect=AssertionError("old username scan")), \

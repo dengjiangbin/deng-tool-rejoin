@@ -32,7 +32,6 @@ import os
 import re
 import shutil
 import socket
-import subprocess
 import sys
 import time
 import traceback
@@ -656,36 +655,30 @@ def _capture_diag_startup(errors: list[dict[str, str]]) -> dict[str, Any]:
         errors.append({"step": "diag_startup", "error": "deng-rejoin not on PATH"})
         return out
     try:
-        proc = subprocess.run(
+        from . import subprocess_isolated as _iso  # noqa: PLC0415
+
+        rc, stdout, stderr, timed_out = _iso.run_isolated_text(
             [wrapper, "--diag-startup"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=45,
-            check=False,
-            text=True,
+            timeout=45.0,
         )
-        out["returncode"] = proc.returncode
-        # SIGSEGV is -11 on Linux/Android; other crash signals also negative.
-        out["sigsegv"] = (proc.returncode == -11)
-        out["crashed"] = proc.returncode < 0
-        out["stdout"] = mask((proc.stdout or "")[-16384:])
-        out["stderr"] = mask((proc.stderr or "")[-16384:])
-        # The last "STEP:<name>" line printed by the child tells us where
-        # it died.  Parse it for convenience.
+        out["returncode"] = rc
+        out["sigsegv"] = (rc == -11)
+        out["crashed"] = rc < 0
+        out["stdout"] = mask(stdout[-16384:])
+        out["stderr"] = mask(stderr[-16384:])
+        if timed_out:
+            errors.append({"step": "diag_startup", "error": "timeout"})
+            out["returncode"] = None
+            return out
         last_step = ""
-        for line in (proc.stdout or "").splitlines():
+        for line in stdout.splitlines():
             line = line.strip()
             if line.startswith("STEP:"):
                 last_step = line
         out["last_step"] = last_step
-    except subprocess.TimeoutExpired as exc:
-        errors.append({"step": "diag_startup", "error": "timeout"})
-        out["returncode"] = None
-        out["timeout"] = True
-        out["stdout"] = mask((exc.stdout or "")[-8192:] if isinstance(exc.stdout, str) else "")
     except Exception as exc:  # noqa: BLE001
         errors.append({"step": "diag_startup", "error": str(exc)[:200]})
+        out["returncode"] = None
     return out
 
 
@@ -1466,33 +1459,32 @@ def save_upload_bundle(probe: dict[str, Any], *, reason: str = "") -> Path:
 
 
 def _resolve_install_api() -> str:
-    try:
-        from .deferred_bundle_install import resolve_install_api
-        return resolve_install_api().strip()
-    except Exception:  # noqa: BLE001
-        return os.environ.get("DENG_REJOIN_INSTALL_API", "").strip()
+    from . import api_config
+
+    return api_config.resolve_api_base_url(allow_install_file=True, allow_default=True)
 
 
-def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool, str]:
+def upload_probe(probe: dict[str, Any], *, timeout: float = 15.0) -> tuple[bool, str]:
     """POST the probe JSON to the install API's dev-probe endpoint.
 
     Trims the payload first so it fits the 4 MB compressed cap, then
     POSTs the gzipped JSON.  Returns ``(ok, info)`` where ``info`` is a
     short probe id on success, or a short, USER-ACTIONABLE error string
     on failure.  Never raises.
+
+    Network I/O uses :mod:`safe_http` with strict connect (5s) and total
+    (15s) timeouts so a slow link cannot freeze the Termux TTY thread.
     """
     import gzip
-    import urllib.error
-    import urllib.request
+    import json
+
+    from . import safe_http
 
     api = _resolve_install_api()
     if not api:
         return False, "install API URL not configured (set DENG_REJOIN_INSTALL_API)"
     url = api.rstrip("/") + "/api/dev-probe/upload"
 
-    # ── Size budget ── trim ANY oversized payload BEFORE we POST so the
-    # server's 4 MB cap doesn't reject us with an opaque 413.  This is
-    # what was blocking the user after running many tests back-to-back.
     trimmed, trim_report = trim_probe_for_upload(sanitize_probe(probe))
     body = json.dumps(trimmed, separators=(",", ":")).encode("utf-8")
     payload = gzip.compress(body)
@@ -1504,46 +1496,42 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
             f"Dropped: {trim_report.get('dropped') or []!r}"
         )
 
-    def _make_request() -> urllib.request.Request:
-        req = urllib.request.Request(url, data=payload, method="POST")
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Content-Encoding", "gzip")
-        req.add_header("User-Agent", "deng-rejoin-probe/1")
-        return req
-
+    http_timeout = (safe_http.DEFAULT_CONNECT_TIMEOUT, int(max(5, min(float(timeout), 15))))
     try:
-        with urllib.request.urlopen(_make_request(), timeout=timeout) as resp:
-            data = resp.read().decode("utf-8", errors="replace")
-        try:
-            obj = json.loads(data)
-        except json.JSONDecodeError:
-            return False, f"non-JSON response: {data[:200]}"
-        pid = str(obj.get("probe_id") or "").strip()
-        if not pid:
-            return False, f"no probe_id in response: {data[:200]}"
-        return True, pid
-    except urllib.error.HTTPError as exc:
-        body_text = ""
-        try:
-            body_text = exc.read().decode("utf-8", errors="replace")[:300]
-        except Exception:  # noqa: BLE001
-            pass
-        # Pretty-print common rejection cases so the user knows what to do.
-        if exc.code == 413:
+        http_status, raw = safe_http.post_raw(
+            url,
+            payload,
+            content_type="application/json",
+            headers={"Content-Encoding": "gzip", "User-Agent": "deng-rejoin-probe/1"},
+            timeout=http_timeout,
+        )
+    except safe_http.SafeHttpNetworkError as exc:
+        return False, f"network error: {exc}"
+    except OSError as exc:
+        return False, f"OS error: {exc}"
+
+    body_text = (raw or b"").decode("utf-8", errors="replace")
+    if http_status >= 400:
+        if http_status == 413:
             return False, (
                 f"server rejected size {len(payload)} bytes (413). "
                 f"Trim dropped: {trim_report.get('dropped') or []!r}. "
-                f"Server body: {body_text}"
+                f"Server body: {body_text[:300]}"
             )
-        if exc.code == 429:
+        if http_status == 429:
             return False, (
                 f"rate-limited (429) — wait ~60 seconds and try again. "
-                f"Server body: {body_text}"
+                f"Server body: {body_text[:300]}"
             )
-        if exc.code == 401:
-            return False, f"server rejected upload (401): {body_text}"
-        return False, f"HTTP {exc.code}: {body_text}"
-    except urllib.error.URLError as exc:
-        return False, f"network error: {exc.reason}"
-    except OSError as exc:
-        return False, f"OS error: {exc}"
+        if http_status == 401:
+            return False, f"server rejected upload (401): {body_text[:300]}"
+        return False, f"HTTP {http_status}: {body_text[:300]}"
+
+    try:
+        obj = json.loads(body_text) if body_text.strip() else {}
+    except json.JSONDecodeError:
+        return False, f"non-JSON response: {body_text[:200]}"
+    pid = str(obj.get("probe_id") or "").strip()
+    if not pid:
+        return False, f"no probe_id in response: {body_text[:200]}"
+    return True, pid

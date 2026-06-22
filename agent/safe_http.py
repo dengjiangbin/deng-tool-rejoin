@@ -29,11 +29,13 @@ import json
 import logging
 import os
 import shutil
-import subprocess
+import tempfile
 import urllib.error
 import urllib.request
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
+from . import subprocess_isolated as _iso
 from .constants import VERSION
 
 _log = logging.getLogger("deng.rejoin.safe_http")
@@ -53,6 +55,22 @@ _SHARED_HEADERS: dict[str, str] = {
 
 # Maximum response body accepted (256 KiB) — prevents OOM from runaway server.
 _MAX_RESPONSE_BYTES = 256 * 1024
+
+# Strict network bounds for Termux/cloud-phone (connect + total transfer).
+DEFAULT_CONNECT_TIMEOUT = 5
+DEFAULT_REQUEST_TIMEOUT = 15
+
+_http_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="deng-http")
+
+
+def _normalize_timeout(timeout: int | float | tuple[int | float, int | float]) -> tuple[int, int]:
+    """Return ``(connect_seconds, total_seconds)`` for curl/urllib."""
+    if isinstance(timeout, tuple):
+        connect = max(1, int(timeout[0]))
+        total = max(connect, int(timeout[1]))
+        return connect, total
+    total = max(5, int(timeout))
+    return min(DEFAULT_CONNECT_TIMEOUT, total), total
 
 
 def _http_backend() -> str:
@@ -115,18 +133,29 @@ def _build_curl_header_args(headers: dict[str, str]) -> list[str]:
     return args
 
 
+def _subprocess_lock():
+    try:
+        from . import android as _android  # noqa: PLC0415
+
+        return _android.subprocess_lock()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _run_curl(
     args: list[str],
     *,
     stdin_bytes: bytes | None = None,
-    timeout: int = 30,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> tuple[int, bytes]:
     """Run curl and return (http_status_code, response_body_bytes).
 
     curl is invoked with:
       -s              silent (no progress bar)
+      --connect-timeout  hard connect cap (5s default)
+      --max-time      hard total cap (15s default)
+      --retry 1       one retry on transient failure
       -w '\\n%{http_code}'   append HTTP status code on last line
-      --max-time      hard timeout (server response + transfer)
       --max-filesize  cap download size to _MAX_RESPONSE_BYTES
 
     Raises SafeHttpNetworkError on:
@@ -138,53 +167,63 @@ def _run_curl(
     if not _curl_available():
         raise SafeHttpNetworkError(_CURL_MISSING_MSG)
 
+    connect_to, max_to = _normalize_timeout(timeout)
     full_cmd = [
         "curl",
         "-s",                                       # silent
-        "--max-time", str(max(5, timeout)),         # hard timeout
+        "--connect-timeout", str(connect_to),
+        "--max-time", str(max_to),
+        "--retry", "1",
         "--max-filesize", str(_MAX_RESPONSE_BYTES), # cap body
         "-w", "\n%{http_code}",                     # append status code
     ] + args
 
-    try:
+    parent_timeout = max_to + 5
+    temp_path: str | None = None
+    curl_args = list(full_cmd)
+    if stdin_bytes is not None:
         try:
-            from . import android as _android  # noqa: PLC0415
-            lock = _android.subprocess_lock()
-        except Exception:  # noqa: BLE001
-            lock = None
-        if lock is None:
-            proc = subprocess.run(
-                full_cmd,
-                input=stdin_bytes,
-                capture_output=True,
-                timeout=timeout + 10,   # python-side timeout > curl --max-time
-                shell=False,            # never shell=True
-            )
-        else:
-            with lock:
-                proc = subprocess.run(
-                    full_cmd,
-                    input=stdin_bytes,
-                    capture_output=True,
-                    timeout=timeout + 10,   # python-side timeout > curl --max-time
-                    shell=False,            # never shell=True
-                )
-    except subprocess.TimeoutExpired:
-        raise SafeHttpNetworkError("Network request timed out (curl process timeout).") from None
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(stdin_bytes)
+                tmp.flush()
+                temp_path = tmp.name
+            curl_args = [
+                part if part != "@-" else f"@{temp_path}"
+                for part in curl_args
+            ]
+        except OSError as exc:
+            raise SafeHttpNetworkError(f"Failed to stage curl POST body: {exc}") from exc
+
+    try:
+        rc, raw, err_b, timed_out = _iso.run_isolated_bytes(
+            curl_args,
+            timeout=float(parent_timeout),
+            lock=_subprocess_lock(),
+            max_stdout=_MAX_RESPONSE_BYTES + 128,
+        )
     except (OSError, FileNotFoundError) as exc:
         raise SafeHttpNetworkError(f"Failed to launch curl: {exc}") from exc
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+    if timed_out:
+        raise SafeHttpNetworkError("Network request timed out (curl process timeout).") from None
 
     # Negative returncode means the child was killed by a signal (e.g. SIGSEGV).
-    if proc.returncode < 0:
-        sig = -proc.returncode
+    if rc < 0:
+        sig = -rc
         _log.debug("curl killed by signal %d", sig)
         raise SafeHttpNetworkError(
             f"Network check crashed safely (signal {sig}). Please retry."
         )
 
     # Non-zero curl exit codes indicate network/protocol errors.
-    if proc.returncode != 0:
-        stderr_hint = (proc.stderr or b"").decode("utf-8", errors="replace")[:200]
+    if rc != 0:
+        stderr_hint = (err_b or b"").decode("utf-8", errors="replace")[:200]
         curl_errors = {
             6: "Could not resolve host",
             7: "Failed to connect",
@@ -195,11 +234,10 @@ def _run_curl(
             56: "Network data receiving error",
             60: "SSL certificate verification failed",
         }
-        reason = curl_errors.get(proc.returncode, f"curl error {proc.returncode}")
-        _log.debug("curl exit %d: %s | %s", proc.returncode, reason, stderr_hint)
+        reason = curl_errors.get(rc, f"curl error {rc}")
+        _log.debug("curl exit %d: %s | %s", rc, reason, stderr_hint)
         raise SafeHttpNetworkError(f"Network error: {reason}.")
 
-    raw = proc.stdout or b""
     # Split on LAST newline to separate body from the appended status code.
     last_nl = raw.rfind(b"\n")
     if last_nl == -1:
@@ -217,12 +255,47 @@ def _run_curl(
     return http_status, body_bytes
 
 
+class AsyncHttpResult:
+    """Non-blocking wrapper around a background HTTP call."""
+
+    __slots__ = ("_future",)
+
+    def __init__(self, future: Future[tuple[int, bytes]]) -> None:
+        self._future = future
+
+    def done(self) -> bool:
+        return self._future.done()
+
+    def result(self, *, timeout: float | None = None) -> tuple[int, bytes]:
+        return self._future.result(timeout=timeout)
+
+
+def post_raw_async(
+    url: str,
+    body_bytes: bytes,
+    *,
+    content_type: str = "application/json",
+    headers: dict[str, str] | None = None,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
+) -> AsyncHttpResult:
+    """Schedule :func:`post_raw` on a daemon thread pool (never blocks the menu loop)."""
+    future = _http_executor.submit(
+        post_raw,
+        url,
+        body_bytes,
+        content_type=content_type,
+        headers=headers,
+        timeout=timeout,
+    )
+    return AsyncHttpResult(future)
+
+
 def _curl_post_json(
     url: str,
     data: dict[str, Any],
     *,
     extra_headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> dict[str, Any]:
     headers = {**_SHARED_HEADERS, **(extra_headers or {})}
     header_args = _build_curl_header_args(headers)
@@ -257,7 +330,7 @@ def _curl_get_json(
     url: str,
     *,
     extra_headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> dict[str, Any]:
     headers = {k: v for k, v in _SHARED_HEADERS.items() if k != "Content-Type"}
     if extra_headers:
@@ -294,13 +367,14 @@ def _python_post_json(
     data: dict[str, Any],
     *,
     extra_headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> dict[str, Any]:
     headers = {**_SHARED_HEADERS, **(extra_headers or {})}
     body = json.dumps(data, separators=(",", ":")).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    connect_to, max_to = _normalize_timeout(timeout)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
             raw = resp.read(_MAX_RESPONSE_BYTES)
             if not raw.strip():
                 return {}
@@ -326,14 +400,15 @@ def _python_get_json(
     url: str,
     *,
     extra_headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> dict[str, Any]:
     headers = {k: v for k, v in _SHARED_HEADERS.items() if k != "Content-Type"}
     if extra_headers:
         headers.update(extra_headers)
     req = urllib.request.Request(url, headers=headers, method="GET")
+    connect_to, max_to = _normalize_timeout(timeout)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
             raw = resp.read(_MAX_RESPONSE_BYTES)
             return json.loads(raw)  # type: ignore[return-value]
     except urllib.error.HTTPError as exc:
@@ -353,6 +428,44 @@ def _python_get_json(
         raise SafeHttpNetworkError(f"Network I/O error: {exc}") from exc
 
 
+def _curl_get_raw(
+    url: str,
+    *,
+    extra_headers: dict[str, str] | None = None,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
+) -> tuple[int, bytes]:
+    headers = {k: v for k, v in _SHARED_HEADERS.items() if k != "Content-Type"}
+    if extra_headers:
+        headers.update(extra_headers)
+    header_args = _build_curl_header_args(headers)
+    get_args = header_args + [url]
+    return _run_curl(get_args, timeout=timeout)
+
+
+def _python_get_raw(
+    url: str,
+    *,
+    extra_headers: dict[str, str] | None = None,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
+) -> tuple[int, bytes]:
+    headers = {k: v for k, v in _SHARED_HEADERS.items() if k != "Content-Type"}
+    if extra_headers:
+        headers.update(extra_headers)
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    connect_to, max_to = _normalize_timeout(timeout)
+    try:
+        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
+            return int(resp.status), resp.read(_MAX_RESPONSE_BYTES)
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read(_MAX_RESPONSE_BYTES) or b""
+        except Exception:  # noqa: BLE001
+            body = b""
+        return int(exc.code), body
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise SafeHttpNetworkError(f"Network I/O error: {exc}") from exc
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
@@ -361,7 +474,7 @@ def post_json(
     data: dict[str, Any],
     *,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> dict[str, Any]:
     """POST ``data`` as JSON to ``url``; return parsed JSON response dict.
 
@@ -384,7 +497,7 @@ def get_json(
     url: str,
     *,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> dict[str, Any]:
     """GET ``url``; parse and return JSON response dict.
 
@@ -411,7 +524,7 @@ def post_raw(
     *,
     content_type: str = "application/json",
     headers: dict[str, str] | None = None,
-    timeout: int = 10,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> tuple[int, bytes]:
     """POST raw bytes; return ``(http_status, response_body)``.
 
@@ -445,8 +558,9 @@ def post_raw(
 
     # Python urllib fallback (CI, dev box). On Termux this path is bypassed.
     req = urllib.request.Request(url, data=body_bytes, headers=merged_headers, method="POST")
+    connect_to, max_to = _normalize_timeout(timeout)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
             return int(resp.status), resp.read(_MAX_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
         try:
@@ -462,7 +576,7 @@ def get_raw(
     url: str,
     *,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
 ) -> tuple[int, bytes]:
     """GET a raw response body without JSON decoding.
 

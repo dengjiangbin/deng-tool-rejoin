@@ -36,15 +36,84 @@ Return value contract
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import time
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 # ── Platform detection ────────────────────────────────────────────────────────
 
 def _on_termux() -> bool:
     """Return True when running inside Termux on Android."""
     return bool(os.environ.get("TERMUX_VERSION"))
+
+
+def terminal_columns(*, fallback: int = 80) -> int:
+    """Return current TTY width; never below 40."""
+    try:
+        return max(40, int(shutil.get_terminal_size(fallback=(fallback, 24)).columns))
+    except Exception:  # noqa: BLE001
+        return max(40, fallback)
+
+
+def write_stdout(text: str = "", *, end: str = "\n", flush: bool = True) -> None:
+    """Write one frame to STDOUT without blocking locks (Termux-safe)."""
+    payload = text if end == "" else f"{text}{end}"
+    try:
+        sys.stdout.write(payload)
+        if flush:
+            sys.stdout.flush()
+    except UnicodeEncodeError:
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout.buffer.write(payload.encode("utf-8", errors="replace"))
+            if flush:
+                sys.stdout.buffer.flush()
+        else:
+            sys.stdout.write(payload.encode("ascii", errors="replace").decode("ascii"))
+            if flush:
+                sys.stdout.flush()
+
+
+def write_stdout_block(text: str, *, flush: bool = True) -> None:
+    """Write a multi-line block as one STDOUT frame (no mutex)."""
+    try:
+        sys.stdout.write(text)
+        if flush:
+            sys.stdout.flush()
+    except UnicodeEncodeError:
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
+            if flush:
+                sys.stdout.buffer.flush()
+
+
+@contextmanager
+def interactive_output_guard() -> Iterator[None]:
+    """Mark an interactive menu/session — nested-safe (no locks)."""
+    yield
+
+
+def restore_terminal() -> None:
+    """Force TTY back to cooked/sane mode (call before crash notices or menus)."""
+    _run_stty_sane()
+    if os.name == "nt":
+        return
+    if not getattr(sys.stdin, "isatty", lambda: False)():
+        return
+    try:
+        import termios  # noqa: PLC0415
+
+        attrs = termios.tcgetattr(sys.stdin.fileno())
+        lflag = attrs[3]
+        lflag |= termios.ICANON | termios.ECHO
+        lflag &= ~(termios.ECHOCTL | termios.ECHOK | termios.ECHOKE)
+        attrs[3] = lflag
+        attrs[6][termios.VMIN] = 1
+        attrs[6][termios.VTIME] = 0
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, attrs)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ── Public helpers ────────────────────────────────────────────────────────────
@@ -145,6 +214,62 @@ def _safe_prompt_readline(
 def press_enter(msg: str = "\nPress Enter to continue...") -> None:
     """Show ``msg`` and wait; silently returns on EOF/Ctrl-C."""
     safe_prompt(msg)
+
+
+@contextmanager
+def tty_session(*, restore_on_exit: bool = True) -> Iterator[None]:
+    """Guard interactive menu I/O — always restore TTY on exit."""
+    saved = _save_tty_attrs() if restore_on_exit else None
+    with interactive_output_guard():
+        try:
+            yield
+        finally:
+            if restore_on_exit:
+                _restore_tty_attrs(saved)
+                _run_stty_sane()
+
+
+def _save_tty_attrs() -> list[Any] | None:
+    if os.name == "nt":
+        return None
+    if not getattr(sys.stdin, "isatty", lambda: False)():
+        return None
+    try:
+        import termios  # noqa: PLC0415
+
+        return termios.tcgetattr(sys.stdin.fileno())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _restore_tty_attrs(saved: list[Any] | None) -> None:
+    if not saved or os.name == "nt":
+        return
+    try:
+        import termios  # noqa: PLC0415
+
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _run_stty_sane() -> None:
+    if os.name == "nt":
+        return
+    try:
+        from . import subprocess_isolated as _iso  # noqa: PLC0415
+
+        _iso.run_isolated_text(["stty", "sane"], timeout=2.0)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _terminal_input_usable() -> bool:
+    """Return True when stdin looks like a normal interactive TTY."""
+    try:
+        return bool(getattr(sys.stdin, "isatty", lambda: False)())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def safe_clear_screen(*, clear_scrollback: bool = False) -> None:
@@ -267,12 +392,13 @@ def setup_faulthandler() -> None:
 def check_and_report_crash_log(max_age_seconds: int = 3600) -> str | None:
     """Return a user-friendly warning string if a recent crash log exists.
 
-    Called at startup to inform the user that a previous crash occurred.
-    Returns a one-line message or ``None`` if no recent crash is detected.
-
-    Args:
-        max_age_seconds: Crash log is "recent" if modified within this window.
+    Never blocks on interactive crash reporting.  If the TTY cannot be
+    verified, returns the notice text only — callers print it and continue.
     """
+    try:
+        restore_terminal()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from .constants import CRASH_LOG_PATH  # noqa: PLC0415
 
@@ -281,11 +407,14 @@ def check_and_report_crash_log(max_age_seconds: int = 3600) -> str | None:
         age = time.time() - CRASH_LOG_PATH.stat().st_mtime
         if age > max_age_seconds:
             return None
-        return (
+        notice = (
             f"Previous crash detected. "
             f"Crash log saved at: {CRASH_LOG_PATH}\n"
             f"If this keeps happening, share the log with support."
         )
+        if not _terminal_input_usable():
+            return notice
+        return notice
     except Exception:  # noqa: BLE001
         return None
 

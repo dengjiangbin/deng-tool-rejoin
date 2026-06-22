@@ -44,6 +44,7 @@ from .constants import (
     ROOT_TIMEOUT_SECONDS,
 )
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk
+from . import subprocess_isolated as _iso
 from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_launch_url, to_roblox_deep_link, validate_launch_url
 
 
@@ -165,27 +166,23 @@ def run_command(args: Iterable[str], *, timeout: int = PROCESS_TIMEOUT_SECONDS) 
     primary cause of SIGSEGV on Termux + Python 3.13 (probe p-316b3b040d).
     """
     cmd = _maybe_resolve_first_arg(_stringify_args(args))
-    with _subprocess_lock:
-        try:
-            completed = subprocess.run(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=timeout,
-                shell=False,
-                env=_safe_env(),
-            )
-            return CommandResult(tuple(cmd), completed.returncode, completed.stdout.strip(), completed.stderr.strip())
-        except FileNotFoundError as exc:
-            # If the bare name was on our list we already tried /system/bin
-            # above; nothing more to do.  Otherwise still report 127 cleanly.
-            return CommandResult(tuple(cmd), 127, "", str(exc))
-        except subprocess.TimeoutExpired as exc:
-            stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-            stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-            return CommandResult(tuple(cmd), 124, stdout.strip(), stderr.strip() or "command timed out", timed_out=True)
+    rc, stdout, stderr, timed_out = _iso.run_isolated_text(
+        cmd,
+        timeout=float(timeout),
+        env=_safe_env(),
+        lock=_subprocess_lock(),
+    )
+    if timed_out:
+        return CommandResult(
+            tuple(cmd),
+            124,
+            stdout.strip(),
+            (stderr.strip() or "command timed out"),
+            timed_out=True,
+        )
+    if rc == 127 and not stdout and stderr == "not found":
+        return CommandResult(tuple(cmd), 127, "", "command not found")
+    return CommandResult(tuple(cmd), rc, stdout.strip(), stderr.strip())
 
 
 def is_termux() -> bool:

@@ -46,27 +46,12 @@ def _install_api_file(app_home: Path) -> Path:
 def resolve_install_api(app_home: Path | None = None) -> str:
     """Public base URL for install/authorize (no trailing slash).
 
-    Priority:
-    1. ``DENG_REJOIN_INSTALL_API`` environment variable
-    2. ``$DENG_REJOIN_HOME/.install_api`` (first line), written by the shell installer
-    3. :data:`DEFAULT_PUBLIC_INSTALL_API`
+    Delegates to :mod:`agent.api_config` so ``DENG_API_URL`` overrides are
+    respected everywhere (no silent production fallback when env is set).
     """
-    env_raw = (os.environ.get("DENG_REJOIN_INSTALL_API") or "").strip()
-    if env_raw:
-        return env_raw.rstrip("/")
+    from . import api_config
 
-    home = app_home if app_home is not None else _app_home()
-    p = _install_api_file(home)
-    if p.is_file():
-        try:
-            text = p.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            text = ""
-        line = text.strip().splitlines()[0].strip() if text.strip() else ""
-        if line:
-            return line.rstrip("/")
-
-    return DEFAULT_PUBLIC_INSTALL_API.rstrip("/")
+    return api_config.resolve_install_api(app_home)
 
 
 def _requested_path(app_home: Path) -> Path:

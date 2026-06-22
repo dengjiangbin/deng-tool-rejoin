@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -21,6 +22,9 @@ _log = logging.getLogger("deng.rejoin.package_username")
 
 USERNAME_DETECT_TIMEOUT_SECONDS = 8.0
 SAFE_DETECT_DEFAULT_TIMEOUT_SECONDS = 2.0
+MENU_SCAN_TIMEOUT_SECONDS = 3.0
+MENU_SCAN_CACHE_TTL_SECONDS = 2.0
+_ROOT_OP_TIMEOUT_SECONDS = 3
 _PREF_MAX_BYTES = 32 * 1024
 _FILE_MAX_BYTES = 64 * 1024
 
@@ -157,9 +161,13 @@ def _root_scan_paths(pkg: str, *, budget_seconds: float) -> tuple[str, str, str,
         if time.monotonic() >= deadline:
             break
         methods.append("root_shared_prefs_glob")
-        paths = root_access.list_root_glob(pattern, timeout=6, max_results=24)
+        paths = root_access.list_root_glob(
+            pattern, timeout=_ROOT_OP_TIMEOUT_SECONDS, max_results=24,
+        )
         for path in paths:
-            content = root_access.read_root_file(path, max_bytes=_PREF_MAX_BYTES, timeout=6)
+            content = root_access.read_root_file(
+                path, max_bytes=_PREF_MAX_BYTES, timeout=_ROOT_OP_TIMEOUT_SECONDS,
+            )
             if not content:
                 status_bits.append(f"unreadable:{path.split('/')[-1]}")
                 continue
@@ -187,10 +195,14 @@ def _root_scan_paths(pkg: str, *, budget_seconds: float) -> tuple[str, str, str,
         if time.monotonic() >= deadline:
             break
         methods.append("root_file_glob")
-        for path in root_access.list_root_glob(pattern, timeout=6, max_results=16):
+        for path in root_access.list_root_glob(
+            pattern, timeout=_ROOT_OP_TIMEOUT_SECONDS, max_results=16,
+        ):
             if path.endswith((".png", ".jpg", ".webp", ".so", ".apk")):
                 continue
-            content = root_access.read_root_file(path, max_bytes=_FILE_MAX_BYTES, timeout=6)
+            content = root_access.read_root_file(
+                path, max_bytes=_FILE_MAX_BYTES, timeout=_ROOT_OP_TIMEOUT_SECONDS,
+            )
             if not content:
                 continue
             text_user, text_key = _grep_username_in_text(content)
@@ -206,14 +218,16 @@ def _root_scan_paths(pkg: str, *, budget_seconds: float) -> tuple[str, str, str,
         if time.monotonic() >= deadline:
             break
         methods.append("root_database_glob")
-        for path in root_access.list_root_glob(pattern, timeout=6, max_results=8):
+        for path in root_access.list_root_glob(
+            pattern, timeout=_ROOT_OP_TIMEOUT_SECONDS, max_results=8,
+        ):
             safe_path = path.replace("'", "'\"'\"'")
             probe = root_access.run_root(
                 f"command -v sqlite3 >/dev/null 2>&1 && sqlite3 '{safe_path}' "
                 "\"SELECT username FROM sqlite_master LIMIT 0;\" 2>/dev/null; "
                 f"sqlite3 '{safe_path}' \"SELECT username,userName,displayName,accountName,playerName "
                 "FROM users LIMIT 5\" 2>/dev/null | head -5",
-                timeout=8,
+                timeout=_ROOT_OP_TIMEOUT_SECONDS,
             )
             if probe.ok and probe.stdout.strip():
                 for line in probe.stdout.splitlines():
@@ -222,7 +236,7 @@ def _root_scan_paths(pkg: str, *, budget_seconds: float) -> tuple[str, str, str,
                         if candidate:
                             status_bits.append(f"ok:db:{path.split('/')[-1]}")
                             return candidate, "root_database", "medium", tuple(methods), "; ".join(status_bits[-3:])
-            content = root_access.read_root_file(path, max_bytes=8192, timeout=6)
+            content = root_access.read_root_file(path, max_bytes=8192, timeout=_ROOT_OP_TIMEOUT_SECONDS)
             if content:
                 text_user, text_key = _grep_username_in_text(content)
                 if text_user:
@@ -353,7 +367,16 @@ def username_display_for_package(
             reason=str(exc)[:160],
         )
 
-    pre = root_access.root_required_preflight(timeout=max(3, int(min(timeout_seconds, 6))))
+    try:
+        pre = root_access.root_required_preflight(timeout=max(3, int(min(timeout_seconds, 6))))
+    except Exception as exc:  # noqa: BLE001
+        return UsernameDisplayRow(
+            package=pkg,
+            username_display=f"{SCANNER_ERROR_PREFIX} {exc}",
+            account_status="scanner_error",
+            username_source="root_preflight_failed",
+            reason=str(exc)[:160],
+        )
     if not pre.ok:
         return UsernameDisplayRow(
             package=pkg,
@@ -477,6 +500,81 @@ def scan_package_username(
         }
     )
     return root_report
+
+
+_menu_scan_cache_lock = threading.Lock()
+_menu_scan_cache: dict[str, tuple[float, UsernameScanReport]] = {}
+
+
+def _timeout_scan_report(package: str, *, duration_ms: int) -> UsernameScanReport:
+    return UsernameScanReport(
+        package=package,
+        username="",
+        source="scanner_timeout",
+        supported=True,
+        reason=f"{SCANNER_ERROR_PREFIX} Timeout",
+        methods_attempted=("root_scan_budget",),
+        duration_ms=duration_ms,
+        root_used=True,
+        root_read_status="timed out",
+    )
+
+
+def scan_package_username_for_menu(
+    package: str,
+    config_data: dict[str, Any] | None = None,
+    *,
+    timeout_seconds: float = MENU_SCAN_TIMEOUT_SECONDS,
+) -> UsernameScanReport:
+    """Fast, bounded username scan for package settings submenu.
+
+    Uses a brief in-memory cache (2s) so re-rendering the menu does not
+    re-run root I/O.  Each package scan is capped at ``timeout_seconds``
+    (default 3s).  On budget overrun returns ``Scanner Error: Timeout``.
+    """
+    del config_data
+    try:
+        pkg = validate_package_name(package)
+    except Exception as exc:  # noqa: BLE001
+        return UsernameScanReport(
+            package=str(package or "")[:120],
+            username="",
+            source="invalid",
+            supported=False,
+            reason=f"{SCANNER_ERROR_PREFIX} {exc}",
+            duration_ms=0,
+        )
+
+    now = time.monotonic()
+    with _menu_scan_cache_lock:
+        cached = _menu_scan_cache.get(pkg)
+        if cached and (now - cached[0]) <= MENU_SCAN_CACHE_TTL_SECONDS:
+            return cached[1]
+
+    started = time.monotonic()
+    budget = min(max(0.25, float(timeout_seconds)), MENU_SCAN_TIMEOUT_SECONDS)
+    report = scan_package_username_root(pkg, timeout_seconds=budget)
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    if (time.monotonic() - started) >= budget or elapsed_ms >= int(budget * 1000):
+        report = _timeout_scan_report(pkg, duration_ms=elapsed_ms)
+
+    with _menu_scan_cache_lock:
+        _menu_scan_cache[pkg] = (time.monotonic(), report)
+    return report
+
+
+def menu_username_display(
+    report: UsernameScanReport,
+    entry: dict[str, Any],
+    config_data: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    """Return ``(display_username, source_label)`` for menu rows."""
+    del entry, config_data  # menu uses scan report only — never re-scan via cache
+    if report.reason.startswith(SCANNER_ERROR_PREFIX):
+        return report.reason[:80], "scanner_error"
+    if report.username:
+        return report.username, report.source or "root_scan"
+    return NO_ACCOUNT_LABEL, report.source or "root_scan_no_account"
 
 
 def resolve_package_display_username(

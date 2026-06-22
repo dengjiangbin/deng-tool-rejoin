@@ -746,7 +746,10 @@ def _remote_license_check_direct(cfg: dict[str, Any]) -> tuple[str, str]:
         return "missing_key", "No license key configured."
     install_id = sync_install_id_with_config(lic)
     device = get_device_summary()
-    srv = (lic.get("server_url") or "").strip() or DEFAULT_LICENSE_SERVER_URL
+    srv = (lic.get("server_url") or "").strip()
+    if not srv:
+        from . import api_config as _api_cfg
+        srv = _api_cfg.license_server_url()
     return check_remote_license_status(
         srv,
         license_key=key,
@@ -765,7 +768,10 @@ def _remote_license_bind_direct(cfg: dict[str, Any]) -> tuple[str, str]:
         return "missing_key", "No license key configured."
     install_id = sync_install_id_with_config(lic)
     device = get_device_summary()
-    srv = (lic.get("server_url") or "").strip() or DEFAULT_LICENSE_SERVER_URL
+    srv = (lic.get("server_url") or "").strip()
+    if not srv:
+        from . import api_config as _api_cfg
+        srv = _api_cfg.license_server_url()
     return bind_remote_license_key(
         srv,
         license_key=key,
@@ -2588,18 +2594,30 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
     """
     if not _is_interactive():
         return draft
+    with safe_io.tty_session():
+        return _config_menu_package_loop(draft)
+
+
+def _config_menu_package_loop(draft: dict[str, Any]) -> dict[str, Any]:
     while True:
         print()
         entries = validate_package_entries(
             draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
         )
         username_diag: list[dict[str, Any]] = []
+        menu_scans: dict[str, package_username.UsernameScanReport] = {}
+        enabled_entries = [e for e in entries if e.get("enabled", True)]
         for entry in entries:
-            scan = package_username.scan_package_username(entry.get("package", ""), draft)
+            pkg = str(entry.get("package") or "").strip()
+            if not pkg:
+                continue
+            scan = package_username.scan_package_username_for_menu(pkg, draft)
+            menu_scans[pkg] = scan
+            uname, src = package_username.menu_username_display(scan, entry, draft)
             username_diag.append({
-                "package": entry.get("package", ""),
-                "display_username": scan.username or get_package_display_username(entry, draft),
-                "username_source": scan.source if scan.username else (entry.get("username_source") or "not_set"),
+                "package": pkg,
+                "display_username": uname,
+                "username_source": src,
                 "username_supported": scan.supported,
                 "username_reason": scan.reason,
                 "methods_attempted": list(scan.methods_attempted),
@@ -2611,17 +2629,16 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
                 "mapping_refresh_called": False,
             })
         draft["_package_menu_username_diag"] = username_diag
-        enabled_entries = [e for e in entries if e.get("enabled", True)]
         current_lines = ["Current Packages:"]
         if enabled_entries:
             for idx, entry in enumerate(enabled_entries, start=1):
-                scan = package_username.scan_package_username(entry["package"], draft)
-                uname = scan.username or get_package_display_username(entry, draft)
-                src = scan.source if scan.username else (
-                    scan.reason[:24] if scan.reason else (entry.get("username_source") or "root_scan")
-                )
+                pkg = entry["package"]
+                scan = menu_scans.get(pkg) or package_username.scan_package_username_for_menu(pkg, draft)
+                uname, src = package_username.menu_username_display(scan, entry, draft)
                 current_lines.append(
-                    f"  [{idx}] {entry['package']} | username: {uname} | source: {src} | state: ready"
+                    termux_ui.fit_line(
+                        f"  [{idx}] {pkg} | username: {uname} | source: {src} | state: ready"
+                    )
                 )
         else:
             current_lines.append("  No Packages Configured.")
@@ -3096,7 +3113,7 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
     )
     current_pkgs = {e["package"] for e in current_entries}
 
-    _print_full_discovery_table(candidates, config_data)
+    _print_full_discovery_table(candidates, draft)
     new_candidates = [c for c in candidates if c.package not in current_pkgs]
     already_all = len(new_candidates) == 0
     if already_all:
@@ -3819,24 +3836,25 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
     # Print banner once before the loop; do NOT reprint inside the loop to
     # prevent the logo from appearing multiple times as the user navigates.
     print_banner(use_color=True)
-    while True:
-        termux_ui.print_config_menu()
-        choice = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
-        if choice is None:
-            print("\nNo interactive input was available. Run this command in Termux to edit settings.")
-            print("\nCurrent settings:")
-            _print_config_summary(draft)
-            return draft, False
-        choice = choice.strip() or "0"
-        if choice == "0":
-            return draft, True
-        if choice == "1":
-            draft = _config_menu_package(draft)
-        elif choice == "2":
-            draft = _config_menu_launch_link(draft)
-        else:
-            termux_ui.print_invalid_option()
-            safe_io.press_enter()
+    with safe_io.tty_session():
+        while True:
+            termux_ui.print_config_menu()
+            choice = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
+            if choice is None:
+                print("\nNo interactive input was available. Run this command in Termux to edit settings.")
+                print("\nCurrent settings:")
+                _print_config_summary(draft)
+                return draft, False
+            choice = choice.strip() or "0"
+            if choice == "0":
+                return draft, True
+            if choice == "1":
+                draft = _config_menu_package(draft)
+            elif choice == "2":
+                draft = _config_menu_launch_link(draft)
+            else:
+                termux_ui.print_invalid_option()
+                safe_io.press_enter()
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
@@ -4478,6 +4496,15 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
     return f"{color}{status}{_ANSI_RESET}" if color else status
 
 
+def _cap_plain_cell(raw: str, max_w: int) -> str:
+    text = str(raw or "")
+    if _visible_len(text) <= max_w:
+        return text
+    if max_w <= 3:
+        return text[:max_w]
+    return text[: max_w - 3] + "..."
+
+
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     """Build the public start summary table: #, Package, Username, State, Runtime, Usage.
 
@@ -4486,11 +4513,8 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     6-tuples (idx, pkg, username, state, runtime, usage).
     Missing trailing columns are shown as empty cells.
 
-    With ``use_color=True`` every cell is rendered in bold so the table
-    is readable on the Termux default monospace font (which renders the
-    regular weight as a hairline).  Status cells additionally carry
-    their colour code from :func:`_colorize_status`; the rest of the
-    cells get the plain ``BOLD`` escape only.
+    Table width is clamped to ``shutil.get_terminal_size().columns`` so cells
+    hard-truncate with ``...`` instead of wrapping to the next line.
     """
     headers = ("#", "Package", "Username", "State", "Runtime", "Usage")
     str_rows = [
@@ -4500,6 +4524,19 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
             str(r[5]) if len(r) > 5 else "",
         )
         for r in rows
+    ]
+
+    term_cols = safe_io.terminal_columns()
+    border_budget = 2 + (len(headers) * 3)
+    data_budget = max(24, term_cols - border_budget)
+    col_caps = [4, 14, 16, 14, 8, 8]
+    capped_total = sum(col_caps)
+    if capped_total > data_budget:
+        scale = data_budget / capped_total
+        col_caps = [max(4, int(c * scale)) for c in col_caps]
+    str_rows = [
+        tuple(_cap_plain_cell(str_rows[i][j], col_caps[j]) for j in range(6))
+        for i in range(len(str_rows))
     ]
 
     widths = [
@@ -4548,7 +4585,7 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
         *(_data_row(colored_rows[i], str_rows[i]) for i in range(len(colored_rows))),
         _hline("└", "┴", "┘"),
     ]
-    return "\n".join(lines)
+    return "\n".join(termux_ui.fit_line(line, term_cols) for line in lines)
 
 
 def build_account_mapping_table(rows: list[tuple[str, str, str, str, str, str]]) -> str:
@@ -5563,8 +5600,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 pass
             lines.append(build_start_table(rows, use_color=use_color))
             _clear_terminal(clear_scrollback=True)
-            sys.stdout.write("\n".join(lines) + "\n")
-            sys.stdout.flush()
+            safe_io.write_stdout_block("\n".join(lines) + "\n")
 
         def _set_all_phase(label: str, note: str = "") -> None:
             for pkg in phase:
@@ -6217,8 +6253,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             ]
             lines.append(build_start_table(live_rows, use_color=use_color))
             _clear_terminal(clear_scrollback=False)
-            sys.stdout.write("\n".join(lines) + "\n")
-            sys.stdout.flush()
+            safe_io.write_stdout_block("\n".join(lines) + "\n")
 
         _transition_lifecycle("MONITORING", "launch_complete")
         try:
@@ -6693,12 +6728,12 @@ def cmd_probe(args: argparse.Namespace) -> int:
     failure becomes a ``probe["errors"]`` entry.
     """
     from . import probe as _p
+    from . import api_config as _api
     from .logger import configure_logging, log_event
 
     include_diag = bool(getattr(args, "diag", False))
     eta = "~30s" if include_diag else "~10s"
-    sys.stdout.write(f"Collecting device evidence... ({eta})\n")
-    sys.stdout.flush()
+    safe_io.write_stdout(f"Collecting device evidence... ({eta})")
     started = _p.time.monotonic()
     first_run = True
     try:
@@ -6714,19 +6749,18 @@ def cmd_probe(args: argparse.Namespace) -> int:
             last_command="probe --upload" if getattr(args, "upload", False) else "probe",
         )
     except Exception as exc:  # noqa: BLE001 — should be impossible, but be safe.
-        sys.stdout.write(f"probe failed: {exc}\n")
+        safe_io.write_stdout(f"probe failed: {exc}")
         return 1
     elapsed = _p.time.monotonic() - started
     path = _p.save_probe(data)
     size = path.stat().st_size
-    sys.stdout.write(
+    safe_io.write_stdout(
         f"probe saved: {path} ({size / 1024:.1f} KB, "
-        f"{len(data.get('errors') or [])} step errors, {elapsed:.1f}s)\n"
+        f"{len(data.get('errors') or [])} step errors, {elapsed:.1f}s)"
     )
 
     if getattr(args, "upload", False):
-        sys.stdout.write("uploading...\n")
-        sys.stdout.flush()
+        safe_io.write_stdout("uploading...")
         ok, info = _p.upload_probe(data)
         try:
             log_event(
@@ -6742,31 +6776,35 @@ def cmd_probe(args: argparse.Namespace) -> int:
         except Exception:  # noqa: BLE001
             pass
         if ok:
-            sys.stdout.write(f"probe uploaded: {info}\n")
-            sys.stdout.write(f"probe path: {path}\n")
+            admin_url = _api.dev_probe_fetch_url(info)
+            safe_io.write_stdout(f"probe uploaded: {info}")
+            safe_io.write_stdout(f"probe path: {path}")
             fetch_ok = False
-            try:
-                from . import safe_http as _sh
-                from .constants import DEFAULT_LICENSE_SERVER_URL
-                fetch_url = DEFAULT_LICENSE_SERVER_URL.rstrip("/") + f"/api/dev-probe/{info}"
-                status, body = _sh.get_raw(fetch_url, timeout=20)
-                fetch_ok = status == 200 and info.encode() in (body or b"")
-            except Exception:  # noqa: BLE001
-                fetch_ok = False
-            sys.stdout.write(
-                f"probe fetch verify: {'ok' if fetch_ok else 'failed'} ({info})\n"
+            fetch_detail = "skipped (no API base configured)"
+            if admin_url:
+                try:
+                    from . import safe_http as _sh
+
+                    status, body = _sh.get_raw(admin_url, timeout=(5, 15))
+                    fetch_ok = status == 200 and info.encode() in (body or b"")
+                    fetch_detail = f"HTTP {status}"
+                except Exception as exc:  # noqa: BLE001
+                    fetch_detail = str(exc)[:120]
+            safe_io.write_stdout(
+                f"probe fetch verify: {'ok' if fetch_ok else 'failed'} ({info}) [{fetch_detail}]"
             )
-            sys.stdout.write(f"probe admin URL: https://rejoin.deng.my.id/api/dev-probe/{info}\n")
+            if admin_url:
+                safe_io.write_stdout(f"probe admin URL: {admin_url}")
         else:
             bundle_path = ""
             try:
                 bundle_path = str(_p.save_upload_bundle(data, reason=str(info)))
             except Exception as exc:  # noqa: BLE001
                 bundle_path = f"<bundle creation failed: {exc}>"
-            sys.stdout.write(f"probe upload failed: {info}\n")
-            sys.stdout.write(f"local probe saved: {path}\n")
-            sys.stdout.write(f"upload bundle saved: {bundle_path}\n")
-            sys.stdout.write("send this file manually if upload is blocked\n")
+            safe_io.write_stdout(f"probe upload failed: {info}")
+            safe_io.write_stdout(f"local probe saved: {path}")
+            safe_io.write_stdout(f"upload bundle saved: {bundle_path}")
+            safe_io.write_stdout("send this file manually if upload is blocked")
             return 1
     else:
         try:
@@ -6782,8 +6820,8 @@ def cmd_probe(args: argparse.Namespace) -> int:
             )
         except Exception:  # noqa: BLE001
             pass
-        sys.stdout.write("to share, either paste the JSON file in chat, or run:\n")
-        sys.stdout.write("  deng-rejoin probe --upload\n")
+        safe_io.write_stdout("to share, either paste the JSON file in chat, or run:")
+        safe_io.write_stdout("  deng-rejoin probe --upload")
     return 0
 
 
@@ -7737,12 +7775,14 @@ def cmd_menu(args: argparse.Namespace) -> int:
     # Notify user if a recent crash was detected (but never show the stack).
     crash_notice = safe_io.check_and_report_crash_log()
     if crash_notice:
+        safe_io.restore_terminal()
+        first_line = crash_notice.split("\n", 1)[0]
         if use_color:
-            print()
-            print(termux_ui.warning_line(crash_notice.split("\n", 1)[0]))
-            print()
+            safe_io.write_stdout("")
+            safe_io.write_stdout(termux_ui.warning_line(first_line))
+            safe_io.write_stdout("")
         else:
-            print(f"\n⚠  {crash_notice}\n")
+            safe_io.write_stdout(f"\n⚠  {first_line}\n")
 
     # Dev mode: skip license gate entirely
     if keystore.DEV_MODE:
@@ -7961,6 +8001,7 @@ def main(argv: list[str] | None = None) -> int:
     tracebacks never reach the public terminal.  All Python-level exceptions
     are caught here; the public user never sees a raw traceback or signal text.
     """
+    safe_io.restore_terminal()
     safe_io.setup_faulthandler()
     # Silence internal namespace loggers so warnings/errors never leak to terminal.
     try:
@@ -7985,6 +8026,7 @@ def main(argv: list[str] | None = None) -> int:
         return _code if isinstance(_code, int) else (0 if _code is None else 1)
     except Exception as exc:  # noqa: BLE001
         import logging as _logging
+        safe_io.restore_terminal()
         _logging.getLogger("deng.rejoin.cli").debug("Unhandled CLI error", exc_info=True)
         _write_cli_crash_log(exc, context="main")
         print(
