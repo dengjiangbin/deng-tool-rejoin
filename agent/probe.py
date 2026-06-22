@@ -639,7 +639,7 @@ def _capture_wrapper_script(errors: list[dict[str, str]]) -> dict[str, Any]:
 
 
 def _capture_diag_startup(errors: list[dict[str, str]]) -> dict[str, Any]:
-    """Exec ``deng-rejoin --diag-startup`` as a child subprocess.
+    """Exec ``deng-rejoin --diag-startup-full`` as a child subprocess.
 
     The child walks the ``cmd_menu`` steps one at a time and prints
     ``STEP:<name>`` before invoking each.  If the child segfaults, we get
@@ -658,7 +658,7 @@ def _capture_diag_startup(errors: list[dict[str, str]]) -> dict[str, Any]:
         from . import subprocess_isolated as _iso  # noqa: PLC0415
 
         rc, stdout, stderr, timed_out = _iso.run_isolated_text(
-            [wrapper, "--diag-startup"],
+            [wrapper, "--diag-startup-full"],
             timeout=45.0,
         )
         out["returncode"] = rc

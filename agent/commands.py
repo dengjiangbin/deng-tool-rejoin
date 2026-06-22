@@ -6845,7 +6845,57 @@ def cmd_doctor_install(args: argparse.Namespace) -> int:
 
 
 def cmd_diag_startup(args: argparse.Namespace) -> int:
-    """Hidden: walk every step of the menu-startup chain, printing markers.
+    """Fast boot diagnostic: crash-log notice + minimal sanity, then hard exit.
+
+    Never enters license checks, root scans, layout probes, or network I/O.
+    Used by ``tests/hardware_verify.py`` and non-interactive crash rescue.
+    """
+    def _step(name: str) -> None:
+        safe_io.write_stdout(f"STEP:{name}")
+
+    def _ok(name: str, detail: str = "") -> None:
+        suffix = f" {detail}" if detail else ""
+        safe_io.write_stdout(f"OK:{name}{suffix}")
+
+    def _err(name: str, exc: BaseException) -> None:
+        safe_io.write_stdout(
+            f"ERROR:{name} {type(exc).__name__}: {str(exc)[:160]}"
+        )
+
+    _step("entered")
+
+    try:
+        _step("ensure_app_dirs")
+        ensure_app_dirs()
+        _ok("ensure_app_dirs")
+    except Exception as exc:  # noqa: BLE001
+        _err("ensure_app_dirs", exc)
+        sys.exit(2)
+
+    notice: str | None = None
+    try:
+        _step("check_crash_log")
+        notice = safe_io.check_and_report_crash_log()
+        if notice:
+            safe_io.write_stdout(notice.split("\n", 1)[0])
+        _ok("check_crash_log", f"notice={'yes' if notice else 'no'}")
+    except Exception as exc:  # noqa: BLE001
+        _err("check_crash_log", exc)
+
+    try:
+        _step("keystore_dev_mode")
+        dev = bool(keystore.DEV_MODE)
+        _ok("keystore_dev_mode", f"dev={dev}")
+    except Exception as exc:  # noqa: BLE001
+        _err("keystore_dev_mode", exc)
+
+    _step("finished")
+    sys.exit(0)
+    return 0  # pragma: no cover
+
+
+def cmd_diag_startup_full(args: argparse.Namespace) -> int:
+    """Full startup tracer: walk every menu-startup step for probe crash isolation.
 
     Each marker is flushed *before* the step runs.  If any sub-routine
     segfaults (real device incident: probe ``p-b30c47d37f``), the parent
@@ -6853,10 +6903,9 @@ def cmd_diag_startup(args: argparse.Namespace) -> int:
     is the next call.  Errors are caught and printed as ``ERROR:<step>``
     so a Python exception doesn't masquerade as a crash.
 
-    Designed to be invoked by :func:`agent.probe._capture_diag_startup`
-    via ``subprocess.run`` so a SIGSEGV in any module is *isolated to
-    this child* — the probe parent survives and uploads the partial
-    output as evidence.
+    Invoked by :func:`agent.probe._capture_diag_startup` via
+    ``--diag-startup-full`` so the fast ``--diag-startup`` rescue path stays
+    sub-second on live hardware.
     """
     def _step(name: str) -> None:
         sys.stdout.write(f"STEP:{name}\n")
@@ -6868,8 +6917,6 @@ def cmd_diag_startup(args: argparse.Namespace) -> int:
         sys.stdout.flush()
 
     def _err(name: str, exc: BaseException) -> None:
-        # Truncated single line.  Real trace goes to the file logger
-        # via the global except in main(); this is just a marker.
         sys.stdout.write(f"ERROR:{name} {type(exc).__name__}: {str(exc)[:160]}\n")
         sys.stdout.flush()
 
@@ -7860,6 +7907,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help=argparse.SUPPRESS)
     parser.add_argument("--diag-startup", dest="diag_startup", action="store_true",
                         help=argparse.SUPPRESS)
+    parser.add_argument("--diag-startup-full", dest="diag_startup_full", action="store_true",
+                        help=argparse.SUPPRESS)
     # ``--diag`` opts INTO the heavy child-subprocess diag step (45 s
     # timeout) inside ``deng-rejoin probe``.  Off by default — without
     # it the probe completes in ~10 s and reliably fits the 4 MB upload
@@ -7983,6 +8032,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ns.resolved_command = "support-bundle"
     elif getattr(ns, "probe", False):
         ns.resolved_command = "probe"
+    elif getattr(ns, "diag_startup_full", False):
+        ns.resolved_command = "diag-startup-full"
     elif getattr(ns, "diag_startup", False):
         ns.resolved_command = "diag-startup"
     elif getattr(ns, "doctor_install", False):
@@ -8002,6 +8053,20 @@ def main(argv: list[str] | None = None) -> int:
     are caught here; the public user never sees a raw traceback or signal text.
     """
     safe_io.restore_terminal()
+    try:
+        args = parse_args(argv)
+    except SystemExit as _parse_exc:
+        _code = _parse_exc.code
+        return _code if isinstance(_code, int) else (0 if _code is None else 1)
+
+    if args.resolved_command == "diag-startup":
+        try:
+            cmd_diag_startup(args)
+        except SystemExit as _diag_exc:
+            _code = _diag_exc.code
+            return _code if isinstance(_code, int) else 0
+        return 0
+
     safe_io.setup_faulthandler()
     # Silence internal namespace loggers so warnings/errors never leak to terminal.
     try:
@@ -8010,7 +8075,6 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001
         pass
     try:
-        args = parse_args(argv)
         return _handlers()[args.resolved_command](args)
     except KeyboardInterrupt:
         # Silent exit — return cleanly to shell, no public text.
@@ -8062,6 +8126,7 @@ def _handlers() -> dict[str, Any]:
         "doctor-install": cmd_doctor_install,
         "probe": cmd_probe,
         "diag-startup": cmd_diag_startup,
+        "diag-startup-full": cmd_diag_startup_full,
         "scan": cmd_scan,
         "map": cmd_map,
         "list": cmd_list_packages,
