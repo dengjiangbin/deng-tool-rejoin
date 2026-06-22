@@ -81,6 +81,7 @@ const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const totemImageAssets = require('./fishitTotemImageAssets');
 const manualInventoryImages = require('./fishitInventoryManualImages');
+const trackerItemImageOverrides = require('./fishitTrackerItemImageOverrides');
 const inventorySort = require('./fishitInventorySort');
 const inventoryAssets = require('./inventoryAssets');
 const inventoryTrackedAccounts = require('./inventoryTrackedAccounts');
@@ -3161,6 +3162,7 @@ function buildTrackerPageLocals(req) {
     trackerRarityCardCss: trackerRarityStyle.buildFtCardRarityCss(),
     trackerRarityJsBootstrap: trackerRarityStyle.buildTrackerRarityJsBootstrap(),
     trackerStoneJsBootstrap: fishitStoneDisplayMap.buildTrackerStoneJsBootstrap(),
+    trackerItemImageJsBootstrap: trackerItemImageOverrides.buildTrackerItemImageOverridesJsBootstrap(),
     trackerTemplateVersion: trackerTemplateVersion(),
     debugInventory,
     apkEmbed,
@@ -3322,7 +3324,8 @@ function reEnrichPublicStoneItems(items, baseUrl) {
   if (!Array.isArray(items) || !items.length) return items;
   const withImages = stoneImageAssets.attachStoneImagesToItems(items, baseUrl);
   const manualRefreshed = manualInventoryImages.refreshManualImagesOnPublicItems(withImages, 'stones', baseUrl);
-  return manualRefreshed.map((item) => gameItemDbPublic.mapToPublicStoneCardItem({
+  const overrideRefreshed = trackerItemImageOverrides.applyTrackerItemImageOverridesToItems(manualRefreshed);
+  return overrideRefreshed.map((item) => gameItemDbPublic.mapToPublicStoneCardItem({
     ...item,
     quantity: item.quantity != null ? item.quantity : (item.amount != null ? item.amount : 1),
   }));

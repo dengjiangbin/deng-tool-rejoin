@@ -6,6 +6,7 @@ const path = require('path');
 const stoneDisplayMap = require('./fishitStoneDisplayMap');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
 const manualInventoryImages = require('./fishitInventoryManualImages');
+const trackerItemImageOverrides = require('./fishitTrackerItemImageOverrides');
 const { trackerReadAssetUrl, trackerReadImageUrl } = require('./fishitTrackerReadUrls');
 
 const STONE_MANUAL_ASSET_SOURCE = 'stone_manual_asset';
@@ -170,6 +171,15 @@ function attachStoneImagesToItems(items, baseUrl) {
       dataSource: item.dataSource || item.source || 'playerdata_gameitemdb',
       source: item.source || 'playerdata_gameitemdb',
     };
+
+    const trackerTopGridOverride = trackerItemImageOverrides.resolveTrackerItemImageOverride(rowBase);
+    if (trackerTopGridOverride) {
+      return {
+        ...rowBase,
+        ...trackerTopGridOverride,
+        imageResolved: true,
+      };
+    }
 
     // Manual override wins over EVERY other source (incl. preferGameDbIcon) so
     // explicitly-uploaded art (e.g. Runic Stone) always beats broken catalog/

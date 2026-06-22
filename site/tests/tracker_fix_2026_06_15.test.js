@@ -259,12 +259,12 @@ describe('STRICT tracker fix — Runic Stone image override (E)', () => {
     assert.ok(!fs.existsSync(path.join(seedDir, 'runic_stone_2026_06_15.png')), 'old runic seed removed');
   });
 
-  test('stone resolver returns the v2 manual override for Runic Stone', () => {
+  test('stone resolver returns top-grid owned URL for Runic Stone', () => {
     const stoneAssets = require('../src/fishitStoneImageAssets');
     require('../src/fishitInventoryManualImages').ensureOverrideFilesFromSeed();
     const rows = stoneAssets.attachStoneImagesToItems([{ name: 'Runic Stone', stoneType: 'Runic' }], 'https://x');
-    assert.equal(rows[0].imageResolver, 'stone_manual_override');
-    assert.match(rows[0].imageUrl, /runic_stone_2026_06_15_v2\.png/);
+    assert.equal(rows[0].imageResolver, 'tracker_top_grid_runic_stone');
+    assert.equal(rows[0].imageUrl, '/public/assets/tracker-top-grid/runic-stone.png');
   });
 
   test('Love Totem and Shiny Totem overrides still resolve', () => {

@@ -58,9 +58,9 @@ describe('totem image resolver', () => {
     const stoneRows = stoneImageAssets.attachStoneImagesToItems([
       { kind: 'stone', itemId: '900', name: 'Runic Stone', stoneType: 'Runic', quantity: 1, icon: 'rbxassetid://888', source: 'playerdata_gameitemdb' },
     ], 'http://127.0.0.1:8791');
-    assert.match(stoneRows[0].imageUrl, /manual\/stones\/runic_stone_2026_06_15_v2\.png/);
-    assert.equal(stoneRows[0].imageSource, 'manual_override');
-    assert.equal(stoneRows[0].imageResolver, 'stone_manual_override');
+    assert.equal(stoneRows[0].imageUrl, '/public/assets/tracker-top-grid/runic-stone.png');
+    assert.equal(stoneRows[0].imageSource, 'tracker_top_grid_item_override');
+    assert.equal(stoneRows[0].imageResolver, 'tracker_top_grid_runic_stone');
   });
 
   test('buildPublicFromPlayerDataGameItemDb maps totem cards with totem image source', async () => {

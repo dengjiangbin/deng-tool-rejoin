@@ -13,6 +13,7 @@ const MARKER = 'TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14';
 
 const trackerRarityStyle = require('../src/fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('../src/fishitStoneDisplayMap');
+const trackerItemImageOverrides = require('../src/fishitTrackerItemImageOverrides');
 
 function minifyCss(source) {
   return String(source || '')
@@ -77,6 +78,7 @@ function transformJs(rawJs) {
   );
   js = js.replace(/^\s*<%- typeof trackerRarityJsBootstrap[\s\S]*?%>\s*$/m, trackerRarityStyle.buildTrackerRarityJsBootstrap());
   js = js.replace(/^\s*<%- typeof trackerStoneJsBootstrap[\s\S]*?%>\s*$/m, fishitStoneDisplayMap.buildTrackerStoneJsBootstrap());
+  js = js.replace(/^\s*<%- typeof trackerItemImageJsBootstrap[\s\S]*?%>\s*$/m, trackerItemImageOverrides.buildTrackerItemImageOverridesJsBootstrap());
   js = js.replace(
     /\|\| '<%- typeof trackerLoadstring[\s\S]*?%>';/,
     '|| (__CFG__.trackerLoadstring || \'\');',
