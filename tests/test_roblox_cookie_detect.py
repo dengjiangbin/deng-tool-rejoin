@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-import agent.roblox_cookie_detect as rcd
-from agent.roblox_cookie_detect import detect_roblox_cookie
+import agent.roblox_presence as rp
+from agent.roblox_presence import detect_roblox_cookie, roblox_cookie_detect
 
 
 class RobloxCookieDetectTests(unittest.TestCase):
@@ -14,7 +14,7 @@ class RobloxCookieDetectTests(unittest.TestCase):
             "</map>"
         )
         self.assertEqual(
-            rcd.cookie_from_pref_xml(xml),
+            rp.cookie_from_pref_xml(xml),
             "_|WARNING:-DO-NOT-SHARE-THIS.ABCDEF1234567890",
         )
 
@@ -26,21 +26,24 @@ class RobloxCookieDetectTests(unittest.TestCase):
             "</map>"
         )
         self.assertEqual(
-            rcd.cookie_from_pref_xml(xml),
+            rp.cookie_from_pref_xml(xml),
             "_|WARNING:-DO-NOT-SHARE-THIS.SECONDVALUE",
         )
 
     def test_detect_roblox_cookie_uses_existing_config_value(self) -> None:
         entry = {"roblox_cookie": "_|WARNING:-DO-NOT-SHARE-THIS.CONFIGCOOKIE"}
-        cookie = rcd.detect_roblox_cookie("com.roblox.client", entry=entry, use_root=False)
+        cookie = detect_roblox_cookie("com.roblox.client", entry=entry, use_root=False)
         self.assertEqual(cookie, "_|WARNING:-DO-NOT-SHARE-THIS.CONFIGCOOKIE")
+
+    def test_roblox_cookie_detect_alias_points_to_detect_roblox_cookie(self) -> None:
+        self.assertIs(roblox_cookie_detect, detect_roblox_cookie)
 
     def test_detect_roblox_cookie_force_rescan_skips_existing_entry(self) -> None:
         entry = {"roblox_cookie": "_|WARNING:-DO-NOT-SHARE-THIS.OLDVALUE"}
-        with patch("agent.roblox_cookie_detect.root_access.has_root", return_value=True), \
-             patch("agent.roblox_cookie_detect._root_scan_shared_prefs", return_value="_|WARNING:-DO-NOT-SHARE-THIS.NEWVALUE"), \
-             patch("agent.roblox_cookie_detect._root_scan_webview_cookies", return_value=""):
-            cookie = rcd.detect_roblox_cookie(
+        with patch("agent.roblox_presence.root_access.has_root", return_value=True), \
+             patch("agent.roblox_presence._root_scan_shared_prefs", return_value="_|WARNING:-DO-NOT-SHARE-THIS.NEWVALUE"), \
+             patch("agent.roblox_presence._root_scan_webview_cookies", return_value=""):
+            cookie = detect_roblox_cookie(
                 "com.roblox.client",
                 entry=entry,
                 use_root=True,
@@ -55,21 +58,21 @@ class RobloxCookieDetectTests(unittest.TestCase):
             '<string name=".ROBLOSECURITY">_|WARNING:-DO-NOT-SHARE-THIS.ROOTFOUND</string>'
             "</map>"
         )
-        with patch("agent.roblox_cookie_detect.root_access.has_root", return_value=True), \
-             patch("agent.roblox_cookie_detect.root_access.list_root_glob", return_value=["/data/data/com.roblox.client/shared_prefs/auth.xml"]), \
-             patch("agent.roblox_cookie_detect.root_access.read_root_file", return_value=xml), \
-             patch("agent.roblox_cookie_detect._root_scan_webview_cookies", return_value=""):
-            cookie = rcd.detect_roblox_cookie("com.roblox.client", use_root=True)
+        with patch("agent.roblox_presence.root_access.has_root", return_value=True), \
+             patch("agent.roblox_presence.root_access.list_root_glob", return_value=["/data/data/com.roblox.client/shared_prefs/auth.xml"]), \
+             patch("agent.roblox_presence.root_access.read_root_file", return_value=xml), \
+             patch("agent.roblox_presence._root_scan_webview_cookies", return_value=""):
+            cookie = detect_roblox_cookie("com.roblox.client", use_root=True)
         self.assertEqual(cookie, "_|WARNING:-DO-NOT-SHARE-THIS.ROOTFOUND")
 
     def test_detect_roblox_cookie_falls_back_to_webview_db(self) -> None:
-        with patch("agent.roblox_cookie_detect.root_access.has_root", return_value=True), \
-             patch("agent.roblox_cookie_detect._root_scan_shared_prefs", return_value=""), \
+        with patch("agent.roblox_presence.root_access.has_root", return_value=True), \
+             patch("agent.roblox_presence._root_scan_shared_prefs", return_value=""), \
              patch(
-                 "agent.roblox_cookie_detect._root_scan_webview_cookies",
+                 "agent.roblox_presence._root_scan_webview_cookies",
                  return_value="_|WARNING:-DO-NOT-SHARE-THIS.WEBVIEW",
              ):
-            cookie = rcd.detect_roblox_cookie("com.roblox.client", use_root=True)
+            cookie = detect_roblox_cookie("com.roblox.client", use_root=True)
         self.assertEqual(cookie, "_|WARNING:-DO-NOT-SHARE-THIS.WEBVIEW")
 
 

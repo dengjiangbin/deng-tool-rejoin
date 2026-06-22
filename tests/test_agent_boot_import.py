@@ -26,10 +26,11 @@ class AgentBootImportTests(unittest.TestCase):
         proc = self._run_py("import agent; assert agent.__version__")
         self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
 
-    def test_roblox_cookie_detect_imports_from_submodule(self) -> None:
+    def test_cookie_detect_imports_from_roblox_presence(self) -> None:
         proc = self._run_py(
-            "from agent.roblox_cookie_detect import detect_roblox_cookie; "
-            "assert callable(detect_roblox_cookie)"
+            "from agent.roblox_presence import detect_roblox_cookie, roblox_cookie_detect; "
+            "assert callable(detect_roblox_cookie); "
+            "assert roblox_cookie_detect is detect_roblox_cookie"
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
 
@@ -43,6 +44,13 @@ class AgentBootImportTests(unittest.TestCase):
             "assert 'roblox_cookie_detect' not in agent.__dict__"
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
+
+    def test_protected_bundle_includes_roblox_presence(self) -> None:
+        from agent.internal_test_artifact import iter_internal_test_pack_files
+
+        rels = {rel for rel, _path in iter_internal_test_pack_files(PROJECT)}
+        self.assertIn("agent/roblox_presence.py", rels)
+        self.assertNotIn("agent/roblox_cookie_detect.py", rels)
 
     def test_subprocess_import_agent_exit_zero(self) -> None:
         proc = self._run_py("import agent")

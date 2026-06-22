@@ -995,7 +995,7 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
         entries = [package_entry("com.roblox.client", "user1", True, "manual")]
         detected = [(123, "root_prefs")]
         with unittest.mock.patch(
-            "agent.roblox_cookie_detect.detect_roblox_cookie",
+            "agent.roblox_presence.detect_roblox_cookie",
             side_effect=AssertionError("cookie scan"),
         ):
             out = _apply_mapping_to_entries(entries, detected, ["Validated"], config={})
@@ -1035,7 +1035,7 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
 
         entries = [package_entry("com.roblox.client", "user1", True, "manual")]
         with unittest.mock.patch(
-            "agent.roblox_cookie_detect.detect_roblox_cookie",
+            "agent.roblox_presence.detect_roblox_cookie",
             side_effect=AssertionError("cookie scan"),
         ), unittest.mock.patch("agent.commands._is_interactive", return_value=False):
             out = _auto_detect_cookies_for_entries(entries, {})

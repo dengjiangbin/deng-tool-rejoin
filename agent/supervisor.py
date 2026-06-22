@@ -1554,7 +1554,7 @@ class WatchdogSupervisor:
                 if (time.monotonic() - last_cookie_attempt) >= 120.0:
                     self._presence_cookie_lookup_at[pkg] = time.monotonic()
                     try:
-                        from agent.roblox_cookie_detect import detect_roblox_cookie
+                        from agent.roblox_presence import detect_roblox_cookie
 
                         cookie = detect_roblox_cookie(
                             pkg,
