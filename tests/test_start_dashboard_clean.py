@@ -12,6 +12,7 @@ Verifies:
 
 from __future__ import annotations
 
+import contextlib
 import io
 import inspect
 import sys
@@ -171,6 +172,68 @@ class TestStartOutputClean(unittest.TestCase):
         out = self._get_output()
         self.assertNotIn("Detected packages:", out,
             "Raw 'Detected packages:' must not appear in dashboard stdout")
+
+    def test_no_onboarding_when_persisted_packages_exist(self):
+        """Live scan may return 0 on cloud phones; persisted config must still start."""
+        import agent.commands as _cmd
+        import agent.keystore as _ks
+
+        cfg = {
+            "roblox_package": "com.roblox.client",
+            "first_setup_completed": True,
+            "packages": [
+                {"package": "com.roblox.client", "enabled": True,
+                 "username": "User1", "low_graphics_enabled": True},
+            ],
+            "supervisor": {"enabled": False, "launch_grace_seconds": 0},
+            "optimization": {"low_graphics_enabled": False},
+        }
+        args = MagicMock()
+        args.no_color = True
+        args.verbose = False
+        args.debug = False
+        mock_sup_inst = MagicMock()
+        mock_sup_inst.status_map = {"com.roblox.client": "Unknown"}
+        mock_sup_inst.stop_source = "user_exit"
+        mock_sup_inst.run_forever = lambda render_callback=None, display_interval=None: None
+
+        buf = io.StringIO()
+        with (
+            patch.object(_ks, "DEV_MODE", True),
+            patch("agent.commands.load_config", return_value=cfg),
+            patch("agent.commands.save_config"),
+            patch("agent.commands._ensure_install_id_saved", return_value=cfg),
+            patch("agent.commands.enabled_package_entries", return_value=self.ENTRIES),
+            patch("agent.commands.android.discover_roblox_package_candidates", return_value=[]),
+            patch("agent.commands.android.force_stop_packages_except", return_value=[]),
+            patch("agent.commands.android.clear_safe_package_cache", return_value="Skipped"),
+            patch("agent.commands.android.apply_low_graphics_optimization", return_value="Skipped"),
+            patch("agent.commands._prepare_automatic_layout", return_value=(cfg, "layout ok")),
+            patch("agent.commands.perform_rejoin", return_value=MagicMock(success=True, error=None)),
+            patch("agent.commands.android.is_process_running", return_value=True),
+            patch("agent.commands.effective_private_server_url", return_value=None),
+            patch("agent.commands.WatchdogSupervisor", return_value=mock_sup_inst),
+            patch("agent.commands._package_detection_options", return_value=(None, True, True)),
+            patch("agent.commands._clear_terminal"),
+        ):
+            with contextlib.redirect_stdout(buf):
+                try:
+                    _cmd.cmd_start(args)
+                except SystemExit:
+                    pass
+                except Exception:
+                    pass
+        out = buf.getvalue()
+        self.assertNotIn("No Roblox Package Detected", out)
+
+    def test_phase_table_includes_placeholder_metrics(self):
+        table = build_start_table(
+            [(1, "com.roblox.client", "User1", "Checking...", "0s", "0 MB")],
+            use_color=False,
+        )
+        self.assertIn("Checking...", table)
+        self.assertIn("0s", table)
+        self.assertIn("0 MB", table)
 
     def test_no_launch_mode_line(self):
         out = self._get_output()

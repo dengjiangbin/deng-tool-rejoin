@@ -74,6 +74,32 @@ class TeardownPipelineTests(unittest.TestCase):
             128 + sig,
         )
 
+    def test_teardown_uses_os_exit_not_sys_exit(self) -> None:
+        with mock.patch("agent.signal_handler.safe_io.restore_terminal"), \
+             mock.patch("agent.signal_handler.erase_runtime_locks"), \
+             mock.patch("agent.signal_handler.os._exit") as hard_exit, \
+             mock.patch("agent.signal_handler.sys.exit") as soft_exit:
+            signal_handler.run_teardown_pipeline(signal.SIGINT, exit_process=True)
+        hard_exit.assert_called_once_with(128 + signal.SIGINT)
+        soft_exit.assert_not_called()
+
+    def test_handle_signal_catches_import_error_and_hard_exits(self) -> None:
+        with mock.patch(
+            "agent.signal_handler.run_teardown_pipeline",
+            side_effect=ImportError("cannot import name 'roblox_cookie_detect' from 'agent'"),
+        ), mock.patch("agent.signal_handler.os._exit") as hard_exit:
+            signal_handler._handle_signal(signal.SIGINT, None)
+        hard_exit.assert_called_once_with(130)
+
+    def test_teardown_pipeline_catches_restore_failure_and_hard_exits(self) -> None:
+        with mock.patch(
+            "agent.signal_handler.safe_io.restore_terminal",
+            side_effect=RuntimeError("tty restore failed"),
+        ), mock.patch("agent.signal_handler.erase_runtime_locks"), \
+             mock.patch("agent.signal_handler.os._exit") as hard_exit:
+            signal_handler.run_teardown_pipeline(signal.SIGINT, exit_process=True)
+        hard_exit.assert_called_once_with(128 + signal.SIGINT)
+
     def test_second_teardown_hard_exits(self) -> None:
         signal_handler._teardown_done = True
         with mock.patch("agent.signal_handler.os._exit") as hard_exit:

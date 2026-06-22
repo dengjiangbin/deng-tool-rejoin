@@ -113,32 +113,52 @@ def run_teardown_pipeline(signum: int, *, exit_process: bool = True) -> int:
     """Execute TTY rescue, lock erasure, and hard exit within a bounded budget."""
     global _teardown_done
 
-    with _teardown_lock:
-        if _teardown_done:
-            code = 128 + int(signum)
-            os._exit(code)
-        _teardown_done = True
-
-    deadline = time.monotonic() + TEARDOWN_BUDGET_SECONDS
     try:
-        safe_io.restore_terminal()
-    except Exception:  # noqa: BLE001
-        pass
+        with _teardown_lock:
+            if _teardown_done:
+                code = 128 + int(signum)
+                os._exit(code)
+            _teardown_done = True
 
-    if time.monotonic() < deadline:
+        deadline = time.monotonic() + TEARDOWN_BUDGET_SECONDS
         try:
-            erase_runtime_locks()
-        except Exception:  # noqa: BLE001
+            safe_io.restore_terminal()
+        except BaseException:  # noqa: BLE001
             pass
 
-    exit_code = 128 + int(signum)
-    if exit_process:
-        sys.exit(exit_code)
-    return exit_code
+        if time.monotonic() < deadline:
+            try:
+                erase_runtime_locks()
+            except BaseException:  # noqa: BLE001
+                pass
+
+        exit_code = 128 + int(signum)
+        if exit_process:
+            os._exit(exit_code)
+        return exit_code
+    except BaseException as exc:  # noqa: BLE001
+        try:
+            sys.stderr.write(f"DENG Rejoin: safe shutdown failed ({exc})\n")
+            sys.stderr.flush()
+        except BaseException:  # noqa: BLE001
+            pass
+        fallback = 130 if int(signum) == getattr(signal, "SIGINT", 2) else 128 + int(signum)
+        if exit_process:
+            os._exit(fallback)
+        return fallback
 
 
 def _handle_signal(signum: int, _frame: Any) -> None:
-    run_teardown_pipeline(signum, exit_process=True)
+    try:
+        run_teardown_pipeline(signum, exit_process=True)
+    except BaseException as exc:  # noqa: BLE001
+        try:
+            sys.stderr.write(f"DENG Rejoin: signal handler failed ({exc})\n")
+            sys.stderr.flush()
+        except BaseException:  # noqa: BLE001
+            pass
+        fallback = 130 if int(signum) == getattr(signal, "SIGINT", 2) else 128 + int(signum)
+        os._exit(fallback)
 
 
 def install_signal_handlers(*, force: bool = False) -> None:

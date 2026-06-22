@@ -5530,15 +5530,16 @@ def cmd_start(args: argparse.Namespace) -> int:
                 detection_enabled=det_en,
             )
         )
-        _start_log.debug("start: detected_packages=%d", detected_n)
+        _start_log.debug(
+            "start: detected_packages=%d configured_packages=%d",
+            detected_n,
+            len(entries),
+        )
         if detected_n == 0:
-            # Still report this to stdout so user knows something is wrong
-            print("No Roblox Package Detected")
-            print()
-            print("  1. Install Roblox or your clone APK.")
-            print("  2. Open Roblox once manually, then return to Termux.")
-            print("  3. Run package detection again.")
-            print()
+            _start_log.info(
+                "start: live package scan found 0 candidates; using %d persisted package(s)",
+                len(entries),
+            )
 
         if cfg.get("root_mode_enabled"):
             root_info = android.detect_root()
@@ -5614,7 +5615,14 @@ def cmd_start(args: argparse.Namespace) -> int:
             from prior phases never bleed through on slow Termux terminals.
             """
             rows = [
-                (i + 1, e["package"], _account_username_for_table(e))
+                (
+                    i + 1,
+                    e["package"],
+                    _account_username_for_table(e),
+                    phase.get(e["package"], "Checking..."),
+                    "0s",
+                    "0 MB",
+                )
                 for i, e in enumerate(entries)
             ]
             lines = [banner_text(use_color=use_color), ""]
@@ -6238,29 +6246,37 @@ def cmd_start(args: argparse.Namespace) -> int:
                 raw_state = _live_map.get(pkg, "Unknown")
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
                 if disp not in _metric_states and raw_state not in _metric_states:
-                    return ""
+                    return "0s"
                 start_ts = getattr(_supervisor, "_online_start_ts", {}).get(pkg, 0.0)
                 if not start_ts:
-                    return ""
+                    return "0s"
                 return _fmt_runtime(max(0.0, _now_ts - start_ts))
 
             def _get_usage(pkg: str) -> str:
                 raw_state = _live_map.get(pkg, "Unknown")
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
-                if disp in ("Dead", "Preparing", "Clear Cache", "Failed"):
+                if disp in ("Dead", "Failed"):
                     return "N/A"
+                if disp in ("Preparing", "Clear Cache", "Launching", "Reopening", "Checking..."):
+                    return "0 MB"
                 cached = _usage_cache.get(pkg)
                 if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:
-                    return str(cached[1] or "N/A")
+                    return str(cached[1] or "0 MB")
                 try:
                     usage = android.get_package_ram_usage(
                         pkg, getattr(_supervisor, "_root_info", None),
                     )
-                    label = str(usage.get("usage_mb") or "").strip() or "N/A"
+                    label = str(usage.get("usage_mb") or "").strip() or "0 MB"
                 except Exception:  # noqa: BLE001
-                    label = "N/A"
+                    label = "0 MB"
                 _usage_cache[pkg] = (_now_ts, label)
                 return label
+
+            def _display_state(pkg: str) -> str:
+                raw_state = str(_live_map.get(pkg, "") or "").strip()
+                if not raw_state or raw_state == "Unknown":
+                    return "Checking..."
+                return _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Checking..."
 
             lines = [banner_text(use_color=use_color), ""]
             ram_label = _get_ram_label()
@@ -6273,10 +6289,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     i + 1,
                     e["package"],
                     _account_username_for_table(e),
-                    _STATE_DISPLAY_MAP.get(
-                        _live_map.get(e["package"], "Unknown"),
-                        _live_map.get(e["package"], "Unknown"),
-                    ),
+                    _display_state(e["package"]),
                     _get_runtime(e["package"]),
                     _get_usage(e["package"]),
                 )
