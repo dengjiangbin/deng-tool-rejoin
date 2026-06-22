@@ -397,7 +397,7 @@ _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
     "Launching": "Launching",
     "Launched": "Launching",
     "Preparing": "Launching",
-    "Relaunching": "Launching",
+    "Relaunching": "Reopening",
     # Process is in the join-private-URL phase. `Join Unconfirmed`
     # collapses here because the supervisor uses it for "deep link
     # opened but no in-game proof yet" — same user-visible meaning.

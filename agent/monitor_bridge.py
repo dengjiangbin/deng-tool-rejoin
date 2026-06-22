@@ -68,7 +68,7 @@ MAX_PACKAGES_PER_PUSH = 64
 # everything down to the public 5 before the bytes leave the device.
 # "In-Lobby" is intentionally absent everywhere now.
 ALLOWED_STATES = frozenset({
-    "Online", "Dead", "Relaunching", "No Heartbeat",
+    "Online", "Dead", "Reopening", "Relaunching", "No Heartbeat",
     "Launching", "Joining",
     "Unknown", "Offline", "Preparing",
     "Background", "Reconnecting", "Warning", "Failed",

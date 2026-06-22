@@ -32,7 +32,7 @@ from agent.supervisor import (
     STATUS_ONLINE,
     STATUS_DEAD,
     STATUS_NO_HEARTBEAT,
-    STATUS_RELAUNCHING,
+    STATUS_REOPENING,
 )
 
 
@@ -167,7 +167,7 @@ class TestReleasePublicCleanup(unittest.TestCase):
                 time.time(),
                 render_callback=lambda: frames.append(sup.status_map[pkg]),
             )
-        self.assertEqual(frames[:2], [STATUS_DEAD, STATUS_RELAUNCHING])
+        self.assertEqual(frames[:2], [STATUS_DEAD, STATUS_REOPENING])
 
 
 # ── TASK 2 — Start flow public state labels ───────────────────────────────────

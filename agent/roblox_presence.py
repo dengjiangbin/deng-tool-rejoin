@@ -194,7 +194,17 @@ def _post_json(
             timeout=max(1, int(timeout)),
         )
         return payload if isinstance(payload, Mapping) else None
-    except safe_http.SafeHttpError:
+    except safe_http.SafeHttpStatusError as exc:
+        if int(getattr(exc, "status_code", 0) or 0) == 429:
+            _log.debug("presence POST rate limited: %s", url)
+        else:
+            _log.debug("presence POST HTTP error: %s", exc)
+        return None
+    except safe_http.SafeHttpNetworkError as exc:
+        _log.debug("presence POST network error: %s", exc)
+        return None
+    except safe_http.SafeHttpError as exc:
+        _log.debug("presence POST safe_http error: %s", exc)
         return None
     except Exception as exc:  # noqa: BLE001
         _log.debug("presence POST error: %s", exc)
@@ -575,12 +585,36 @@ def map_presence_profile(result: PresenceResult | None) -> str:
     if result is None or result.is_unknown:
         return ""
     if result.is_in_game:
-        return "In Game"
+        return "Online"
     if result.is_lobby:
         return "In Lobby"
     if result.is_offline:
         return "Offline"
     return "Online"
+
+
+def poll_presence_gate_state(
+    user_id: int,
+    *,
+    cookie: str | None = None,
+    process_alive: bool = True,
+) -> str:
+    """Classify one presence poll for sequential launch gating.
+
+    Returns one of: ``Online``, ``Checking``, ``Pending``, ``Dead``.
+    Never raises.
+    """
+    if not process_alive:
+        return "Dead"
+    if user_id <= 0:
+        return "Pending"
+    try:
+        result = fetch_presence_one(user_id, cookie=cookie, refresh=True)
+    except Exception:  # noqa: BLE001
+        return "Checking"
+    if result.presence_type == PresenceType.IN_GAME:
+        return "Online"
+    return "Checking"
 
 
 def get_presence_state_for_package(package_entry: dict | None) -> str:  # type: ignore[type-arg]

@@ -281,8 +281,8 @@ class TestStateDetection(unittest.TestCase):
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        from agent.supervisor import STATUS_IN_GAME
-        self.assertEqual(state, STATUS_IN_GAME)
+        from agent.supervisor import STATUS_ONLINE
+        self.assertEqual(state, STATUS_ONLINE)
         self.assertEqual(detail["in_game"], "true")
 
     # Test 14
@@ -364,16 +364,17 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(sup.status_map[_PKG2], STATUS_ONLINE)
 
     def test_missing_config_user_id_falls_back_without_presence(self):
-        """Without resolvable user id, presence is skipped and NHB is reported."""
+        """Without resolvable user id, presence is skipped and Pending is reported."""
         sup = _make_sup()
+        from agent.supervisor import STATUS_PENDING
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
              patch.object(android, "discover_roblox_user_id_from_prefs", side_effect=AssertionError("prefs scan")), \
              patch("agent.roblox_presence.lookup_user_id", return_value=None), \
              patch("agent.roblox_presence.fetch_presence_one", side_effect=AssertionError("presence call")):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertIn("heartbeat", detail["reason"])
+        self.assertEqual(state, STATUS_PENDING)
+        self.assertIn("presence_user_id_pending", detail["reason"])
         self.assertEqual(sup._presence_last_detail[_PKG]["roblox_api_status"], "skipped")
 
     def test_username_lookup_used_for_presence_when_user_id_missing(self):
@@ -608,7 +609,7 @@ class TestWatchdogContinuity(unittest.TestCase):
             )
         self.assertEqual(seen, packages)
         self.assertEqual(sup.checking_label, "Checking Package 3/3")
-        self.assertIn(sup.status_map[_PKG], {STATUS_NO_HEARTBEAT, "Relaunching", "Launching"})
+        self.assertIn(sup.status_map[_PKG], {STATUS_NO_HEARTBEAT, "Reopening", "Relaunching", "Launching"})
 
     def test_checking_label_persists_after_round_until_shutdown(self):
         packages = [_PKG, _PKG2]

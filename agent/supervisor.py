@@ -150,13 +150,16 @@ def _reapply_layout_for_package(package: str) -> None:
 # ─── Status constants (shown in terminal and webhook) ─────────────────────────
 
 STATUS_ONLINE            = "Online"
-STATUS_IN_GAME           = "In Game"           # Roblox presence type 2 (in experience)
+STATUS_IN_GAME           = "Online"            # presence type 2 (legacy alias)
 STATUS_IN_LOBBY          = "In Lobby"          # Roblox presence type 1 (home/lobby)
 STATUS_OFFLINE           = "Offline"
 STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
 STATUS_LAUNCHING         = "Launching"
-STATUS_RELAUNCHING       = "Relaunching"
-STATUS_CHECKING          = "Preparing"
+STATUS_REOPENING         = "Reopening"
+STATUS_RELAUNCHING       = "Reopening"         # legacy alias
+STATUS_CHECKING          = "Checking"
+STATUS_PENDING           = "Pending"
+STATUS_CHECKING_LEGACY   = "Preparing"
 STATUS_BACKGROUND        = "Background"
 STATUS_RECONNECTING      = "Reconnecting"
 STATUS_WARNING           = "Warning"
@@ -1571,7 +1574,10 @@ class WatchdogSupervisor:
             detail["roblox_api_used"] = "true"
             presence = _rp.fetch_presence_one(uid, cookie=cookie)
             ptype = getattr(presence, "presence_type", None)
-            detail["roblox_api_status"] = "success"
+            if getattr(presence, "is_unknown", False):
+                detail["roblox_api_status"] = "network_error"
+            else:
+                detail["roblox_api_status"] = "success"
             detail["roblox_presence_type"] = getattr(ptype, "name", str(ptype))
             detail["roblox_presence_profile"] = _rp.map_presence_profile(presence)
             detail["roblox_place_id"] = getattr(presence, "place_id", "") or ""
@@ -1580,8 +1586,19 @@ class WatchdogSupervisor:
             detail["roblox_game_id"] = getattr(presence, "game_id", "") or ""
             return presence
         except Exception as exc:  # noqa: BLE001
+            from . import safe_http as _sh
+
             detail["roblox_api_used"] = "true" if detail.get("roblox_user_id") else "false"
-            detail["roblox_api_status"] = "failed"
+            if isinstance(exc, _sh.SafeHttpStatusError) and int(getattr(exc, "status_code", 0) or 0) == 429:
+                detail["roblox_api_status"] = "rate_limited"
+            elif isinstance(exc, _sh.SafeHttpNetworkError):
+                detail["roblox_api_status"] = "network_error"
+            else:
+                err_text = str(exc).lower()
+                if "timeout" in err_text or "timed out" in err_text:
+                    detail["roblox_api_status"] = "timeout"
+                else:
+                    detail["roblox_api_status"] = "failed"
             detail["presence_error"] = str(exc)[:160]
             return None
 
@@ -1676,13 +1693,13 @@ class WatchdogSupervisor:
                 "elapsed_ms": elapsed_ms,
                 "root_available": str(root_available).lower(),
                 "foreground_package": foreground_package,
-                "activity": profile or "In Game",
+                "activity": profile or "Online",
                 "in_game_proof": "true",
                 "heartbeat_age_sec": heartbeat_age_sec,
                 "reason": "roblox_presence_in_game",
             }
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_IN_GAME)
-            return STATUS_IN_GAME, detail
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_ONLINE)
+            return STATUS_ONLINE, detail
 
         if presence_lobby:
             self._nhb_offline_count[pkg] = 0
@@ -1701,6 +1718,49 @@ class WatchdogSupervisor:
             }
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_IN_LOBBY)
             return STATUS_IN_LOBBY, detail
+
+        api_status = str(pres_detail.get("roblox_api_status") or "")
+        presence_error = str(pres_detail.get("presence_error") or "")
+
+        if process_running and presence is None and presence_error == "missing_user_id":
+            detail = {
+                "process_running": "true",
+                "in_game": "false",
+                "heartbeat_ok": "false",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "Pending",
+                "in_game_proof": "unknown",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": "presence_user_id_pending",
+            }
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_PENDING)
+            return STATUS_PENDING, detail
+
+        if process_running and presence is None and api_status in {
+            "failed",
+            "rate_limited",
+            "network_error",
+            "timeout",
+            "skipped",
+        }:
+            detail = {
+                "process_running": "true",
+                "in_game": "false",
+                "heartbeat_ok": "false",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "Checking",
+                "in_game_proof": "unknown",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": f"presence_api_{api_status}",
+            }
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_CHECKING)
+            return STATUS_CHECKING, detail
 
         if presence_offline and was_recently_online:
             count = self._nhb_offline_count.get(pkg, 0) + 1
@@ -1910,7 +1970,7 @@ class WatchdogSupervisor:
                 action=action,
                 reason="process_not_running",
             )
-            self._set_status(pkg, STATUS_RELAUNCHING)
+            self._set_status(pkg, STATUS_REOPENING)
             if callable(render_callback):
                 try:
                     render_callback()
@@ -1974,7 +2034,7 @@ class WatchdogSupervisor:
                 action=action,
                 reason="heartbeat_stalled_or_presence_offline",
             )
-            self._set_status(pkg, STATUS_RELAUNCHING)
+            self._set_status(pkg, STATUS_REOPENING)
             if callable(render_callback):
                 try:
                     render_callback()
@@ -2284,7 +2344,7 @@ class WatchdogSupervisor:
                 # Root scanner is authoritative: never pin Launching when the
                 # process is dead/offline or when Online evidence exists.
                 prev_pinned = self._prev_state.get(pkg)
-                pin_states = {STATUS_LAUNCHING, STATUS_JOINING, STATUS_RELAUNCHING}
+                pin_states = {STATUS_LAUNCHING, STATUS_JOINING, STATUS_REOPENING}
                 if (
                     self._in_grace(pkg, now)
                     and prev_pinned in pin_states

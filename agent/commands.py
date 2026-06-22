@@ -4487,6 +4487,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Ready":             _ANSI_YELLOW,
         "Starting":          _ANSI_YELLOW,
         "Launching":         _ANSI_YELLOW,
+        "Reopening":         _ANSI_YELLOW,
         "Relaunching":       _ANSI_YELLOW,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
@@ -4680,6 +4681,7 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     ("Join" + "ing"):    "launching",
     "Reconnecting":      "reconnecting",
     "Launching":         "launching",
+    "Reopening":         "reconnecting",
     "Relaunching":       "reconnecting",
     "Failed":            "failed",
     "Join Failed":       "failed",
@@ -5246,6 +5248,70 @@ def _verify_layout_post_launch(
     return out, diag_rows
 
 
+def _resolve_presence_user_id(entry: dict[str, Any]) -> int:
+    """Resolve Roblox user id from a package entry. Never raises."""
+    raw_uid = entry.get("roblox_user_id")
+    if isinstance(raw_uid, int) and raw_uid > 0:
+        return int(raw_uid)
+    if isinstance(raw_uid, str) and raw_uid.isdigit():
+        return int(raw_uid)
+    uname = str(entry.get("account_username") or "").strip()
+    if not uname:
+        return 0
+    try:
+        from agent.roblox_presence import lookup_user_id
+
+        resolved = lookup_user_id(uname)
+        return int(resolved) if resolved else 0
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _wait_for_sequential_presence_online(
+    entry: dict[str, Any],
+    cfg: dict[str, Any],
+    *,
+    poll_seconds: float = 7.0,
+    timeout_seconds: float = 900.0,
+    render_callback: Any = None,
+) -> str:
+    """Block until Roblox presence type 2 confirms the package is Online."""
+    from agent.roblox_presence import detect_roblox_cookie, poll_presence_gate_state
+
+    pkg = str(entry.get("package") or "").strip()
+    if not pkg:
+        return "Failed"
+    uid = _resolve_presence_user_id(entry)
+    cookie = str(entry.get("roblox_cookie") or "").strip()
+    if not cookie:
+        try:
+            cookie = detect_roblox_cookie(pkg, entry=entry, config=cfg, use_root=True)
+        except Exception:  # noqa: BLE001
+            cookie = ""
+    prep_root = android.detect_root()
+    deadline = time.monotonic() + max(30.0, float(timeout_seconds))
+    poll = max(5.0, min(10.0, float(poll_seconds)))
+    while time.monotonic() < deadline:
+        pid = android.get_package_pid(pkg, prep_root)
+        process_alive = bool(pid)
+        gate = poll_presence_gate_state(
+            uid,
+            cookie=cookie or None,
+            process_alive=process_alive,
+        )
+        if gate == "Online":
+            return "Online"
+        if gate == "Dead":
+            return "Dead"
+        if callable(render_callback):
+            try:
+                render_callback()
+            except Exception:  # noqa: BLE001
+                pass
+        time.sleep(poll)
+    return "Checking"
+
+
 def _run_preparation_phase(
     entries: list[dict[str, Any]],
     cfg: dict[str, Any],
@@ -5723,60 +5789,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 str(_stop_ok).lower(), _stop_err,
             )
 
-        # 2) "Clear Cache" — clear only cache/code_cache for each configured
-        #    package.  shared_prefs/databases/files are never touched.
-        #    Size is verified to reach 0; retry on non-zero remainder.
-        prep_gfx: dict[str, str] = {}
-        prep_cache: dict[str, str] = {}   # per-package cache-clear status label
-        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
-        # Set all packages to "Clear Cache" and render ONCE before the loop.
-        _transition_lifecycle("CLEARING_CACHE", "clear_cache")
-        _start_session.mark("cache_cleanup_begin")
-        for entry in entries:
-            phase[entry["package"]] = "Clear Cache"
-        _render_phase()
-        # Re-apply the release's Landscape-only orientation after background cleanup.
-        _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
-        for entry in entries:
-            pkg = entry["package"]
-            _cache_result: dict[str, object] = {}
-            try:
-                _cache_result = android.clear_package_cache_verified(pkg)
-            except Exception as _exc:  # noqa: BLE001
-                _cache_result = {
-                    "success": False, "skipped": False, "skipped_reason": "",
-                    "cache_paths": [], "size_before_bytes": 0, "size_after_bytes": 0,
-                    "attempts": 0, "error": str(_exc)[:80],
-                }
-            _start_log.info(
-                "[DENG_REJOIN_CLEAR_CACHE] package=%s cache_paths=%s"
-                " size_before_bytes=%s size_after_bytes=%s attempt=%s"
-                " success=%s error=%s",
-                pkg,
-                ",".join(str(p) for p in _cache_result.get("cache_paths") or []) or "none",
-                _cache_result.get("size_before_bytes", 0),
-                _cache_result.get("size_after_bytes", 0),
-                _cache_result.get("attempts", 0),
-                str(_cache_result.get("success", False)).lower(),
-                _cache_result.get("error", ""),
-            )
-            if _cache_result.get("success"):
-                prep_cache[pkg] = "Cleared"
-            elif _cache_result.get("skipped"):
-                prep_cache[pkg] = "Skipped"
-            else:
-                prep_cache[pkg] = "Failed"
-            low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
-            try:
-                prep_gfx[pkg] = android.apply_low_graphics_optimization(pkg, enabled=low)
-            except Exception:  # noqa: BLE001
-                prep_gfx[pkg] = "error"
-            _start_log.debug("start: prep pkg=%s cache_ok=%s gfx=%s",
-                             pkg, _cache_result.get("success"), prep_gfx[pkg])
-        _start_session.mark("cache_cleanup_done")
-        _start_session.mark("low_graphics_done")
-
-        # 3) Compute window layout silently (no public phase change).
+        # 2) Compute window layout silently (no public phase change).
         try:
             _start_session.mark("layout_begin")
             cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
@@ -5817,99 +5830,105 @@ def cmd_start(args: argparse.Namespace) -> int:
         else:
             _start_log.info("start: No launch URL configured — clones will open Roblox home")
 
-        # ── Launch each package ───────────────────────────────────────────────
-        # 5) "Launching" — set ALL packages to "Launching" at once before
-        # the loop and render a single clean "all starting" screen.  Only
-        # re-render AFTER each launch (to show success/failure result).
+        # ── Sequential launch queue ───────────────────────────────────────────
+        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
+        prep_gfx: dict[str, str] = {}
+        prep_cache: dict[str, str] = {}
+        launch_ok: dict[str, bool] = {}
+        launch_err: dict[str, str] = {}
+        launch_attempted: dict[str, bool] = {}
         _transition_lifecycle("LAUNCHING", "launch_packages")
         _start_session.mark("package_launch_begin", package_count=len(entries))
-        launch_ok:  dict[str, bool] = {}
-        launch_err: dict[str, str]  = {}
-        launch_attempted: dict[str, bool] = {}
-        for entry in entries:
-            phase[entry["package"]] = "Launching"
-        _render_phase("Launching clones...")
+        _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
+
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
             runtime_entry = runtime_entry_by_pkg.get(package, entry)
             launch_attempted[package] = True
+            for later in entries[index:]:
+                phase[later["package"]] = "Pending"
+            phase[package] = "Preparing"
+            _render_phase("Preparing next package...")
+            try:
+                _pid_before = android.get_package_pid(package, _prep_root)
+                android.force_stop_package(package, _prep_root)
+                import time as _t
+                _t.sleep(0.3)
+                _pid_after = android.get_package_pid(package, _prep_root)
+                if _pid_after:
+                    _t.sleep(0.8)
+                    android.force_stop_package(package, _prep_root)
+                    _t.sleep(0.3)
+                    _pid_after = android.get_package_pid(package, _prep_root)
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("sequential prep force-stop error for %s: %s", package, _exc)
+
+            phase[package] = "Clear Cache"
+            _render_phase()
+            _cache_result: dict[str, object] = {}
+            try:
+                _cache_result = android.clear_package_cache_verified(package)
+            except Exception as _exc:  # noqa: BLE001
+                _cache_result = {"success": False, "skipped": False, "error": str(_exc)[:80]}
+            prep_cache[package] = (
+                "Cleared" if _cache_result.get("success")
+                else "Skipped" if _cache_result.get("skipped")
+                else "Failed"
+            )
+            low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
+            try:
+                prep_gfx[package] = android.apply_low_graphics_optimization(package, enabled=low)
+            except Exception:  # noqa: BLE001
+                prep_gfx[package] = "error"
+
+            phase[package] = "Launching"
+            _render_phase("Launching clone...")
             package_cfg = dict(runtime_cfg)
             package_cfg["roblox_package"] = package
             from .config import private_url_launch_context as _purl_ctx
             _url_context = _purl_ctx(runtime_entry, runtime_cfg)
             _has_url = _url_context.get("url_mode") == "private_url"
-            # Ensure package key file is correct before launch.
-            # Writes: /storage/emulated/0/Android/data/{pkg}/files/gloop/external/Internals/Cache/license
-            # Only if a FREE_ key is configured; does NOT touch DENG Tool license.
             try:
                 from .package_key import ensure_package_key_for_start as _epkfs
-                _pk_result = _epkfs(
-                    package, runtime_cfg,
+                _epkfs(
+                    package,
+                    runtime_cfg,
                     root_enabled=bool(runtime_cfg.get("root_mode_enabled", False)),
                 )
-                _start_log.info(
-                    "[DENG_REJOIN_PACKAGE_KEY] package=%s mode=start_ensure path=%s"
-                    " key_prefix=%s key_masked=%s write_needed=%s write_attempted=%s"
-                    " method=%s success=%s error=%s",
-                    package,
-                    _pk_result.get("path", ""),
-                    _pk_result.get("key_prefix", ""),
-                    _pk_result.get("key_masked", ""),
-                    str(_pk_result.get("write_needed", False)).lower(),
-                    str(_pk_result.get("write_attempted", False)).lower(),
-                    _pk_result.get("method", "skipped"),
-                    str(_pk_result.get("success", True)).lower(),
-                    _pk_result.get("error", ""),
-                )
-            except Exception as _pk_exc:  # noqa: BLE001
-                _start_log.debug("package_key ensure error (non-fatal): %s", _pk_exc)
-            result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
-            launch_ok[package]  = result.success
-            launch_err[package] = result.error or ""
-            try:
-                from . import launcher as _launcher_mod
-                _launch_state = _launcher_mod._read_launch_state(package)
             except Exception:  # noqa: BLE001
-                _launch_state = {}
-            _start_log.info(
-                "[DENG_REJOIN_LAUNCH_PACKAGE] package=%s launcher=%s"
-                " private_url_mode=%s url_mode=%s url_config_source=%s"
-                " result=%s return_code=%s success=%s process_alive=%s"
-                " activity_visible=%s surface_present=%s black_screen_suspected=%s",
-                package,
-                "private_url" if _has_url else "app_only",
-                _url_context.get("private_url_mode", "global"),
-                _url_context.get("url_mode", "app_only"),
-                _url_context.get("url_config_source", "blank"),
-                result.error or "ok", 0 if result.success else 1,
-                str(result.success).lower(),
-                str(bool(_launch_state.get("process_alive"))).lower(),
-                str(bool(_launch_state.get("activity_visible"))).lower(),
-                str(bool(_launch_state.get("surface_present"))).lower(),
-                str(bool(_launch_state.get("black_screen_suspected"))).lower(),
+                pass
+            result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
+            launch_ok[package] = result.success
+            launch_err[package] = result.error or ""
+            if not result.success:
+                phase[package] = "Failed"
+                _render_phase()
+                continue
+
+            phase[package] = "Checking"
+            _render_phase("Waiting for Roblox presence...")
+            gate_state = _wait_for_sequential_presence_online(
+                runtime_entry,
+                runtime_cfg,
+                poll_seconds=7.0,
+                render_callback=_render_phase,
             )
-            # Try to mute the package audio (per-package, root, non-fatal).
-            if result.success:
-                try:
-                    _mute = android.mute_package_audio(package)
-                    _start_log.info(
-                        "[DENG_REJOIN_PACKAGE_VOLUME] package=%s method=%s"
-                        " target_volume=0 success=%s skipped_reason=%s error=%s",
-                        package,
-                        _mute.get("method", ""),
-                        str(_mute.get("success", False)).lower(),
-                        _mute.get("skipped_reason", ""),
-                        _mute.get("error", ""),
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
-            # Update result state and render once per completed launch.
-            phase[package] = "Launching" if result.success else "Failed"
+            phase[package] = gate_state
+            launch_ok[package] = gate_state == "Online"
+            if gate_state != "Online":
+                launch_err[package] = f"presence_gate:{gate_state.lower()}"
             _render_phase()
-            _start_log.debug(
-                "start: launch pkg=%s ok=%s err=%s",
-                package, result.success, result.error or "",
+            _start_log.info(
+                "[DENG_REJOIN_SEQUENTIAL_LAUNCH] package=%s index=%d/%d"
+                " launcher=%s gate_state=%s success=%s",
+                package,
+                index,
+                len(entries),
+                "private_url" if _has_url else "app_only",
+                gate_state,
+                str(launch_ok[package]).lower(),
             )
+
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
 
         # 6) Grace wait before verifying layout — keep packages shown as
@@ -6183,13 +6202,16 @@ def cmd_start(args: argparse.Namespace) -> int:
             # Live watchdog states — keep as-is.
             "No Heartbeat":     "Dead",
             "Online":           "Online",
-            "In Game":          "In Game",
+            "In Game":          "Online",
             "In Lobby":         "In Lobby",
             "Join Failed":      "Failed",
             "Wrong Game / Wrong Server": "Failed",
             "Dead":             "Dead",
-            "Relaunching":       "Reopening",
+            "Reopening":        "Reopening",
+            "Relaunching":      "Reopening",
             "Launching":         "Launching",
+            "Checking":         "Checking",
+            "Pending":          "Pending",
             # v1.0.4: Joining is now a real supervisor state but the
             # Termux terminal user doesn't care about the
             # open-app / open-URL distinction — they just want
@@ -6240,7 +6262,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _usage_cache = {}
                 setattr(_live_dashboard, "_usage_cache", _usage_cache)
 
-            _metric_states = {"Online", "In Game", "In Lobby"}
+            _metric_states = {"Online", "In Lobby"}
 
             def _get_runtime(pkg: str) -> str:
                 raw_state = _live_map.get(pkg, "Unknown")

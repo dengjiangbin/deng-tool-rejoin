@@ -15,8 +15,9 @@ if str(PROJECT) not in sys.path:
 
 from agent import probe
 from agent.launcher import RejoinResult
-from agent.roblox_presence import PresenceResult, PresenceType, map_presence_profile
+from agent.roblox_presence import PresenceResult, PresenceType, map_presence_profile, poll_presence_gate_state
 from agent.supervisor import (
+    STATUS_CHECKING,
     STATUS_DEAD,
     STATUS_FAILED,
     STATUS_IN_GAME,
@@ -24,6 +25,7 @@ from agent.supervisor import (
     STATUS_JOINING,
     STATUS_LAUNCHING,
     STATUS_ONLINE,
+    STATUS_REOPENING,
     STATUS_RELAUNCHING,
     WatchdogSupervisor,
 )
@@ -92,13 +94,13 @@ class DeadRecoveryTests(unittest.TestCase):
         self.assertEqual(detail["process_running"], "false")
         self.assertEqual(detail["reason"], "process_not_running")
 
-    def test_dead_triggers_relaunch(self) -> None:
+    def test_dead_triggers_reopen(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         with patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=True)) as launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             sup._handle_state(_PKG, _entry(), STATUS_DEAD, STATUS_ONLINE, time.time())
         launch.assert_called_once()
-        self.assertIn(sup.status_map[_PKG], {STATUS_LAUNCHING, STATUS_JOINING, STATUS_RELAUNCHING})
+        self.assertIn(sup.status_map[_PKG], {STATUS_LAUNCHING, STATUS_JOINING, STATUS_REOPENING, STATUS_RELAUNCHING})
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_FAILED})
         with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()), \
              patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=True)) as launch, \
@@ -113,14 +115,14 @@ class PresenceProfileTests(unittest.TestCase):
     def test_map_presence_profile_labels(self) -> None:
         self.assertEqual(
             map_presence_profile(PresenceResult(user_id=1, presence_type=PresenceType.IN_GAME)),
-            "In Game",
+            "Online",
         )
         self.assertEqual(
             map_presence_profile(PresenceResult(user_id=1, presence_type=PresenceType.ONLINE)),
             "In Lobby",
         )
 
-    def test_in_game_state_starts_metric_timestamps(self) -> None:
+    def test_in_game_presence_maps_to_online_state(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
         game = MagicMock()
         game.is_in_game = True
@@ -132,8 +134,18 @@ class PresenceProfileTests(unittest.TestCase):
              patch.object(sup, "_check_ram_optimization") as ram_check:
             state, _ = sup._detect_package_state(_PKG, _entry())
             sup._handle_state(_PKG, _entry(), state, STATUS_LAUNCHING, time.time())
-        self.assertEqual(state, STATUS_IN_GAME)
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertEqual(STATUS_IN_GAME, STATUS_ONLINE)
         ram_check.assert_called_once()
+
+    def test_transient_presence_api_failure_returns_checking(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._presence_last_detail[_PKG] = {"roblox_api_status": "rate_limited"}
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
+             patch.object(sup, "_fetch_presence", return_value=None):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+        self.assertEqual(state, STATUS_CHECKING)
+        self.assertIn("presence_api_rate_limited", detail["reason"])
 
     def test_in_lobby_state_is_not_dead(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
@@ -147,6 +159,33 @@ class PresenceProfileTests(unittest.TestCase):
             state, _ = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_IN_LOBBY)
         self.assertNotEqual(state, STATUS_DEAD)
+
+    def test_poll_presence_gate_state_online_on_type_2(self) -> None:
+        ingame = PresenceResult(user_id=1, presence_type=PresenceType.IN_GAME)
+        with patch("agent.roblox_presence.fetch_presence_one", return_value=ingame):
+            self.assertEqual(
+                poll_presence_gate_state(1, cookie="cookie", process_alive=True),
+                "Online",
+            )
+
+
+class SequentialLaunchTests(unittest.TestCase):
+    def test_wait_blocks_until_online(self) -> None:
+        from agent.commands import _wait_for_sequential_presence_online
+
+        calls = {"n": 0}
+
+        def _gate(*_args, **_kwargs):
+            calls["n"] += 1
+            return "Online" if calls["n"] >= 2 else "Checking"
+
+        with patch("agent.commands.android.get_package_pid", return_value="1234"), \
+             patch("agent.commands.android.detect_root"), \
+             patch("agent.roblox_presence.poll_presence_gate_state", side_effect=_gate), \
+             patch("agent.commands.time.sleep"):
+            state = _wait_for_sequential_presence_online(_entry(), _cfg(), poll_seconds=5.0, timeout_seconds=60.0)
+        self.assertEqual(state, "Online")
+        self.assertGreaterEqual(calls["n"], 2)
 
 
 class ProbePayloadTests(unittest.TestCase):

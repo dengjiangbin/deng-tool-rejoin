@@ -150,7 +150,7 @@ class DeadPriorityRegressionTests(unittest.TestCase):
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=_game_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_IN_GAME)
+        self.assertEqual(state, STATUS_ONLINE)
 
     def test_dead_state_relaunches_only_that_package(self) -> None:
         sup = self._supervisor(initial_status={_PKG: STATUS_ONLINE, _PKG2: STATUS_ONLINE})
