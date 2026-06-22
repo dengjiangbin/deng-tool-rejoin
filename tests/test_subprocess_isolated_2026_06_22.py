@@ -48,6 +48,19 @@ class SubprocessIsolationTests(unittest.TestCase):
         self.assertIn("uid=0", out)
         isolated.assert_called_once()
 
+    def test_android_run_command_passes_lock_instance_not_callable(self) -> None:
+        from agent import android as _android
+
+        with mock.patch(
+            "agent.subprocess_isolated.run_isolated_text",
+            return_value=(0, "ok", "", False),
+        ) as isolated:
+            _android.run_command(["echo", "hi"], timeout=2)
+
+        lock_arg = isolated.call_args.kwargs.get("lock")
+        self.assertIs(lock_arg, _android.subprocess_lock())
+        self.assertTrue(hasattr(lock_arg, "acquire"))
+
 
 if __name__ == "__main__":
     unittest.main()

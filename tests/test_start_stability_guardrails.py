@@ -35,12 +35,15 @@ class TestStartStabilityGuardrails(unittest.TestCase):
     def test_android_root_runner_exposes_one_global_lock(self) -> None:
         self.assertIs(android.subprocess_lock(), android.subprocess_lock())
         source = inspect.getsource(android.run_command)
-        self.assertIn("with _subprocess_lock", source)
+        self.assertIn("lock=subprocess_lock()", source)
+        self.assertNotIn("lock=_subprocess_lock()", source)
 
     def test_curl_and_android_share_subprocess_serialization(self) -> None:
         source = inspect.getsource(safe_http._run_curl)
-        self.assertIn("subprocess_lock", source)
-        self.assertIn("with lock", source)
+        self.assertIn("run_isolated_bytes", source)
+        self.assertIn("lock=_subprocess_lock()", source)
+        iso_source = inspect.getsource(__import__("agent.subprocess_isolated", fromlist=["x"]))
+        self.assertIn("with lock:", iso_source)
 
     def test_public_start_supervisor_does_not_reference_auto_execute_module(self) -> None:
         source = inspect.getsource(supervisor)

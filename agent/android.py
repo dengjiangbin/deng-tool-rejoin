@@ -170,7 +170,7 @@ def run_command(args: Iterable[str], *, timeout: int = PROCESS_TIMEOUT_SECONDS) 
         cmd,
         timeout=float(timeout),
         env=_safe_env(),
-        lock=_subprocess_lock(),
+        lock=subprocess_lock(),
     )
     if timed_out:
         return CommandResult(

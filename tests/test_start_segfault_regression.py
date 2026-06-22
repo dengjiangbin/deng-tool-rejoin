@@ -31,8 +31,9 @@ class StartSegfaultRegressionTests(unittest.TestCase):
 
     def test_android_subprocess_calls_are_serialized(self) -> None:
         source = inspect.getsource(android.run_command)
-        self.assertIn("_subprocess_lock", source)
-        self.assertIn("with _subprocess_lock", source)
+        self.assertIn("run_isolated_text", source)
+        self.assertIn("lock=subprocess_lock()", source)
+        self.assertNotIn("lock=_subprocess_lock()", source)
 
     def test_root_commands_route_through_serialized_runner(self) -> None:
         source = inspect.getsource(android.run_root_command)
@@ -57,7 +58,7 @@ class StartSegfaultRegressionTests(unittest.TestCase):
     def test_render_loop_writes_only_from_start_owner(self) -> None:
         source = inspect.getsource(commands.cmd_start)
         live_dashboard = source[source.index("def _live_dashboard"):]
-        self.assertIn("sys.stdout.write", live_dashboard)
+        self.assertIn("safe_io.write_stdout_block", live_dashboard)
         self.assertNotIn("threading.Thread", live_dashboard)
 
     def test_start_handles_keyboard_interrupt_and_restores_terminal(self) -> None:
@@ -100,9 +101,10 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         self.assertIn("_release_start_lock", source)
 
     def test_run_command_timeout_returns_clean_result(self) -> None:
-        import subprocess
-
-        with patch("agent.android.subprocess.run", side_effect=subprocess.TimeoutExpired(["pidof"], 1)):
+        with patch(
+            "agent.subprocess_isolated.run_isolated_text",
+            return_value=(-1, "", "timed out", True),
+        ):
             result = android.run_command(["pidof", "com.moons.litesc"], timeout=1)
         self.assertTrue(result.timed_out)
         self.assertEqual(result.returncode, 124)
@@ -111,9 +113,10 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         from agent import safe_http
 
         source = inspect.getsource(safe_http._run_curl)
-        self.assertIn("android", source)
-        self.assertIn("subprocess_lock", source)
-        self.assertIn("with lock", source)
+        self.assertIn("run_isolated_bytes", source)
+        self.assertIn("lock=_subprocess_lock()", source)
+        iso_source = inspect.getsource(__import__("agent.subprocess_isolated", fromlist=["x"]))
+        self.assertIn("with lock:", iso_source)
 
     def test_no_termux_os_system_clear_anywhere_in_agent_start_modules(self) -> None:
         combined = "\n".join(
