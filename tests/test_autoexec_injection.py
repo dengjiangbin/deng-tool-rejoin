@@ -41,8 +41,18 @@ class TestAutoexecPayload(unittest.TestCase):
         self.assertIn(_PKG, lua)
         self.assertIn("127.0.0.1:9999/heartbeat?package=", lua)
         self.assertIn(ai.PRIMARY_TRACKER_URL, lua)
+        self.assertIn("dengjiangbin/fish-it/main/tracker.lua", lua)
+        self.assertNotIn("pgen0x/kaeru", lua)
         self.assertIn("task.spawn", lua)
         self.assertIn("loadstring", lua)
+
+    def test_build_heartbeat_tracker_lua_waits_for_game_load_and_local_player(self) -> None:
+        lua = ai.build_heartbeat_tracker_lua(_PKG)
+        self.assertIn("game:IsLoaded()", lua)
+        self.assertIn("game.Loaded:Wait()", lua)
+        self.assertIn('game:GetService("Players")', lua)
+        self.assertIn("Players.LocalPlayer", lua)
+        self.assertIn("Deng Local Heartbeat (Robust Detection Logic)", lua)
 
     def test_target_file_name_is_deng_rejoin_heartbeat_lua(self) -> None:
         self.assertEqual(ai.TRACKER_FILENAME, "deng_rejoin_heartbeat.lua")
