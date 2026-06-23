@@ -30,9 +30,11 @@ class LuaHeartbeatServer:
         "_host",
         "_httpd",
         "_lock",
+        "_ping_counts",
         "_port",
         "_thread",
         "_ttl",
+        "_window_ping_counts",
     )
 
     def __init__(
@@ -51,6 +53,8 @@ class LuaHeartbeatServer:
         }
         self._heartbeats: dict[str, float] = {}
         self._ever_seen: set[str] = set()
+        self._ping_counts: dict[str, int] = {}
+        self._window_ping_counts: dict[str, int] = {}
         self._lock = threading.Lock()
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -83,7 +87,24 @@ class LuaHeartbeatServer:
         with self._lock:
             self._heartbeats[pkg] = now
             self._ever_seen.add(pkg)
+            self._ping_counts[pkg] = int(self._ping_counts.get(pkg, 0)) + 1
+            self._window_ping_counts[pkg] = int(self._window_ping_counts.get(pkg, 0)) + 1
         return True
+
+    def ping_count(self, package: str, *, window: bool = True) -> int:
+        """Return heartbeat ping count for ``package`` (window = current execution)."""
+        pkg = str(package or "").strip()
+        with self._lock:
+            store = self._window_ping_counts if window else self._ping_counts
+            return int(store.get(pkg, 0))
+
+    def reset_window_ping_count(self, package: str) -> None:
+        """Reset per-window ping counter when a clone relaunches."""
+        pkg = str(package or "").strip()
+        if not pkg:
+            return
+        with self._lock:
+            self._window_ping_counts.pop(pkg, None)
 
     def is_fresh(self, package: str, *, ttl_seconds: float | None = None) -> bool:
         ttl = float(self._ttl if ttl_seconds is None else ttl_seconds)

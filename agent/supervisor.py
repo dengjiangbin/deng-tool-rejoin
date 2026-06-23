@@ -1533,6 +1533,7 @@ class WatchdogSupervisor:
 
     def mark_package_launched(self, pkg: str) -> None:
         """Register a launch/reopen and bind loading-grace protection."""
+        self._lua_heartbeat_server.reset_window_ping_count(pkg)
         self._mark_launched(pkg)
         self._set_status(pkg, STATUS_LAUNCHING)
 

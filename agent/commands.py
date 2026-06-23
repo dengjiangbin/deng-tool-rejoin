@@ -4478,6 +4478,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
     """Wrap a status string in the appropriate ANSI color code."""
     if not use_color:
         return status
+    base_key = status.split(" (", 1)[0] if " (" in status else status
     color = {
         "Started":      _ANSI_GREEN,
         "Online":            _ANSI_GREEN,
@@ -4520,7 +4521,18 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Unknown":      _ANSI_DIM,
         "Heartbeat OK":          _ANSI_GREEN,
         "Launch command sent":   _ANSI_GREEN,
-    }.get(status, "")
+    }.get(status) or {
+        "Started":      _ANSI_GREEN,
+        "Online":            _ANSI_GREEN,
+        "Lobby":             _ANSI_GREEN,
+        "In Server":         _ANSI_GREEN,
+        "Ready":             _ANSI_YELLOW,
+        "Launching":         _ANSI_YELLOW,
+        "Reopening":         _ANSI_YELLOW,
+        "No Heartbeat":      _ANSI_RED,
+        "Dead":              _ANSI_RED,
+        "Failed":            _ANSI_RED,
+    }.get(base_key, "")
     return f"{color}{status}{_ANSI_RESET}" if color else status
 
 
@@ -4560,7 +4572,7 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     term_cols = safe_io.terminal_columns()
     border_budget = 2 + (len(headers) * 3)
     data_budget = max(24, term_cols - border_budget)
-    col_caps = [4, 12, 14, 14, 8, 8]
+    col_caps = [4, 12, 14, 22, 8, 8]
     capped_total = sum(col_caps)
     if capped_total > data_budget:
         scale = data_budget / capped_total
@@ -6328,7 +6340,14 @@ def cmd_start(args: argparse.Namespace) -> int:
                 raw_state = str(_live_map.get(pkg, "") or "").strip()
                 if not raw_state or raw_state == "Unknown":
                     return "Checking..."
-                return _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Checking..."
+                disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Checking..."
+                if disp == "Online":
+                    try:
+                        pings = int(_supervisor._lua_heartbeat_server.ping_count(pkg))
+                    except Exception:  # noqa: BLE001
+                        pings = 0
+                    return f"Online (Pings: {pings})"
+                return disp
 
             lines = [banner_text(use_color=use_color), ""]
             ram_label = _get_ram_label()

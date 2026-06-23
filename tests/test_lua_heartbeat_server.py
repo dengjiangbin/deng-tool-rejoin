@@ -58,6 +58,17 @@ class TestLuaHeartbeatServer(unittest.TestCase):
             self.server._heartbeats[_PKG] = time.monotonic() - 45.0
         self.assertFalse(self.server.is_fresh(_PKG))
 
+    def test_ping_count_increments_and_resets_window(self) -> None:
+        self.server.record_heartbeat(_PKG)
+        self.server.record_heartbeat(_PKG)
+        self.assertEqual(self.server.ping_count(_PKG), 2)
+        self.assertEqual(self.server.ping_count(_PKG, window=False), 2)
+        self.server.reset_window_ping_count(_PKG)
+        self.assertEqual(self.server.ping_count(_PKG), 0)
+        self.assertEqual(self.server.ping_count(_PKG, window=False), 2)
+        self.server.record_heartbeat(_PKG)
+        self.assertEqual(self.server.ping_count(_PKG), 1)
+
 
 class TestWatchdogLuaPrimaryDetection(unittest.TestCase):
     def test_local_heartbeat_marks_online_without_api(self) -> None:
@@ -120,6 +131,14 @@ class TestWatchdogLuaPrimaryDetection(unittest.TestCase):
             state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_LAUNCHING)
         self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
+
+    def test_mark_package_launched_resets_window_ping_count(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._lua_heartbeat_server.record_heartbeat(_PKG)
+        sup._lua_heartbeat_server.record_heartbeat(_PKG)
+        self.assertEqual(sup._lua_heartbeat_server.ping_count(_PKG), 2)
+        sup.mark_package_launched(_PKG)
+        self.assertEqual(sup._lua_heartbeat_server.ping_count(_PKG), 0)
 
 
 class TestRecoveryMemoryFlush(unittest.TestCase):
