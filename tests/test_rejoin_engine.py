@@ -132,8 +132,8 @@ class PresenceProfileTests(unittest.TestCase):
 
     def test_in_game_presence_maps_to_online_state(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
-        sup._lua_heartbeat_server.record_heartbeat(_PKG)
-        with patch.object(sup, "_fetch_presence", side_effect=AssertionError("lua is primary")), \
+        presence = MagicMock(is_in_game=True, is_lobby=False, is_offline=False, is_unknown=False)
+        with patch.object(sup, "_fetch_presence", return_value=presence), \
              patch.object(sup, "_check_ram_optimization") as ram_check:
             state, _ = sup._detect_package_state(_PKG, _entry())
             sup._handle_state(_PKG, _entry(), state, STATUS_LAUNCHING, time.time())
@@ -170,7 +170,7 @@ class PresenceProfileTests(unittest.TestCase):
         self.assertEqual(state, STATUS_ONLINE)
         self.assertIn("preserve_state", detail["reason"])
 
-    def test_in_lobby_state_maps_to_lobby_within_allowance(self) -> None:
+    def test_in_lobby_state_maps_to_no_heartbeat_after_grace(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
         sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         lobby = MagicMock()
@@ -180,8 +180,7 @@ class PresenceProfileTests(unittest.TestCase):
         lobby.is_lobby = True
         with patch.object(sup, "_fetch_presence", return_value=lobby):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        from agent.supervisor import STATUS_LOBBY
-        self.assertEqual(state, STATUS_LOBBY)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertNotEqual(state, STATUS_DEAD)
 
     def test_poll_presence_gate_state_online_on_type_2(self) -> None:

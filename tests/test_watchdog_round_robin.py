@@ -318,17 +318,15 @@ class TestLoadingGracePeriod(unittest.TestCase):
 
 
 class TestCookieOnlyDetection(unittest.TestCase):
-    def test_fresh_lua_heartbeat_skips_api_and_os_probes(self) -> None:
+    def test_root_pidof_miss_skips_presence(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
-        sup._lua_heartbeat_server.record_heartbeat(_PKG)
-        with patch.object(sup, "_process_alive_fast") as mock_pid, \
-             patch.object(sup, "_fast_alive_evidence") as mock_evidence, \
-             patch.object(sup, "_fetch_presence", side_effect=AssertionError("api probe")):
+        sup._root_info = MagicMock(available=True, tool="su")
+        result = MagicMock(ok=False, stdout="")
+        with patch("agent.android.run_root_command", return_value=result), \
+             patch.object(sup, "_fetch_presence", side_effect=AssertionError("presence must be skipped")):
             state, detail = sup._detect_package_state(_PKG, _entry())
-        mock_pid.assert_not_called()
-        mock_evidence.assert_not_called()
-        self.assertEqual(state, STATUS_ONLINE)
-        self.assertEqual(detail["reason"], "local_lua_heartbeat_fresh")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "root_pidof_missing")
 
     def test_offline_presence_after_grace_is_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
@@ -343,7 +341,7 @@ class TestCookieOnlyDetection(unittest.TestCase):
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail["reason"], "presence_offline")
 
-    def test_offline_presence_during_loading_grace_stays_launching(self) -> None:
+    def test_offline_presence_during_loading_grace_stays_waiting(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup.mark_package_launched(_PKG)
         presence = MagicMock()
@@ -353,8 +351,8 @@ class TestCookieOnlyDetection(unittest.TestCase):
         presence.is_unknown = False
         with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
+        self.assertEqual(state, "Waiting")
+        self.assertEqual(detail["reason"], "presence_checked_loading_grace")
 
 
 class TestLaunchTimestampBinding(unittest.TestCase):

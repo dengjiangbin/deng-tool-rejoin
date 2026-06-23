@@ -131,7 +131,7 @@ class TestPublicStates(unittest.TestCase):
     ]
     _ALLOWED_PUBLIC = {
         "Layout", "Launching", "Online", "Relaunching", "Failed", "Dead",
-        "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
+        "No Heartbeat", "Checking", "Waiting", "Preparing", "Clear Cache", "Pending",
         "Lobby",
     }
 
@@ -649,8 +649,8 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         ):
             state, detail = watcher._detect_package_state("com.roblox.client", entry)
 
-        self.assertEqual(state, sup.STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
+        self.assertEqual(state, sup.STATUS_WAITING)
+        self.assertEqual(detail["reason"], "presence_checked_loading_grace")
 
 
 # ─── 6. YesCaptcha hidden from public UI ─────────────────────────────────────

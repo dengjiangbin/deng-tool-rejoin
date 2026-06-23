@@ -287,8 +287,8 @@ class TestStateDetection(unittest.TestCase):
     def test_launching_package_evaluated_in_watchdog_loop(self):
         """Launching must not zombie — watchdog runs launching evaluation path."""
         sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
-        sup._lua_heartbeat_server.record_heartbeat(_PKG)
-        with patch.object(sup, "_fetch_presence", side_effect=AssertionError("lua is primary")):
+        presence = MagicMock(is_in_game=True, is_lobby=False, is_offline=False, is_unknown=False)
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             self.assertTrue(sup._needs_launching_evaluation(_PKG))
             state, _ = sup._evaluate_launching_or_pending(_PKG, _make_entry())
         self.assertEqual(state, STATUS_ONLINE)
@@ -354,8 +354,8 @@ class TestStateDetection(unittest.TestCase):
         presence.is_unknown = False
         with patch.object(sup, "_fetch_presence", return_value=presence) as fetch:
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
+        self.assertEqual(state, "Waiting")
+        self.assertEqual(detail["reason"], "presence_checked_loading_grace")
         fetch.assert_called_once()
 
     def test_offline_presence_after_online_relaunches_only_that_package(self):
@@ -412,8 +412,8 @@ class TestStateDetection(unittest.TestCase):
         with patch.object(sup, "_fast_alive_evidence", side_effect=AssertionError("os probe")), \
              patch.object(sup, "_fetch_presence", return_value=None) as fetch:
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
+        self.assertEqual(state, "Waiting")
+        self.assertEqual(detail["reason"], "presence_checked_loading_grace")
         fetch.assert_called_once()
 
     # Test 16

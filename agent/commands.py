@@ -4532,7 +4532,8 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Clearing":     _ANSI_CYAN,   # legacy alias
         "Layout":       _ANSI_CYAN,   # internal only (not shown in public UI)
         "Docking":      _ANSI_CYAN,   # internal only
-        "Waiting":      _ANSI_YELLOW, # internal only
+        "Waiting":      _ANSI_CYAN,
+        "Checking":     _ANSI_CYAN,
         "Resizing":     _ANSI_CYAN,
         "Optimizing":   _ANSI_CYAN,
         "Reconnecting": _ANSI_CYAN,
@@ -5855,25 +5856,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 prep_gfx[package] = android.apply_low_graphics_optimization(package, enabled=low)
             except Exception:  # noqa: BLE001
                 prep_gfx[package] = "error"
-            try:
-                from .autoexec_injection import inject_autoexec_tracker
-
-                _inj_root = _prep_root.tool if getattr(_prep_root, "available", False) else None
-                _inj = inject_autoexec_tracker(package, root_tool=_inj_root)
-                _start_log.info(
-                    "[DENG_REJOIN_AUTOEXEC_INJECT] package=%s success=%s "
-                    "written=%s attempted=%s errors=%s",
-                    package,
-                    str(bool(_inj.get("success"))).lower(),
-                    ",".join(_inj.get("paths_written") or []) or "none",
-                    ",".join(_inj.get("paths_attempted") or []) or "none",
-                    ";".join(_inj.get("errors") or []) or "none",
-                )
-            except Exception as _inj_exc:  # noqa: BLE001
-                _start_log.debug(
-                    "start: autoexec tracker inject error (non-fatal): %s",
-                    _inj_exc,
-                )
         _start_session.mark("batch_clear_cache_done", package_count=len(entries))
         _start_session.mark("package_preparation_done", package_count=len(entries))
 
@@ -5924,6 +5906,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             STATUS_LAUNCHING as _STATUS_LAUNCHING,
             STATUS_ONLINE as _STATUS_ONLINE,
             STATUS_PENDING as _STATUS_PENDING,
+            STATUS_WAITING as _STATUS_WAITING,
         )
 
         _live_cfg_boot = dict(runtime_cfg)
@@ -5995,7 +5978,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 continue
 
             _supervisor.mark_package_launched(package)
-            phase[package] = "Launching"
+            _supervisor._set_status(package, _STATUS_WAITING)
+            phase[package] = _STATUS_WAITING
             launch_ok[package] = True
             launch_err[package] = ""
             _render_phase("Launching...")
@@ -6152,8 +6136,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 safe_err = mask_urls_in_text(err) or "Launch failed"
                 stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             else:
-                from .supervisor import STATUS_LAUNCHING
-                state = STATUS_LAUNCHING
+                from .supervisor import STATUS_WAITING
+                state = STATUS_WAITING
                 stat_internal = "launch command sent; watchdog will verify presence"
             initial_status[pkg] = state
             table_rows.append((index, pkg, username, state))
@@ -6264,8 +6248,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             pkg = entry["package"]
             if not launch_ok.get(pkg):
                 _supervisor._set_status(pkg, _STATUS_FAILED)
-            elif _supervisor.status_map.get(pkg) not in {_STATUS_LAUNCHING, _STATUS_ONLINE}:
-                _supervisor._set_status(pkg, _STATUS_LAUNCHING)
+            elif _supervisor.status_map.get(pkg) not in {_STATUS_LAUNCHING, _STATUS_WAITING, _STATUS_ONLINE}:
+                _supervisor._set_status(pkg, _STATUS_WAITING)
         _live_map = _supervisor.status_map
         _start_session.mark("supervisor_begin", package_count=len(runtime_entries))
 
@@ -6284,6 +6268,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Dead":             "Dead",
             "Relaunching":      "Relaunching",
             "Launching":        "Launching",
+            "Waiting":          "Waiting",
             "Checking":         "Checking",
             "Pending":          "Pending",
             "Join Unconfirmed": "Launching",
@@ -6346,7 +6331,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
                 if disp in ("Dead", "Failed"):
                     return "N/A"
-                if disp in ("Preparing", "Clear Cache", "Launching", "Relaunching", "Checking", "Checking..."):
+                if disp in ("Preparing", "Clear Cache", "Launching", "Waiting", "Relaunching", "Checking", "Checking..."):
                     return "0 MB"
                 cached = _usage_cache.get(pkg)
                 if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:
@@ -6366,10 +6351,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 if not raw_state or raw_state == "Unknown":
                     return "Checking..."
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Checking..."
-                if disp == "Online":
-                    record = _supervisor._lua_heartbeat_server.get_record(pkg)
-                    pings = int(record.get("count") or 0)
-                    return f"Online (Pings: {pings})"
                 return disp
 
             lines = [banner_text(use_color=use_color), ""]

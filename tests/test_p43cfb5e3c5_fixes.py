@@ -359,7 +359,7 @@ class TestPublicUICleanliness(unittest.TestCase):
         map_src = src[start:end]
         allowed = {
             "Online", "Dead", "Launching", "Relaunching", "Failed", "Lobby",
-            "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
+            "No Heartbeat", "Checking", "Waiting", "Preparing", "Clear Cache", "Pending",
         }
         import re
         vals = re.findall(r':\s*"([^"]+)"', map_src)
