@@ -180,8 +180,8 @@ class DeadPriorityRegressionTests(unittest.TestCase):
 
     def test_process_alive_api_says_in_game_can_be_online(self) -> None:
         sup = self._supervisor()
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=_game_presence()):
+        self._past_loading_grace(sup)
+        with patch.object(sup, "_fetch_presence", return_value=_game_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_ONLINE)
 

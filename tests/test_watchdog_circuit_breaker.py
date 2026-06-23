@@ -92,9 +92,9 @@ class TestPresenceRateLimitShield(unittest.TestCase):
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         sup._prev_state[_PKG] = STATUS_ONLINE
         sup._last_online_ts[_PKG] = time.time()
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
 
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(
+        with patch.object(
                  sup,
                  "_fetch_presence",
                  side_effect=RobloxRateLimitedError("presence"),
@@ -114,6 +114,8 @@ class TestPresenceRateLimitShield(unittest.TestCase):
         sup.mark_all_launches_completed()
         sup._prev_state[_PKG] = STATUS_ONLINE
         sup._last_online_ts[_PKG] = time.time()
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        sup._last_launched_at[_PKG2] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         sleep_calls: list[float] = []
 
         def _fetch_side_effect(pkg, **kwargs):
@@ -159,6 +161,7 @@ class TestApiOutageShield(unittest.TestCase):
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         sup._prev_state[_PKG] = STATUS_ONLINE
         sup._last_online_ts[_PKG] = time.time()
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
 
         with patch.object(
             sup,
@@ -175,6 +178,7 @@ class TestApiOutageShield(unittest.TestCase):
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         sup._prev_state[_PKG] = STATUS_ONLINE
         sup._last_online_ts[_PKG] = time.time()
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
 
         with patch.object(
             sup,
@@ -195,6 +199,8 @@ class TestApiOutageShield(unittest.TestCase):
         sup.mark_all_launches_completed()
         sup._prev_state[_PKG] = STATUS_ONLINE
         sup._last_online_ts[_PKG] = time.time()
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        sup._last_launched_at[_PKG2] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         sleep_calls: list[float] = []
 
         def _fetch_side_effect(pkg, **kwargs):

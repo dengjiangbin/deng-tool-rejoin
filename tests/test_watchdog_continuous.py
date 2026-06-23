@@ -287,13 +287,8 @@ class TestStateDetection(unittest.TestCase):
     def test_launching_package_evaluated_in_watchdog_loop(self):
         """Launching must not zombie — watchdog runs launching evaluation path."""
         sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
-        presence = MagicMock()
-        presence.is_in_game = True
-        presence.is_offline = False
-        presence.is_lobby = False
-        presence.is_unknown = False
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=presence):
+        sup._lua_heartbeat_server.record_heartbeat(_PKG)
+        with patch.object(sup, "_fetch_presence", side_effect=AssertionError("lua is primary")):
             self.assertTrue(sup._needs_launching_evaluation(_PKG))
             state, _ = sup._evaluate_launching_or_pending(_PKG, _make_entry())
         self.assertEqual(state, STATUS_ONLINE)
@@ -301,13 +296,13 @@ class TestStateDetection(unittest.TestCase):
     # Test 13
     def test_process_running_presence_in_game_returns_in_game(self):
         sup = _make_sup()
+        self._past_loading_grace(sup)
         presence = MagicMock()
         presence.is_in_game = True
         presence.is_offline = False
         presence.is_lobby = False
         presence.is_unknown = False
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=presence):
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         from agent.supervisor import STATUS_ONLINE
         self.assertEqual(state, STATUS_ONLINE)
@@ -353,15 +348,10 @@ class TestStateDetection(unittest.TestCase):
         """Lobby/offline during loading grace stays Launching — not No Heartbeat."""
         sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
         sup.mark_package_launched(_PKG)
-        presence = MagicMock()
-        presence.is_in_game = False
-        presence.is_offline = False
-        presence.is_lobby = True
-        presence.is_unknown = False
-        with patch.object(sup, "_fetch_presence", return_value=presence):
+        with patch.object(sup, "_fetch_presence", side_effect=AssertionError("api skipped during grace")):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "presence_lobby_loading_grace")
+        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
 
     def test_offline_presence_after_online_relaunches_only_that_package(self):
         """Offline cookie presence triggers No Heartbeat; Dead recovery relaunches alone."""
@@ -387,6 +377,7 @@ class TestStateDetection(unittest.TestCase):
     def test_missing_config_user_id_falls_back_without_presence(self):
         """Without resolvable user id, presence is skipped and Pending is reported."""
         sup = _make_sup()
+        self._past_loading_grace(sup)
         from agent.supervisor import STATUS_PENDING
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
@@ -401,8 +392,8 @@ class TestStateDetection(unittest.TestCase):
     def test_username_lookup_used_for_presence_when_user_id_missing(self):
         """Watchdog resolves username → user id before presence fetch."""
         sup = _make_sup()
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(android, "current_foreground_package", return_value=""), \
+        self._past_loading_grace(sup)
+        with patch.object(android, "current_foreground_package", return_value=""), \
              patch.object(android, "discover_roblox_user_id_from_prefs", return_value=None), \
              patch("agent.roblox_presence.lookup_user_id", return_value=12345) as lookup, \
              patch("agent.roblox_presence.fetch_presence_one", return_value=None):
@@ -413,12 +404,11 @@ class TestStateDetection(unittest.TestCase):
         """Unknown/missing presence during loading grace stays Launching — no OS hint."""
         sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
         sup.mark_package_launched(_PKG)
-        with patch.object(sup, "_fast_alive_evidence") as mock_evidence, \
-             patch.object(sup, "_fetch_presence", return_value=None):
+        with patch.object(sup, "_fast_alive_evidence", side_effect=AssertionError("os probe")), \
+             patch.object(sup, "_fetch_presence", side_effect=AssertionError("api skipped during grace")):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        mock_evidence.assert_not_called()
         self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "presence_unknown_loading_grace")
+        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
 
     # Test 16
     def test_no_joining_state_in_watchdog_allowed_states(self):

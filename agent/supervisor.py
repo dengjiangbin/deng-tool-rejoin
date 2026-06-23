@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import signal
 import threading
@@ -15,6 +16,12 @@ from .config import effective_private_server_url, load_config, private_url_launc
 from .launcher import launch_package_for_current_config, perform_rejoin
 from .lockfile import LockManager
 from .logger import configure_logging, log_event
+from .lua_heartbeat_server import (
+    DEFAULT_HOST as LUA_HEARTBEAT_HOST,
+    DEFAULT_PORT as LUA_HEARTBEAT_PORT,
+    HEARTBEAT_TTL_SECONDS as LUA_HEARTBEAT_TTL_SECONDS,
+    LuaHeartbeatServer,
+)
 from .monitor import check_package_health, check_roblox_health
 from .roblox_health import categorize_unhealthy
 
@@ -1217,6 +1224,14 @@ class WatchdogSupervisor:
     # ── Lobby transition allowance after loading grace expires ───────────────
     LOBBY_TRANSITION_SECONDS: int = 180
 
+    # ── Local in-game Lua heartbeat server ───────────────────────────────────
+    LUA_HEARTBEAT_HOST: str = LUA_HEARTBEAT_HOST
+    LUA_HEARTBEAT_PORT: int = LUA_HEARTBEAT_PORT
+    LUA_HEARTBEAT_TTL_SECONDS: float = LUA_HEARTBEAT_TTL_SECONDS
+
+    # ── Recovery breathing room after force-stop (LMK / phantom-process guard) ─
+    RECOVERY_FORCE_STOP_BREATH_SECONDS: float = 1.5
+
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
 
@@ -1318,6 +1333,12 @@ class WatchdogSupervisor:
         self._watchdog_round_rate_limited: bool = False
         self._lobby_entered_at: dict[str, float] = {}
         self._recovery_gate_attempts: dict[str, int] = {}
+        self._lua_heartbeat_server = LuaHeartbeatServer(
+            host=self.LUA_HEARTBEAT_HOST,
+            port=self.LUA_HEARTBEAT_PORT,
+            allowed_packages=frozenset(self.packages),
+            ttl_seconds=self.LUA_HEARTBEAT_TTL_SECONDS,
+        )
         self._root_info = android.detect_root()
 
         for e in self.entries:
@@ -1405,6 +1426,32 @@ class WatchdogSupervisor:
     def set_render_callback(self, render_callback: Any) -> None:
         self._render_callback = render_callback
 
+    def _ensure_lua_heartbeat_server(self) -> None:
+        try:
+            self._lua_heartbeat_server.start()
+            log_event(
+                self._logger,
+                "info",
+                "[DENG_REJOIN_LUA_HEARTBEAT_SERVER_STARTED]",
+                host=self._lua_heartbeat_server.host,
+                port=self._lua_heartbeat_server.port,
+                ttl_sec=self.LUA_HEARTBEAT_TTL_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                self._logger,
+                "warning",
+                "[DENG_REJOIN_LUA_HEARTBEAT_SERVER_START_FAILED]",
+                error=str(exc)[:160],
+            )
+
+    def _post_recovery_memory_flush(self) -> None:
+        """Drop transient recovery allocations so Termux stays under LMK pressure."""
+        try:
+            gc.collect()
+        except Exception:  # noqa: BLE001
+            pass
+
     def start_daemon(
         self,
         *,
@@ -1418,6 +1465,7 @@ class WatchdogSupervisor:
         self._render_callback = render_callback
         self.stop_event.clear()
         self.stop_source = ""
+        self._ensure_lua_heartbeat_server()
         self._watchdog_thread = threading.Thread(
             target=self._run_watchdog_loop,
             kwargs={
@@ -1612,7 +1660,7 @@ class WatchdogSupervisor:
         )
         if self._process_alive_fast(pkg):
             if self._force_stop_target_package(pkg):
-                time.sleep(1.5)
+                time.sleep(float(self.RECOVERY_FORCE_STOP_BREATH_SECONDS))
         self._set_status(pkg, STATUS_REOPENING)
         self._mark_launched(pkg)
         if callable(render_callback):
@@ -1627,6 +1675,7 @@ class WatchdogSupervisor:
             self._set_status(pkg, STATUS_LAUNCHING)
         else:
             self._set_status(pkg, STATUS_DEAD)
+        self._post_recovery_memory_flush()
 
     def _in_grace(self, pkg: str, now: float) -> bool:
         return now < self._grace_until.get(pkg, 0.0)
@@ -2094,20 +2143,82 @@ class WatchdogSupervisor:
     def _detect_package_state(
         self, pkg: str, entry: dict[str, Any], *, force_cookie_rescan: bool = False
     ) -> tuple[str, dict[str, Any]]:
-        """Detect package state using cookie presence as the sole source of truth.
+        """Detect package state using local Lua heartbeats as primary truth.
 
-        Android PID/window/foreground probes are intentionally excluded — a hung
-        background clone can still hold a valid PID while the Roblox session is
-        dead.  Only the authenticated cookie presence engine decides liveness.
+        In-game executor scripts ping the local HTTP server every few seconds.
+        Roblox cookie/public presence is consulted only as a fallback when a
+        package is past its loading grace and has never registered a local ping.
         """
         del entry
         t0 = time.monotonic()
+        elapsed_ms = lambda: int((time.monotonic() - t0) * 1000)
+        pres_detail = self._presence_last_detail.get(pkg, {})
+        heartbeat_age_sec = (
+            int(time.time() - self._last_online_ts[pkg])
+            if self._last_online_ts.get(pkg)
+            else ""
+        )
+        in_loading_grace = self._in_loading_grace(pkg)
+        lua_server = self._lua_heartbeat_server
+        lua_age = lua_server.age_seconds(pkg)
+
+        def _detail_base(**overrides: Any) -> dict[str, Any]:
+            detail = {
+                "process_running": "unknown",
+                "in_game": "false",
+                "heartbeat_ok": "false",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms(),
+                "root_available": "unknown",
+                "foreground_package": "",
+                "activity": "",
+                "in_game_proof": "false",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "presence_source": "local_lua_heartbeat",
+                "reason": "local_lua_heartbeat_evaluated",
+                "lua_heartbeat_age_sec": (
+                    round(float(lua_age), 1) if lua_age is not None else ""
+                ),
+            }
+            detail.update(overrides)
+            return detail
+
+        if lua_server.is_fresh(pkg):
+            self._clear_lobby_state(pkg)
+            self._nhb_offline_count[pkg] = 0
+            detail = _detail_base(
+                in_game="true",
+                heartbeat_ok="true",
+                in_game_proof="true",
+                activity="Online",
+                reason="local_lua_heartbeat_fresh",
+            )
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_ONLINE)
+            return STATUS_ONLINE, detail
+
+        if lua_server.ever_seen(pkg) and not in_loading_grace:
+            self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
+            detail = _detail_base(
+                activity="No Heartbeat",
+                reason="local_lua_heartbeat_stale",
+            )
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+            return STATUS_NO_HEARTBEAT, detail
+
+        if in_loading_grace:
+            detail = _detail_base(
+                activity="Launching",
+                in_game_proof="unknown",
+                reason="local_lua_pending_loading_grace",
+            )
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_LAUNCHING)
+            return STATUS_LAUNCHING, detail
 
         if self._presence_api_fault_active() or self._watchdog_round_rate_limited:
             return self._preserve_package_state_on_api_fault(
                 pkg,
                 t0=t0,
-                pres_detail=self._presence_last_detail.get(pkg, {}),
+                pres_detail=pres_detail,
                 fault="shield_active",
             )
 
@@ -2122,36 +2233,19 @@ class WatchdogSupervisor:
                 return self._preserve_package_state_on_api_fault(
                     pkg,
                     t0=t0,
-                    pres_detail=self._presence_last_detail.get(pkg, {}),
+                    pres_detail=pres_detail,
                     fault=str(getattr(exc, "fault", "fault") or "fault"),
                 )
             raise
 
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
         pres_detail = self._presence_last_detail.get(pkg, {})
         profile = str(pres_detail.get("roblox_presence_profile") or "")
-        heartbeat_age_sec = (
-            int(time.time() - self._last_online_ts[pkg])
-            if self._last_online_ts.get(pkg)
-            else ""
-        )
-        in_loading_grace = self._in_loading_grace(pkg)
 
         def _presence_detail(**overrides: Any) -> dict[str, Any]:
-            detail = {
-                "process_running": "unknown",
-                "in_game": "false",
-                "heartbeat_ok": "false",
-                "warning_detected": "false",
-                "elapsed_ms": elapsed_ms,
-                "root_available": "unknown",
-                "foreground_package": "",
-                "activity": "",
-                "in_game_proof": "false",
-                "heartbeat_age_sec": heartbeat_age_sec,
-                "presence_source": "cookie_dual_verify",
-                "reason": "roblox_presence_evaluated",
-            }
+            detail = _detail_base(
+                presence_source="cookie_dual_verify",
+                reason="roblox_presence_evaluated",
+            )
             detail.update(overrides)
             return detail
 
@@ -2203,14 +2297,6 @@ class WatchdogSupervisor:
             return STATUS_NO_HEARTBEAT, detail
 
         if presence_lobby:
-            if in_loading_grace:
-                detail = _presence_detail(
-                    activity="Launching",
-                    in_game_proof="unknown",
-                    reason="presence_lobby_loading_grace",
-                )
-                self._log_state_evidence(pkg, detail, pres_detail, STATUS_LAUNCHING)
-                return STATUS_LAUNCHING, detail
             self._note_lobby_entered(pkg)
             if self._in_lobby_transition_allowance(pkg):
                 detail = _presence_detail(
@@ -2231,14 +2317,6 @@ class WatchdogSupervisor:
 
         if presence_offline:
             self._clear_lobby_state(pkg)
-            if in_loading_grace:
-                detail = _presence_detail(
-                    activity="Launching",
-                    in_game_proof="unknown",
-                    reason="presence_offline_loading_grace",
-                )
-                self._log_state_evidence(pkg, detail, pres_detail, STATUS_LAUNCHING)
-                return STATUS_LAUNCHING, detail
             self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
             detail = _presence_detail(
                 activity=profile or "Offline",
@@ -2252,15 +2330,6 @@ class WatchdogSupervisor:
             if presence is not None and not presence_unknown
             else "missing_in_game_proof_no_heartbeat"
         )
-        if in_loading_grace and presence_unknown:
-            detail = _presence_detail(
-                activity="Launching",
-                in_game_proof="unknown",
-                reason="presence_unknown_loading_grace",
-            )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_LAUNCHING)
-            return STATUS_LAUNCHING, detail
-
         detail = _presence_detail(
             activity="No Heartbeat",
             in_game_proof="unknown" if presence_unknown else "false",
@@ -2417,6 +2486,7 @@ class WatchdogSupervisor:
                 self._set_status(pkg, STATUS_LAUNCHING)
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
+            self._post_recovery_memory_flush()
             return True
 
         elif state == STATUS_NO_HEARTBEAT:
@@ -2465,13 +2535,14 @@ class WatchdogSupervisor:
             self._nhb_since.pop(pkg, None)
             self._nhb_cooldown_until.pop(pkg, None)
             if self._force_stop_target_package(pkg):
-                time.sleep(1.5)
+                time.sleep(float(self.RECOVERY_FORCE_STOP_BREATH_SECONDS))
             self._set_status(pkg, STATUS_DEAD)
             if callable(render_callback):
                 try:
                     render_callback()
                 except Exception:  # noqa: BLE001
                     pass
+            self._post_recovery_memory_flush()
             return True
 
         elif state in _METRIC_ACTIVE_STATES:
@@ -2660,6 +2731,7 @@ class WatchdogSupervisor:
         render_callback: Any = None,
     ) -> None:
         """Sequential watchdog monitor loop. Safe to run on a daemon thread."""
+        self._ensure_lua_heartbeat_server()
         render_callback = render_callback if render_callback is not None else self._render_callback
         display_interval = float(display_interval or self._display_interval or self.DASHBOARD_RENDER_INTERVAL_SECONDS)
 
@@ -2934,6 +3006,10 @@ class WatchdogSupervisor:
 
         db.insert_event("INFO", "watchdog_supervisor_stopped", "session ended by user")
         log_event(logger, "info", "watchdog_supervisor_stopped")
+        try:
+            self._lua_heartbeat_server.stop()
+        except Exception:  # noqa: BLE001
+            pass
 
     def stop(self, source: str = "programmatic") -> None:
         """Signal the supervisor loop to stop."""
@@ -2951,6 +3027,10 @@ class WatchdogSupervisor:
             allowed="true",
         )
         self.stop_event.set()
+        try:
+            self._lua_heartbeat_server.stop()
+        except Exception:  # noqa: BLE001
+            pass
 
     def get_status_snapshot(
         self, entries: list[dict[str, Any]] | None = None

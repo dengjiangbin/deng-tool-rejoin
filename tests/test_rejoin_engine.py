@@ -132,13 +132,8 @@ class PresenceProfileTests(unittest.TestCase):
 
     def test_in_game_presence_maps_to_online_state(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
-        game = MagicMock()
-        game.is_in_game = True
-        game.is_offline = False
-        game.is_unknown = False
-        game.is_lobby = False
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=game), \
+        sup._lua_heartbeat_server.record_heartbeat(_PKG)
+        with patch.object(sup, "_fetch_presence", side_effect=AssertionError("lua is primary")), \
              patch.object(sup, "_check_ram_optimization") as ram_check:
             state, _ = sup._detect_package_state(_PKG, _entry())
             sup._handle_state(_PKG, _entry(), state, STATUS_LAUNCHING, time.time())
@@ -150,8 +145,8 @@ class PresenceProfileTests(unittest.TestCase):
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         sup._prev_state[_PKG] = STATUS_ONLINE
         sup._last_online_ts[_PKG] = time.time()
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        with patch.object(
                  sup,
                  "_fetch_presence",
                  side_effect=__import__("agent.roblox_presence", fromlist=["RobloxRateLimitedError"]).RobloxRateLimitedError("presence"),
@@ -164,6 +159,7 @@ class PresenceProfileTests(unittest.TestCase):
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         sup._prev_state[_PKG] = STATUS_ONLINE
         sup._last_online_ts[_PKG] = time.time()
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         from agent.roblox_presence import RobloxApiFaultError
         with patch.object(
             sup,

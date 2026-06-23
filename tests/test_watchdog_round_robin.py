@@ -318,21 +318,17 @@ class TestLoadingGracePeriod(unittest.TestCase):
 
 
 class TestCookieOnlyDetection(unittest.TestCase):
-    def test_detect_package_state_skips_os_liveness_probes(self) -> None:
+    def test_fresh_lua_heartbeat_skips_api_and_os_probes(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
-        presence = MagicMock()
-        presence.is_in_game = True
-        presence.is_offline = False
-        presence.is_lobby = False
-        presence.is_unknown = False
+        sup._lua_heartbeat_server.record_heartbeat(_PKG)
         with patch.object(sup, "_process_alive_fast") as mock_pid, \
              patch.object(sup, "_fast_alive_evidence") as mock_evidence, \
-             patch.object(sup, "_fetch_presence", return_value=presence):
+             patch.object(sup, "_fetch_presence", side_effect=AssertionError("api probe")):
             state, detail = sup._detect_package_state(_PKG, _entry())
         mock_pid.assert_not_called()
         mock_evidence.assert_not_called()
         self.assertEqual(state, STATUS_ONLINE)
-        self.assertEqual(detail["reason"], "roblox_presence_in_game")
+        self.assertEqual(detail["reason"], "local_lua_heartbeat_fresh")
 
     def test_offline_presence_after_grace_is_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
@@ -358,7 +354,7 @@ class TestCookieOnlyDetection(unittest.TestCase):
         with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "presence_offline_loading_grace")
+        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
 
 
 class TestLaunchTimestampBinding(unittest.TestCase):

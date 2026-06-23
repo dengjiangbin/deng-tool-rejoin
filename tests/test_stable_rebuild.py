@@ -17,6 +17,7 @@ import importlib
 import inspect
 import sys
 import threading
+import time
 import types
 import unittest
 from unittest import mock
@@ -600,6 +601,9 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         }
         cfg = {"supervisor": {}, "foreground_grace_seconds": 90}
         watcher = sup.WatchdogSupervisor([entry], cfg)
+        watcher._last_launched_at["com.roblox.client"] = (
+            time.monotonic() - (watcher.LOADING_GRACE_SECONDS + 5)
+        )
         with mock.patch.object(
             watcher,
             "_fast_alive_evidence",
@@ -646,7 +650,7 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
             state, detail = watcher._detect_package_state("com.roblox.client", entry)
 
         self.assertEqual(state, sup.STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "presence_unknown_loading_grace")
+        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
 
 
 # ─── 6. YesCaptcha hidden from public UI ─────────────────────────────────────
