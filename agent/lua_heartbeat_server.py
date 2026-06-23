@@ -6,6 +6,7 @@ watchdog knows the game client is alive without polling external APIs.
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +20,35 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9999
 HEARTBEAT_TTL_SECONDS = 30.0
 
+DEFAULT_HEARTBEAT_RECORD: dict[str, float | int] = {
+    "timestamp": 0.0,
+    "count": 0,
+    "total_count": 0,
+}
+
+
+def normalize_heartbeat_record(raw: Any) -> dict[str, float | int]:
+    """Return a safe heartbeat record with numeric timestamp/count fields."""
+    if not isinstance(raw, dict):
+        return copy.copy(DEFAULT_HEARTBEAT_RECORD)
+    try:
+        timestamp = float(raw.get("timestamp") or 0.0)
+    except (TypeError, ValueError):
+        timestamp = 0.0
+    try:
+        count = int(raw.get("count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    try:
+        total_count = int(raw.get("total_count") or 0)
+    except (TypeError, ValueError):
+        total_count = 0
+    return {
+        "timestamp": max(0.0, timestamp),
+        "count": max(0, count),
+        "total_count": max(0, total_count),
+    }
+
 
 class LuaHeartbeatServer:
     """Background HTTP server recording per-package Lua heartbeat timestamps."""
@@ -26,15 +56,13 @@ class LuaHeartbeatServer:
     __slots__ = (
         "_allowed_packages",
         "_ever_seen",
-        "_heartbeats",
         "_host",
         "_httpd",
         "_lock",
-        "_ping_counts",
         "_port",
+        "_records",
         "_thread",
         "_ttl",
-        "_window_ping_counts",
     )
 
     def __init__(
@@ -51,10 +79,8 @@ class LuaHeartbeatServer:
         self._allowed_packages = {
             str(p).strip() for p in (allowed_packages or ()) if str(p).strip()
         }
-        self._heartbeats: dict[str, float] = {}
+        self._records: dict[str, dict[str, float | int]] = {}
         self._ever_seen: set[str] = set()
-        self._ping_counts: dict[str, int] = {}
-        self._window_ping_counts: dict[str, int] = {}
         self._lock = threading.Lock()
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -73,7 +99,17 @@ class LuaHeartbeatServer:
     def heartbeats(self) -> dict[str, float]:
         """Read-only snapshot of last heartbeat monotonic timestamps."""
         with self._lock:
-            return dict(self._heartbeats)
+            return {
+                pkg: float(rec["timestamp"])
+                for pkg, rec in self._records.items()
+                if float(rec.get("timestamp") or 0.0) > 0.0
+            }
+
+    def get_record(self, package: str) -> dict[str, float | int]:
+        """Return a copy of the heartbeat record for ``package``."""
+        pkg = str(package or "").strip()
+        with self._lock:
+            return normalize_heartbeat_record(self._records.get(pkg))
 
     def record_heartbeat(self, package: str) -> bool:
         """Record a heartbeat for ``package``. Returns False when rejected."""
@@ -85,18 +121,19 @@ class LuaHeartbeatServer:
             return False
         now = time.monotonic()
         with self._lock:
-            self._heartbeats[pkg] = now
+            rec = self._records.setdefault(pkg, copy.copy(DEFAULT_HEARTBEAT_RECORD))
+            rec["timestamp"] = now
+            rec["count"] = int(rec.get("count") or 0) + 1
+            rec["total_count"] = int(rec.get("total_count") or 0) + 1
             self._ever_seen.add(pkg)
-            self._ping_counts[pkg] = int(self._ping_counts.get(pkg, 0)) + 1
-            self._window_ping_counts[pkg] = int(self._window_ping_counts.get(pkg, 0)) + 1
         return True
 
     def ping_count(self, package: str, *, window: bool = True) -> int:
         """Return heartbeat ping count for ``package`` (window = current execution)."""
-        pkg = str(package or "").strip()
-        with self._lock:
-            store = self._window_ping_counts if window else self._ping_counts
-            return int(store.get(pkg, 0))
+        rec = self.get_record(package)
+        if window:
+            return int(rec["count"])
+        return int(rec["total_count"])
 
     def reset_window_ping_count(self, package: str) -> None:
         """Reset per-window ping counter when a clone relaunches."""
@@ -104,26 +141,27 @@ class LuaHeartbeatServer:
         if not pkg:
             return
         with self._lock:
-            self._window_ping_counts.pop(pkg, None)
+            if pkg in self._records:
+                self._records[pkg]["count"] = 0
 
     def is_fresh(self, package: str, *, ttl_seconds: float | None = None) -> bool:
         ttl = float(self._ttl if ttl_seconds is None else ttl_seconds)
-        with self._lock:
-            ts = self._heartbeats.get(str(package or "").strip())
-        if not ts:
+        rec = self.get_record(package)
+        ts = float(rec["timestamp"])
+        if ts <= 0.0:
             return False
-        return (time.monotonic() - float(ts)) < ttl
+        return (time.monotonic() - ts) < ttl
 
     def ever_seen(self, package: str) -> bool:
         with self._lock:
             return str(package or "").strip() in self._ever_seen
 
     def age_seconds(self, package: str) -> float | None:
-        with self._lock:
-            ts = self._heartbeats.get(str(package or "").strip())
-        if not ts:
+        rec = self.get_record(package)
+        ts = float(rec["timestamp"])
+        if ts <= 0.0:
             return None
-        return max(0.0, time.monotonic() - float(ts))
+        return max(0.0, time.monotonic() - ts)
 
     def running(self) -> bool:
         thread = self._thread

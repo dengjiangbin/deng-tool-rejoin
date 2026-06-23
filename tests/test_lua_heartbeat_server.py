@@ -14,7 +14,11 @@ PROJECT = Path(__file__).resolve().parents[1]
 if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
-from agent.lua_heartbeat_server import LuaHeartbeatServer
+from agent.lua_heartbeat_server import (
+    DEFAULT_HEARTBEAT_RECORD,
+    LuaHeartbeatServer,
+    normalize_heartbeat_record,
+)
 from agent.supervisor import STATUS_LAUNCHING, STATUS_NO_HEARTBEAT, STATUS_ONLINE, WatchdogSupervisor
 
 _PKG = "com.roblox.client"
@@ -55,8 +59,31 @@ class TestLuaHeartbeatServer(unittest.TestCase):
     def test_stale_heartbeat_not_fresh(self) -> None:
         self.server.record_heartbeat(_PKG)
         with self.server._lock:
-            self.server._heartbeats[_PKG] = time.monotonic() - 45.0
+            self.server._records[_PKG]["timestamp"] = time.monotonic() - 45.0
         self.assertFalse(self.server.is_fresh(_PKG))
+
+    def test_get_record_returns_timestamp_and_count(self) -> None:
+        self.server.record_heartbeat(_PKG)
+        self.server.record_heartbeat(_PKG)
+        rec = self.server.get_record(_PKG)
+        self.assertGreater(float(rec["timestamp"]), 0.0)
+        self.assertEqual(int(rec["count"]), 2)
+        self.assertEqual(int(rec["total_count"]), 2)
+
+    def test_normalize_heartbeat_record_rejects_bad_types(self) -> None:
+        rec = normalize_heartbeat_record({"timestamp": "bad", "count": None})
+        self.assertEqual(rec["timestamp"], 0.0)
+        self.assertEqual(rec["count"], 0)
+        self.assertEqual(rec, normalize_heartbeat_record(DEFAULT_HEARTBEAT_RECORD))
+
+    def test_is_fresh_uses_timestamp_not_count(self) -> None:
+        self.server.record_heartbeat(_PKG)
+        with self.server._lock:
+            self.server._records[_PKG]["count"] = 999
+        self.assertTrue(self.server.is_fresh(_PKG))
+        age = self.server.age_seconds(_PKG)
+        self.assertIsNotNone(age)
+        self.assertLess(float(age or 999.0), 1.0)
 
     def test_ping_count_increments_and_resets_window(self) -> None:
         self.server.record_heartbeat(_PKG)
@@ -104,7 +131,8 @@ class TestWatchdogLuaPrimaryDetection(unittest.TestCase):
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         sup._lua_heartbeat_server.record_heartbeat(_PKG)
-        sup._lua_heartbeat_server._heartbeats[_PKG] = time.monotonic() - 45.0
+        with sup._lua_heartbeat_server._lock:
+            sup._lua_heartbeat_server._records[_PKG]["timestamp"] = time.monotonic() - 45.0
         with patch.object(sup, "_fetch_presence", side_effect=AssertionError("api must not run")):
             state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)

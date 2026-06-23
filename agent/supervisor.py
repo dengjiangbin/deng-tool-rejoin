@@ -2161,7 +2161,9 @@ class WatchdogSupervisor:
         )
         in_loading_grace = self._in_loading_grace(pkg)
         lua_server = self._lua_heartbeat_server
+        lua_record = lua_server.get_record(pkg)
         lua_age = lua_server.age_seconds(pkg)
+        lua_ping_count = int(lua_record.get("count") or 0)
 
         def _detail_base(**overrides: Any) -> dict[str, Any]:
             detail = {
@@ -2180,6 +2182,7 @@ class WatchdogSupervisor:
                 "lua_heartbeat_age_sec": (
                     round(float(lua_age), 1) if lua_age is not None else ""
                 ),
+                "lua_ping_count": lua_ping_count,
             }
             detail.update(overrides)
             return detail

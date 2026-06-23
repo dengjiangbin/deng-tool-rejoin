@@ -415,6 +415,36 @@ def _write_cli_crash_log(exc: BaseException, *, context: str = "cli") -> None:
         pass
 
 
+def _report_start_dashboard_crash(
+    exc: BaseException,
+    *,
+    session: StartSessionLogger | None = None,
+) -> int:
+    """Persist and print a dashboard crash instead of silently exiting Termux."""
+    _write_cli_crash_log(exc, context="start_dashboard_monitor_loop")
+    try:
+        if session is not None:
+            session.mark("dashboard_fatal_crash", error=str(exc)[:200])
+    except Exception:  # noqa: BLE001
+        pass
+    for line in (
+        "",
+        f"[FATAL ERROR] Dashboard crashed: {exc}",
+        f"Traceback saved to {CRASH_LOG_PATH}.",
+        "Tool paused to prevent silent exit.",
+    ):
+        try:
+            print(termux_ui.fit_line(line))
+        except Exception:  # noqa: BLE001
+            print(line)
+    if _is_interactive():
+        try:
+            input("Press Enter to exit...")
+        except (EOFError, KeyboardInterrupt):
+            pass
+    return 1
+
+
 def _spawn_monitor_worker(cfg: dict[str, Any]) -> bool:
     if _monitor_worker_running():
         return True
@@ -6342,10 +6372,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                     return "Checking..."
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Checking..."
                 if disp == "Online":
-                    try:
-                        pings = int(_supervisor._lua_heartbeat_server.ping_count(pkg))
-                    except Exception:  # noqa: BLE001
-                        pings = 0
+                    record = _supervisor._lua_heartbeat_server.get_record(pkg)
+                    pings = int(record.get("count") or 0)
                     return f"Online (Pings: {pings})"
                 return disp
 
@@ -6405,11 +6433,21 @@ def cmd_start(args: argparse.Namespace) -> int:
             _supervisor.stop_source = "ctrl_c"
             _supervisor.stop("ctrl_c")
         except Exception as exc:  # noqa: BLE001
-            _start_log.debug("Supervisor monitor terminated with error: %s", exc)
+            _start_log.exception("Supervisor monitor terminated with error: %s", exc)
             _shutdown_reason = "fatal_error"
             _log_stop_request("fatal_error", allowed=True, stack=str(exc)[:1000])
             _supervisor.stop_source = "fatal_error"
             _supervisor.stop("fatal_error")
+            _transition_lifecycle("STOPPING", "fatal_error")
+            try:
+                from . import monitor_autostart as _mon_auto
+                _mon_auto.set_active_supervisor(None)
+            except Exception:  # noqa: BLE001
+                pass
+            _release_start_lock("fatal_error")
+            _transition_lifecycle("STOPPED", "fatal_error")
+            _start_session.finish("fatal_error")
+            return _report_start_dashboard_crash(exc, session=_start_session)
 
         _stop_source = str(getattr(_supervisor, "stop_source", "") or "").strip()
         if _stop_source in _allowed_stop_sources:
