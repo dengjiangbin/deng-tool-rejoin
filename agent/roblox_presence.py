@@ -47,6 +47,7 @@ Never raises.  Network/JSON/SSL failures all return safe defaults.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -153,6 +154,40 @@ _USERNAME_CACHE: dict[str, tuple[float, int | None]] = {}
 
 # ─── http helper ─────────────────────────────────────────────────────────────
 
+def _extract_csrf_token(response_headers: Mapping[str, str]) -> str:
+    for key, value in response_headers.items():
+        if str(key).lower() == "x-csrf-token" and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _decode_post_json_body(body_bytes: bytes) -> Mapping[str, object] | None:
+    if not body_bytes:
+        return None
+    try:
+        payload = json.loads(body_bytes.decode("utf-8", errors="replace"))
+    except (json.JSONDecodeError, ValueError, UnicodeError):
+        return None
+    return payload if isinstance(payload, Mapping) else None
+
+
+def _roblox_post_once(
+    url: str,
+    body: Mapping[str, object],
+    *,
+    headers: dict[str, str],
+    timeout: float,
+) -> tuple[int, dict[str, str], Mapping[str, object] | None]:
+    json_bytes = json.dumps(dict(body), separators=(",", ":")).encode("utf-8")
+    status, resp_headers, resp_body = safe_http.post_with_response(
+        url,
+        json_bytes,
+        headers=headers,
+        timeout=max(1, int(timeout)),
+    )
+    return status, resp_headers, _decode_post_json_body(resp_body)
+
+
 def _post_json(
     url: str,
     body: Mapping[str, object],
@@ -162,44 +197,40 @@ def _post_json(
 ) -> Mapping[str, object] | None:
     """POST JSON to a Roblox endpoint and return parsed JSON, or None.
 
-    Never raises.  Returns None on any failure.  Caller decides whether
-    "no data" should mean Unknown or Offline.
-
-    Probe p-79933739d8: live Start reached watchdog package 1 and then the
-    process vanished before state evidence was logged.  The only native-risky
-    path entered there was Python urllib/ssl for the Roblox Presence API.
-    Route through ``safe_http`` so Termux uses curl in a child process; if curl
-    crashes, Python receives a clean network error instead of SIGSEGV.
+    When a ``.ROBLOSECURITY`` cookie is supplied, Roblox requires an
+    ``X-CSRF-TOKEN`` handshake: the first POST may return HTTP 403 with
+    ``x-csrf-token`` in the response headers; the same POST is retried
+    immediately with ``X-CSRF-TOKEN`` set.
     """
     if not isinstance(body, Mapping):
         return None
 
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
     if cookie:
-        # Some endpoints want X-CSRF-TOKEN even for trivial GETs once a
-        # cookie is present.  Roblox returns the token in a header on a
-        # 403, then accepts the retry — but that handshake is fragile.
-        # For presence + username lookups, an anonymous POST works fine.
-        # We pass the cookie only when the caller explicitly opts in,
-        # and we keep the field name safe (no leaking in error text).
         masked = mask_cookie(cookie)
         _log.debug("attaching cookie (masked=%s)", masked)
         headers["Cookie"] = f".ROBLOSECURITY={cookie}"
 
     try:
-        payload = safe_http.post_json(
-            url,
-            dict(body),
-            headers=headers,
-            timeout=max(1, int(timeout)),
+        status, resp_headers, payload = _roblox_post_once(
+            url, body, headers=headers, timeout=timeout,
         )
-        return payload if isinstance(payload, Mapping) else None
-    except safe_http.SafeHttpStatusError as exc:
-        if int(getattr(exc, "status_code", 0) or 0) == 429:
+        if cookie and status == 403:
+            csrf = _extract_csrf_token(resp_headers)
+            if csrf:
+                retry_headers = dict(headers)
+                retry_headers["X-CSRF-TOKEN"] = csrf
+                _log.debug("roblox CSRF retry for %s", url)
+                status, resp_headers, payload = _roblox_post_once(
+                    url, body, headers=retry_headers, timeout=timeout,
+                )
+        if status == 429:
             _log.debug("presence POST rate limited: %s", url)
-        else:
-            _log.debug("presence POST HTTP error: %s", exc)
-        return None
+            return None
+        if status >= 400:
+            _log.debug("presence POST HTTP %s: %s", status, url)
+            return None
+        return payload if isinstance(payload, Mapping) else None
     except safe_http.SafeHttpNetworkError as exc:
         _log.debug("presence POST network error: %s", exc)
         return None

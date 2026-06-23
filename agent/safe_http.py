@@ -255,6 +255,115 @@ def _run_curl(
     return http_status, body_bytes
 
 
+def _parse_http_header_block(raw_headers: bytes) -> dict[str, str]:
+    text = raw_headers.decode("utf-8", errors="replace")
+    headers: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line or line.startswith("HTTP/"):
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        headers[key.strip().lower()] = value.strip()
+    return headers
+
+
+def _split_curl_headers_and_body(payload: bytes) -> tuple[dict[str, str], bytes]:
+    for sep in (b"\r\n\r\n", b"\n\n"):
+        idx = payload.find(sep)
+        if idx != -1:
+            return _parse_http_header_block(payload[:idx]), payload[idx + len(sep):]
+    return {}, payload
+
+
+def _run_curl_with_headers(
+    args: list[str],
+    *,
+    stdin_bytes: bytes | None = None,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
+) -> tuple[int, dict[str, str], bytes]:
+    """Run curl and return ``(status_code, response_headers, body_bytes)``."""
+    if not _curl_available():
+        raise SafeHttpNetworkError(_CURL_MISSING_MSG)
+
+    connect_to, max_to = _normalize_timeout(timeout)
+    marker = b"__DENG_HTTP_CODE__"
+    full_cmd = [
+        "curl",
+        "-s",
+        "-S",
+        "-D",
+        "-",
+        "--connect-timeout",
+        str(connect_to),
+        "--max-time",
+        str(max_to),
+        "--retry",
+        "1",
+        "--max-filesize",
+        str(_MAX_RESPONSE_BYTES),
+        "-w",
+        f"\n{marker.decode()}%{{http_code}}__\n",
+    ] + args
+
+    parent_timeout = max_to + 5
+    temp_path: str | None = None
+    curl_args = list(full_cmd)
+    if stdin_bytes is not None:
+        try:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(stdin_bytes)
+                tmp.flush()
+                temp_path = tmp.name
+            curl_args = [
+                part if part != "@-" else f"@{temp_path}"
+                for part in curl_args
+            ]
+        except OSError as exc:
+            raise SafeHttpNetworkError(f"Failed to stage curl POST body: {exc}") from exc
+
+    try:
+        rc, raw, err_b, timed_out = _iso.run_isolated_bytes(
+            curl_args,
+            timeout=float(parent_timeout),
+            lock=_subprocess_lock(),
+            max_stdout=_MAX_RESPONSE_BYTES + 4096,
+        )
+    except (OSError, FileNotFoundError) as exc:
+        raise SafeHttpNetworkError(f"Failed to launch curl: {exc}") from exc
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+    if timed_out:
+        raise SafeHttpNetworkError("Network request timed out (curl process timeout).") from None
+    if rc < 0:
+        sig = -rc
+        raise SafeHttpNetworkError(
+            f"Network check crashed safely (signal {sig}). Please retry."
+        )
+    if rc != 0:
+        stderr_hint = (err_b or b"").decode("utf-8", errors="replace")[:200]
+        raise SafeHttpNetworkError(f"Network error: curl error {rc}. {stderr_hint}")
+
+    marker_idx = raw.rfind(marker)
+    if marker_idx == -1:
+        headers, body_bytes = _split_curl_headers_and_body(raw)
+        return 0, headers, body_bytes
+
+    payload = raw[:marker_idx]
+    status_part = raw[marker_idx + len(marker):]
+    try:
+        http_status = int(status_part.strip().strip("_"))
+    except ValueError:
+        http_status = 0
+    headers, body_bytes = _split_curl_headers_and_body(payload)
+    return http_status, headers, body_bytes
+
+
 class AsyncHttpResult:
     """Non-blocking wrapper around a background HTTP call."""
 
@@ -516,6 +625,55 @@ def get_json(
 
 
 # ── Lightweight (status_code, body) helpers for the monitor bridge ───────────
+
+
+def post_with_response(
+    url: str,
+    body_bytes: bytes,
+    *,
+    content_type: str = "application/json",
+    headers: dict[str, str] | None = None,
+    timeout: int | float | tuple[int | float, int | float] = DEFAULT_REQUEST_TIMEOUT,
+) -> tuple[int, dict[str, str], bytes]:
+    """POST raw bytes; return ``(http_status, response_headers, body)``.
+
+    Never raises on HTTP status — callers inspect status and headers
+    (for example Roblox ``x-csrf-token`` on 403). Network failures raise
+    :class:`SafeHttpNetworkError`.
+    """
+    backend = _http_backend()
+    merged_headers: dict[str, str] = {
+        "User-Agent": _SHARED_HEADERS["User-Agent"],
+        "Accept": "*/*",
+        "Content-Type": content_type,
+    }
+    if headers:
+        merged_headers.update(headers)
+
+    if backend == "curl":
+        header_args = _build_curl_header_args(merged_headers)
+        post_args = ["-X", "POST", "--data-binary", "@-"] + header_args + [url]
+        return _run_curl_with_headers(
+            post_args,
+            stdin_bytes=body_bytes,
+            timeout=timeout,
+        )
+
+    req = urllib.request.Request(url, data=body_bytes, headers=merged_headers, method="POST")
+    connect_to, max_to = _normalize_timeout(timeout)
+    try:
+        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
+            hdrs = {k.lower(): v for k, v in resp.headers.items()}
+            return int(resp.status), hdrs, resp.read(_MAX_RESPONSE_BYTES)
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read(_MAX_RESPONSE_BYTES) or b""
+        except Exception:  # noqa: BLE001
+            body = b""
+        hdrs = {k.lower(): v for k, v in exc.headers.items()} if exc.headers else {}
+        return int(exc.code), hdrs, body
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise SafeHttpNetworkError(f"Network I/O error: {exc}") from exc
 
 
 def post_raw(

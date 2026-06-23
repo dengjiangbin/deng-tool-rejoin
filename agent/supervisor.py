@@ -1200,8 +1200,10 @@ class WatchdogSupervisor:
     # ── Staggered launch: strict pause between package opens ────────────────
     LAUNCH_STAGGER_SECONDS: int = 30
 
-    # ── Round-robin watchdog: pause between per-package evaluations ─────────
+    # ── Round-robin watchdog: visible Checking hold + tail pause per package ─
     PACKAGE_ROUND_ROBIN_SECONDS: int = 10
+    PACKAGE_CHECKING_HOLD_SECONDS: float = 2.0
+    PACKAGE_ROUND_ROBIN_TAIL_SECONDS: float = 8.0
 
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
@@ -2481,6 +2483,8 @@ class WatchdogSupervisor:
                 error_text = ""
                 launching_eval = self._needs_launching_evaluation(pkg)
                 self._set_status(pkg, STATUS_CHECKING)
+                _maybe_render(force=True)
+                self._interruptible_sleep(self.PACKAGE_CHECKING_HOLD_SECONDS)
                 try:
                     if launching_eval:
                         state, detail = self._evaluate_launching_or_pending(pkg, entry)
@@ -2583,15 +2587,16 @@ class WatchdogSupervisor:
                         )
 
                 _maybe_render()
-                if idx < total and not self.stop_event.is_set():
+                if not self.stop_event.is_set():
                     log_event(
                         logger, "info", "[DENG_REJOIN_WATCHDOG_ROUND_ROBIN_PAUSE]",
                         round=self._round,
                         package=pkg,
-                        next_package_index=idx + 1,
-                        pause_sec=round_robin_sec,
+                        next_package_index=(idx + 1) if idx < total else 1,
+                        checking_hold_sec=self.PACKAGE_CHECKING_HOLD_SECONDS,
+                        tail_pause_sec=self.PACKAGE_ROUND_ROBIN_TAIL_SECONDS,
                     )
-                    self._interruptible_sleep(round_robin_sec)
+                    self._interruptible_sleep(self.PACKAGE_ROUND_ROBIN_TAIL_SECONDS)
 
             _counts = {
                 "online":       sum(1 for v in self.status_map.values() if v == STATUS_ONLINE),

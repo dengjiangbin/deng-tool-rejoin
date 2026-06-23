@@ -57,13 +57,18 @@ class TestRoundRobinWatchdog(unittest.TestCase):
     def test_package_round_robin_constant_is_10_seconds(self) -> None:
         self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_SECONDS, 10)
 
+    def test_checking_hold_and_tail_constants(self) -> None:
+        self.assertEqual(WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS, 2.0)
+        self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_TAIL_SECONDS, 8.0)
+
     def test_watchdog_loop_source_uses_round_robin_pause(self) -> None:
         src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
-        self.assertIn("PACKAGE_ROUND_ROBIN_SECONDS", src)
+        self.assertIn("PACKAGE_CHECKING_HOLD_SECONDS", src)
+        self.assertIn("PACKAGE_ROUND_ROBIN_TAIL_SECONDS", src)
         self.assertIn("_interruptible_sleep", src)
         self.assertIn("WATCHDOG_ROUND_ROBIN_PAUSE", src)
 
-    def test_sequential_packages_sleep_between_evaluations(self) -> None:
+    def test_sequential_packages_sleep_hold_then_tail(self) -> None:
         sup = WatchdogSupervisor(
             [_entry(_PKG), _entry(_PKG2)],
             _cfg(),
@@ -95,10 +100,8 @@ class TestRoundRobinWatchdog(unittest.TestCase):
             if sup._watchdog_thread is not None:
                 sup._watchdog_thread.join(timeout=5.0)
 
-        self.assertTrue(
-            any(s == 10.0 for s in sleep_calls),
-            f"expected 10.0s round-robin pause between packages, got {sleep_calls}",
-        )
+        self.assertIn(2.0, sleep_calls, f"expected 2.0s Checking hold, got {sleep_calls}")
+        self.assertIn(8.0, sleep_calls, f"expected 8.0s tail pause, got {sleep_calls}")
 
     def test_launching_package_sets_checking_before_eval(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
@@ -117,6 +120,66 @@ class TestRoundRobinWatchdog(unittest.TestCase):
              ):
             sup._evaluate_launching_or_pending(_PKG, _entry())
         self.assertIn(STATUS_CHECKING, seen)
+
+
+class TestCsrfPresenceHandshake(unittest.TestCase):
+    def test_post_json_retries_with_csrf_token_on_403(self) -> None:
+        import agent.roblox_presence as rp
+
+        calls: list[dict[str, str]] = []
+
+        def _fake_once(url, body, *, headers, timeout):
+            calls.append(dict(headers))
+            if "X-CSRF-TOKEN" not in headers:
+                return (
+                    403,
+                    {"x-csrf-token": "csrf-token-abc"},
+                    None,
+                )
+            return (
+                200,
+                {},
+                {
+                    "userPresences": [
+                        {
+                            "userId": 12345,
+                            "userPresenceType": 2,
+                            "placeId": 999,
+                            "rootPlaceId": 888,
+                            "lastLocation": "Game",
+                            "lastOnline": "2026-01-01T00:00:00Z",
+                        }
+                    ]
+                },
+            )
+
+        with patch.object(rp, "_roblox_post_once", side_effect=_fake_once):
+            payload = rp._post_json(
+                rp._PRESENCE_URL,
+                {"userIds": [12345]},
+                cookie="fake-cookie-value-long-enough",
+            )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("X-CSRF-TOKEN", calls[0])
+        self.assertEqual(calls[1].get("X-CSRF-TOKEN"), "csrf-token-abc")
+
+    def test_presence_type_2_maps_to_in_game(self) -> None:
+        import agent.roblox_presence as rp
+
+        row = {
+            "userId": 12345,
+            "userPresenceType": 2,
+            "placeId": 111,
+            "rootPlaceId": 222,
+            "lastLocation": "Live Game",
+            "lastOnline": "2026-01-01T00:00:00Z",
+        }
+        parsed = rp._parse_presence_row(row)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertTrue(parsed.is_in_game)
 
 
 class TestJoiningStateRemoved(unittest.TestCase):

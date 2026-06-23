@@ -168,30 +168,55 @@ class TestFetchPresence(unittest.TestCase):
 class TestNeverRaises(unittest.TestCase):
     def test_post_json_returns_none_on_network_error(self) -> None:
         with mock.patch.object(
-            rp.safe_http,
-            "post_json",
+            rp,
+            "_roblox_post_once",
             side_effect=rp.safe_http.SafeHttpNetworkError("no network"),
         ):
             self.assertIsNone(rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}))
 
     def test_post_json_returns_none_on_bad_json(self) -> None:
         with mock.patch.object(
-            rp.safe_http,
-            "post_json",
-            side_effect=rp.safe_http.SafeHttpJsonError("bad json"),
+            rp,
+            "_roblox_post_once",
+            return_value=(200, {}, None),
         ):
             self.assertIsNone(rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}))
 
     def test_post_json_uses_safe_http_for_termux_stability(self) -> None:
-        with mock.patch.object(rp.safe_http, "post_json", return_value={"ok": True}) as post:
+        with mock.patch.object(
+            rp,
+            "_roblox_post_once",
+            return_value=(200, {}, {"ok": True}),
+        ) as post:
             self.assertEqual(rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}), {"ok": True})
         post.assert_called_once()
 
-    def test_post_json_live_path_has_no_python_ssl_urlopen(self) -> None:
+    def test_post_json_live_path_uses_post_with_response(self) -> None:
         src = inspect.getsource(rp._post_json)
-        self.assertIn("safe_http.post_json", src)
+        self.assertIn("_roblox_post_once", src)
+        src_once = inspect.getsource(rp._roblox_post_once)
+        self.assertIn("post_with_response", src_once)
         self.assertNotIn("urlopen", src)
         self.assertNotIn("create_default_context", src)
+
+    def test_post_json_csrf_retry_on_403(self) -> None:
+        calls: list[dict[str, str]] = []
+
+        def _fake(url, body, *, headers, timeout):
+            calls.append(dict(headers))
+            if "X-CSRF-TOKEN" not in headers:
+                return 403, {"x-csrf-token": "tok123"}, None
+            return 200, {}, {"data": [{"id": 1, "name": "alice"}]}
+
+        with mock.patch.object(rp, "_roblox_post_once", side_effect=_fake):
+            out = rp._post_json(
+                rp._USERNAME_LOOKUP_URL,
+                {"usernames": ["alice"], "excludeBannedUsers": False},
+                cookie="cookie-value-long",
+            )
+        self.assertEqual(out, {"data": [{"id": 1, "name": "alice"}]})
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1].get("X-CSRF-TOKEN"), "tok123")
 
 
 if __name__ == "__main__":  # pragma: no cover
