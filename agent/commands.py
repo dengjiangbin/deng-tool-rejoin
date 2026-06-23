@@ -5685,7 +5685,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                     i + 1,
                     e["package"],
                     _account_username_for_table(e),
-                    phase.get(e["package"], "Checking..."),
+                    (
+                        _supervisor_ref.status_map.get(e["package"])
+                        if _supervisor_ref is not None
+                        else phase.get(e["package"], "Checking...")
+                    ) or phase.get(e["package"], "Checking..."),
                     "0s",
                     "0 MB",
                 )
@@ -5855,6 +5859,40 @@ def cmd_start(args: argparse.Namespace) -> int:
         else:
             _start_log.info("start: No launch URL configured — clones will open Roblox home")
 
+        # ── Bootstrap watchdog daemon BEFORE staggered launch ─────────────────
+        from .supervisor import (
+            STATUS_FAILED as _STATUS_FAILED,
+            STATUS_JOINING as _STATUS_JOINING,
+            STATUS_LAUNCHING as _STATUS_LAUNCHING,
+            STATUS_ONLINE as _STATUS_ONLINE,
+            STATUS_PENDING as _STATUS_PENDING,
+        )
+
+        _live_cfg_boot = dict(runtime_cfg)
+        _live_cfg_boot["package_start_times"] = dict(start_times)
+        _sup_sub_boot = dict(sup)
+        _hci_boot = int(_sup_sub_boot.get("health_check_interval_seconds", 10))
+        _sup_sub_boot["health_check_interval_seconds"] = max(10, _hci_boot)
+        _live_cfg_boot["supervisor"] = _sup_sub_boot
+        _live_cfg_boot["start_session_id"] = _start_session_id
+        _live_cfg_boot["screen_mode"] = _start_screen_mode
+        runtime_entries_boot = _ensure_presence_auth_for_entries(runtime_entries, cfg)
+        _boot_status = {e["package"]: _STATUS_PENDING for e in entries}
+        _supervisor = WatchdogSupervisor(
+            runtime_entries_boot, _live_cfg_boot, initial_status=_boot_status
+        )
+        _supervisor_ref = _supervisor
+        try:
+            from . import monitor_autostart as _mon_auto_boot
+            _mon_auto_boot.set_active_supervisor(_supervisor)
+            _try_autostart_monitor_bridge(cfg)
+        except Exception:  # noqa: BLE001
+            pass
+        _supervisor.start_daemon(display_interval=3.0, render_callback=None)
+        _start_session.mark("watchdog_daemon_started", package_count=len(entries))
+        for _boot_entry in entries:
+            phase[_boot_entry["package"]] = _STATUS_PENDING
+
         # ── PHASE 2: staggered launching (30s between packages) ───────────────
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
@@ -5870,6 +5908,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             for later in entries[index:]:
                 phase[later["package"]] = "Pending"
             phase[package] = "Launching"
+            _supervisor._set_status(package, _STATUS_LAUNCHING)
             _render_phase("Launching clone...")
             package_cfg = dict(runtime_cfg)
             package_cfg["roblox_package"] = package
@@ -5890,25 +5929,31 @@ def cmd_start(args: argparse.Namespace) -> int:
             launch_err[package] = result.error or ""
             if not result.success:
                 phase[package] = "Failed"
+                _supervisor._set_status(package, _STATUS_FAILED)
                 _render_phase()
                 continue
 
             phase[package] = "Joining"
+            _supervisor._set_status(package, _STATUS_JOINING)
             launch_ok[package] = True
             launch_err[package] = ""
             _render_phase("Joining...")
             _start_log.info(
                 "[DENG_REJOIN_STAGGERED_LAUNCH] package=%s index=%d/%d"
-                " launcher=%s phase=joining success=true",
+                " launcher=%s phase=joining success=true watchdog_daemon=%s",
                 package,
                 index,
                 len(entries),
                 "private_url" if _has_url else "app_only",
+                str(_supervisor.watchdog_thread_alive()).lower(),
             )
             if index < len(entries):
                 import time as _t
                 from .supervisor import WatchdogSupervisor as _WS
-                _t.sleep(_WS.LAUNCH_STAGGER_SECONDS)
+                _stagger_deadline = _t.monotonic() + _WS.LAUNCH_STAGGER_SECONDS
+                while _t.monotonic() < _stagger_deadline:
+                    _render_phase()
+                    _t.sleep(min(1.0, _stagger_deadline - _t.monotonic()))
 
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
 
@@ -6133,11 +6178,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_session.finish("launch_failed")
             return 1
 
-        # ── Supervisor loop — dashboard takes over entirely ───────────────────
-        # From this point on, _live_dashboard() clears the terminal and
-        # redraws logo + table on every refresh.  No other text is printed.
-        # Keep the live supervisor config valid.  The dashboard still refreshes
-        # frequently below; worker health checks must stay within config bounds.
+        # ── Supervisor dashboard — watchdog already running on daemon thread ─
         _live_cfg = dict(runtime_cfg)
         _live_cfg["package_start_times"] = start_times
         _sup_sub = dict(
@@ -6148,30 +6189,20 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_cfg["supervisor"] = _sup_sub
         _live_cfg["start_session_id"] = _start_session_id
         _live_cfg["screen_mode"] = _start_screen_mode
+        _supervisor.cfg = _live_cfg
         safe_io.set_crash_context(
             phase="supervisor_start",
             session_id=_start_session_id,
             screen_mode=_start_screen_mode,
             package_count=len(runtime_entries),
         )
-        # [DENG_REJOIN_WATCHDOG_FIX] Use WatchdogSupervisor: sequential per-package
-        # loop, process-check-first, 4 states only, never stops after Online.
-        runtime_entries = _ensure_presence_auth_for_entries(runtime_entries, cfg)
-        _supervisor = WatchdogSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
-        _supervisor_ref = _supervisor
-        # Register the live supervisor with the monitor autostart so per-package
-        # state updates start flowing into the Rejoin APK as soon as Start
-        # begins. Idempotent + safe — set_active_supervisor never raises and
-        # the bridge thread already ran from cmd_menu when the license gated.
-        try:
-            from . import monitor_autostart as _mon_auto
-            _mon_auto.set_active_supervisor(_supervisor)
-            # Re-issue autostart in case the user ran ``deng-rejoin start``
-            # directly (skipping the menu autostart hook).
-            _try_autostart_monitor_bridge(cfg)
-        except Exception:  # noqa: BLE001
-            pass
-        _live_map = _supervisor.status_map  # dict mutated in-place by watchdog loop
+        for index, entry in enumerate(entries, start=1):
+            pkg = entry["package"]
+            if not launch_ok.get(pkg):
+                _supervisor._set_status(pkg, _STATUS_FAILED)
+            elif _supervisor.status_map.get(pkg) not in {_STATUS_JOINING, _STATUS_ONLINE}:
+                _supervisor._set_status(pkg, _STATUS_JOINING)
+        _live_map = _supervisor.status_map
         _start_session.mark("supervisor_begin", package_count=len(runtime_entries))
 
         # Public state map: internal states → user-facing labels.
@@ -6305,56 +6336,49 @@ def cmd_start(args: argparse.Namespace) -> int:
                 packages=[e["package"] for e in entries],
                 after_launch="true",
                 main_thread_alive="true",
-                watchdog_alive="true",
+                watchdog_alive=str(_supervisor.watchdog_thread_alive()).lower(),
             )
         except Exception:  # noqa: BLE001
             pass
 
-        # Use 3-second display interval (like Kaeru's blinking real-time table).
-        _allowed_stop_sources = {"sigint", "sigterm", "ctrl_c", "user_exit", "fatal_error"}
-        _unexpected_restart_count = 0
-        while True:
-            try:
-                _start_session.mark("supervisor_loop")
-                _supervisor.run_forever(
-                    render_callback=_live_dashboard,
-                    display_interval=3.0,
-                )
-            except KeyboardInterrupt:
-                _shutdown_reason = "ctrl_c"
-                _log_stop_request("ctrl_c", allowed=True)
-                _supervisor.stop_source = "ctrl_c"
-                _supervisor.stop("ctrl_c")
-            except Exception as exc:  # noqa: BLE001
-                _start_log.debug("Supervisor terminated with error: %s", exc)
-                _shutdown_reason = "fatal_error"
-                _log_stop_request("fatal_error", allowed=True, stack=str(exc)[:1000])
-                _supervisor.stop_source = "fatal_error"
-                _supervisor.stop("fatal_error")
+        _supervisor.set_render_callback(_live_dashboard)
+        signal.signal(signal.SIGTERM, _supervisor._handle_stop)
+        signal.signal(signal.SIGINT, _supervisor._handle_stop)
+        _allowed_stop_sources = {"sigterm", "sigint", "ctrl_c", "user_exit", "fatal_error"}
+        try:
+            _start_session.mark("supervisor_loop")
+            import time as _monitor_time
+            while not _supervisor.stop_event.is_set():
+                _live_dashboard()
+                if _supervisor.stop_event.wait(3.0):
+                    break
+        except KeyboardInterrupt:
+            _shutdown_reason = "ctrl_c"
+            _log_stop_request("ctrl_c", allowed=True)
+            _supervisor.stop_source = "ctrl_c"
+            _supervisor.stop("ctrl_c")
+        except Exception as exc:  # noqa: BLE001
+            _start_log.debug("Supervisor monitor terminated with error: %s", exc)
+            _shutdown_reason = "fatal_error"
+            _log_stop_request("fatal_error", allowed=True, stack=str(exc)[:1000])
+            _supervisor.stop_source = "fatal_error"
+            _supervisor.stop("fatal_error")
 
-            _stop_source = str(getattr(_supervisor, "stop_source", "") or "").strip()
-            if _stop_source in _allowed_stop_sources:
-                _shutdown_reason = _stop_source
-                break
-
-            _unexpected_restart_count += 1
+        _stop_source = str(getattr(_supervisor, "stop_source", "") or "").strip()
+        if _stop_source in _allowed_stop_sources:
+            _shutdown_reason = _stop_source
+        elif _stop_source:
             try:
                 from .logger import configure_logging, log_event
                 log_event(
                     configure_logging(),
                     "info",
                     "[DENG_REJOIN_UNEXPECTED_EXIT_GUARD]",
-                    reason=_stop_source or "watchdog_returned_without_stop_source",
-                    prevented="true",
-                    restart_count=_unexpected_restart_count,
+                    reason=_stop_source or "monitor_loop_exited",
+                    prevented="false",
                 )
             except Exception:  # noqa: BLE001
                 pass
-            _supervisor.stop_event.clear()
-            _supervisor.stop_source = ""
-            _transition_lifecycle("MONITORING", "unexpected_watchdog_return_prevented")
-            import time as _guard_time
-            _guard_time.sleep(0.5)
 
         _transition_lifecycle("STOPPING", _shutdown_reason)
         # Best-effort clean exit: clear screen so terminal is not littered.

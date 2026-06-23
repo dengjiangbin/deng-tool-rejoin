@@ -551,7 +551,7 @@ class TestNoHeartbeatKillSwitch(unittest.TestCase):
         sup = self._make_sup()
         pkg  = "com.roblox.client"
         now  = time.time()
-        sup._nhb_since[pkg] = now - 10
+        sup._nhb_since[pkg] = time.monotonic() - 10
 
         with unittest.mock.patch.object(sup, "_do_launch") as mock_launch, \
              unittest.mock.patch("agent.supervisor.android") as mock_android:
@@ -567,7 +567,7 @@ class TestNoHeartbeatKillSwitch(unittest.TestCase):
         sup = self._make_sup()
         pkg  = "com.roblox.client"
         now  = time.time()
-        sup._nhb_since[pkg] = now - (WatchdogSupervisor.NHB_KILL_SWITCH_SECONDS + 5)
+        sup._nhb_since[pkg] = time.monotonic() - (WatchdogSupervisor.NHB_KILL_SWITCH_SECONDS + 5)
 
         with unittest.mock.patch.object(sup, "_do_launch") as mock_launch, \
              unittest.mock.patch("agent.supervisor.android") as mock_android, \
@@ -588,7 +588,7 @@ class TestNoHeartbeatKillSwitch(unittest.TestCase):
         sup = WatchdogSupervisor(entries, {})
         pkg1, pkg2 = "com.roblox.client", "com.roblox.client2"
         now = time.time()
-        sup._nhb_since[pkg1] = now - 10
+        sup._nhb_since[pkg1] = time.monotonic() - 10
         self.assertNotIn(pkg2, sup._nhb_since)
         self.assertIn(pkg1, sup._nhb_since)
 

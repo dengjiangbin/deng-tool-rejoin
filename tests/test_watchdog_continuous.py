@@ -168,7 +168,7 @@ class TestBlankPrivateServerUrl(unittest.TestCase):
             sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
             mock_stop.assert_not_called()
             mock_launch.assert_not_called()
-            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 1)
+            sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 1)
             sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         mock_stop.assert_called_once_with(_PKG)
         mock_launch.assert_not_called()
@@ -234,7 +234,7 @@ class TestConfiguredPrivateServerUrl(unittest.TestCase):
             sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
             mock_stop.assert_not_called()
             mock_launch.assert_not_called()
-            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 1)
+            sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 1)
             sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         mock_stop.assert_called_once_with(_PKG)
         mock_launch.assert_not_called()
@@ -546,7 +546,7 @@ class TestWatchdogContinuity(unittest.TestCase):
             mock_launch.return_value = RejoinResult(True, root_used=False)
             sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
             self.assertFalse(mock_stop.called)
-            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 1)
+            sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 1)
             sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         self.assertTrue(mock_stop.called, "force_stop_package must be called after kill-switch")
         self.assertFalse(mock_launch.called, "relaunch must wait for Dead recovery")
@@ -833,7 +833,7 @@ class TestRunningNotPlayingRecovery(unittest.TestCase):
              patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 5)
+            sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
             sup._handle_state(_PKG, _make_entry(private_url=""), STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         mock_stop.assert_called_once_with(_PKG)
         mock_launch.assert_not_called()
@@ -847,7 +847,7 @@ class TestRunningNotPlayingRecovery(unittest.TestCase):
              patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 5)
+            sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
             sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         mock_stop.assert_called_once_with(_PKG)
         mock_launch.assert_not_called()

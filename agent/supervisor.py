@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import threading
 import time
@@ -1235,6 +1236,10 @@ class WatchdogSupervisor:
         }
         self.cfg = cfg
         self.stop_event = threading.Event()
+        self._state_lock = threading.RLock()
+        self._watchdog_thread: threading.Thread | None = None
+        self._render_callback: Any = None
+        self._display_interval: float = 3.0
 
         # Public status dict — mutated in-place (read by dashboard callback).
         self.status_map: dict[str, str] = {
@@ -1363,10 +1368,78 @@ class WatchdogSupervisor:
         self.stop_event.set()
 
     def _set_status(self, pkg: str, status: str) -> None:
-        old = self.status_map.get(pkg)
-        self.status_map[pkg] = status
+        with self._state_lock:
+            old = self.status_map.get(pkg)
+            self.status_map[pkg] = status
         if old != status and callable(self.on_status_change):
             self.on_status_change(pkg, status)
+
+    def watchdog_thread_alive(self) -> bool:
+        thread = self._watchdog_thread
+        return bool(thread is not None and thread.is_alive())
+
+    def set_render_callback(self, render_callback: Any) -> None:
+        self._render_callback = render_callback
+
+    def start_daemon(
+        self,
+        *,
+        display_interval: float = 3.0,
+        render_callback: Any = None,
+    ) -> None:
+        """Launch the watchdog loop on a dedicated daemon thread (non-blocking)."""
+        if self.watchdog_thread_alive():
+            return
+        self._display_interval = float(display_interval)
+        self._render_callback = render_callback
+        self.stop_event.clear()
+        self.stop_source = ""
+        self._watchdog_thread = threading.Thread(
+            target=self._run_watchdog_loop,
+            kwargs={
+                "display_interval": float(display_interval),
+                "render_callback": render_callback,
+            },
+            name="deng-watchdog",
+            daemon=True,
+        )
+        self._watchdog_thread.start()
+        log_event(
+            self._logger,
+            "info",
+            "[DENG_REJOIN_WATCHDOG_DAEMON_STARTED]",
+            packages=self.packages,
+            thread_name="deng-watchdog",
+            daemon="true",
+        )
+
+    def _process_alive_fast(self, pkg: str) -> bool:
+        """Non-blocking liveness probe via pidof + ``os.kill(pid, 0)``."""
+        try:
+            package = android.validate_package_name(pkg)
+        except Exception:  # noqa: BLE001
+            return False
+        pid_str = ""
+        try:
+            pid_str = android.get_package_pid(package, self._root_info)
+        except Exception:  # noqa: BLE001
+            pid_str = ""
+        if not pid_str:
+            try:
+                res = android.run_command(["pidof", "-s", package], timeout=2)
+                if res.ok and res.stdout.strip().isdigit():
+                    pid_str = res.stdout.strip()
+            except Exception:  # noqa: BLE001
+                pid_str = ""
+        if not pid_str or not str(pid_str).strip().isdigit():
+            return False
+        try:
+            os.kill(int(str(pid_str).strip()), 0)
+            return True
+        except (ProcessLookupError, ValueError, OSError):
+            return False
+        except Exception:  # noqa: BLE001
+            return False
 
     def _set_grace(self, pkg: str, now: float, seconds: int | None = None) -> None:
         self._grace_until[pkg] = now + float(seconds or self.DEFAULT_GRACE_SECONDS)
@@ -1691,6 +1764,36 @@ class WatchdogSupervisor:
         """
         del entry
         t0 = time.monotonic()
+        if not self._process_alive_fast(pkg):
+            try:
+                evidence = self._fast_alive_evidence(pkg)
+            except Exception:  # noqa: BLE001
+                evidence = {}
+            process_missing = bool(evidence.get("process_missing"))
+            process_running = bool(
+                not process_missing
+                and (
+                    evidence.get("alive")
+                    or evidence.get("running")
+                    or evidence.get("root_running")
+                )
+            )
+            if not process_running:
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                detail = {
+                    "process_running": "false",
+                    "in_game": "false",
+                    "heartbeat_ok": "false",
+                    "warning_detected": "false",
+                    "elapsed_ms": elapsed_ms,
+                    "root_available": str(bool(getattr(self._root_info, "available", False))).lower(),
+                    "foreground_package": "",
+                    "activity": "",
+                    "in_game_proof": "false",
+                    "reason": "process_not_running",
+                }
+                self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_DEAD)
+                return STATUS_DEAD, detail
         try:
             evidence = self._fast_alive_evidence(pkg)
         except Exception:  # noqa: BLE001
@@ -2083,16 +2186,17 @@ class WatchdogSupervisor:
 
         elif state == STATUS_NO_HEARTBEAT:
             nhb_since = self._nhb_since.get(pkg)
+            now_mono = time.monotonic()
             if nhb_since is None:
-                self._nhb_since[pkg] = now
+                self._nhb_since[pkg] = now_mono
                 log_event(
                     logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_TRACK]",
                     package=pkg,
-                    started_at=round(now, 3),
+                    started_at=round(now_mono, 3),
                     kill_switch_sec=self.NHB_KILL_SWITCH_SECONDS,
                 )
                 return
-            elapsed = now - nhb_since
+            elapsed = now_mono - nhb_since
             if elapsed < self.NHB_KILL_SWITCH_SECONDS:
                 log_event(
                     logger, "debug", "[DENG_REJOIN_NO_HEARTBEAT_WAIT]",
@@ -2115,6 +2219,12 @@ class WatchdogSupervisor:
                 time.sleep(1.5)
             except Exception:  # noqa: BLE001
                 pass
+            self._set_status(pkg, STATUS_DEAD)
+            if callable(render_callback):
+                try:
+                    render_callback()
+                except Exception:  # noqa: BLE001
+                    pass
             return
 
         elif state in _METRIC_ACTIVE_STATES:
@@ -2251,29 +2361,31 @@ class WatchdogSupervisor:
         display_interval: float = 3.0,
         render_callback: Any = None,
     ) -> None:
-        """Run the sequential watchdog loop until stop() is called.
+        """Run the watchdog loop on the current thread (tests / legacy path)."""
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, self._handle_stop)
+            signal.signal(signal.SIGINT, self._handle_stop)
+        self._run_watchdog_loop(
+            display_interval=display_interval,
+            render_callback=render_callback,
+        )
 
-        For every round:
-          1. Log [DENG_REJOIN_WATCHDOG_ROUND]
-          2. For each package (index/total):
-             - Update self.checking_label = "Checking Package X/Y"
-             - Detect state (process first, presence second)
-             - Log [DENG_REJOIN_PACKAGE_CHECK]
-             - If not in grace window: handle recovery
-          3. Log [DENG_REJOIN_WATCHDOG_CONTINUES]
-          4. Sleep interval (interruptible by stop_event)
-
-        The dashboard callback is called approximately every display_interval
-        seconds during both the package checks and the sleep phase.
-        """
-        signal.signal(signal.SIGTERM, self._handle_stop)
-        signal.signal(signal.SIGINT, self._handle_stop)
+    def _run_watchdog_loop(
+        self,
+        *,
+        display_interval: float = 3.0,
+        render_callback: Any = None,
+    ) -> None:
+        """Sequential watchdog monitor loop. Safe to run on a daemon thread."""
+        render_callback = render_callback if render_callback is not None else self._render_callback
+        display_interval = float(display_interval or self._display_interval or 3.0)
 
         logger = self._logger
         log_event(
             logger, "info", "watchdog_supervisor_started",
             packages=self.packages,
             session_id=str(self.cfg.get("start_session_id") or ""),
+            daemon_thread=str(threading.current_thread().daemon).lower(),
         )
         db.insert_event(
             "INFO", "watchdog_supervisor_started",
@@ -2284,16 +2396,18 @@ class WatchdogSupervisor:
 
         def _maybe_render(*, force: bool = False) -> None:
             nonlocal _next_render
-            if render_callback is not None and (force or time.time() >= _next_render):
+            cb = render_callback or self._render_callback
+            if cb is not None and (force or time.time() >= _next_render):
                 try:
-                    render_callback()
+                    cb()
                 except Exception:  # noqa: BLE001
                     pass
-                _next_render = time.time() + float(display_interval)
+                _next_render = time.time() + display_interval
 
         while not self.stop_event.is_set():
             self._round += 1
             now = time.time()
+            now_mono = time.monotonic()
             interval = self._sup_interval()
             total = len(self.packages)
 
@@ -2421,7 +2535,7 @@ class WatchdogSupervisor:
                 self._prev_state[pkg] = state
 
                 if state == STATUS_NO_HEARTBEAT and prev != STATUS_NO_HEARTBEAT:
-                    self._nhb_since.setdefault(pkg, now)
+                    self._nhb_since.setdefault(pkg, now_mono)
                 elif state != STATUS_NO_HEARTBEAT:
                     self._nhb_since.pop(pkg, None)
 
@@ -2441,10 +2555,23 @@ class WatchdogSupervisor:
                     _maybe_render(force=True)
                     continue
 
-                # Grace window: skip recovery immediately after a launch,
-                # except when the scanner proves the process is dead/offline.
-                if not self._in_grace(pkg, now) or state in {STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED}:
-                    self._handle_state(pkg, entry, state, prev, now, render_callback=render_callback)
+                # No Heartbeat kill-switch must run even during launch grace.
+                if state == STATUS_NO_HEARTBEAT:
+                    self._handle_state(
+                        pkg, entry, state, prev, now, render_callback=render_callback
+                    )
+                elif not self._in_grace(pkg, now) or state in {
+                    STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED
+                }:
+                    self._handle_state(
+                        pkg, entry, state, prev, now, render_callback=render_callback
+                    )
+
+                # Dead recovery after NHB kill-switch may have force-stopped pkg.
+                if self.status_map.get(pkg) == STATUS_DEAD and state != STATUS_DEAD:
+                    self._handle_state(
+                        pkg, entry, STATUS_DEAD, prev, now, render_callback=render_callback
+                    )
 
             # ── Watchdog continuity probe ─────────────────────────────────────
             _counts = {
