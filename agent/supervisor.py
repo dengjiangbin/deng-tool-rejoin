@@ -1208,6 +1208,9 @@ class WatchdogSupervisor:
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
 
+    # ── Post-launch loading grace: suppress NHB kill-switch timer ───────────
+    LOADING_GRACE_SECONDS: int = 120
+
     # ── Presence poll must complete within strictly < 15 seconds ────────────
     PRESENCE_POLL_TIMEOUT_SECONDS: int = 14
 
@@ -1267,10 +1270,14 @@ class WatchdogSupervisor:
 
         self._round: int = 0
 
+        # Global latch: watchdog idles until cmd_start finishes ALL staggered launches.
+        self._all_launches_completed: bool = False
+
         # ── Per-package mutable tracking ──────────────────────────────────────
         self._prev_state: dict[str, str] = {}
         self._last_online_ts: dict[str, float] = {}   # last time confirmed Online
         self._online_start_ts: dict[str, float] = {}  # when package first became Online (for Runtime display)
+        self._last_launched_at: dict[str, float] = {}  # monotonic ts of last open/reopen
         self._grace_until: dict[str, float] = {}      # no relaunch until this ts
         self._nhb_offline_count: dict[str, int] = {}  # consecutive offline hits
         self._nhb_since: dict[str, float] = {}  # when package entered No Heartbeat
@@ -1441,6 +1448,31 @@ class WatchdogSupervisor:
 
     def _set_grace(self, pkg: str, now: float, seconds: int | None = None) -> None:
         self._grace_until[pkg] = now + float(seconds or self.DEFAULT_GRACE_SECONDS)
+
+    def mark_all_launches_completed(self) -> None:
+        """Release the global launch latch so the watchdog may begin checking."""
+        with self._state_lock:
+            self._all_launches_completed = True
+        log_event(
+            self._logger,
+            "info",
+            "[DENG_REJOIN_ALL_LAUNCHES_COMPLETED]",
+            packages=self.packages,
+            package_count=len(self.packages),
+        )
+
+    def _mark_launched(self, pkg: str) -> None:
+        """Record a fresh open/reopen and reset No Heartbeat kill-switch tracking."""
+        with self._state_lock:
+            self._last_launched_at[pkg] = time.monotonic()
+            self._nhb_since.pop(pkg, None)
+
+    def _in_loading_grace(self, pkg: str) -> bool:
+        """True while a package is within the post-launch connection grace window."""
+        launched = self._last_launched_at.get(pkg)
+        if not launched:
+            return False
+        return (time.monotonic() - float(launched)) < float(self.LOADING_GRACE_SECONDS)
 
     def _in_grace(self, pkg: str, now: float) -> bool:
         return now < self._grace_until.get(pkg, 0.0)
@@ -2165,6 +2197,7 @@ class WatchdogSupervisor:
                 reason="process_not_running",
             )
             self._set_status(pkg, STATUS_REOPENING)
+            self._mark_launched(pkg)
             if callable(render_callback):
                 try:
                     render_callback()
@@ -2174,11 +2207,27 @@ class WatchdogSupervisor:
             if success:
                 self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
                 self._set_grace(pkg, now)
+                self._mark_launched(pkg)
                 self._set_status(pkg, STATUS_LAUNCHING)
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
         elif state == STATUS_NO_HEARTBEAT:
+            if self.status_map.get(pkg) == STATUS_ONLINE:
+                self._nhb_since.pop(pkg, None)
+                return
+            if self._in_loading_grace(pkg):
+                self._nhb_since.pop(pkg, None)
+                log_event(
+                    logger, "info", "[DENG_REJOIN_LOADING_GRACE]",
+                    package=pkg,
+                    grace_sec=self.LOADING_GRACE_SECONDS,
+                    elapsed_sec=round(
+                        time.monotonic() - self._last_launched_at.get(pkg, 0.0), 1
+                    ),
+                    action="suppress_nhb_kill_switch",
+                )
+                return
             nhb_since = self._nhb_since.get(pkg)
             now_mono = time.monotonic()
             if nhb_since is None:
@@ -2219,6 +2268,7 @@ class WatchdogSupervisor:
             return
 
         elif state in _METRIC_ACTIVE_STATES:
+            self._nhb_since.pop(pkg, None)
             log_event(
                 logger, "info", "[DENG_REJOIN_ONLINE_STABLE]",
                 package=pkg,
@@ -2428,6 +2478,24 @@ class WatchdogSupervisor:
                     pass
                 _next_render = time.time() + display_interval
 
+        while not self.stop_event.is_set() and not self._all_launches_completed:
+            log_event(
+                logger, "debug", "[DENG_REJOIN_WATCHDOG_LAUNCH_LATCH]",
+                waiting="true",
+                all_launches_completed="false",
+            )
+            self._interruptible_sleep(1.0)
+
+        if self.stop_event.is_set():
+            log_event(logger, "info", "watchdog_supervisor_stopped")
+            return
+
+        log_event(
+            logger, "info", "[DENG_REJOIN_WATCHDOG_LAUNCH_LATCH_RELEASED]",
+            all_launches_completed="true",
+            package_count=len(self.packages),
+        )
+
         while not self.stop_event.is_set():
             self._round += 1
             now = time.time()
@@ -2460,17 +2528,6 @@ class WatchdogSupervisor:
 
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = f"Checking Package {idx}/{total}"
-
-                if self._is_prelaunch_pending(pkg):
-                    log_event(
-                        logger, "info", "[DENG_REJOIN_WATCHDOG_SKIP_PRELAUNCH]",
-                        round=self._round,
-                        index=idx,
-                        total=total,
-                        package=pkg,
-                        reason="staggered_launch_not_started",
-                    )
-                    continue
 
                 _maybe_render(force=True)
                 check_started = time.monotonic()
@@ -2570,7 +2627,8 @@ class WatchdogSupervisor:
                 self._prev_state[pkg] = state
 
                 if state == STATUS_NO_HEARTBEAT and prev != STATUS_NO_HEARTBEAT:
-                    self._nhb_since.setdefault(pkg, now_mono)
+                    if not self._in_loading_grace(pkg):
+                        self._nhb_since.setdefault(pkg, now_mono)
                 elif state != STATUS_NO_HEARTBEAT:
                     self._nhb_since.pop(pkg, None)
 
@@ -2586,13 +2644,15 @@ class WatchdogSupervisor:
                     _maybe_render(force=True)
 
                 if state not in {STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
-                    if state == STATUS_NO_HEARTBEAT:
+                    if state == STATUS_NO_HEARTBEAT and not self._in_loading_grace(pkg):
                         self._handle_state(
                             pkg, entry, state, prev, now, render_callback=render_callback
                         )
-                    elif not self._in_grace(pkg, now) or state in {
-                        STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED
-                    }:
+                    elif state != STATUS_NO_HEARTBEAT and (
+                        not self._in_grace(pkg, now) or state in {
+                            STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED
+                        }
+                    ):
                         self._handle_state(
                             pkg, entry, state, prev, now, render_callback=render_callback
                         )

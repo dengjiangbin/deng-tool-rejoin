@@ -95,6 +95,7 @@ class TestWatchdogDaemonThread(unittest.TestCase):
              patch.object(sup, "_fetch_presence", return_value=presence), \
              patch("agent.supervisor.db.insert_event"), \
              patch("agent.supervisor.db.insert_heartbeat"):
+            sup.mark_all_launches_completed()
             sup.start_daemon(display_interval=0.05)
             time.sleep(0.35)
             sup.stop()
@@ -105,6 +106,7 @@ class TestWatchdogDaemonThread(unittest.TestCase):
 
     def test_nhb_kill_switch_uses_monotonic_clock(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 10)
         sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
         with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
@@ -116,6 +118,7 @@ class TestWatchdogDaemonThread(unittest.TestCase):
     def test_nhb_kill_switch_not_blocked_by_grace(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
         sup._grace_until[_PKG] = time.time() + 300
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 10)
         sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 1)
         with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \

@@ -568,6 +568,7 @@ class TestNoHeartbeatKillSwitch(unittest.TestCase):
         pkg  = "com.roblox.client"
         now  = time.time()
         sup._nhb_since[pkg] = time.monotonic() - (WatchdogSupervisor.NHB_KILL_SWITCH_SECONDS + 5)
+        sup._last_launched_at[pkg] = time.monotonic() - (WatchdogSupervisor.LOADING_GRACE_SECONDS + 10)
 
         with unittest.mock.patch.object(sup, "_do_launch") as mock_launch, \
              unittest.mock.patch.object(sup, "_force_stop_target_package", return_value=True) as mock_kill, \

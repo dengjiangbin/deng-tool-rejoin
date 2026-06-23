@@ -71,6 +71,17 @@ class TestTwoPhaseStartupSource(unittest.TestCase):
         self.assertIn('_set_all_phase("Preparing"', src)
         self.assertIn('_set_all_phase("Clear Cache"', src)
 
+    def test_launch_latch_released_after_staggered_launch(self) -> None:
+        import agent.commands as cmd
+
+        src = inspect.getsource(cmd.cmd_start)
+        launch_done_idx = src.find("package_launch_done")
+        latch_idx = src.find("mark_all_launches_completed")
+        mark_launched_idx = src.find("_mark_launched")
+        self.assertGreater(launch_done_idx, -1)
+        self.assertGreater(latch_idx, launch_done_idx)
+        self.assertGreater(mark_launched_idx, src.find("PHASE 2: staggered launching"))
+
 
 class TestLaunchingWatchdogEvaluation(unittest.TestCase):
     def test_launching_transitions_to_checking_then_online(self) -> None:

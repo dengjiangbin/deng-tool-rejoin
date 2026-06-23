@@ -18,6 +18,7 @@ from agent import android
 from agent.supervisor import (
     STATUS_CHECKING,
     STATUS_LAUNCHING,
+    STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
     STATUS_PENDING,
     WatchdogSupervisor,
@@ -68,7 +69,12 @@ class TestRoundRobinWatchdog(unittest.TestCase):
         self.assertIn("_interruptible_sleep", src)
         self.assertIn("WATCHDOG_ROUND_ROBIN_PAUSE", src)
 
-    def test_prelaunch_pending_skipped_in_watchdog_loop(self) -> None:
+    def test_watchdog_loop_source_uses_launch_latch(self) -> None:
+        src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
+        self.assertIn("_all_launches_completed", src)
+        self.assertIn("WATCHDOG_LAUNCH_LATCH", src)
+
+    def test_watchdog_idles_until_launch_latch_released(self) -> None:
         sup = WatchdogSupervisor(
             [_entry(_PKG), _entry(_PKG2)],
             _cfg(),
@@ -82,18 +88,24 @@ class TestRoundRobinWatchdog(unittest.TestCase):
 
         with patch.object(sup, "_detect_package_state", side_effect=_track_detect), \
              patch.object(sup, "_evaluate_launching_or_pending", side_effect=_track_detect), \
-             patch.object(sup, "_interruptible_sleep"), \
              patch("agent.supervisor.db.insert_event"), \
              patch("agent.supervisor.db.insert_heartbeat"), \
              patch("agent.supervisor.log_event"):
             sup.start_daemon(display_interval=0.05)
-            time.sleep(0.2)
+            time.sleep(0.15)
+            self.assertEqual(
+                detect_calls, [],
+                "watchdog must not check any package before launch latch releases",
+            )
+            sup.mark_all_launches_completed()
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and not detect_calls:
+                time.sleep(0.05)
             sup.stop("test")
             if sup._watchdog_thread is not None:
                 sup._watchdog_thread.join(timeout=3.0)
 
-        self.assertNotIn(_PKG, detect_calls, "Pending package must not be presence-checked")
-        self.assertIn(_PKG2, detect_calls, "Launched package must be checked")
+        self.assertTrue(detect_calls, "watchdog must check packages after latch release")
 
     def test_sequential_packages_sleep_hold_then_tail(self) -> None:
         sup = WatchdogSupervisor(
@@ -101,6 +113,7 @@ class TestRoundRobinWatchdog(unittest.TestCase):
             _cfg(),
             initial_status={_PKG: STATUS_LAUNCHING, _PKG2: STATUS_LAUNCHING},
         )
+        sup.mark_all_launches_completed()
         sleep_calls: list[float] = []
         presence = MagicMock()
         presence.is_in_game = True
@@ -240,6 +253,7 @@ class TestTermuxSafeForceStop(unittest.TestCase):
 
     def test_watchdog_kill_switch_uses_targeted_force_stop(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 10)
         sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
         with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_kill, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
@@ -255,6 +269,44 @@ class TestTermuxSafeForceStop(unittest.TestCase):
             ok = sup._force_stop_target_package("com.termux")
         self.assertFalse(ok)
         mock_stop.assert_not_called()
+
+
+class TestLoadingGracePeriod(unittest.TestCase):
+    def test_loading_grace_constant_is_120_seconds(self) -> None:
+        self.assertEqual(WatchdogSupervisor.LOADING_GRACE_SECONDS, 120)
+
+    def test_nhb_kill_switch_blocked_during_loading_grace(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._last_launched_at[_PKG] = time.monotonic() - 30.0
+        sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
+        with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_kill, \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch("time.sleep"):
+            sup._handle_state(
+                _PKG, _entry(), STATUS_NO_HEARTBEAT, STATUS_LAUNCHING, time.time()
+            )
+        mock_kill.assert_not_called()
+        self.assertNotIn(_PKG, sup._nhb_since)
+
+    def test_nhb_kill_switch_runs_after_loading_grace_expires(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 10)
+        sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
+        with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_kill, \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch("time.sleep"):
+            sup._handle_state(
+                _PKG, _entry(), STATUS_NO_HEARTBEAT, STATUS_LAUNCHING, time.time()
+            )
+        mock_kill.assert_called_once_with(_PKG)
+
+    def test_online_clears_nhb_tracking(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._nhb_since[_PKG] = time.monotonic() - 30.0
+        with patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch.object(sup, "_check_ram_optimization"):
+            sup._handle_state(_PKG, _entry(), STATUS_ONLINE, STATUS_NO_HEARTBEAT, time.time())
+        self.assertNotIn(_PKG, sup._nhb_since)
 
 
 if __name__ == "__main__":

@@ -187,6 +187,7 @@ class TestWatchdogSleepNonNegative(unittest.TestCase):
             sup.status_map[pkg] = STATUS_ONLINE
             sup._grace_until[pkg] = now + 300
             sup._last_online_ts[pkg] = now
+        sup.mark_all_launches_completed()
 
         errors: list[Exception] = []
 
@@ -316,6 +317,7 @@ class TestWatchdogContinuity(unittest.TestCase):
             sup.status_map[pkg] = STATUS_ONLINE
             sup._grace_until[pkg] = now + 300
             sup._last_online_ts[pkg] = now
+        sup.mark_all_launches_completed()
 
         rounds_seen: list[int] = []
 

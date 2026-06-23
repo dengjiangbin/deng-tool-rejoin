@@ -5932,6 +5932,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _render_phase()
                 continue
 
+            _supervisor._mark_launched(package)
             phase[package] = "Launching"
             _supervisor._set_status(package, _STATUS_LAUNCHING)
             launch_ok[package] = True
@@ -5956,6 +5957,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                     _t.sleep(max(0.0, min(1.0, _stagger_remain)))
 
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
+        _supervisor.mark_all_launches_completed()
+        _start_session.mark("all_launches_completed", package_count=len(entries))
 
         # 6) Grace wait before verifying layout — keep packages shown as
         #    "Launching" (no "Waiting" label shown in public UI).
