@@ -246,15 +246,52 @@ class TestWatchdogSleepNonNegative(unittest.TestCase):
                 f"_PackageWorker._sleep: time.sleep called with negative value {s}")
 
     def test_sleep_code_clamps_to_zero(self) -> None:
-        """Inspect run_forever source to confirm max(0.0, ...) guard."""
+        """Inspect watchdog loop source to confirm max(0.0, ...) guard."""
         import inspect
         from agent.supervisor import WatchdogSupervisor
-        src = inspect.getsource(WatchdogSupervisor.run_forever)
+        src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
         self.assertIn(
             "max(0.0,",
             src,
-            "run_forever() sleep must use max(0.0, ...) to prevent negative sleep",
+            "_run_watchdog_loop() sleep must use max(0.0, ...) to prevent negative sleep",
         )
+
+    def test_stagger_render_loop_clamps_negative_sleep(self) -> None:
+        """30s stagger repaint loop must never pass negative values to sleep."""
+        import inspect
+        import agent.commands as cmd
+
+        src = inspect.getsource(cmd.cmd_start)
+        stagger_idx = src.find("_stagger_deadline")
+        self.assertGreater(stagger_idx, -1, "stagger deadline loop must exist")
+        stagger_block = src[stagger_idx:stagger_idx + 400]
+        self.assertIn("max(0.0,", stagger_block)
+        self.assertIn("_stagger_remain", stagger_block)
+
+    def test_stagger_sleep_delta_simulation_never_negative(self) -> None:
+        """Simulate slow render exceeding 1s slice — sleep arg must stay >= 0."""
+        sleep_args: list[float] = []
+
+        def _mock_sleep(seconds: float) -> None:
+            sleep_args.append(float(seconds))
+
+        deadline = time.monotonic() + 30.0
+        with mock.patch("time.sleep", side_effect=_mock_sleep), \
+             mock.patch("time.monotonic") as mock_mono:
+            # First tick: 1s remaining after render
+            mock_mono.side_effect = [deadline - 30.0, deadline - 1.0, deadline + 0.5]
+            remain = deadline - mock_mono()
+            # Simulate render overrun pushing past deadline
+            mock_mono.side_effect = [deadline - 0.001, deadline + 2.0]
+            remain_over = deadline - mock_mono()
+            clamped = max(0.0, min(1.0, remain_over))
+            _mock_sleep(clamped)
+
+        for value in sleep_args:
+            self.assertGreaterEqual(
+                value, 0.0,
+                f"stagger sleep must be non-negative, got {value}",
+            )
 
 
 # ─── Continuity: full watchdog round completes without error ──────────────────

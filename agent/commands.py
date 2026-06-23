@@ -5308,7 +5308,7 @@ def _wait_for_sequential_presence_online(
                 render_callback()
             except Exception:  # noqa: BLE001
                 pass
-        time.sleep(poll)
+        time.sleep(max(0.0, poll))
     return "Checking"
 
 
@@ -5953,7 +5953,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _stagger_deadline = _t.monotonic() + _WS.LAUNCH_STAGGER_SECONDS
                 while _t.monotonic() < _stagger_deadline:
                     _render_phase()
-                    _t.sleep(min(1.0, _stagger_deadline - _t.monotonic()))
+                    _stagger_remain = _stagger_deadline - _t.monotonic()
+                    _t.sleep(max(0.0, min(1.0, _stagger_remain)))
 
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
 
@@ -5961,7 +5962,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         #    "Launching" (no "Waiting" label shown in public UI).
         grace_wait = int(sup.get("launch_grace_seconds", 15))
         import time as _time
-        _time.sleep(max(5, grace_wait))
+        _time.sleep(max(0.0, max(5, grace_wait)))
 
         # 8) Verify layout silently — no "Resizing" label shown (user feedback:
         #    showing "Resizing" after launching is confusing/useless; the
