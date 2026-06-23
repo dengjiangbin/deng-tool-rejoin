@@ -56,12 +56,12 @@ def _alive_evidence() -> dict:
 
 
 class TestRoundRobinWatchdog(unittest.TestCase):
-    def test_package_round_robin_constant_is_10_seconds(self) -> None:
-        self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_SECONDS, 10)
+    def test_package_round_robin_constant_is_three_seconds(self) -> None:
+        self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_SECONDS, 3)
 
     def test_checking_hold_and_tail_constants(self) -> None:
-        self.assertEqual(WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS, 2.0)
-        self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_TAIL_SECONDS, 8.0)
+        self.assertEqual(WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS, 1.0)
+        self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_TAIL_SECONDS, 2.0)
 
     def test_watchdog_loop_source_uses_round_robin_pause(self) -> None:
         src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
@@ -72,7 +72,7 @@ class TestRoundRobinWatchdog(unittest.TestCase):
 
     def test_dashboard_render_interval_is_one_second(self) -> None:
         self.assertEqual(WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS, 1.0)
-        self.assertLess(
+        self.assertEqual(
             WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS,
             WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS,
         )
@@ -148,8 +148,8 @@ class TestRoundRobinWatchdog(unittest.TestCase):
             if sup._watchdog_thread is not None:
                 sup._watchdog_thread.join(timeout=5.0)
 
-        self.assertIn(2.0, sleep_calls, f"expected 2.0s Checking hold, got {sleep_calls}")
-        self.assertIn(8.0, sleep_calls, f"expected 8.0s tail pause, got {sleep_calls}")
+        self.assertIn(1.0, sleep_calls, f"expected 1.0s Checking hold, got {sleep_calls}")
+        self.assertIn(2.0, sleep_calls, f"expected 2.0s tail pause, got {sleep_calls}")
 
     def test_launching_package_sets_checking_before_eval(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
@@ -315,6 +315,50 @@ class TestLoadingGracePeriod(unittest.TestCase):
              patch.object(sup, "_check_ram_optimization"):
             sup._handle_state(_PKG, _entry(), STATUS_ONLINE, STATUS_NO_HEARTBEAT, time.time())
         self.assertNotIn(_PKG, sup._nhb_since)
+
+
+class TestCookieOnlyDetection(unittest.TestCase):
+    def test_detect_package_state_skips_os_liveness_probes(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
+        presence = MagicMock()
+        presence.is_in_game = True
+        presence.is_offline = False
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_process_alive_fast") as mock_pid, \
+             patch.object(sup, "_fast_alive_evidence") as mock_evidence, \
+             patch.object(sup, "_fetch_presence", return_value=presence):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+        mock_pid.assert_not_called()
+        mock_evidence.assert_not_called()
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertEqual(detail["reason"], "roblox_presence_in_game")
+
+    def test_offline_presence_after_grace_is_no_heartbeat(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "presence_offline")
+
+    def test_offline_presence_during_loading_grace_stays_launching(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
+        sup.mark_package_launched(_PKG)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+        self.assertEqual(state, STATUS_LAUNCHING)
+        self.assertEqual(detail["reason"], "presence_offline_loading_grace")
 
 
 class TestLaunchTimestampBinding(unittest.TestCase):

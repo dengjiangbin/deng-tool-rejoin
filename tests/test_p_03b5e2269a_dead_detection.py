@@ -18,10 +18,10 @@ from agent.supervisor import (
     STATUS_DEAD,
     STATUS_IN_GAME,
     STATUS_IN_LOBBY,
-    STATUS_JOINING,
     STATUS_LAUNCHING,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
+    STATUS_REOPENING,
     WatchdogSupervisor,
 )
 
@@ -109,40 +109,61 @@ class DeadPriorityRegressionTests(unittest.TestCase):
         cfg["roblox_packages"] = entries
         return WatchdogSupervisor(entries, cfg, initial_status=initial_status)
 
-    def test_process_missing_api_says_in_lobby_final_state_dead(self) -> None:
+    def _past_loading_grace(self, sup: WatchdogSupervisor, pkg: str = _PKG) -> None:
+        sup._last_launched_at[pkg] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+
+    def test_offline_presence_after_grace_is_no_heartbeat_not_dead(self) -> None:
         sup = self._supervisor()
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=_lobby_presence()) as fetch_presence:
+        self._past_loading_grace(sup)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_DEAD)
-        self.assertEqual(detail["process_running"], "false")
-        fetch_presence.assert_not_called()
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["process_running"], "unknown")
+        self.assertEqual(detail["reason"], "presence_offline")
 
-    def test_process_missing_cache_says_in_lobby_final_state_dead(self) -> None:
+    def test_lobby_presence_after_grace_is_no_heartbeat(self) -> None:
         sup = self._supervisor(initial_status={_PKG: STATUS_IN_LOBBY})
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()):
+        self._past_loading_grace(sup)
+        with patch.object(sup, "_fetch_presence", return_value=_lobby_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_DEAD)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
 
-    def test_process_missing_previous_online_final_state_dead(self) -> None:
+    def test_offline_presence_after_previous_online_is_no_heartbeat(self) -> None:
         sup = self._supervisor(initial_status={_PKG: STATUS_ONLINE})
         sup._prev_state[_PKG] = STATUS_ONLINE
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()):
+        self._past_loading_grace(sup)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_DEAD)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
 
-    def test_process_missing_valid_username_user_id_final_state_dead(self) -> None:
+    def test_offline_presence_with_user_id_is_no_heartbeat(self) -> None:
         sup = self._supervisor()
         entry = _entry(user_id=10957545286)
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()):
+        self._past_loading_grace(sup)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, entry)
-        self.assertEqual(state, STATUS_DEAD)
-        self.assertEqual(detail["reason"], "process_not_running")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "presence_offline")
 
     def test_process_alive_api_says_lobby_is_no_heartbeat(self) -> None:
         sup = self._supervisor()
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=_lobby_presence()):
+        self._past_loading_grace(sup)
+        with patch.object(sup, "_fetch_presence", return_value=_lobby_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
 
@@ -169,7 +190,7 @@ class DeadPriorityRegressionTests(unittest.TestCase):
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             sup._handle_state(_PKG, entry, STATUS_DEAD, STATUS_ONLINE, time.time())
         self.assertEqual(launch.call_args.args, (entry, sup.cfg, "dead_recovery"))
-        self.assertIn(sup.status_map[_PKG], {STATUS_LAUNCHING, STATUS_JOINING})
+        self.assertIn(sup.status_map[_PKG], {STATUS_LAUNCHING, STATUS_REOPENING})
 
     def test_dead_relaunch_uses_app_only_when_url_blank(self) -> None:
         sup = self._supervisor(url="", initial_status={_PKG: STATUS_ONLINE})

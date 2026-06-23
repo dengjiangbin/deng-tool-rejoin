@@ -254,24 +254,34 @@ class TestConfiguredPrivateServerUrl(unittest.TestCase):
 # â”€â”€â”€ 11-16: State Detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestStateDetection(unittest.TestCase):
-    """State detection must follow deterministic priority: process first."""
+    """State detection uses cookie presence as the sole source of truth."""
+
+    def _past_loading_grace(self, sup: WatchdogSupervisor, pkg: str = _PKG) -> None:
+        sup._last_launched_at[pkg] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
 
     # Test 11
-    def test_process_not_running_returns_dead(self):
+    def test_offline_presence_after_grace_returns_no_heartbeat(self):
         sup = _make_sup()
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()):
-            state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_DEAD)
-        self.assertEqual(detail["process_running"], "false")
-
-    # Test 12
-    def test_process_running_no_presence_returns_no_heartbeat(self):
-        sup = _make_sup()
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=None):
+        self._past_loading_grace(sup)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertEqual(detail["process_running"], "true")
+        self.assertEqual(detail["process_running"], "unknown")
+        self.assertEqual(detail["reason"], "presence_offline")
+
+    # Test 12
+    def test_missing_presence_after_grace_returns_no_heartbeat(self):
+        sup = _make_sup()
+        self._past_loading_grace(sup)
+        with patch.object(sup, "_fetch_presence", return_value=None):
+            state, detail = sup._detect_package_state(_PKG, _make_entry())
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["process_running"], "unknown")
         self.assertEqual(detail["heartbeat_ok"], "false")
 
     def test_launching_package_evaluated_in_watchdog_loop(self):
@@ -307,78 +317,69 @@ class TestStateDetection(unittest.TestCase):
     def test_was_online_presence_offline_twice_returns_no_heartbeat(self):
         """Offline presence after recent Online becomes No Heartbeat."""
         sup = _make_sup()
+        self._past_loading_grace(sup)
         sup._last_online_ts[_PKG] = time.time() - 5
         presence = MagicMock()
         presence.is_in_game = False
         presence.is_offline = True
         presence.is_lobby = False
         presence.is_unknown = False
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=presence):
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state1, _ = sup._detect_package_state(_PKG, _make_entry())
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=presence):
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state2, detail2 = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state1, STATUS_NO_HEARTBEAT)
         self.assertEqual(state2, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail2["heartbeat_ok"], "false")
 
     # Test 15
-    def test_process_alive_presence_lobby_returns_no_heartbeat(self):
-        """Presence Online/not Playing maps to No Heartbeat."""
+    def test_presence_lobby_after_grace_returns_no_heartbeat(self):
+        """Presence Online/not Playing maps to No Heartbeat after loading grace."""
         sup = _make_sup()
+        self._past_loading_grace(sup)
         presence = MagicMock()
         presence.is_in_game = False
         presence.is_offline = False
         presence.is_lobby = True
         presence.is_unknown = False
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=presence):
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, _ = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertNotEqual(state, "Joining")
 
-    def test_process_missing_presence_lobby_returns_dead(self):
-        """Local missing-process proof has priority over stale lobby presence."""
-        sup = _make_sup(initial_status={_PKG: STATUS_ONLINE})
+    def test_presence_lobby_during_grace_stays_launching(self):
+        """Lobby/offline during loading grace stays Launching — not No Heartbeat."""
+        sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
+        sup.mark_package_launched(_PKG)
         presence = MagicMock()
         presence.is_in_game = False
         presence.is_offline = False
         presence.is_lobby = True
         presence.is_unknown = False
-        stale_visual = {
-            "alive": True,
-            "running": False,
-            "root_running": False,
-            "task": False,
-            "window": True,
-            "surface": True,
-            "foreground": False,
-            "process_missing": True,
-        }
-        with patch.object(sup, "_fast_alive_evidence", return_value=stale_visual), \
-             patch.object(sup, "_fetch_presence", return_value=presence) as fetch_presence:
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_DEAD)
-        self.assertEqual(detail["process_running"], "false")
-        fetch_presence.assert_not_called()
+        self.assertEqual(state, STATUS_LAUNCHING)
+        self.assertEqual(detail["reason"], "presence_lobby_loading_grace")
 
-    def test_missing_process_after_online_relaunches_only_that_package(self):
-        """A previously Online package that disappears becomes Dead and relaunches alone."""
+    def test_offline_presence_after_online_relaunches_only_that_package(self):
+        """Offline cookie presence triggers No Heartbeat; Dead recovery relaunches alone."""
         entry = _make_entry()
         sup = _make_sup(packages=[_PKG, _PKG2], initial_status={_PKG: STATUS_ONLINE, _PKG2: STATUS_ONLINE})
+        self._past_loading_grace(sup)
         now = time.time()
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()), \
-             patch.object(sup, "_fetch_presence") as fetch_presence:
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, entry)
-        self.assertEqual(state, STATUS_DEAD)
-        self.assertEqual(detail["process_running"], "false")
-        fetch_presence.assert_not_called()
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "presence_offline")
         with patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=False)) as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
-            sup._handle_state(_PKG, entry, state, STATUS_ONLINE, now)
+            sup._handle_state(_PKG, entry, STATUS_DEAD, STATUS_ONLINE, now)
         mock_launch.assert_called_once_with(entry, sup.cfg, "dead_recovery")
-        self.assertEqual(sup.status_map[_PKG], STATUS_LAUNCHING)
         self.assertEqual(sup.status_map[_PKG2], STATUS_ONLINE)
 
     def test_missing_config_user_id_falls_back_without_presence(self):
@@ -406,17 +407,16 @@ class TestStateDetection(unittest.TestCase):
             sup._detect_package_state(_PKG, _make_entry())
         lookup.assert_called_once_with("TestUser")
 
-    def test_foreground_window_hint_online_when_api_missing(self):
-        """Root/window foreground evidence can prove Online when API mapping is missing."""
-        sup = _make_sup()
-        ev = {"alive": True, "running": True, "root_running": False,
-              "task": True, "window": True, "surface": True, "foreground": True}
-        with patch.object(sup, "_fast_alive_evidence", return_value=ev), \
-             patch.object(android, "current_foreground_package", return_value=_PKG), \
+    def test_unknown_presence_during_grace_stays_launching(self):
+        """Unknown/missing presence during loading grace stays Launching — no OS hint."""
+        sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
+        sup.mark_package_launched(_PKG)
+        with patch.object(sup, "_fast_alive_evidence") as mock_evidence, \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_ONLINE)
-        self.assertEqual(detail["reason"], "foreground_window_surface_hint")
+        mock_evidence.assert_not_called()
+        self.assertEqual(state, STATUS_LAUNCHING)
+        self.assertEqual(detail["reason"], "presence_unknown_loading_grace")
 
     # Test 16
     def test_no_joining_state_in_watchdog_allowed_states(self):
@@ -426,17 +426,18 @@ class TestStateDetection(unittest.TestCase):
         # _detect_package_state can only return one of these values
         sup = _make_sup()
         possible_returns = set()
-        for process_up in (True, False):
-            for in_game in (True, False):
-                for offline in (True, False):
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        for in_game in (True, False):
+            for offline in (True, False):
+                for lobby in (True, False):
                     presence = MagicMock()
-                    presence.is_in_game = in_game and process_up
-                    presence.is_offline = offline and process_up and not in_game
-                    ev = _alive_evidence() if process_up else _dead_evidence()
+                    presence.is_in_game = in_game
+                    presence.is_offline = offline and not in_game
+                    presence.is_lobby = lobby and not in_game and not offline
+                    presence.is_unknown = False
                     sup._nhb_offline_count[_PKG] = sup.NHB_OFFLINE_CONFIRMATIONS if offline else 0
                     sup._last_online_ts[_PKG] = time.time() - 5 if not in_game else 0
-                    with patch.object(sup, "_fast_alive_evidence", return_value=ev), \
-                         patch.object(sup, "_fetch_presence", return_value=presence if process_up else None):
+                    with patch.object(sup, "_fetch_presence", return_value=presence):
                         st, _ = sup._detect_package_state(_PKG, _make_entry())
                     possible_returns.add(st)
         self.assertNotIn("Joining", possible_returns)
@@ -504,16 +505,21 @@ class TestWatchdogContinuity(unittest.TestCase):
             "Watchdog should complete at least 2 full rounds when all Online")
 
     # Test 19
-    def test_force_close_after_online_detected_as_dead_next_round(self):
-        """After Online, if process dies the next _detect call returns Dead."""
+    def test_offline_presence_after_online_returns_no_heartbeat(self):
+        """After Online, cookie offline presence maps to No Heartbeat (not OS Dead)."""
         sup = _make_sup()
         sup._set_status(_PKG, STATUS_ONLINE)
         sup._last_online_ts[_PKG] = time.time()
-        # Simulate force-close: process no longer running
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=None):
-            state, _ = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_DEAD)
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
+            state, detail = sup._detect_package_state(_PKG, _make_entry())
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "presence_offline")
 
     # Test 20
     def test_dead_package_triggers_relaunch(self):
@@ -709,11 +715,12 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
         # _fetch_presence, no uiautomator/logcat calls happen.
         self.assertNotIn("uiautomator_dump", [c[0] for c in uia_calls])
 
-    def test_probe_p089_state_check_uses_bounded_fast_evidence(self):
-        """Regression for p-0899246178: package 1 check must not enter legacy full scan."""
+    def test_probe_p089_state_check_skips_os_liveness_probes(self):
+        """Regression for p-0899246178: detection must not call OS liveness helpers."""
         sup = _make_sup()
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         with patch.object(android, "get_package_alive_evidence", side_effect=AssertionError("legacy scan")), \
-             patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
+             patch.object(sup, "_fast_alive_evidence", side_effect=AssertionError("os probe")), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)

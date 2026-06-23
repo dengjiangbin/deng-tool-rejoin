@@ -86,13 +86,19 @@ def _alive_evidence() -> dict:
 
 
 class DeadRecoveryTests(unittest.TestCase):
-    def test_missing_process_transitions_to_dead(self) -> None:
+    def test_offline_presence_after_grace_returns_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()):
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_DEAD)
-        self.assertEqual(detail["process_running"], "false")
-        self.assertEqual(detail["reason"], "process_not_running")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["process_running"], "unknown")
+        self.assertEqual(detail["reason"], "presence_offline")
 
     def test_dead_triggers_reopen(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
@@ -102,13 +108,15 @@ class DeadRecoveryTests(unittest.TestCase):
         launch.assert_called_once()
         self.assertIn(sup.status_map[_PKG], {STATUS_LAUNCHING, STATUS_REOPENING, STATUS_RELAUNCHING})
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_FAILED})
-        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()), \
-             patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=True)) as launch, \
-             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = True
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence):
             state, _ = sup._detect_package_state(_PKG, _entry())
-            self.assertEqual(state, STATUS_DEAD)
-            sup._handle_state(_PKG, _entry(), state, STATUS_FAILED, time.time())
-        launch.assert_called_once()
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
 
 
 class PresenceProfileTests(unittest.TestCase):
@@ -163,13 +171,13 @@ class PresenceProfileTests(unittest.TestCase):
 
     def test_in_lobby_state_maps_to_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         lobby = MagicMock()
         lobby.is_in_game = False
         lobby.is_offline = False
         lobby.is_unknown = False
         lobby.is_lobby = True
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=lobby):
+        with patch.object(sup, "_fetch_presence", return_value=lobby):
             state, _ = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertNotEqual(state, STATUS_DEAD)
