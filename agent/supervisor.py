@@ -163,8 +163,8 @@ STATUS_IN_LOBBY          = "In Lobby"          # Roblox presence type 1 (home/lo
 STATUS_OFFLINE           = "Offline"
 STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
 STATUS_LAUNCHING         = "Launching"
-STATUS_REOPENING         = "Reopening"
-STATUS_RELAUNCHING       = "Reopening"         # legacy alias
+STATUS_REOPENING         = "Relaunching"        # legacy constant name
+STATUS_RELAUNCHING       = "Relaunching"
 STATUS_CHECKING          = "Checking"
 STATUS_PENDING           = "Pending"
 STATUS_PREPARING         = "Preparing"
@@ -193,7 +193,6 @@ STATUS_DISCONNECTED      = "Disconnected"
 #   Dead          — process not running
 # Running-but-not-in-game now maps directly to No Heartbeat.
 STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running but not actively playing
-STATUS_SUSPENDED     = "Suspended"     # Recovery circuit breaker tripped
 
 # Presence-confirmed steady states that kick off RAM/runtime metric loops.
 _METRIC_ACTIVE_STATES = frozenset({
@@ -691,7 +690,7 @@ class _PackageWorker(threading.Thread):
                         continue
                     # Online (lobby) — Kaeru-style: record internally but do NOT
                     # set legacy transient or Lobby as public state.  The process-alive
-                    # check below will determine the public Online/Reopening/Failed.
+                    # check below will determine the public Online/Relaunching/Failed.
                     # This eliminates the old transient loop caused by presence
                     # lobby detection triggering the 120s URL resend timer.
                     if presence.is_lobby:
@@ -1215,7 +1214,6 @@ class WatchdogSupervisor:
 
     # ── Blocking recovery gate: poll interval while fixing one package ───────
     RECOVERY_GATE_POLL_SECONDS: float = 5.0
-    RECOVERY_GATE_MAX_ATTEMPTS: int = 3
 
     # ── Roblox presence API fault shield (429 / 5xx / timeout) ───────────────
     PRESENCE_RATE_LIMIT_BACKOFF_SECONDS: float = 15.0
@@ -1332,7 +1330,6 @@ class WatchdogSupervisor:
         self._presence_rate_limit_until: float = 0.0
         self._watchdog_round_rate_limited: bool = False
         self._lobby_entered_at: dict[str, float] = {}
-        self._recovery_gate_attempts: dict[str, int] = {}
         self._lua_heartbeat_server = LuaHeartbeatServer(
             host=self.LUA_HEARTBEAT_HOST,
             port=self.LUA_HEARTBEAT_PORT,
@@ -1678,7 +1675,7 @@ class WatchdogSupervisor:
                 "info",
                 "[DENG_REJOIN_RECOVERY_DETACHED_DISPATCH]",
                 package=pkg,
-                action="nohup_force_stop_monkey",
+                action="root_tmp_script_force_stop_monkey",
             )
             success = True
         else:
@@ -2012,7 +2009,12 @@ class WatchdogSupervisor:
         package_total: int,
         render_callback: Any = None,
     ) -> None:
-        """Halt round-robin until one package reaches Online or stable Dead."""
+        """Halt round-robin until one package reaches Online or stable Dead.
+
+        Recovery is deliberately unbounded.  A Lua false-negative must not
+        permanently suspend a package: the gate keeps polling and relaunches
+        whenever dual-layer liveness says it is needed.
+        """
         logger = self._logger
         log_event(
             logger,
@@ -2022,7 +2024,7 @@ class WatchdogSupervisor:
             package_index=package_index,
             package_total=package_total,
             poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
-            max_attempts=self.RECOVERY_GATE_MAX_ATTEMPTS,
+            recovery_limit="unbounded",
         )
         attempt = 0
         now = time.time()
@@ -2039,7 +2041,6 @@ class WatchdogSupervisor:
             self._prev_state[pkg] = state
             if state == STATUS_ONLINE:
                 self._nhb_since.pop(pkg, None)
-                self._recovery_gate_attempts.pop(pkg, None)
                 log_event(
                     logger,
                     "info",
@@ -2050,7 +2051,6 @@ class WatchdogSupervisor:
                 )
                 break
             if state == STATUS_DEAD:
-                self._recovery_gate_attempts.pop(pkg, None)
                 log_event(
                     logger,
                     "info",
@@ -2062,21 +2062,6 @@ class WatchdogSupervisor:
                 break
 
             attempt += 1
-            self._recovery_gate_attempts[pkg] = attempt
-            if attempt >= self.RECOVERY_GATE_MAX_ATTEMPTS:
-                self._set_status(pkg, STATUS_SUSPENDED)
-                self._recovery_gate_attempts.pop(pkg, None)
-                log_event(
-                    logger,
-                    "warning",
-                    "[DENG_REJOIN_RECOVERY_CIRCUIT_BREAKER]",
-                    package=pkg,
-                    attempts=attempt,
-                    result="suspended",
-                    action="release_watchdog_queue",
-                )
-                break
-
             log_event(
                 logger,
                 "info",
@@ -2084,10 +2069,14 @@ class WatchdogSupervisor:
                 package=pkg,
                 state=state,
                 attempt=attempt,
-                max_attempts=self.RECOVERY_GATE_MAX_ATTEMPTS,
+                recovery_limit="unbounded",
                 poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
             )
-            self._deploy_gate_recovery_cycle(pkg, entry, now, render_callback=render_callback)
+            # A just-dispatched launch needs time to start.  Poll it without
+            # force-stopping it again; once grace expires a genuine
+            # No-Heartbeat result re-enters the relaunch path.
+            if state != STATUS_LAUNCHING:
+                self._deploy_gate_recovery_cycle(pkg, entry, now, render_callback=render_callback)
             self._interruptible_sleep(self.RECOVERY_GATE_POLL_SECONDS)
         else:
             log_event(
@@ -2160,11 +2149,12 @@ class WatchdogSupervisor:
     def _detect_package_state(
         self, pkg: str, entry: dict[str, Any], *, force_cookie_rescan: bool = False
     ) -> tuple[str, dict[str, Any]]:
-        """Detect package state using local Lua heartbeats as primary truth.
+        """Determine liveness from Lua first, then cookie/public presence.
 
-        In-game executor scripts ping the local HTTP server every few seconds.
-        Roblox cookie/public presence is consulted only as a fallback when a
-        package is past its loading grace and has never registered a local ping.
+        A fresh local Lua heartbeat is authoritative.  On every stale or
+        missing heartbeat pass, the root-backed cookie/public presence probe is
+        run before declaring No Heartbeat.  This keeps executor auto-exec
+        failure from turning into a false recovery loop.
         """
         del entry
         t0 = time.monotonic()
@@ -2216,24 +2206,6 @@ class WatchdogSupervisor:
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_ONLINE)
             return STATUS_ONLINE, detail
 
-        if lua_server.ever_seen(pkg) and not in_loading_grace:
-            self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
-            detail = _detail_base(
-                activity="No Heartbeat",
-                reason="local_lua_heartbeat_stale",
-            )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-            return STATUS_NO_HEARTBEAT, detail
-
-        if in_loading_grace:
-            detail = _detail_base(
-                activity="Launching",
-                in_game_proof="unknown",
-                reason="local_lua_pending_loading_grace",
-            )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_LAUNCHING)
-            return STATUS_LAUNCHING, detail
-
         if self._presence_api_fault_active() or self._watchdog_round_rate_limited:
             return self._preserve_package_state_on_api_fault(
                 pkg,
@@ -2282,81 +2254,51 @@ class WatchdogSupervisor:
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_ONLINE)
             return STATUS_ONLINE, detail
 
+        if in_loading_grace:
+            detail = _presence_detail(
+                activity="Launching",
+                in_game_proof="unknown",
+                reason="lua_stale_presence_checked_loading_grace",
+            )
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_LAUNCHING)
+            return STATUS_LAUNCHING, detail
+
         api_status = str(pres_detail.get("roblox_api_status") or "")
         presence_error = str(pres_detail.get("presence_error") or "")
         presence_lobby = bool(presence is not None and getattr(presence, "is_lobby", False))
         presence_offline = bool(presence is not None and getattr(presence, "is_offline", False))
         presence_unknown = presence is None or bool(getattr(presence, "is_unknown", False))
 
+        if presence_lobby or presence_offline:
+            self._clear_lobby_state(pkg)
+            self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
+            detail = _presence_detail(
+                activity=profile or ("Lobby" if presence_lobby else "Offline"),
+                reason="presence_lobby" if presence_lobby else "presence_offline",
+            )
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+            return STATUS_NO_HEARTBEAT, detail
+
+        # Neither layer has declared the package offline.  Keep the previous
+        # good state (or Launching for a first observation) instead of treating
+        # a missing cookie/API response as proof that recovery is required.
         if presence is None and presence_error == "missing_user_id":
-            pending_state = STATUS_PENDING if not force_cookie_rescan else STATUS_NO_HEARTBEAT
-            detail = _presence_detail(
-                activity="Pending" if pending_state == STATUS_PENDING else "No Heartbeat",
-                in_game_proof="unknown",
-                reason="presence_user_id_pending",
+            preserved = STATUS_PENDING
+        else:
+            preserved = str(self._prev_state.get(pkg) or self.status_map.get(pkg) or "").strip()
+        if preserved in {"", STATUS_CHECKING, STATUS_PENDING, STATUS_NO_HEARTBEAT}:
+            preserved = (
+                STATUS_PENDING
+                if presence is None and presence_error == "missing_user_id"
+                else (STATUS_ONLINE if self._last_online_ts.get(pkg) else STATUS_LAUNCHING)
             )
-            self._log_state_evidence(pkg, detail, pres_detail, pending_state)
-            return pending_state, detail
-
-        if presence is None and presence_error == "missing_cookie":
-            detail = _presence_detail(
-                activity="No Heartbeat",
-                in_game_proof="unknown",
-                reason="cookie_extraction_failed",
-            )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-            return STATUS_NO_HEARTBEAT, detail
-
-        if presence is None and api_status == "skipped":
-            detail = _presence_detail(
-                activity="No Heartbeat",
-                in_game_proof="unknown",
-                reason="presence_api_skipped",
-            )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-            return STATUS_NO_HEARTBEAT, detail
-
-        if presence_lobby:
-            self._note_lobby_entered(pkg)
-            if self._in_lobby_transition_allowance(pkg):
-                detail = _presence_detail(
-                    activity=profile or "Lobby",
-                    in_game_proof="unknown",
-                    reason="presence_lobby_transition_allowance",
-                )
-                self._log_state_evidence(pkg, detail, pres_detail, STATUS_LOBBY)
-                return STATUS_LOBBY, detail
-            self._clear_lobby_state(pkg)
-            self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
-            detail = _presence_detail(
-                activity=profile or "Lobby",
-                reason="presence_lobby_stall_timeout",
-            )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-            return STATUS_NO_HEARTBEAT, detail
-
-        if presence_offline:
-            self._clear_lobby_state(pkg)
-            self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
-            detail = _presence_detail(
-                activity=profile or "Offline",
-                reason="presence_offline",
-            )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-            return STATUS_NO_HEARTBEAT, detail
-
-        reason = (
-            "presence_not_in_game_no_heartbeat"
-            if presence is not None and not presence_unknown
-            else "missing_in_game_proof_no_heartbeat"
-        )
         detail = _presence_detail(
-            activity="No Heartbeat",
+            activity=preserved,
             in_game_proof="unknown" if presence_unknown else "false",
-            reason=reason,
+            reason="lua_stale_presence_unavailable_preserve_state",
         )
-        self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-        return STATUS_NO_HEARTBEAT, detail
+        self._log_state_evidence(pkg, detail, pres_detail, preserved)
+        return preserved, detail
 
     def _log_state_evidence(
         self,
@@ -2470,7 +2412,7 @@ class WatchdogSupervisor:
 
         Recovery rules:
         - Dead        → launch_package_for_current_config
-        - No Heartbeat → track stall; after 60s force-stop → Dead → Reopening
+        - No Heartbeat → track stall; after 60s force-stop → Dead → Relaunching
         - Online      → update last_online_ts, keep monitoring
 
         Returns True when a blocking recovery gate should run for this package.
@@ -2827,14 +2769,6 @@ class WatchdogSupervisor:
             for idx, pkg in enumerate(self.packages, 1):
                 if self.stop_event.is_set():
                     break
-
-                if str(self.status_map.get(pkg) or "").strip() == STATUS_SUSPENDED:
-                    log_event(
-                        logger, "info", "[DENG_REJOIN_WATCHDOG_SKIP_SUSPENDED]",
-                        round=self._round,
-                        package=pkg,
-                    )
-                    continue
 
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = f"Checking Package {idx}/{total}"

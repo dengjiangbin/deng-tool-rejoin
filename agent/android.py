@@ -802,20 +802,60 @@ def build_detached_force_stop_relaunch_shell(
     root_tool: str = "su",
     sleep_seconds: float = 3.5,
 ) -> str:
-    """Build a single background shell that force-stops then relaunches one package."""
+    """Build the detached root invocation for one staged relaunch script.
+
+    The actual recovery work lives in ``/data/local/tmp`` rather than inside
+    Termux's process tree.  The caller launches this command through
+    :func:`agent.subprocess_isolated.spawn_detached` after creating the script.
+    """
+    pkg = validate_package_name(package)
+    tool = str(root_tool or "su").strip() or "su"
+    script_path = f"/data/local/tmp/relaunch_{pkg}.sh"
+    detached_script = (
+        f"sh {shlex.quote(script_path)} < /dev/null > /dev/null 2>&1 &"
+    )
+    return f"{shlex.quote(tool)} -c {shlex.quote(detached_script)}"
+
+
+def build_detached_force_stop_relaunch_script(
+    package: str,
+    *,
+    sleep_seconds: float = 3.5,
+) -> str:
+    """Build the root-owned Android recovery script for ``package``."""
     pkg = validate_package_name(package)
     pause = max(0.5, float(sleep_seconds))
-    inner = (
-        f"am force-stop {shlex.quote(pkg)} && "
-        f"sleep {pause} && "
-        f"monkey -p {shlex.quote(pkg)} -c android.intent.category.LAUNCHER 1"
-    )
-    tool = str(root_tool or "su").strip() or "su"
-    inner_q = shlex.quote(inner)
     return (
-        f"nohup sh -c '{tool} -mm -c {inner_q} || {tool} -c {inner_q}' "
-        f">/dev/null 2>&1 &"
+        "#!/system/bin/sh\n"
+        f"am force-stop {shlex.quote(pkg)}\n"
+        f"sleep {pause:g}\n"
+        f"monkey -p {shlex.quote(pkg)} -c android.intent.category.LAUNCHER 1\n"
     )
+
+
+def _write_detached_force_stop_relaunch_script(
+    package: str,
+    *,
+    root_tool: str,
+    sleep_seconds: float,
+) -> bool:
+    """Write the recovery script as root without involving an interactive TTY."""
+    pkg = validate_package_name(package)
+    script_path = f"/data/local/tmp/relaunch_{pkg}.sh"
+    script = build_detached_force_stop_relaunch_script(
+        pkg, sleep_seconds=sleep_seconds,
+    )
+    marker = "DENG_REJOIN_RECOVERY_SCRIPT"
+    write_shell = (
+        "umask 077\n"
+        f"cat > {shlex.quote(script_path)} <<'{marker}'\n"
+        f"{script}{marker}\n"
+        f"chmod 700 {shlex.quote(script_path)}"
+    )
+    result = run_root_command(
+        ["sh", "-c", write_shell], root_tool=root_tool, timeout=10,
+    )
+    return bool(result.ok)
 
 
 def dispatch_detached_force_stop_relaunch(
@@ -824,11 +864,17 @@ def dispatch_detached_force_stop_relaunch(
     root_tool: str | None = None,
     sleep_seconds: float = 3.5,
 ) -> bool:
-    """Detach force-stop + monkey relaunch so Termux drops the root process tree immediately."""
+    """Stage and detach recovery so Termux is not the root shell's parent."""
     tool = root_tool or detect_root().tool
     if not tool:
         return False
     if _is_force_stop_protected(package):
+        return False
+    if not _write_detached_force_stop_relaunch_script(
+        package,
+        root_tool=str(tool),
+        sleep_seconds=sleep_seconds,
+    ):
         return False
     shell = build_detached_force_stop_relaunch_shell(
         package,

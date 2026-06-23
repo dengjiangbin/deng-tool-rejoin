@@ -105,7 +105,7 @@ class TestLaunchingWatchdogEvaluation(unittest.TestCase):
         self.assertEqual(fetch.call_args.kwargs.get("force_cookie_rescan"), True)
         self.assertEqual(state, STATUS_ONLINE)
 
-    def test_launching_cookie_failure_maps_to_no_heartbeat(self) -> None:
+    def test_launching_cookie_failure_preserves_launching(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup._presence_last_detail[_PKG] = {
             "roblox_api_status": "skipped",
@@ -114,8 +114,8 @@ class TestLaunchingWatchdogEvaluation(unittest.TestCase):
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._evaluate_launching_or_pending(_PKG, _entry())
-        self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertIn("cookie", detail.get("reason", ""))
+        self.assertEqual(state, STATUS_LAUNCHING)
+        self.assertIn("presence", detail.get("reason", ""))
 
     def test_pending_package_not_evaluated_until_launch(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_PENDING})

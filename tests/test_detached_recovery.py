@@ -19,26 +19,42 @@ _PKG = "com.moons.litesc"
 
 
 class TestDetachedRecovery(unittest.TestCase):
-    def test_build_detached_shell_batches_force_stop_and_monkey(self) -> None:
+    def test_build_detached_script_batches_force_stop_and_monkey(self) -> None:
+        script = android.build_detached_force_stop_relaunch_script(_PKG)
         shell = android.build_detached_force_stop_relaunch_shell(_PKG, root_tool="su")
-        self.assertIn("nohup", shell)
-        self.assertIn("am force-stop", shell)
-        self.assertIn("sleep", shell)
-        self.assertIn("monkey -p", shell)
-        self.assertIn(_PKG, shell)
-        self.assertIn("su -mm -c", shell)
-        self.assertIn("|| su -c", shell)
-        self.assertTrue(shell.rstrip().endswith("&"))
+        self.assertIn("#!/system/bin/sh", script)
+        self.assertIn("am force-stop", script)
+        self.assertIn("sleep 3.5", script)
+        self.assertIn("monkey -p", script)
+        self.assertIn(_PKG, script)
+        self.assertIn("su -c", shell)
+        self.assertIn(f"/data/local/tmp/relaunch_{_PKG}.sh", shell)
+        self.assertIn("< /dev/null", shell)
+        self.assertIn("&'", shell)
 
     def test_dispatch_detached_uses_spawn_detached_once(self) -> None:
-        with patch("agent.subprocess_isolated.spawn_detached", return_value=True) as mock_spawn:
+        with patch("agent.android._write_detached_force_stop_relaunch_script", return_value=True), \
+             patch("agent.subprocess_isolated.spawn_detached", return_value=True) as mock_spawn:
             ok = android.dispatch_detached_force_stop_relaunch(_PKG, root_tool="su")
         self.assertTrue(ok)
         mock_spawn.assert_called_once()
         args = mock_spawn.call_args.args[0]
         self.assertEqual(args[0], "sh")
         self.assertEqual(args[1], "-c")
-        self.assertIn("nohup", args[2])
+        self.assertIn(f"/data/local/tmp/relaunch_{_PKG}.sh", args[2])
+
+    def test_dispatch_writes_root_owned_tmp_script_before_detaching(self) -> None:
+        with patch("agent.android.run_root_command") as root_cmd, \
+             patch("agent.subprocess_isolated.spawn_detached", return_value=True):
+            root_cmd.return_value = type("Res", (), {"ok": True})()
+            ok = android.dispatch_detached_force_stop_relaunch(_PKG, root_tool="su")
+        self.assertTrue(ok)
+        write_args = root_cmd.call_args.args[0]
+        self.assertEqual(write_args[:2], ["sh", "-c"])
+        self.assertIn(f"/data/local/tmp/relaunch_{_PKG}.sh", write_args[2])
+        self.assertIn("am force-stop", write_args[2])
+        self.assertIn("monkey -p", write_args[2])
+        self.assertIn("chmod 700", write_args[2])
 
     def test_mount_master_root_tries_mm_before_fallback(self) -> None:
         calls: list[list[str]] = []

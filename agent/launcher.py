@@ -299,7 +299,7 @@ def perform_rejoin(
                     "[DENG_REJOIN_RECOVERY_DETACHED_DISPATCH]",
                     reason=reason,
                     package=package,
-                    action="nohup_force_stop_monkey",
+                    action="root_tmp_script_force_stop_monkey",
                 )
                 db.insert_rejoin_attempt(
                     reason=reason,

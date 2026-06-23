@@ -18,7 +18,6 @@ from agent.supervisor import (
     STATUS_LOBBY,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
-    STATUS_SUSPENDED,
     WatchdogSupervisor,
 )
 
@@ -53,16 +52,21 @@ def _alive_evidence() -> dict:
 
 
 class TestRecoveryCircuitBreaker(unittest.TestCase):
-    def test_recovery_gate_max_attempts_is_three(self) -> None:
-        self.assertEqual(WatchdogSupervisor.RECOVERY_GATE_MAX_ATTEMPTS, 3)
+    def test_recovery_gate_has_no_attempt_cap_or_suspended_state(self) -> None:
+        self.assertFalse(hasattr(WatchdogSupervisor, "RECOVERY_GATE_MAX_ATTEMPTS"))
+        source = __import__("inspect").getsource(WatchdogSupervisor._run_blocking_recovery_gate)
+        self.assertNotIn("STATUS_SUSPENDED", source)
+        self.assertIn("recovery_limit=\"unbounded\"", source)
 
-    def test_gate_suspends_after_three_failed_recovery_cycles(self) -> None:
+    def test_gate_keeps_retrying_until_explicitly_stopped(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         eval_calls = {"n": 0}
 
         def _isolated(_pkg, _entry):
             eval_calls["n"] += 1
-            return STATUS_LAUNCHING
+            if eval_calls["n"] >= 4:
+                sup.stop_event.set()
+            return STATUS_NO_HEARTBEAT
 
         with patch.object(sup, "_evaluate_package_presence_isolated", side_effect=_isolated), \
              patch.object(sup, "_deploy_gate_recovery_cycle"), \
@@ -75,13 +79,8 @@ class TestRecoveryCircuitBreaker(unittest.TestCase):
                 package_total=1,
             )
 
-        self.assertEqual(sup.status_map.get(_PKG), STATUS_SUSPENDED)
-        self.assertEqual(eval_calls["n"], 3)
-
-    def test_suspended_package_skipped_in_watchdog_round(self) -> None:
-        src = __import__("inspect").getsource(WatchdogSupervisor._run_watchdog_loop)
-        self.assertIn("WATCHDOG_SKIP_SUSPENDED", src)
-        self.assertIn("STATUS_SUSPENDED", src)
+        self.assertEqual(sup.status_map.get(_PKG), STATUS_NO_HEARTBEAT)
+        self.assertEqual(eval_calls["n"], 4)
 
 
 class TestPresenceRateLimitShield(unittest.TestCase):
@@ -229,7 +228,7 @@ class TestApiOutageShield(unittest.TestCase):
         self.assertEqual(sup.status_map.get(_PKG), STATUS_ONLINE)
 
 
-class TestLobbyTransitionAllowance(unittest.TestCase):
+class TestLobbyDetection(unittest.TestCase):
     def _lobby_presence(self):
         lobby = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
         lobby.is_in_game = False
@@ -238,22 +237,22 @@ class TestLobbyTransitionAllowance(unittest.TestCase):
         lobby.is_lobby = True
         return lobby
 
-    def test_lobby_after_grace_displays_lobby_state(self) -> None:
+    def test_lobby_after_grace_is_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         with patch.object(sup, "_fetch_presence", return_value=self._lobby_presence()):
             state, detail = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_LOBBY)
-        self.assertEqual(detail["reason"], "presence_lobby_transition_allowance")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "presence_lobby")
 
-    def test_lobby_stall_after_180_seconds_triggers_no_heartbeat(self) -> None:
+    def test_lobby_is_no_heartbeat_without_a_transition_delay(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         sup._lobby_entered_at[_PKG] = time.monotonic() - (sup.LOBBY_TRANSITION_SECONDS + 1)
         with patch.object(sup, "_fetch_presence", return_value=self._lobby_presence()):
             state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertEqual(detail["reason"], "presence_lobby_stall_timeout")
+        self.assertEqual(detail["reason"], "presence_lobby")
 
 
 if __name__ == "__main__":

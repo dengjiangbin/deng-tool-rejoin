@@ -384,7 +384,7 @@ _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
     "Launching": "Launching",
     "Launched": "Launching",
     "Preparing": "Launching",
-    "Relaunching": "Reopening",
+    "Relaunching": "Relaunching",
     "Joining": "Launching",
     "Join Unconfirmed": "Launching",
     # Heartbeat lost on a known-good process. Reconnecting / Background

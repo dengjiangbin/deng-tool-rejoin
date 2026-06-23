@@ -127,16 +127,22 @@ class TestWatchdogLuaPrimaryDetection(unittest.TestCase):
         self.assertEqual(state, STATUS_ONLINE)
         self.assertEqual(detail["presence_source"], "local_lua_heartbeat")
 
-    def test_stale_lua_after_grace_is_no_heartbeat_without_api(self) -> None:
+    def test_stale_lua_after_grace_uses_presence_before_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
         sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         sup._lua_heartbeat_server.record_heartbeat(_PKG)
         with sup._lua_heartbeat_server._lock:
             sup._lua_heartbeat_server._records[_PKG]["timestamp"] = time.monotonic() - 45.0
-        with patch.object(sup, "_fetch_presence", side_effect=AssertionError("api must not run")):
+        offline = MagicMock()
+        offline.is_in_game = False
+        offline.is_offline = True
+        offline.is_lobby = False
+        offline.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=offline) as fetch_presence:
             state, detail = sup._detect_package_state(_PKG, _entry())
+        fetch_presence.assert_called_once()
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertEqual(detail["reason"], "local_lua_heartbeat_stale")
+        self.assertEqual(detail["reason"], "presence_offline")
 
     def test_api_fallback_only_when_never_seen_lua_and_past_grace(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
@@ -155,10 +161,11 @@ class TestWatchdogLuaPrimaryDetection(unittest.TestCase):
     def test_loading_grace_without_lua_stays_launching(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup.mark_package_launched(_PKG)
-        with patch.object(sup, "_fetch_presence", side_effect=AssertionError("api must not run")):
+        with patch.object(sup, "_fetch_presence", return_value=None) as fetch_presence:
             state, detail = sup._detect_package_state(_PKG, _entry())
+        fetch_presence.assert_called_once()
         self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
+        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
 
     def test_mark_package_launched_resets_window_ping_count(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())

@@ -2,7 +2,7 @@
 
 Covers:
 - Archive: live Start does not import/call archived broken modules
-- States: only public states shown (Layout/Launching/Online/Reopening/Failed)
+- States: only public states shown (Layout/Launching/Online/Relaunching/Failed)
 - Private URL: setup saves, Start reads, legacy key promoted
 - Supervisor: per-package relaunch, restart cap, Ctrl+C, no endless loop
 - Roblox Presence API: integration, fallback, rate-limit safety, no crash
@@ -130,9 +130,9 @@ class TestPublicStates(unittest.TestCase):
         "Failed", "Layout", "Join Failed", "Wrong Game / Wrong Server",
     ]
     _ALLOWED_PUBLIC = {
-        "Layout", "Launching", "Online", "Reopening", "Failed", "Dead",
+        "Layout", "Launching", "Online", "Relaunching", "Failed", "Dead",
         "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
-        "Suspended", "Lobby",
+        "Lobby",
     }
 
     def _get_display_map(self):
@@ -182,7 +182,7 @@ class TestPublicStates(unittest.TestCase):
 
     def test_reconnecting_maps_to_reopening(self) -> None:
         smap = self._get_display_map()
-        self.assertEqual(smap.get("Reconnecting"), "Reopening")
+        self.assertEqual(smap.get("Reconnecting"), "Relaunching")
 
     def test_in_lobby_maps_to_lobby(self) -> None:
         smap = self._get_display_map()
@@ -650,7 +650,7 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
             state, detail = watcher._detect_package_state("com.roblox.client", entry)
 
         self.assertEqual(state, sup.STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
+        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
 
 
 # ─── 6. YesCaptcha hidden from public UI ─────────────────────────────────────

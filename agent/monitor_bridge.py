@@ -62,7 +62,7 @@ MAX_PACKAGES_PER_PUSH = 64
 # so the bridge does not depend on supervisor imports).
 # v1.0.5: canonical 4 APK-visible states — Dead, Launching, Online, No Heartbeat.
 ALLOWED_STATES = frozenset({
-    "Online", "Dead", "Reopening", "Relaunching", "No Heartbeat",
+    "Online", "Dead", "Relaunching", "No Heartbeat",
     "Launching",
     "Unknown", "Offline", "Preparing",
     "Background", "Reconnecting", "Warning", "Failed",

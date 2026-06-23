@@ -109,7 +109,7 @@ _JOIN_UNCONFIRMED_RELAUNCH_SECONDS_BROKEN = 120
 #
 # FIX: The live supervisor now records presence state internally but does NOT
 # change the visible state based on lobby detection.  The process-alive check
-# below determines the public Online/Reopening/Failed state.
+# below determines the public Online/Relaunching/Failed state.
 
 # ─── BROKEN _label_map (from old supervisor.py StateTracker path) ─────────────
 #

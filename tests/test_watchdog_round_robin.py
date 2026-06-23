@@ -354,7 +354,7 @@ class TestCookieOnlyDetection(unittest.TestCase):
         with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
+        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
 
 
 class TestLaunchTimestampBinding(unittest.TestCase):

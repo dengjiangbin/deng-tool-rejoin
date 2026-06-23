@@ -338,8 +338,8 @@ class TestPublicUICleanliness(unittest.TestCase):
         self.assertIn('"In Lobby"', src)
         self.assertIn('"No Heartbeat"', src)
 
-    def test_joining_is_public_display_value(self) -> None:
-        """Staggered launch exposes Joining in the Termux dashboard."""
+    def test_relaunching_is_public_display_value(self) -> None:
+        """Recovery exposes the accurate Relaunching label in the dashboard."""
         import inspect, re
         import agent.commands as _mod
         src = inspect.getsource(_mod.cmd_start)
@@ -347,7 +347,7 @@ class TestPublicUICleanliness(unittest.TestCase):
         end = src.find("}", start) + 1
         map_src = src[start:end]
         values = re.findall(r':\s*"([^"]+)"', map_src)
-        self.assertIn("Joining", values)
+        self.assertIn("Relaunching", values)
 
     def test_allowed_states_in_display_map_values(self) -> None:
         """_STATE_DISPLAY_MAP values must only be from the allowed public set."""
@@ -358,7 +358,7 @@ class TestPublicUICleanliness(unittest.TestCase):
         end   = src.find("}", start) + 1
         map_src = src[start:end]
         allowed = {
-            "Online", "Dead", "Launching", "Joining", "Reopening", "Failed",
+            "Online", "Dead", "Launching", "Relaunching", "Failed", "Lobby",
             "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
         }
         import re

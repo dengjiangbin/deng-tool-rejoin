@@ -275,12 +275,12 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail["reason"], "presence_offline")
 
     # Test 12
-    def test_missing_presence_after_grace_returns_no_heartbeat(self):
+    def test_missing_presence_after_grace_preserves_launching(self):
         sup = _make_sup()
         self._past_loading_grace(sup)
         with patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(state, STATUS_LAUNCHING)
         self.assertEqual(detail["process_running"], "unknown")
         self.assertEqual(detail["heartbeat_ok"], "false")
 
@@ -328,8 +328,8 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail2["heartbeat_ok"], "false")
 
     # Test 15
-    def test_presence_lobby_after_grace_returns_lobby_state(self):
-        """Presence Online/not Playing maps to Lobby during transition allowance."""
+    def test_presence_lobby_after_grace_returns_no_heartbeat(self):
+        """Stale Lua plus Lobby presence is a recovery signal after grace."""
         sup = _make_sup()
         self._past_loading_grace(sup)
         presence = MagicMock()
@@ -339,19 +339,24 @@ class TestStateDetection(unittest.TestCase):
         presence.is_unknown = False
         with patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        from agent.supervisor import STATUS_LOBBY
-        self.assertEqual(state, STATUS_LOBBY)
-        self.assertEqual(detail["reason"], "presence_lobby_transition_allowance")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "presence_lobby")
         self.assertNotEqual(state, "Joining")
 
     def test_presence_lobby_during_grace_stays_launching(self):
         """Lobby/offline during loading grace stays Launching — not No Heartbeat."""
         sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
         sup.mark_package_launched(_PKG)
-        with patch.object(sup, "_fetch_presence", side_effect=AssertionError("api skipped during grace")):
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = False
+        presence.is_lobby = True
+        presence.is_unknown = False
+        with patch.object(sup, "_fetch_presence", return_value=presence) as fetch:
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
+        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
+        fetch.assert_called_once()
 
     def test_offline_presence_after_online_relaunches_only_that_package(self):
         """Offline cookie presence triggers No Heartbeat; Dead recovery relaunches alone."""
@@ -386,7 +391,7 @@ class TestStateDetection(unittest.TestCase):
              patch("agent.roblox_presence.fetch_presence_one", side_effect=AssertionError("presence call")):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_PENDING)
-        self.assertIn("presence_user_id_pending", detail["reason"])
+        self.assertIn("presence_unavailable_preserve_state", detail["reason"])
         self.assertEqual(sup._presence_last_detail[_PKG]["roblox_api_status"], "skipped")
 
     def test_username_lookup_used_for_presence_when_user_id_missing(self):
@@ -405,10 +410,11 @@ class TestStateDetection(unittest.TestCase):
         sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
         sup.mark_package_launched(_PKG)
         with patch.object(sup, "_fast_alive_evidence", side_effect=AssertionError("os probe")), \
-             patch.object(sup, "_fetch_presence", side_effect=AssertionError("api skipped during grace")):
+             patch.object(sup, "_fetch_presence", return_value=None) as fetch:
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_LAUNCHING)
-        self.assertEqual(detail["reason"], "local_lua_pending_loading_grace")
+        self.assertEqual(detail["reason"], "lua_stale_presence_checked_loading_grace")
+        fetch.assert_called_once()
 
     # Test 16
     def test_no_joining_state_in_watchdog_allowed_states(self):
@@ -628,7 +634,7 @@ class TestWatchdogContinuity(unittest.TestCase):
             )
         self.assertEqual(seen, packages)
         self.assertEqual(sup.checking_label, "Checking Package 3/3")
-        self.assertIn(sup.status_map[_PKG], {STATUS_NO_HEARTBEAT, "Reopening", "Relaunching", "Launching"})
+        self.assertIn(sup.status_map[_PKG], {STATUS_NO_HEARTBEAT, "Relaunching", "Launching"})
 
     def test_checking_label_persists_after_round_until_shutdown(self):
         packages = [_PKG, _PKG2]
@@ -715,8 +721,8 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
              patch.object(sup, "_fast_alive_evidence", side_effect=AssertionError("os probe")), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertIn("heartbeat", detail["reason"])
+        self.assertEqual(state, STATUS_LAUNCHING)
+        self.assertIn("presence", detail["reason"])
 
     def test_fast_alive_evidence_uses_short_root_timeouts(self):
         """Root process proof is bounded so Checking Package 1/3 cannot stall a round."""

@@ -4518,7 +4518,6 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Ready":             _ANSI_YELLOW,
         "Starting":          _ANSI_YELLOW,
         "Launching":         _ANSI_YELLOW,
-        "Reopening":         _ANSI_YELLOW,
         "Relaunching":       _ANSI_YELLOW,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
@@ -4543,7 +4542,6 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Partial":      _ANSI_YELLOW,
             "Failed":       _ANSI_RED,
             "Dead":         _ANSI_RED,
-            "Suspended":    _ANSI_RED,
             "Offline":      _ANSI_RED,
         "Closed":       _ANSI_RED,
         "Background":   _ANSI_YELLOW,
@@ -4558,7 +4556,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "In Server":         _ANSI_GREEN,
         "Ready":             _ANSI_YELLOW,
         "Launching":         _ANSI_YELLOW,
-        "Reopening":         _ANSI_YELLOW,
+        "Relaunching":       _ANSI_YELLOW,
         "No Heartbeat":      _ANSI_RED,
         "Dead":              _ANSI_RED,
         "Failed":            _ANSI_RED,
@@ -4724,7 +4722,6 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     ("Join" + "ing"):    "launching",
     "Reconnecting":      "reconnecting",
     "Launching":         "launching",
-    "Reopening":         "reconnecting",
     "Relaunching":       "reconnecting",
     "Failed":            "failed",
     "Join Failed":       "failed",
@@ -6273,7 +6270,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _start_session.mark("supervisor_begin", package_count=len(runtime_entries))
 
         # Public state map: internal states → user-facing labels.
-        # Allowed public states: Layout, Launching, Online, Reopening, Dead, Failed.
+        # Allowed public states: Layout, Launching, Online, Relaunching, Dead, Failed.
         # Internal/noisy states (Docking, Layout, Waiting, Checking etc.)
         # never reach the live supervisor dashboard.
         _STATE_DISPLAY_MAP: dict[str, str] = {
@@ -6285,9 +6282,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Join Failed":      "Failed",
             "Wrong Game / Wrong Server": "Failed",
             "Dead":             "Dead",
-            "Suspended":        "Suspended",
-            "Reopening":        "Reopening",
-            "Relaunching":      "Reopening",
+            "Relaunching":      "Relaunching",
             "Launching":        "Launching",
             "Checking":         "Checking",
             "Pending":          "Pending",
@@ -6303,7 +6298,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             # App open but not in game yet — allow lobby transition window.
             "Lobby":            "Lobby",
             # Recovery / disconnect states
-            "Reconnecting":     "Reopening",
+            "Reconnecting":     "Relaunching",
             "Disconnected":     "Dead",
             "Offline":          "Dead",
         }
@@ -6351,7 +6346,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
                 if disp in ("Dead", "Failed"):
                     return "N/A"
-                if disp in ("Preparing", "Clear Cache", "Launching", "Reopening", "Checking", "Checking..."):
+                if disp in ("Preparing", "Clear Cache", "Launching", "Relaunching", "Checking", "Checking..."):
                     return "0 MB"
                 cached = _usage_cache.get(pkg)
                 if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:
@@ -8210,6 +8205,14 @@ def main(argv: list[str] | None = None) -> int:
         pass
     try:
         args = parse_args(argv)
+    except KeyboardInterrupt:
+        # Parsing can be interrupted before command dispatch; preserve the
+        # same silent, clean exit contract as an in-command Ctrl+C.
+        _termux_exit_clean()
+        return 0
+    except EOFError:
+        _termux_exit_clean()
+        return 0
     except SystemExit as _parse_exc:
         _code = _parse_exc.code
         return _code if isinstance(_code, int) else (0 if _code is None else 1)
