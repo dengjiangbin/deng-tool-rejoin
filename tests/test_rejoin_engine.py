@@ -127,7 +127,7 @@ class PresenceProfileTests(unittest.TestCase):
         )
         self.assertEqual(
             map_presence_profile(PresenceResult(user_id=1, presence_type=PresenceType.ONLINE)),
-            "In Lobby",
+            "Lobby",
         )
 
     def test_in_game_presence_maps_to_online_state(self) -> None:
@@ -160,16 +160,21 @@ class PresenceProfileTests(unittest.TestCase):
         self.assertEqual(state, STATUS_ONLINE)
         self.assertIn("preserve_state", detail["reason"])
 
-    def test_transient_presence_network_failure_returns_no_heartbeat(self) -> None:
-        sup = WatchdogSupervisor([_entry()], _cfg())
-        sup._presence_last_detail[_PKG] = {"roblox_api_status": "network_error"}
-        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
-             patch.object(sup, "_fetch_presence", return_value=None):
+    def test_transient_presence_network_failure_preserves_state(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
+        sup._prev_state[_PKG] = STATUS_ONLINE
+        sup._last_online_ts[_PKG] = time.time()
+        from agent.roblox_presence import RobloxApiFaultError
+        with patch.object(
+            sup,
+            "_fetch_presence",
+            side_effect=RobloxApiFaultError("presence", fault="network"),
+        ):
             state, detail = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertIn("presence_api_network_error", detail["reason"])
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertIn("preserve_state", detail["reason"])
 
-    def test_in_lobby_state_maps_to_no_heartbeat(self) -> None:
+    def test_in_lobby_state_maps_to_lobby_within_allowance(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
         sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
         lobby = MagicMock()
@@ -179,7 +184,8 @@ class PresenceProfileTests(unittest.TestCase):
         lobby.is_lobby = True
         with patch.object(sup, "_fetch_presence", return_value=lobby):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        from agent.supervisor import STATUS_LOBBY
+        self.assertEqual(state, STATUS_LOBBY)
         self.assertNotEqual(state, STATUS_DEAD)
 
     def test_poll_presence_gate_state_online_on_type_2(self) -> None:

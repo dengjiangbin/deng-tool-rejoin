@@ -12,9 +12,10 @@ PROJECT = Path(__file__).resolve().parents[1]
 if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
-from agent.roblox_presence import RobloxRateLimitedError
+from agent.roblox_presence import RobloxApiFaultError, RobloxRateLimitedError
 from agent.supervisor import (
     STATUS_LAUNCHING,
+    STATUS_LOBBY,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
     STATUS_SUSPENDED,
@@ -151,6 +152,102 @@ class TestPresenceRateLimitShield(unittest.TestCase):
             f"expected 15s rate-limit backoff, got {sleep_calls}",
         )
         self.assertEqual(sup.status_map.get(_PKG), STATUS_ONLINE)
+
+
+class TestApiOutageShield(unittest.TestCase):
+    def test_http_503_preserves_online_state(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
+        sup._prev_state[_PKG] = STATUS_ONLINE
+        sup._last_online_ts[_PKG] = time.time()
+
+        with patch.object(
+            sup,
+            "_fetch_presence",
+            side_effect=RobloxApiFaultError("presence", fault="server_error", status_code=503),
+        ):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertIn("preserve_state", detail["reason"])
+        self.assertTrue(sup._presence_api_fault_active())
+
+    def test_network_timeout_preserves_online_state(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
+        sup._prev_state[_PKG] = STATUS_ONLINE
+        sup._last_online_ts[_PKG] = time.time()
+
+        with patch.object(
+            sup,
+            "_fetch_presence",
+            side_effect=RobloxApiFaultError("presence", fault="timeout"),
+        ):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertIn("preserve_state", detail["reason"])
+
+    def test_api_fault_round_triggers_backoff_sleep(self) -> None:
+        sup = WatchdogSupervisor(
+            [_entry(_PKG), _entry(_PKG2)],
+            _cfg(),
+            initial_status={_PKG: STATUS_ONLINE, _PKG2: STATUS_ONLINE},
+        )
+        sup.mark_all_launches_completed()
+        sup._prev_state[_PKG] = STATUS_ONLINE
+        sup._last_online_ts[_PKG] = time.time()
+        sleep_calls: list[float] = []
+
+        def _fetch_side_effect(pkg, **kwargs):
+            if pkg == _PKG:
+                raise RobloxApiFaultError("presence", fault="server_error", status_code=503)
+            game = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+            game.is_in_game = True
+            game.is_offline = False
+            game.is_lobby = False
+            game.is_unknown = False
+            return game
+
+        with patch.object(sup, "_fetch_presence", side_effect=_fetch_side_effect), \
+             patch.object(sup, "_interruptible_sleep", side_effect=lambda s: sleep_calls.append(float(s))), \
+             patch("agent.supervisor.db.insert_event"), \
+             patch("agent.supervisor.db.insert_heartbeat"), \
+             patch("agent.supervisor.log_event"):
+            sup.start_daemon(display_interval=0.05)
+
+            import threading
+            threading.Thread(target=lambda: (time.sleep(0.3), sup.stop("test")), daemon=True).start()
+            if sup._watchdog_thread is not None:
+                sup._watchdog_thread.join(timeout=5.0)
+
+        self.assertIn(WatchdogSupervisor.PRESENCE_API_FAULT_BACKOFF_SECONDS, sleep_calls)
+        self.assertEqual(sup.status_map.get(_PKG), STATUS_ONLINE)
+
+
+class TestLobbyTransitionAllowance(unittest.TestCase):
+    def _lobby_presence(self):
+        lobby = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+        lobby.is_in_game = False
+        lobby.is_offline = False
+        lobby.is_unknown = False
+        lobby.is_lobby = True
+        return lobby
+
+    def test_lobby_after_grace_displays_lobby_state(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        with patch.object(sup, "_fetch_presence", return_value=self._lobby_presence()):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+        self.assertEqual(state, STATUS_LOBBY)
+        self.assertEqual(detail["reason"], "presence_lobby_transition_allowance")
+
+    def test_lobby_stall_after_180_seconds_triggers_no_heartbeat(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
+        sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)
+        sup._lobby_entered_at[_PKG] = time.monotonic() - (sup.LOBBY_TRANSITION_SECONDS + 1)
+        with patch.object(sup, "_fetch_presence", return_value=self._lobby_presence()):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "presence_lobby_stall_timeout")
 
 
 if __name__ == "__main__":

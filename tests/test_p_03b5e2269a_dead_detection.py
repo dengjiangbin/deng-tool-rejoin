@@ -126,12 +126,22 @@ class DeadPriorityRegressionTests(unittest.TestCase):
         self.assertEqual(detail["process_running"], "unknown")
         self.assertEqual(detail["reason"], "presence_offline")
 
-    def test_lobby_presence_after_grace_is_no_heartbeat(self) -> None:
+    def test_lobby_presence_after_grace_is_lobby_state(self) -> None:
         sup = self._supervisor(initial_status={_PKG: STATUS_IN_LOBBY})
         self._past_loading_grace(sup)
         with patch.object(sup, "_fetch_presence", return_value=_lobby_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
+        from agent.supervisor import STATUS_LOBBY
+        self.assertEqual(state, STATUS_LOBBY)
+
+    def test_lobby_presence_after_stall_timeout_is_no_heartbeat(self) -> None:
+        sup = self._supervisor(initial_status={_PKG: STATUS_IN_LOBBY})
+        self._past_loading_grace(sup)
+        sup._lobby_entered_at[_PKG] = time.monotonic() - (sup.LOBBY_TRANSITION_SECONDS + 1)
+        with patch.object(sup, "_fetch_presence", return_value=_lobby_presence()):
+            state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "presence_lobby_stall_timeout")
 
     def test_offline_presence_after_previous_online_is_no_heartbeat(self) -> None:
         sup = self._supervisor(initial_status={_PKG: STATUS_ONLINE})
@@ -160,12 +170,13 @@ class DeadPriorityRegressionTests(unittest.TestCase):
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail["reason"], "presence_offline")
 
-    def test_process_alive_api_says_lobby_is_no_heartbeat(self) -> None:
+    def test_process_alive_api_says_lobby_is_lobby_state(self) -> None:
         sup = self._supervisor()
         self._past_loading_grace(sup)
         with patch.object(sup, "_fetch_presence", return_value=_lobby_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        from agent.supervisor import STATUS_LOBBY
+        self.assertEqual(state, STATUS_LOBBY)
 
     def test_process_alive_api_says_in_game_can_be_online(self) -> None:
         sup = self._supervisor()

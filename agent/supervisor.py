@@ -1210,8 +1210,12 @@ class WatchdogSupervisor:
     RECOVERY_GATE_POLL_SECONDS: float = 5.0
     RECOVERY_GATE_MAX_ATTEMPTS: int = 3
 
-    # ── Roblox presence API 429 shield ───────────────────────────────────────
+    # ── Roblox presence API fault shield (429 / 5xx / timeout) ───────────────
     PRESENCE_RATE_LIMIT_BACKOFF_SECONDS: float = 15.0
+    PRESENCE_API_FAULT_BACKOFF_SECONDS: float = 15.0
+
+    # ── Lobby transition allowance after loading grace expires ───────────────
+    LOBBY_TRANSITION_SECONDS: int = 180
 
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
@@ -1312,6 +1316,7 @@ class WatchdogSupervisor:
         self._presence_expected_targets: dict[str, Any] = {}
         self._presence_rate_limit_until: float = 0.0
         self._watchdog_round_rate_limited: bool = False
+        self._lobby_entered_at: dict[str, float] = {}
         self._recovery_gate_attempts: dict[str, int] = {}
         self._root_info = android.detect_root()
 
@@ -1511,13 +1516,33 @@ class WatchdogSupervisor:
         return (time.monotonic() - launched) < float(self.LOADING_GRACE_SECONDS)
 
     def _note_presence_rate_limit(self) -> None:
-        """Arm the 429 safe-state shield and round-robin cooling backoff."""
-        until = time.monotonic() + float(self.PRESENCE_RATE_LIMIT_BACKOFF_SECONDS)
+        """Arm the API fault safe-state shield and round-robin cooling backoff."""
+        backoff = float(self.PRESENCE_API_FAULT_BACKOFF_SECONDS)
+        until = time.monotonic() + backoff
         self._presence_rate_limit_until = max(self._presence_rate_limit_until, until)
         self._watchdog_round_rate_limited = True
 
+    def _note_presence_api_fault(self) -> None:
+        """Alias for the unified API outage / rate-limit shield."""
+        self._note_presence_rate_limit()
+
     def _presence_rate_limit_active(self) -> bool:
         return time.monotonic() < float(self._presence_rate_limit_until)
+
+    def _presence_api_fault_active(self) -> bool:
+        return self._presence_rate_limit_active()
+
+    def _note_lobby_entered(self, pkg: str) -> None:
+        self._lobby_entered_at.setdefault(pkg, time.monotonic())
+
+    def _in_lobby_transition_allowance(self, pkg: str) -> bool:
+        entered = self._lobby_entered_at.get(pkg)
+        if entered is None:
+            return True
+        return (time.monotonic() - entered) < float(self.LOBBY_TRANSITION_SECONDS)
+
+    def _clear_lobby_state(self, pkg: str) -> None:
+        self._lobby_entered_at.pop(pkg, None)
 
     def _preserve_package_state_on_rate_limit(
         self,
@@ -1525,8 +1550,9 @@ class WatchdogSupervisor:
         *,
         t0: float,
         pres_detail: dict[str, Any] | None = None,
+        fault: str = "rate_limited",
     ) -> tuple[str, dict[str, Any]]:
-        """Keep the last known good state when Roblox returns HTTP 429."""
+        """Keep the last known good state when Roblox API calls fault out."""
         preserved = str(self._prev_state.get(pkg) or self.status_map.get(pkg) or "").strip()
         if preserved in {STATUS_CHECKING, STATUS_PENDING, ""}:
             preserved = STATUS_ONLINE if self._last_online_ts.get(pkg) else STATUS_LAUNCHING
@@ -1534,7 +1560,7 @@ class WatchdogSupervisor:
             preserved = STATUS_ONLINE
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         detail = {
-            "process_running": "true",
+            "process_running": "unknown",
             "in_game": "unknown",
             "heartbeat_ok": "unknown",
             "warning_detected": "false",
@@ -1543,7 +1569,7 @@ class WatchdogSupervisor:
             "foreground_package": "",
             "activity": preserved,
             "in_game_proof": "unknown",
-            "reason": "presence_api_rate_limited_preserve_state",
+            "reason": f"presence_api_{fault}_preserve_state",
         }
         self._log_state_evidence(
             pkg,
@@ -1552,6 +1578,21 @@ class WatchdogSupervisor:
             preserved,
         )
         return preserved, detail
+
+    def _preserve_package_state_on_api_fault(
+        self,
+        pkg: str,
+        *,
+        t0: float,
+        pres_detail: dict[str, Any] | None = None,
+        fault: str = "fault",
+    ) -> tuple[str, dict[str, Any]]:
+        return self._preserve_package_state_on_rate_limit(
+            pkg,
+            t0=t0,
+            pres_detail=pres_detail,
+            fault=fault,
+        )
 
     def _deploy_gate_recovery_cycle(
         self,
@@ -1810,10 +1851,17 @@ class WatchdogSupervisor:
             detail["roblox_api_used"] = "true"
             try:
                 presence = _rp.fetch_presence_dual_verified(uid, cookie=cookie)
-            except _rp.RobloxRateLimitedError:
-                detail["roblox_api_status"] = "rate_limited"
-                detail["presence_error"] = "http_429"
-                self._note_presence_rate_limit()
+            except _rp.RobloxApiFaultError as exc:
+                detail["roblox_api_status"] = {
+                    "rate_limited": "rate_limited",
+                    "server_error": "server_error",
+                    "network": "network_error",
+                    "timeout": "timeout",
+                }.get(str(exc.fault), "failed")
+                detail["presence_error"] = f"http_{exc.fault}"
+                if exc.status_code is not None:
+                    detail["presence_error"] = f"http_{exc.status_code}"
+                self._note_presence_api_fault()
                 raise
             ptype = getattr(presence, "presence_type", None)
             if getattr(presence, "is_unknown", False):
@@ -1828,28 +1876,50 @@ class WatchdogSupervisor:
             detail["roblox_game_id"] = getattr(presence, "game_id", "") or ""
             return presence
         except Exception as exc:  # noqa: BLE001
+            from . import roblox_presence as _rp
             from . import safe_http as _sh
 
-            if isinstance(exc, _rp.RobloxRateLimitedError):
+            if isinstance(exc, _rp.RobloxApiFaultError):
+                fault = str(getattr(exc, "fault", "fault") or "fault")
                 detail["roblox_api_used"] = "true"
-                detail["roblox_api_status"] = "rate_limited"
-                detail["presence_error"] = "http_429"
-                self._note_presence_rate_limit()
+                detail["roblox_api_status"] = {
+                    "rate_limited": "rate_limited",
+                    "server_error": "server_error",
+                    "network": "network_error",
+                    "timeout": "timeout",
+                }.get(fault, "failed")
+                detail["presence_error"] = f"http_{fault}"
+                self._note_presence_api_fault()
                 raise
             detail["roblox_api_used"] = "true" if detail.get("roblox_user_id") else "false"
             if isinstance(exc, _sh.SafeHttpStatusError) and int(getattr(exc, "status_code", 0) or 0) == 429:
                 detail["roblox_api_status"] = "rate_limited"
                 detail["presence_error"] = "http_429"
-                self._note_presence_rate_limit()
+                self._note_presence_api_fault()
                 raise _rp.RobloxRateLimitedError("presence_fetch") from exc
+            if isinstance(exc, _sh.SafeHttpStatusError) and _sh.is_server_error_status(
+                int(getattr(exc, "status_code", 0) or 0)
+            ):
+                detail["roblox_api_status"] = "server_error"
+                detail["presence_error"] = f"http_{int(exc.status_code)}"
+                self._note_presence_api_fault()
+                raise _rp.RobloxApiFaultError(
+                    "presence_fetch",
+                    fault="server_error",
+                    status_code=int(exc.status_code),
+                ) from exc
             if isinstance(exc, _sh.SafeHttpNetworkError):
-                detail["roblox_api_status"] = "network_error"
-            else:
                 err_text = str(exc).lower()
-                if "timeout" in err_text or "timed out" in err_text:
-                    detail["roblox_api_status"] = "timeout"
-                else:
-                    detail["roblox_api_status"] = "failed"
+                fault = "timeout" if "timeout" in err_text or "timed out" in err_text else "network"
+                detail["roblox_api_status"] = "timeout" if fault == "timeout" else "network_error"
+                detail["presence_error"] = fault
+                self._note_presence_api_fault()
+                raise _rp.RobloxApiFaultError("presence_fetch", fault=fault) from exc
+            err_text = str(exc).lower()
+            if "timeout" in err_text or "timed out" in err_text:
+                detail["roblox_api_status"] = "timeout"
+            else:
+                detail["roblox_api_status"] = "failed"
             detail["presence_error"] = str(exc)[:160]
             return None
 
@@ -2033,11 +2103,12 @@ class WatchdogSupervisor:
         del entry
         t0 = time.monotonic()
 
-        if self._presence_rate_limit_active() or self._watchdog_round_rate_limited:
-            return self._preserve_package_state_on_rate_limit(
+        if self._presence_api_fault_active() or self._watchdog_round_rate_limited:
+            return self._preserve_package_state_on_api_fault(
                 pkg,
                 t0=t0,
                 pres_detail=self._presence_last_detail.get(pkg, {}),
+                fault="shield_active",
             )
 
         presence = None
@@ -2046,12 +2117,13 @@ class WatchdogSupervisor:
         except Exception as exc:  # noqa: BLE001
             from . import roblox_presence as _rp
 
-            if isinstance(exc, _rp.RobloxRateLimitedError):
-                self._note_presence_rate_limit()
-                return self._preserve_package_state_on_rate_limit(
+            if isinstance(exc, _rp.RobloxApiFaultError):
+                self._note_presence_api_fault()
+                return self._preserve_package_state_on_api_fault(
                     pkg,
                     t0=t0,
                     pres_detail=self._presence_last_detail.get(pkg, {}),
+                    fault=str(getattr(exc, "fault", "fault") or "fault"),
                 )
             raise
 
@@ -2084,6 +2156,7 @@ class WatchdogSupervisor:
             return detail
 
         if presence is not None and getattr(presence, "is_in_game", False):
+            self._clear_lobby_state(pkg)
             self._nhb_offline_count[pkg] = 0
             detail = _presence_detail(
                 in_game="true",
@@ -2120,37 +2193,56 @@ class WatchdogSupervisor:
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
             return STATUS_NO_HEARTBEAT, detail
 
-        if presence is None and api_status in {
-            "failed",
-            "network_error",
-            "timeout",
-            "skipped",
-        }:
+        if presence is None and api_status == "skipped":
             detail = _presence_detail(
                 activity="No Heartbeat",
                 in_game_proof="unknown",
-                reason=f"presence_api_{api_status}",
+                reason="presence_api_skipped",
             )
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
             return STATUS_NO_HEARTBEAT, detail
 
-        if presence_lobby or presence_offline:
+        if presence_lobby:
             if in_loading_grace:
                 detail = _presence_detail(
                     activity="Launching",
                     in_game_proof="unknown",
-                    reason=(
-                        "presence_offline_loading_grace"
-                        if presence_offline
-                        else "presence_lobby_loading_grace"
-                    ),
+                    reason="presence_lobby_loading_grace",
+                )
+                self._log_state_evidence(pkg, detail, pres_detail, STATUS_LAUNCHING)
+                return STATUS_LAUNCHING, detail
+            self._note_lobby_entered(pkg)
+            if self._in_lobby_transition_allowance(pkg):
+                detail = _presence_detail(
+                    activity=profile or "Lobby",
+                    in_game_proof="unknown",
+                    reason="presence_lobby_transition_allowance",
+                )
+                self._log_state_evidence(pkg, detail, pres_detail, STATUS_LOBBY)
+                return STATUS_LOBBY, detail
+            self._clear_lobby_state(pkg)
+            self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
+            detail = _presence_detail(
+                activity=profile or "Lobby",
+                reason="presence_lobby_stall_timeout",
+            )
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+            return STATUS_NO_HEARTBEAT, detail
+
+        if presence_offline:
+            self._clear_lobby_state(pkg)
+            if in_loading_grace:
+                detail = _presence_detail(
+                    activity="Launching",
+                    in_game_proof="unknown",
+                    reason="presence_offline_loading_grace",
                 )
                 self._log_state_evidence(pkg, detail, pres_detail, STATUS_LAUNCHING)
                 return STATUS_LAUNCHING, detail
             self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
             detail = _presence_detail(
-                activity=profile or ("Offline" if presence_offline else "In Lobby"),
-                reason="presence_offline" if presence_offline else "roblox_presence_in_lobby",
+                activity=profile or "Offline",
+                reason="presence_offline",
             )
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
             return STATUS_NO_HEARTBEAT, detail

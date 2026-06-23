@@ -4675,7 +4675,7 @@ _FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
 
 _STATE_TO_SUMMARY: dict[str, str] = {
     "Online":            "online",
-    "Lobby":             "dead",
+    "Lobby":             "lobby",
     "In Server":         "online",         # confirmed in target server
     ("Join " + "Unconfirmed"):  "launching",
     "No Heartbeat":      "no heartbeat",   # was in game, heartbeat stalled
@@ -6220,7 +6220,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "No Heartbeat":     "No Heartbeat",
             "Online":           "Online",
             "In Game":          "Online",
-            "In Lobby":         "No Heartbeat",
+            "In Lobby":         "Lobby",
             "Join Failed":      "Failed",
             "Wrong Game / Wrong Server": "Failed",
             "Dead":             "Dead",
@@ -6239,8 +6239,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             "In Server":        "Online",
             "Background":       "Online",
             "Warning":          "Online",
-            # App open but not in game -> No Heartbeat.
-            "Lobby":            "No Heartbeat",
+            # App open but not in game yet — allow lobby transition window.
+            "Lobby":            "Lobby",
             # Recovery / disconnect states
             "Reconnecting":     "Reopening",
             "Disconnected":     "Dead",

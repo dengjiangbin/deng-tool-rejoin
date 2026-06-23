@@ -166,13 +166,25 @@ class TestFetchPresence(unittest.TestCase):
 # ─── never raises ────────────────────────────────────────────────────────────
 
 class TestNeverRaises(unittest.TestCase):
-    def test_post_json_returns_none_on_network_error(self) -> None:
+    def test_post_json_raises_api_fault_on_network_error(self) -> None:
         with mock.patch.object(
             rp,
             "_roblox_post_once",
             side_effect=rp.safe_http.SafeHttpNetworkError("no network"),
         ):
-            self.assertIsNone(rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}))
+            with self.assertRaises(rp.RobloxApiFaultError):
+                rp._post_json(rp._PRESENCE_URL, {"userIds": [1]})
+
+    def test_post_json_raises_api_fault_on_server_error(self) -> None:
+        with mock.patch.object(
+            rp,
+            "_roblox_post_once",
+            return_value=(503, {}, None),
+        ):
+            with self.assertRaises(rp.RobloxApiFaultError) as ctx:
+                rp._post_json(rp._PRESENCE_URL, {"userIds": [1]})
+        self.assertEqual(ctx.exception.fault, "server_error")
+        self.assertEqual(ctx.exception.status_code, 503)
 
     def test_post_json_returns_none_on_bad_json(self) -> None:
         with mock.patch.object(

@@ -333,8 +333,8 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail2["heartbeat_ok"], "false")
 
     # Test 15
-    def test_presence_lobby_after_grace_returns_no_heartbeat(self):
-        """Presence Online/not Playing maps to No Heartbeat after loading grace."""
+    def test_presence_lobby_after_grace_returns_lobby_state(self):
+        """Presence Online/not Playing maps to Lobby during transition allowance."""
         sup = _make_sup()
         self._past_loading_grace(sup)
         presence = MagicMock()
@@ -343,8 +343,10 @@ class TestStateDetection(unittest.TestCase):
         presence.is_lobby = True
         presence.is_unknown = False
         with patch.object(sup, "_fetch_presence", return_value=presence):
-            state, _ = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+            state, detail = sup._detect_package_state(_PKG, _make_entry())
+        from agent.supervisor import STATUS_LOBBY
+        self.assertEqual(state, STATUS_LOBBY)
+        self.assertEqual(detail["reason"], "presence_lobby_transition_allowance")
         self.assertNotEqual(state, "Joining")
 
     def test_presence_lobby_during_grace_stays_launching(self):

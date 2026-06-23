@@ -131,7 +131,7 @@ class TestPublicStates(unittest.TestCase):
     _ALLOWED_PUBLIC = {
         "Layout", "Launching", "Online", "Reopening", "Failed", "Dead",
         "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
-        "Suspended",
+        "Suspended", "Lobby",
     }
 
     def _get_display_map(self):
@@ -173,20 +173,20 @@ class TestPublicStates(unittest.TestCase):
         self.assertNotEqual(smap["In Server"], "In Server")
         self.assertIn(smap["In Server"], self._ALLOWED_PUBLIC)
 
-    def test_no_lobby_maps_to_no_heartbeat(self) -> None:
+    def test_lobby_maps_to_lobby_in_public_display(self) -> None:
         smap = self._get_display_map()
         self.assertIn("Lobby", smap)
-        self.assertEqual(smap["Lobby"], "No Heartbeat")
+        self.assertEqual(smap["Lobby"], "Lobby")
         self.assertIn(smap["Lobby"], self._ALLOWED_PUBLIC)
 
     def test_reconnecting_maps_to_reopening(self) -> None:
         smap = self._get_display_map()
         self.assertEqual(smap.get("Reconnecting"), "Reopening")
 
-    def test_in_lobby_maps_to_no_heartbeat(self) -> None:
+    def test_in_lobby_maps_to_lobby(self) -> None:
         smap = self._get_display_map()
-        displayed = smap.get("In Lobby", "No Heartbeat")
-        self.assertEqual(displayed, "No Heartbeat")
+        displayed = smap.get("In Lobby", "Lobby")
+        self.assertEqual(displayed, "Lobby")
 
     def test_dead_stays_dead(self) -> None:
         smap = self._get_display_map()

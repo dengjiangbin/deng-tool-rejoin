@@ -129,6 +129,12 @@ def is_rate_limited_status(status: int) -> bool:
     return int(status) == HTTP_TOO_MANY_REQUESTS
 
 
+def is_server_error_status(status: int) -> bool:
+    """Return True for Roblox/API server-side outage responses (5xx)."""
+    code = int(status)
+    return 500 <= code <= 599
+
+
 # ── curl backend ──────────────────────────────────────────────────────────────
 
 

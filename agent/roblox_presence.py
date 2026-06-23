@@ -61,14 +61,33 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from . import root_access, safe_http
 from .config import validate_package_name, validate_roblosecurity_cookie
-from .safe_http import is_rate_limited_status
+from .safe_http import is_rate_limited_status, is_server_error_status
 from .url_utils import RobloxExpectedTarget
 
 _log = logging.getLogger("deng.rejoin.roblox_presence")
 
 
-class RobloxRateLimitedError(Exception):
+class RobloxApiFaultError(Exception):
+    """Roblox API unavailable — rate limits, server errors, or network faults."""
+
+    def __init__(
+        self,
+        source: str,
+        *,
+        fault: str = "unknown",
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(source)
+        self.source = source
+        self.fault = fault
+        self.status_code = status_code
+
+
+class RobloxRateLimitedError(RobloxApiFaultError):
     """Raised when Roblox returns HTTP 429 Too Many Requests."""
+
+    def __init__(self, source: str) -> None:
+        super().__init__(source, fault="rate_limited", status_code=429)
 
 # Public endpoints — both accept anonymous POST with a JSON body.
 _USERNAME_LOOKUP_URL = "https://users.roblox.com/v1/usernames/users"
@@ -232,17 +251,25 @@ def _post_json(
         if is_rate_limited_status(status):
             _log.debug("presence POST rate limited: %s", url)
             raise RobloxRateLimitedError(url)
+        if is_server_error_status(status):
+            _log.debug("presence POST server error HTTP %s: %s", status, url)
+            raise RobloxApiFaultError(url, fault="server_error", status_code=status)
         if status >= 400:
             _log.debug("presence POST HTTP %s: %s", status, url)
             return None
         return payload if isinstance(payload, Mapping) else None
     except safe_http.SafeHttpNetworkError as exc:
         _log.debug("presence POST network error: %s", exc)
-        return None
-    except RobloxRateLimitedError:
+        err_text = str(exc).lower()
+        fault = "timeout" if "timeout" in err_text or "timed out" in err_text else "network"
+        raise RobloxApiFaultError(url, fault=fault) from exc
+    except RobloxApiFaultError:
         raise
     except safe_http.SafeHttpError as exc:
         _log.debug("presence POST safe_http error: %s", exc)
+        err_text = str(exc).lower()
+        if "timeout" in err_text or "timed out" in err_text:
+            raise RobloxApiFaultError(url, fault="timeout") from exc
         return None
     except Exception as exc:  # noqa: BLE001
         _log.debug("presence POST error: %s", exc)
@@ -400,7 +427,7 @@ def fetch_presence(
             payload = _post_json(
                 _PRESENCE_URL, {"userIds": batch}, cookie=cookie,
             )
-        except RobloxRateLimitedError:
+        except RobloxApiFaultError:
             raise
         seen_in_batch: set[int] = set()
         if isinstance(payload, dict):
@@ -678,7 +705,7 @@ def map_presence_profile(result: PresenceResult | None) -> str:
     if result.is_in_game:
         return "Online"
     if result.is_lobby:
-        return "In Lobby"
+        return "Lobby"
     if result.is_offline:
         return "Offline"
     return "Online"
