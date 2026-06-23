@@ -17,7 +17,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.0.0/deng-tool-rejoin-v1.0.0.tar.gz",
-    "artifact_sha256": "8854f7ecd70827b465cb402af28a791eeee2491aab979889ff377c261a021b22",
+    "artifact_sha256": "9d4be5d882f7e01d1cafbfbfa55cc16b8239d30ae9bc5c0cf9b4ed929c1fa51c",
     "installer_endpoint": "/install/v1.0.0",
     "notes": "Frozen public stable release. Immutable artifact built from refs/tags/v1.0.0.",
     "enabled": true
@@ -89,6 +89,6 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "d39d2116c0f75e3f5cc38ec2b2b24087f2978612d01a4d8f534cf792956aa5a0"
+    "artifact_sha256": "a228bf8bbd4a60024603487b8d148b0f16b4c8d54d4f939e92e35393bfca65ed"
   }
 ]

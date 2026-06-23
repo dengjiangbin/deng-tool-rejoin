@@ -5816,6 +5816,25 @@ def cmd_start(args: argparse.Namespace) -> int:
                 prep_gfx[package] = android.apply_low_graphics_optimization(package, enabled=low)
             except Exception:  # noqa: BLE001
                 prep_gfx[package] = "error"
+            try:
+                from .autoexec_injection import inject_autoexec_tracker
+
+                _inj_root = _prep_root.tool if getattr(_prep_root, "available", False) else None
+                _inj = inject_autoexec_tracker(package, root_tool=_inj_root)
+                _start_log.info(
+                    "[DENG_REJOIN_AUTOEXEC_INJECT] package=%s success=%s "
+                    "written=%s attempted=%s errors=%s",
+                    package,
+                    str(bool(_inj.get("success"))).lower(),
+                    ",".join(_inj.get("paths_written") or []) or "none",
+                    ",".join(_inj.get("paths_attempted") or []) or "none",
+                    ";".join(_inj.get("errors") or []) or "none",
+                )
+            except Exception as _inj_exc:  # noqa: BLE001
+                _start_log.debug(
+                    "start: autoexec tracker inject error (non-fatal): %s",
+                    _inj_exc,
+                )
         _start_session.mark("batch_clear_cache_done", package_count=len(entries))
         _start_session.mark("package_preparation_done", package_count=len(entries))
 
