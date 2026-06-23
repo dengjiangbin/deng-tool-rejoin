@@ -5888,7 +5888,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             _try_autostart_monitor_bridge(cfg)
         except Exception:  # noqa: BLE001
             pass
-        _supervisor.start_daemon(display_interval=3.0, render_callback=None)
+        _supervisor.start_daemon(
+            display_interval=WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS,
+            render_callback=None,
+        )
         _start_session.mark("watchdog_daemon_started", package_count=len(entries))
         for _boot_entry in entries:
             phase[_boot_entry["package"]] = _STATUS_PENDING
@@ -5908,7 +5911,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             for later in entries[index:]:
                 phase[later["package"]] = "Pending"
             phase[package] = "Launching"
-            _supervisor._set_status(package, _STATUS_LAUNCHING)
+            _supervisor.mark_package_launched(package)
             _render_phase("Launching clone...")
             package_cfg = dict(runtime_cfg)
             package_cfg["roblox_package"] = package
@@ -5933,9 +5936,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _render_phase()
                 continue
 
-            _supervisor._mark_launched(package)
+            _supervisor.mark_package_launched(package)
             phase[package] = "Launching"
-            _supervisor._set_status(package, _STATUS_LAUNCHING)
             launch_ok[package] = True
             launch_err[package] = ""
             _render_phase("Launching...")
@@ -6352,9 +6354,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         try:
             _start_session.mark("supervisor_loop")
             import time as _monitor_time
+            _dashboard_interval = WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS
             while not _supervisor.stop_event.is_set():
+                _render_started = _monitor_time.monotonic()
                 _live_dashboard()
-                if _supervisor.stop_event.wait(3.0):
+                _sleep_for = max(0.0, _dashboard_interval - (_monitor_time.monotonic() - _render_started))
+                if _supervisor.stop_event.wait(_sleep_for):
                     break
         except KeyboardInterrupt:
             _shutdown_reason = "ctrl_c"

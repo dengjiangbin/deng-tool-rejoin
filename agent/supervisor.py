@@ -1219,6 +1219,9 @@ class WatchdogSupervisor:
     # ── Post-launch loading grace: suppress NHB kill-switch timer ───────────
     LOADING_GRACE_SECONDS: int = 120
 
+    # ── Main-thread dashboard repaint cadence (must be <= Checking hold) ───
+    DASHBOARD_RENDER_INTERVAL_SECONDS: float = 1.0
+
     # ── Presence poll must complete within strictly < 15 seconds ────────────
     PRESENCE_POLL_TIMEOUT_SECONDS: int = 14
 
@@ -1246,7 +1249,7 @@ class WatchdogSupervisor:
         self._state_lock = threading.RLock()
         self._watchdog_thread: threading.Thread | None = None
         self._render_callback: Any = None
-        self._display_interval: float = 3.0
+        self._display_interval: float = self.DASHBOARD_RENDER_INTERVAL_SECONDS
 
         # Public status dict — mutated in-place (read by dashboard callback).
         self.status_map: dict[str, str] = {
@@ -1400,7 +1403,7 @@ class WatchdogSupervisor:
     def start_daemon(
         self,
         *,
-        display_interval: float = 3.0,
+        display_interval: float = DASHBOARD_RENDER_INTERVAL_SECONDS,
         render_callback: Any = None,
     ) -> None:
         """Launch the watchdog loop on a dedicated daemon thread (non-blocking)."""
@@ -1462,7 +1465,10 @@ class WatchdogSupervisor:
 
     def mark_all_launches_completed(self) -> None:
         """Release the global launch latch so the watchdog may begin checking."""
+        now = time.monotonic()
         with self._state_lock:
+            for pkg in self.packages:
+                self._last_launched_at.setdefault(pkg, now)
             self._all_launches_completed = True
         log_event(
             self._logger,
@@ -1472,18 +1478,37 @@ class WatchdogSupervisor:
             package_count=len(self.packages),
         )
 
+    def mark_package_launched(self, pkg: str) -> None:
+        """Register a launch/reopen and bind loading-grace protection."""
+        self._mark_launched(pkg)
+        self._set_status(pkg, STATUS_LAUNCHING)
+
     def _mark_launched(self, pkg: str) -> None:
         """Record a fresh open/reopen and reset No Heartbeat kill-switch tracking."""
         with self._state_lock:
             self._last_launched_at[pkg] = time.monotonic()
             self._nhb_since.pop(pkg, None)
 
+    def _ensure_launch_timestamp(self, pkg: str) -> float:
+        """Return launch monotonic ts, treating a missing entry as freshly opened."""
+        with self._state_lock:
+            ts = self._last_launched_at.get(pkg)
+            if not ts:
+                ts = time.monotonic()
+                self._last_launched_at[pkg] = ts
+                log_event(
+                    self._logger,
+                    "info",
+                    "[DENG_REJOIN_LAUNCH_TIMESTAMP_DEFAULTED]",
+                    package=pkg,
+                    action="bind_fresh_grace_anchor",
+                )
+            return float(ts)
+
     def _in_loading_grace(self, pkg: str) -> bool:
         """True while a package is within the post-launch connection grace window."""
-        launched = self._last_launched_at.get(pkg)
-        if not launched:
-            return False
-        return (time.monotonic() - float(launched)) < float(self.LOADING_GRACE_SECONDS)
+        launched = self._ensure_launch_timestamp(pkg)
+        return (time.monotonic() - launched) < float(self.LOADING_GRACE_SECONDS)
 
     def _note_presence_rate_limit(self) -> None:
         """Arm the 429 safe-state shield and round-robin cooling backoff."""
@@ -2452,7 +2477,7 @@ class WatchdogSupervisor:
                     package=pkg,
                     grace_sec=self.LOADING_GRACE_SECONDS,
                     elapsed_sec=round(
-                        time.monotonic() - self._last_launched_at.get(pkg, 0.0), 1
+                        time.monotonic() - self._ensure_launch_timestamp(pkg), 1
                     ),
                     action="suppress_nhb_kill_switch",
                 )
@@ -2663,7 +2688,7 @@ class WatchdogSupervisor:
     def run_forever(
         self,
         *,
-        display_interval: float = 3.0,
+        display_interval: float = DASHBOARD_RENDER_INTERVAL_SECONDS,
         render_callback: Any = None,
     ) -> None:
         """Run the watchdog loop on the current thread (tests / legacy path)."""
@@ -2678,12 +2703,12 @@ class WatchdogSupervisor:
     def _run_watchdog_loop(
         self,
         *,
-        display_interval: float = 3.0,
+        display_interval: float = DASHBOARD_RENDER_INTERVAL_SECONDS,
         render_callback: Any = None,
     ) -> None:
         """Sequential watchdog monitor loop. Safe to run on a daemon thread."""
         render_callback = render_callback if render_callback is not None else self._render_callback
-        display_interval = float(display_interval or self._display_interval or 3.0)
+        display_interval = float(display_interval or self._display_interval or self.DASHBOARD_RENDER_INTERVAL_SECONDS)
 
         logger = self._logger
         log_event(

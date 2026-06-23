@@ -70,6 +70,13 @@ class TestRoundRobinWatchdog(unittest.TestCase):
         self.assertIn("_interruptible_sleep", src)
         self.assertIn("WATCHDOG_ROUND_ROBIN_PAUSE", src)
 
+    def test_dashboard_render_interval_is_one_second(self) -> None:
+        self.assertEqual(WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS, 1.0)
+        self.assertLess(
+            WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS,
+            WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS,
+        )
+
     def test_watchdog_loop_source_uses_launch_latch(self) -> None:
         src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
         self.assertIn("_all_launches_completed", src)
@@ -307,6 +314,47 @@ class TestLoadingGracePeriod(unittest.TestCase):
         with patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
              patch.object(sup, "_check_ram_optimization"):
             sup._handle_state(_PKG, _entry(), STATUS_ONLINE, STATUS_NO_HEARTBEAT, time.time())
+        self.assertNotIn(_PKG, sup._nhb_since)
+
+
+class TestLaunchTimestampBinding(unittest.TestCase):
+    def test_mark_package_launched_writes_monotonic_timestamp(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg())
+        before = time.monotonic()
+        sup.mark_package_launched(_PKG)
+        after = time.monotonic()
+        ts = sup._last_launched_at[_PKG]
+        self.assertGreaterEqual(ts, before)
+        self.assertLessEqual(ts, after)
+        self.assertEqual(sup.status_map[_PKG], STATUS_LAUNCHING)
+
+    def test_missing_launch_timestamp_defaults_to_fresh_grace(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
+        self.assertNotIn(_PKG, sup._last_launched_at)
+        self.assertTrue(sup._in_loading_grace(_PKG))
+        self.assertIn(_PKG, sup._last_launched_at)
+
+    def test_mark_all_launches_completed_backfills_missing_timestamps(self) -> None:
+        sup = WatchdogSupervisor(
+            [_entry(_PKG), _entry(_PKG2)],
+            _cfg(),
+            initial_status={_PKG: STATUS_LAUNCHING, _PKG2: STATUS_PENDING},
+        )
+        sup.mark_package_launched(_PKG)
+        sup.mark_all_launches_completed()
+        self.assertIn(_PKG, sup._last_launched_at)
+        self.assertIn(_PKG2, sup._last_launched_at)
+
+    def test_nhb_kill_switch_blocked_when_launch_timestamp_missing(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
+        with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_kill, \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch("time.sleep"):
+            sup._handle_state(
+                _PKG, _entry(), STATUS_NO_HEARTBEAT, STATUS_LAUNCHING, time.time()
+            )
+        mock_kill.assert_not_called()
         self.assertNotIn(_PKG, sup._nhb_since)
 
 
