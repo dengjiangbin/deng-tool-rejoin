@@ -184,6 +184,15 @@ def _wait_for_launch_ready(package: str, cfg: dict[str, Any]) -> dict[str, Any]:
     return last
 
 
+_DETACHED_RECOVERY_REASONS = frozenset({
+    "recovery_gate_retry",
+    "dead_recovery",
+    "no_heartbeat_recovery",
+    "watchdog_recovery",
+    "process_missing",
+})
+
+
 def perform_rejoin(
     config_data: dict[str, Any],
     *,
@@ -270,6 +279,44 @@ def perform_rejoin(
     try:
         if not android.package_installed(package):
             raise RuntimeError(f"Roblox package is not installed: {package}")
+
+        if (
+            not no_force_stop
+            and not url_for_launch
+            and reason in _DETACHED_RECOVERY_REASONS
+            and cfg.get("root_mode_enabled")
+        ):
+            root_info = android.detect_root()
+            if root_info.available and android.dispatch_detached_force_stop_relaunch(
+                package,
+                root_tool=root_info.tool,
+                sleep_seconds=3.5,
+            ):
+                root_used = True
+                log_event(
+                    logger,
+                    "info",
+                    "[DENG_REJOIN_RECOVERY_DETACHED_DISPATCH]",
+                    reason=reason,
+                    package=package,
+                    action="nohup_force_stop_monkey",
+                )
+                db.insert_rejoin_attempt(
+                    reason=reason,
+                    package=package,
+                    launch_mode=launch_mode,
+                    masked_launch_url=None,
+                    root_used=True,
+                    success=True,
+                    error=None,
+                )
+                db.insert_event(
+                    "INFO",
+                    "rejoin_success",
+                    f"Detached recovery dispatched for {package}",
+                    {"reason": reason, "package": package},
+                )
+                return RejoinResult(True, root_used=True, warning=warning)
 
         # ── ALWAYS force-stop before launch ────────────────────────────────
         # User feedback (post-probe-1239f2b5f9): "I messed up the open

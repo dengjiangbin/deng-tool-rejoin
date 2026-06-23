@@ -778,6 +778,66 @@ def run_root_command(args: Iterable[str], *, root_tool: str | None = None, timeo
     return run_command([tool, "-c", command], timeout=timeout)
 
 
+def run_mount_master_root_command(
+    args: Iterable[str],
+    *,
+    root_tool: str | None = None,
+    timeout: int = PROCESS_TIMEOUT_SECONDS,
+) -> CommandResult:
+    """Run a root command via ``su -mm`` (global mount namespace), falling back to ``su -c``."""
+    tool = root_tool or detect_root().tool
+    if not tool:
+        return CommandResult(tuple(_stringify_args(args)), 127, "", "root tool unavailable")
+    tokens = _maybe_resolve_first_arg(_stringify_args(args))
+    command = shlex.join(tokens)
+    mm_res = run_command([tool, "-mm", "-c", command], timeout=timeout)
+    if mm_res.ok:
+        return mm_res
+    return run_root_command(args, root_tool=tool, timeout=timeout)
+
+
+def build_detached_force_stop_relaunch_shell(
+    package: str,
+    *,
+    root_tool: str = "su",
+    sleep_seconds: float = 3.5,
+) -> str:
+    """Build a single background shell that force-stops then relaunches one package."""
+    pkg = validate_package_name(package)
+    pause = max(0.5, float(sleep_seconds))
+    inner = (
+        f"am force-stop {shlex.quote(pkg)} && "
+        f"sleep {pause} && "
+        f"monkey -p {shlex.quote(pkg)} -c android.intent.category.LAUNCHER 1"
+    )
+    tool = str(root_tool or "su").strip() or "su"
+    inner_q = shlex.quote(inner)
+    return (
+        f"nohup sh -c '{tool} -mm -c {inner_q} || {tool} -c {inner_q}' "
+        f">/dev/null 2>&1 &"
+    )
+
+
+def dispatch_detached_force_stop_relaunch(
+    package: str,
+    *,
+    root_tool: str | None = None,
+    sleep_seconds: float = 3.5,
+) -> bool:
+    """Detach force-stop + monkey relaunch so Termux drops the root process tree immediately."""
+    tool = root_tool or detect_root().tool
+    if not tool:
+        return False
+    if _is_force_stop_protected(package):
+        return False
+    shell = build_detached_force_stop_relaunch_shell(
+        package,
+        root_tool=str(tool),
+        sleep_seconds=sleep_seconds,
+    )
+    return _iso.spawn_detached(["sh", "-c", shell])
+
+
 def run_android_command(
     args: Iterable[str],
     *,

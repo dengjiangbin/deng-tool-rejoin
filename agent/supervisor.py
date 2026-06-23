@@ -1659,9 +1659,6 @@ class WatchdogSupervisor:
             package=pkg,
             action="force_stop_relaunch",
         )
-        if self._process_alive_fast(pkg):
-            if self._force_stop_target_package(pkg):
-                time.sleep(float(self.RECOVERY_FORCE_STOP_BREATH_SECONDS))
         self._set_status(pkg, STATUS_REOPENING)
         self._mark_launched(pkg)
         if callable(render_callback):
@@ -1669,7 +1666,26 @@ class WatchdogSupervisor:
                 render_callback()
             except Exception:  # noqa: BLE001
                 pass
-        success = self._do_launch(pkg, entry, "recovery_gate_retry")
+        root_tool = getattr(self._root_info, "tool", None)
+        dispatched = android.dispatch_detached_force_stop_relaunch(
+            pkg,
+            root_tool=root_tool,
+            sleep_seconds=3.5,
+        )
+        if dispatched:
+            log_event(
+                logger,
+                "info",
+                "[DENG_REJOIN_RECOVERY_DETACHED_DISPATCH]",
+                package=pkg,
+                action="nohup_force_stop_monkey",
+            )
+            success = True
+        else:
+            if self._process_alive_fast(pkg):
+                if self._force_stop_target_package(pkg):
+                    time.sleep(float(self.RECOVERY_FORCE_STOP_BREATH_SECONDS))
+            success = self._do_launch(pkg, entry, "recovery_gate_retry")
         if success:
             self._set_grace(pkg, now)
             self._mark_launched(pkg)

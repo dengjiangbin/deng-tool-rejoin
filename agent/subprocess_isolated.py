@@ -130,3 +130,24 @@ def run_isolated_bytes(
         with lock:
             return _execute()
     return _execute()
+
+
+def spawn_detached(args: Iterable[str], *, env: dict[str, str] | None = None) -> bool:
+    """Start ``args`` and return immediately without waiting (phantom-process guard)."""
+    cmd = [str(a) for a in args]
+    try:
+        kwargs: dict = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "shell": False,
+        }
+        if env is not None:
+            kwargs["env"] = env
+        if os.name != "nt":
+            kwargs["close_fds"] = True
+            kwargs["start_new_session"] = True
+        subprocess.Popen(cmd, **kwargs)
+        return True
+    except OSError:
+        return False

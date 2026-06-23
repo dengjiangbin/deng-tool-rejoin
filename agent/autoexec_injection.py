@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import os
 import shlex
-import tempfile
 from typing import Any
 
 from .config import validate_package_name
@@ -13,16 +12,17 @@ from .lua_heartbeat_server import DEFAULT_HOST, DEFAULT_PORT
 
 _log = logging.getLogger("deng.rejoin.autoexec_injection")
 
-TRACKER_FILENAME = "deng_heartbeat.lua"
+TRACKER_FILENAME = "deng_rejoin_heartbeat.lua"
 PRIMARY_TRACKER_URL = "https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua"
 
-# Known executor auto-exec search paths on rooted Android clones.
+# Executor-specific auto-exec folders on rooted Android clones (Delta/Codex/Vega X/etc.).
 AUTOEXEC_PATH_TEMPLATES: tuple[str, ...] = (
-    "/data/data/{package}/files/autoexec/",
-    "/data/data/{package}/files/workspace/autoexec/",
+    "/sdcard/Android/data/{package}/files/Delta/autoexec/",
+    "/sdcard/Android/data/{package}/files/Codex/autoexec/",
+    "/sdcard/Android/data/{package}/files/VegaX/autoexec/",
+    "/sdcard/Android/media/{package}/spdm_scripts/autoexec/",
     "/sdcard/Android/data/{package}/files/autoexec/",
-    "/sdcard/Android/media/{package}/autoexec/",
-    "/sdcard/Documents/{package}/autoexec/",
+    "/data/data/{package}/files/autoexec/",
 )
 
 
@@ -42,11 +42,6 @@ def _is_internal_data_path(path: str, package: str) -> bool:
     return str(path or "").startswith(prefix)
 
 
-def _is_external_storage_path(path: str) -> bool:
-    normalized = str(path or "")
-    return normalized.startswith(("/sdcard/", "/storage/"))
-
-
 def lookup_package_uid_gid(
     package: str,
     *,
@@ -58,7 +53,7 @@ def lookup_package_uid_gid(
 
     pkg = validate_package_name(str(package or "").strip())
     target = str(stat_path or _package_files_dir(pkg)).rstrip("/") + "/"
-    res = android.run_root_command(
+    res = android.run_mount_master_root_command(
         ["stat", "-c", "%u:%g", target],
         root_tool=root_tool,
         timeout=8,
@@ -76,52 +71,33 @@ def lookup_package_uid_gid(
     return uid, gid
 
 
-def chown_autoexec_directory(
-    directory: str,
+def build_injection_shell_script(
     package: str,
+    paths: list[str],
+    payload: str,
     *,
-    root_tool: str,
     uid_gid: tuple[str, str] | None = None,
-) -> tuple[bool, str]:
-    """Apply clone UID/GID ownership to an auto-exec directory after root writes."""
-    from . import android
-
-    directory = str(directory or "").rstrip("/") + "/"
-    if _is_external_storage_path(directory):
-        pair = uid_gid or lookup_package_uid_gid(package, root_tool=root_tool)
-        if not pair:
-            return True, ""
-        uid, gid = pair
-        res = android.run_root_command(
-            ["chown", "-R", f"{uid}:{gid}", directory.rstrip("/")],
-            root_tool=root_tool,
-            timeout=10,
-        )
-        if not res.ok:
-            _log.debug(
-                "[DENG_REJOIN_AUTOEXEC_CHOWN_SKIP] package=%s path=%s reason=external_fs error=%s",
-                package,
-                directory,
-                (res.stderr or "")[:120],
+) -> str:
+    """Build one mount-master bash block that writes the tracker to every autoexec path."""
+    lines: list[str] = []
+    chown_dirs: list[str] = []
+    for directory in paths:
+        dest_dir = str(directory or "").rstrip("/")
+        if not dest_dir:
+            continue
+        dest = f"{dest_dir}/{TRACKER_FILENAME}"
+        lines.append(f"mkdir -p {shlex.quote(dest_dir)} 2>/dev/null")
+        lines.append(f"printf %s {shlex.quote(payload)} > {shlex.quote(dest)}")
+        lines.append(f"chmod 777 {shlex.quote(dest)} 2>/dev/null")
+        if _is_internal_data_path(dest_dir + "/", package):
+            chown_dirs.append(dest_dir)
+    if uid_gid:
+        uid, gid = uid_gid
+        for dest_dir in chown_dirs:
+            lines.append(
+                f"chown -R {uid}:{gid} {shlex.quote(dest_dir)} 2>/dev/null"
             )
-            return True, ""
-        return True, ""
-
-    if not _is_internal_data_path(directory, package):
-        return True, ""
-
-    pair = uid_gid or lookup_package_uid_gid(package, root_tool=root_tool)
-    if not pair:
-        return False, "uid_gid lookup failed"
-    uid, gid = pair
-    res = android.run_root_command(
-        ["chown", "-R", f"{uid}:{gid}", directory.rstrip("/")],
-        root_tool=root_tool,
-        timeout=10,
-    )
-    if not res.ok:
-        return False, f"chown failed: {(res.stderr or '')[:120]}"
-    return True, ""
+    return "\n".join(lines)
 
 
 def build_heartbeat_tracker_lua(
@@ -153,74 +129,6 @@ def build_heartbeat_tracker_lua(
     )
 
 
-def _write_file_via_root(
-    dest_path: str,
-    content: str,
-    *,
-    root_tool: str,
-    package: str,
-    uid_gid: tuple[str, str] | None = None,
-) -> tuple[bool, str]:
-    from . import android
-
-    parent = os.path.dirname(dest_path)
-    mkdir_res = android.run_root_command(
-        ["sh", "-c", f"mkdir -p {shlex.quote(parent)}"],
-        root_tool=root_tool,
-        timeout=10,
-    )
-    if not mkdir_res.ok:
-        return False, f"mkdir failed: {(mkdir_res.stderr or '')[:120]}"
-
-    tmp_path: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            delete=False,
-            suffix=".lua",
-            prefix="deng_autoexec_",
-        ) as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
-
-        write_res = android.run_root_command(
-            [
-                "sh",
-                "-c",
-                f"cat {shlex.quote(tmp_path)} > {shlex.quote(dest_path)}",
-            ],
-            root_tool=root_tool,
-            timeout=15,
-        )
-        if not write_res.ok:
-            return False, f"write failed: {(write_res.stderr or '')[:120]}"
-
-        chmod_res = android.run_root_command(
-            ["chmod", "777", dest_path],
-            root_tool=root_tool,
-            timeout=8,
-        )
-        if not chmod_res.ok:
-            return False, f"chmod failed: {(chmod_res.stderr or '')[:120]}"
-
-        chown_ok, chown_err = chown_autoexec_directory(
-            parent,
-            package,
-            root_tool=root_tool,
-            uid_gid=uid_gid,
-        )
-        if not chown_ok:
-            return False, chown_err
-        return True, ""
-    finally:
-        if tmp_path:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-
 def inject_autoexec_tracker(
     package: str,
     *,
@@ -229,7 +137,7 @@ def inject_autoexec_tracker(
     heartbeat_port: int = DEFAULT_PORT,
     primary_script_url: str = PRIMARY_TRACKER_URL,
 ) -> dict[str, Any]:
-    """Write ``deng_heartbeat.lua`` into known auto-exec folders for one clone."""
+    """Write ``deng_rejoin_heartbeat.lua`` into known auto-exec folders for one clone."""
     from . import android
 
     result: dict[str, Any] = {
@@ -238,6 +146,7 @@ def inject_autoexec_tracker(
         "paths_attempted": [],
         "paths_written": [],
         "uid_gid": None,
+        "mount_master": True,
         "errors": [],
     }
     try:
@@ -255,42 +164,44 @@ def inject_autoexec_tracker(
             return result
         tool = root_info.tool
 
-    uid_gid = lookup_package_uid_gid(pkg, root_tool=str(tool))
-    if uid_gid:
-        result["uid_gid"] = f"{uid_gid[0]}:{uid_gid[1]}"
-
+    paths = resolve_autoexec_paths(pkg)
     payload = build_heartbeat_tracker_lua(
         pkg,
         heartbeat_host=heartbeat_host,
         heartbeat_port=heartbeat_port,
         primary_script_url=primary_script_url,
     )
-    for directory in resolve_autoexec_paths(pkg):
-        dest = os.path.join(directory, TRACKER_FILENAME)
-        result["paths_attempted"].append(dest)
-        ok, err = _write_file_via_root(
-            dest,
-            payload,
-            root_tool=str(tool),
-            package=pkg,
-            uid_gid=uid_gid,
-        )
-        if ok:
-            result["paths_written"].append(dest)
-            _log.info(
-                "[DENG_REJOIN_AUTOEXEC_WRITE] package=%s path=%s uid_gid=%s success=true",
-                pkg,
-                dest,
-                result.get("uid_gid") or "unknown",
-            )
-        elif err:
-            result["errors"].append(f"{dest}: {err}")
-            _log.debug(
-                "[DENG_REJOIN_AUTOEXEC_WRITE] package=%s path=%s success=false error=%s",
-                pkg,
-                dest,
-                err,
-            )
+    uid_gid = lookup_package_uid_gid(pkg, root_tool=str(tool))
+    if uid_gid:
+        result["uid_gid"] = f"{uid_gid[0]}:{uid_gid[1]}"
 
-    result["success"] = bool(result["paths_written"])
+    for directory in paths:
+        result["paths_attempted"].append(
+            os.path.join(directory, TRACKER_FILENAME),
+        )
+
+    script = build_injection_shell_script(pkg, paths, payload, uid_gid=uid_gid)
+    inject_res = android.run_mount_master_root_command(
+        ["sh", "-c", script],
+        root_tool=str(tool),
+        timeout=30,
+    )
+    if inject_res.ok:
+        result["paths_written"] = list(result["paths_attempted"])
+        result["success"] = True
+        _log.info(
+            "[DENG_REJOIN_AUTOEXEC_WRITE] package=%s paths=%s uid_gid=%s mount_master=true success=true",
+            pkg,
+            len(result["paths_written"]),
+            result.get("uid_gid") or "unknown",
+        )
+    else:
+        err = (inject_res.stderr or inject_res.stdout or "inject failed")[:160]
+        result["errors"].append(err)
+        _log.debug(
+            "[DENG_REJOIN_AUTOEXEC_WRITE] package=%s mount_master=true success=false error=%s",
+            pkg,
+            err,
+        )
+
     return result
