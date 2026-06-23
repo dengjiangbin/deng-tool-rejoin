@@ -24,6 +24,7 @@ from agent.supervisor import (
     STATUS_IN_LOBBY,
     STATUS_JOINING,
     STATUS_LAUNCHING,
+    STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
     STATUS_REOPENING,
     STATUS_RELAUNCHING,
@@ -138,16 +139,16 @@ class PresenceProfileTests(unittest.TestCase):
         self.assertEqual(STATUS_IN_GAME, STATUS_ONLINE)
         ram_check.assert_called_once()
 
-    def test_transient_presence_api_failure_returns_checking(self) -> None:
+    def test_transient_presence_api_failure_returns_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
         sup._presence_last_detail[_PKG] = {"roblox_api_status": "rate_limited"}
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_CHECKING)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertIn("presence_api_rate_limited", detail["reason"])
 
-    def test_in_lobby_state_is_not_dead(self) -> None:
+    def test_in_lobby_state_maps_to_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
         lobby = MagicMock()
         lobby.is_in_game = False
@@ -157,7 +158,7 @@ class PresenceProfileTests(unittest.TestCase):
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=lobby):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_IN_LOBBY)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertNotEqual(state, STATUS_DEAD)
 
     def test_poll_presence_gate_state_online_on_type_2(self) -> None:
@@ -169,23 +170,20 @@ class PresenceProfileTests(unittest.TestCase):
             )
 
 
-class SequentialLaunchTests(unittest.TestCase):
-    def test_wait_blocks_until_online(self) -> None:
-        from agent.commands import _wait_for_sequential_presence_online
+class StaggeredLaunchTests(unittest.TestCase):
+    def test_launch_stagger_constant_is_30_seconds(self) -> None:
+        from agent.supervisor import WatchdogSupervisor
+        self.assertEqual(WatchdogSupervisor.LAUNCH_STAGGER_SECONDS, 30)
 
-        calls = {"n": 0}
+    def test_presence_timeout_under_15_seconds(self) -> None:
+        from agent.roblox_presence import HTTP_TIMEOUT
+        from agent.supervisor import WatchdogSupervisor
+        self.assertLess(HTTP_TIMEOUT, 15.0)
+        self.assertEqual(WatchdogSupervisor.PRESENCE_POLL_TIMEOUT_SECONDS, 14)
 
-        def _gate(*_args, **_kwargs):
-            calls["n"] += 1
-            return "Online" if calls["n"] >= 2 else "Checking"
-
-        with patch("agent.commands.android.get_package_pid", return_value="1234"), \
-             patch("agent.commands.android.detect_root"), \
-             patch("agent.roblox_presence.poll_presence_gate_state", side_effect=_gate), \
-             patch("agent.commands.time.sleep"):
-            state = _wait_for_sequential_presence_online(_entry(), _cfg(), poll_seconds=5.0, timeout_seconds=60.0)
-        self.assertEqual(state, "Online")
-        self.assertGreaterEqual(calls["n"], 2)
+    def test_nhb_kill_switch_is_60_seconds(self) -> None:
+        from agent.supervisor import WatchdogSupervisor
+        self.assertEqual(WatchdogSupervisor.NHB_KILL_SWITCH_SECONDS, 60)
 
 
 class ProbePayloadTests(unittest.TestCase):

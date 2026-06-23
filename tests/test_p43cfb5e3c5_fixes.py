@@ -42,8 +42,8 @@ class TestPrepCacheDefinition(unittest.TestCase):
     def test_prep_cache_populated_per_package(self) -> None:
         """prep_cache must be assigned inside the Clear Cache loop."""
         src = self._get_cmd_start_source()
-        self.assertIn('prep_cache[pkg]', src,
-                      "prep_cache[pkg] assignment missing — will produce empty dict")
+        self.assertIn('prep_cache[package]', src,
+                      "prep_cache assignment missing — will produce empty dict")
 
     def test_no_broad_except_hiding_nameerror(self) -> None:
         """The Clear Cache loop must not swallow NameError silently.
@@ -56,7 +56,7 @@ class TestPrepCacheDefinition(unittest.TestCase):
         # 'except Exception' that wraps the prep_cache assignment itself.
         # Easiest proxy: prep_cache dict init and assignment must both be present.
         self.assertIn("prep_cache: dict", src)
-        self.assertIn("prep_cache[pkg]", src)
+        self.assertIn("prep_cache[package]", src)
 
 
 # ---------------------------------------------------------------------------
@@ -330,26 +330,16 @@ class TestPublicUICleanliness(unittest.TestCase):
         table = self._make_table()
         self.assertNotIn("Checking Package", table)
 
-    def test_in_lobby_is_not_public_display_value(self) -> None:
-        """Authenticated lobby/not-playing presence must display as Dead."""
-        import ast, inspect
+    def test_in_lobby_maps_to_no_heartbeat_display(self) -> None:
+        """Authenticated lobby/not-playing presence displays as No Heartbeat."""
+        import inspect
         import agent.commands as _mod
         src = inspect.getsource(_mod.cmd_start)
-        self.assertNotIn('"In-Lobby"', src)
-        self.assertNotIn('"In-Lobby",', src)
+        self.assertIn('"In Lobby"', src)
+        self.assertIn('"No Heartbeat"', src)
 
-    def test_no_joining_in_display_map_values(self) -> None:
-        """_STATE_DISPLAY_MAP must not produce 'Joining' as a Termux display value.
-
-        v1.0.4 note: Joining IS a real supervisor state now (the bridge
-        sends it to the APK so users see Dead → Launching → Joining →
-        Online). The Termux TERMINAL still collapses Joining to
-        Launching though, because the terminal user already sees the
-        start sequence directly and doesn't need the extra step.
-
-        So this test only forbids "Joining" as a VALUE in the dict.
-        Having it as a KEY (mapped to "Launching") is required.
-        """
+    def test_joining_is_public_display_value(self) -> None:
+        """Staggered launch exposes Joining in the Termux dashboard."""
         import inspect, re
         import agent.commands as _mod
         src = inspect.getsource(_mod.cmd_start)
@@ -357,25 +347,20 @@ class TestPublicUICleanliness(unittest.TestCase):
         end = src.find("}", start) + 1
         map_src = src[start:end]
         values = re.findall(r':\s*"([^"]+)"', map_src)
-        self.assertNotIn(
-            "Joining", values,
-            "_STATE_DISPLAY_MAP must not map any state to 'Joining' "
-            "as a Termux terminal display value (KEY is fine).",
-        )
+        self.assertIn("Joining", values)
 
     def test_allowed_states_in_display_map_values(self) -> None:
         """_STATE_DISPLAY_MAP values must only be from the allowed public set."""
         import inspect
         import agent.commands as _mod
         src = inspect.getsource(_mod.cmd_start)
-        # Extract the map block from source by slicing
         start = src.find("_STATE_DISPLAY_MAP")
         end   = src.find("}", start) + 1
         map_src = src[start:end]
         allowed = {
-            "Online", "Dead", "Launching", "Reopening", "Failed",
+            "Online", "Dead", "Launching", "Joining", "Reopening", "Failed",
+            "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
         }
-        # Find all string literals that appear after a ':' (the values)
         import re
         vals = re.findall(r':\s*"([^"]+)"', map_src)
         for v in vals:

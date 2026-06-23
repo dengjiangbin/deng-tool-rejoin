@@ -515,69 +515,61 @@ class TestLiveStartTableRelease(unittest.TestCase):
         self.assertNotEqual(ts1, ts2)
 
 
-# ── TASK 8 — No Heartbeat cooldown ───────────────────────────────────────────
+# ── TASK 8 — No Heartbeat kill-switch ────────────────────────────────────────
 
-class TestNoHeartbeatCooldown(unittest.TestCase):
-    """NHB relaunch must be gated by a cooldown to prevent instant loops."""
+class TestNoHeartbeatKillSwitch(unittest.TestCase):
+    """NHB must force-stop only after 60s continuous stall."""
 
     def _make_sup(self) -> WatchdogSupervisor:
         entries = [{"package": "com.roblox.client", "username": "u"}]
         return WatchdogSupervisor(entries, {})
 
-    def test_nhb_cooldown_sec_defined(self) -> None:
-        self.assertGreater(WatchdogSupervisor.NHB_RELAUNCH_COOLDOWN_SEC, 0)
+    def test_nhb_kill_switch_seconds_defined(self) -> None:
+        self.assertEqual(WatchdogSupervisor.NHB_KILL_SWITCH_SECONDS, 60)
 
-    def test_nhb_cooldown_until_dict_exists(self) -> None:
+    def test_nhb_since_dict_exists(self) -> None:
         sup = self._make_sup()
-        self.assertTrue(hasattr(sup, "_nhb_cooldown_until"))
+        self.assertTrue(hasattr(sup, "_nhb_since"))
 
-    def test_first_nhb_sets_cooldown(self) -> None:
-        """First NHB detection sets cooldown and does not relaunch immediately."""
+    def test_first_nhb_starts_tracking_without_force_stop(self) -> None:
         sup = self._make_sup()
         pkg  = "com.roblox.client"
         now  = time.time()
-        launch_calls: list[str] = []
 
-        with unittest.mock.patch.object(sup, "_do_launch", side_effect=lambda *a, **kw: launch_calls.append(a[0]) or True), \
+        with unittest.mock.patch.object(sup, "_do_launch") as mock_launch, \
              unittest.mock.patch("agent.supervisor.android") as mock_android:
             mock_android.force_stop_package.return_value = unittest.mock.MagicMock(ok=True)
             mock_android.effective_private_server_url = unittest.mock.MagicMock(return_value="")
             entry = sup.entry_by_pkg[pkg]
             sup._handle_state(pkg, entry, STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
 
-        # Cooldown should now be set
-        self.assertIn(pkg, sup._nhb_cooldown_until)
-        self.assertGreater(sup._nhb_cooldown_until[pkg], now)
+        self.assertIn(pkg, sup._nhb_since)
+        mock_android.force_stop_package.assert_not_called()
+        mock_launch.assert_not_called()
 
-    def test_second_nhb_during_cooldown_skips_relaunch(self) -> None:
-        """Second NHB detection within cooldown must skip relaunch."""
+    def test_nhb_before_kill_switch_skips_force_stop(self) -> None:
         sup = self._make_sup()
         pkg  = "com.roblox.client"
         now  = time.time()
-        # Pre-set cooldown: expires 100s from now.
-        sup._nhb_cooldown_until[pkg] = now + 100
-        launch_calls: list[str] = []
+        sup._nhb_since[pkg] = now - 10
 
-        with unittest.mock.patch.object(sup, "_do_launch", side_effect=lambda *a, **kw: launch_calls.append(a[0]) or True), \
+        with unittest.mock.patch.object(sup, "_do_launch") as mock_launch, \
              unittest.mock.patch("agent.supervisor.android") as mock_android:
             mock_android.force_stop_package.return_value = unittest.mock.MagicMock(ok=True)
             mock_android.effective_private_server_url = unittest.mock.MagicMock(return_value="")
             entry = sup.entry_by_pkg[pkg]
             sup._handle_state(pkg, entry, STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
 
-        # No relaunch should have occurred
-        self.assertEqual(len(launch_calls), 0, "Relaunch happened during cooldown")
+        mock_android.force_stop_package.assert_not_called()
+        mock_launch.assert_not_called()
 
-    def test_nhb_relaunch_happens_after_cooldown_expires(self) -> None:
-        """After cooldown expires, NHB relaunch must proceed."""
+    def test_nhb_kill_switch_triggers_force_stop_not_relaunch(self) -> None:
         sup = self._make_sup()
         pkg  = "com.roblox.client"
-        # Cooldown expired 10s ago
         now  = time.time()
-        sup._nhb_cooldown_until[pkg] = now - 10
-        launch_calls: list[str] = []
+        sup._nhb_since[pkg] = now - (WatchdogSupervisor.NHB_KILL_SWITCH_SECONDS + 5)
 
-        with unittest.mock.patch.object(sup, "_do_launch", side_effect=lambda *a, **kw: launch_calls.append(a[0]) or True), \
+        with unittest.mock.patch.object(sup, "_do_launch") as mock_launch, \
              unittest.mock.patch("agent.supervisor.android") as mock_android, \
              unittest.mock.patch("time.sleep"):
             mock_android.force_stop_package.return_value = unittest.mock.MagicMock(ok=True)
@@ -585,10 +577,10 @@ class TestNoHeartbeatCooldown(unittest.TestCase):
             entry = sup.entry_by_pkg[pkg]
             sup._handle_state(pkg, entry, STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
 
-        self.assertGreater(len(launch_calls), 0, "Relaunch did not happen after cooldown")
+        mock_android.force_stop_package.assert_called_once_with(pkg)
+        mock_launch.assert_not_called()
 
-    def test_nhb_cooldown_does_not_affect_other_packages(self) -> None:
-        """NHB cooldown on one package must not affect others."""
+    def test_nhb_kill_switch_does_not_affect_other_packages(self) -> None:
         entries = [
             {"package": "com.roblox.client",  "username": "u1"},
             {"package": "com.roblox.client2", "username": "u2"},
@@ -596,10 +588,9 @@ class TestNoHeartbeatCooldown(unittest.TestCase):
         sup = WatchdogSupervisor(entries, {})
         pkg1, pkg2 = "com.roblox.client", "com.roblox.client2"
         now = time.time()
-        sup._nhb_cooldown_until[pkg1] = now + 100  # pkg1 in cooldown
-        # pkg2 should be unaffected — cooldown not set
-        self.assertNotIn(pkg2, sup._nhb_cooldown_until)
-        self.assertIn(pkg1, sup._nhb_cooldown_until)
+        sup._nhb_since[pkg1] = now - 10
+        self.assertNotIn(pkg2, sup._nhb_since)
+        self.assertIn(pkg1, sup._nhb_since)
 
 
 # ── TASK 9 — Volume mute ─────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ from agent.supervisor import (
     STATUS_IN_LOBBY,
     STATUS_JOINING,
     STATUS_LAUNCHING,
+    STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
     WatchdogSupervisor,
 )
@@ -138,12 +139,12 @@ class DeadPriorityRegressionTests(unittest.TestCase):
         self.assertEqual(state, STATUS_DEAD)
         self.assertEqual(detail["reason"], "process_not_running")
 
-    def test_process_alive_api_says_lobby_is_in_lobby(self) -> None:
+    def test_process_alive_api_says_lobby_is_no_heartbeat(self) -> None:
         sup = self._supervisor()
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=_lobby_presence()):
             state, _ = sup._detect_package_state(_PKG, _entry())
-        self.assertEqual(state, STATUS_IN_LOBBY)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
 
     def test_process_alive_api_says_in_game_can_be_online(self) -> None:
         sup = self._supervisor()

@@ -7,7 +7,7 @@ Watchdog steady states:
 
 Legacy constants are kept in supervisor.py for backward compatibility of
 old _PackageWorker tests but must NOT be produced by WatchdogSupervisor.
-Joining is deprecated and removed from WatchdogSupervisor.
+Joining is emitted after staggered launch and during Dead recovery when a URL is configured.
 """
 
 from __future__ import annotations
@@ -86,36 +86,24 @@ class TestStatusColors(unittest.TestCase):
         self.assertNotEqual(out_d, "Disconnected")
 
 
-class TestInitialStartTableUsesLaunching(unittest.TestCase):
-    """Post-launch initial status must always be Launching (Joining removed)."""
+class TestInitialStartTableUsesJoining(unittest.TestCase):
+    """Post-launch initial status must be Joining until watchdog verifies presence."""
 
-    def test_post_launch_always_launching_regardless_of_url(self) -> None:
-        """cmd_start sets Launching for all packages after launch — no Joining."""
+    def test_post_launch_always_joining_after_successful_launch(self) -> None:
+        from agent.supervisor import STATUS_JOINING
         for _has_url in (True, False):
             launch_ok = True
-            running = True
-            # New logic:
             if not launch_ok:
                 state = "Failed"
-            elif running:
-                state = "Launching"  # no longer "Joining" even with URL
             else:
-                state = "Launching"
-            self.assertEqual(state, "Launching",
-                f"expected Launching with has_url={_has_url}, got {state}")
+                state = STATUS_JOINING
+            self.assertEqual(state, STATUS_JOINING,
+                f"expected Joining with has_url={_has_url}, got {state}")
 
-    def test_joining_is_deprecated_and_not_used_as_initial_state(self) -> None:
-        """Joining must not appear as an initial status produced by cmd_start logic."""
-        for _has_url in (True, False):
-            launch_ok = True
-            running = True
-            if not launch_ok:
-                state = "Failed"
-            elif running:
-                state = "Launching"
-            else:
-                state = "Launching"
-            self.assertNotEqual(state, "Joining")
+    def test_failed_launch_stays_failed(self) -> None:
+        launch_ok = False
+        state = "Failed" if not launch_ok else "Joining"
+        self.assertEqual(state, "Failed")
 
 
 if __name__ == "__main__":  # pragma: no cover

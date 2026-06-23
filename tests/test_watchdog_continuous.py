@@ -154,18 +154,23 @@ class TestBlankPrivateServerUrl(unittest.TestCase):
         mock_launch.assert_called_once_with(_make_entry(), sup.cfg, "dead_recovery")
 
     # Test 5
-    def test_no_heartbeat_recovery_blank_url_force_stops_then_relaunches(self):
-        """No Heartbeat: force_stop_package is called, then relaunch (app-only when URL blank)."""
+    def test_no_heartbeat_recovery_blank_url_waits_then_force_stops(self):
+        """No Heartbeat: force_stop only after 60s continuous stall."""
         sup = _make_sup(private_url="")
-        with patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
-             patch.object(android, "force_stop_package") as mock_stop, \
+        now = time.time()
+        with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
+             patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            sup._last_online_ts[_PKG] = time.time() - 10  # was recently Online
+            sup._last_online_ts[_PKG] = now - 10
             sup._nhb_offline_count[_PKG] = sup.NHB_OFFLINE_CONFIRMATIONS
-            sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_ONLINE, time.time())
+            sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
+            mock_stop.assert_not_called()
+            mock_launch.assert_not_called()
+            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 1)
+            sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         mock_stop.assert_called_once_with(_PKG)
-        mock_launch.assert_called_once()
+        mock_launch.assert_not_called()
 
 
 # â”€â”€â”€ 6-10: Configured Private Server URL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -214,19 +219,24 @@ class TestConfiguredPrivateServerUrl(unittest.TestCase):
         self.assertEqual(sup.status_map.get(_PKG), STATUS_LAUNCHING)
 
     # Test 8
-    def test_no_heartbeat_recovery_with_url_force_stops_then_relaunches(self):
-        """No Heartbeat with URL: force-stop then private URL relaunch."""
+    def test_no_heartbeat_recovery_with_url_waits_then_force_stops(self):
+        """No Heartbeat with URL: force-stop only after 60s continuous stall."""
         entry = _make_entry(private_url=self._URL)
         sup = _make_sup(private_url=self._URL)
-        sup._last_online_ts[_PKG] = time.time() - 10
+        now = time.time()
+        sup._last_online_ts[_PKG] = now - 10
         sup._nhb_offline_count[_PKG] = sup.NHB_OFFLINE_CONFIRMATIONS
         with patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch.object(android, "force_stop_package") as mock_stop, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_ONLINE, time.time())
+            sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
+            mock_stop.assert_not_called()
+            mock_launch.assert_not_called()
+            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 1)
+            sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         mock_stop.assert_called_once_with(_PKG)
-        self.assertEqual(mock_launch.call_args.args[2], "no_heartbeat_recovery")
+        mock_launch.assert_not_called()
 
     # Test 9
     def test_url_with_type_server_is_preserved(self):
@@ -306,8 +316,8 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail2["heartbeat_ok"], "false")
 
     # Test 15
-    def test_process_alive_presence_lobby_returns_in_lobby_not_joining(self):
-        """Presence Online/not Playing maps to In Lobby."""
+    def test_process_alive_presence_lobby_returns_no_heartbeat(self):
+        """Presence Online/not Playing maps to No Heartbeat."""
         sup = _make_sup()
         presence = MagicMock()
         presence.is_in_game = False
@@ -317,7 +327,7 @@ class TestStateDetection(unittest.TestCase):
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state, _ = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_IN_LOBBY)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertNotEqual(state, "Joining")
 
     def test_process_missing_presence_lobby_returns_dead(self):
@@ -510,18 +520,21 @@ class TestWatchdogContinuity(unittest.TestCase):
         mock_launch.assert_called_once()
 
     # Test 21
-    def test_no_heartbeat_triggers_force_stop_then_relaunch(self):
-        """No Heartbeat triggers force_stop_package then launch_package_for_current_config."""
+    def test_no_heartbeat_triggers_force_stop_after_kill_switch(self):
+        """No Heartbeat triggers force_stop_package after 60s, not immediate relaunch."""
         sup = _make_sup()
-        sup._last_online_ts[_PKG] = time.time() - 1
+        now = time.time()
+        sup._last_online_ts[_PKG] = now - 1
         with patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch.object(android, "force_stop_package") as mock_stop, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_ONLINE, time.time())
-        # force-stop must happen BEFORE relaunch; order is guaranteed by sequential code
-        self.assertTrue(mock_stop.called, "force_stop_package must be called for No Heartbeat")
-        self.assertTrue(mock_launch.called, "relaunch must be called after force-stop")
+            sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
+            self.assertFalse(mock_stop.called)
+            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 1)
+            sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
+        self.assertTrue(mock_stop.called, "force_stop_package must be called after kill-switch")
+        self.assertFalse(mock_launch.called, "relaunch must wait for Dead recovery")
 
     # Test 22
     def test_grace_window_blocks_immediate_repeated_relaunch(self):
@@ -731,12 +744,10 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
         self.assertNotRegex(src, r'run_command\s*\([^)]*logcat')
 
     # Test 27
-    def test_joining_not_in_initial_status(self):
-        """WatchdogSupervisor normalizes 'Joining' initial_status to Launching."""
+    def test_joining_preserved_in_initial_status(self):
+        """WatchdogSupervisor preserves Joining from staggered launch handoff."""
         sup = _make_sup(initial_status={_PKG: "Joining"})
-        # Joining must be normalized away
-        self.assertNotEqual(sup.status_map.get(_PKG), "Joining")
-        self.assertEqual(sup.status_map.get(_PKG), STATUS_LAUNCHING)
+        self.assertEqual(sup.status_map.get(_PKG), "Joining")
 
     # Test 28
     def test_no_removed_launch_action_text_in_state_machine(self):
@@ -798,31 +809,33 @@ class TestLaunchPackageForCurrentConfig(unittest.TestCase):
 # ─── Additional: running-but-not-playing recovery logic ──────────────────────
 
 class TestRunningNotPlayingRecovery(unittest.TestCase):
-    """No Heartbeat force-stops only the affected package, then relaunches."""
+    """No Heartbeat kill-switch force-stops after 60s; Dead recovery relaunches."""
 
-    def test_no_heartbeat_blank_url_force_stops_then_relaunches_app_only(self):
+    def test_no_heartbeat_blank_url_force_stops_after_kill_switch(self):
         sup = _make_sup(private_url="")
+        now = time.time()
         with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
              patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            sup._handle_state(_PKG, _make_entry(private_url=""), STATUS_NO_HEARTBEAT, STATUS_ONLINE, time.time())
+            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 5)
+            sup._handle_state(_PKG, _make_entry(private_url=""), STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         mock_stop.assert_called_once_with(_PKG)
-        mock_launch.assert_called_once()
-        self.assertEqual(mock_launch.call_args.args[2], "no_heartbeat_recovery")
+        mock_launch.assert_not_called()
 
-    def test_no_heartbeat_with_url_force_stops_then_relaunches_private_url(self):
+    def test_no_heartbeat_with_url_force_stops_after_kill_switch(self):
         url = "roblox://experiences/start?privateServerLinkCode=abc"
         sup = _make_sup(private_url=url)
         entry = _make_entry(private_url=url)
+        now = time.time()
         with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
              patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_ONLINE, time.time())
+            sup._nhb_since[_PKG] = now - (sup.NHB_KILL_SWITCH_SECONDS + 5)
+            sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
         mock_stop.assert_called_once_with(_PKG)
-        mock_launch.assert_called_once()
-        self.assertEqual(mock_launch.call_args.args[2], "no_heartbeat_recovery")
+        mock_launch.assert_not_called()
 
 
 # â”€â”€â”€ Additional: Status constants exist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

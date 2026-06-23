@@ -159,6 +159,8 @@ STATUS_REOPENING         = "Reopening"
 STATUS_RELAUNCHING       = "Reopening"         # legacy alias
 STATUS_CHECKING          = "Checking"
 STATUS_PENDING           = "Pending"
+STATUS_PREPARING         = "Preparing"
+STATUS_CLEAR_CACHE       = "Clear Cache"
 STATUS_CHECKING_LEGACY   = "Preparing"
 STATUS_BACKGROUND        = "Background"
 STATUS_RECONNECTING      = "Reconnecting"
@@ -1203,13 +1205,20 @@ class WatchdogSupervisor:
     # ── Grace window after launch — do not check immediately ────────────────
     DEFAULT_GRACE_SECONDS: int = 30
 
-    # ── No-Heartbeat relaunch cooldown — brief pause before force-stop ───────
-    # Prevents instant force-stop/relaunch loops if the heartbeat check fires
-    # repeatedly in quick succession.  Set to 0 to disable.
-    NHB_RELAUNCH_COOLDOWN_SEC: int = 5
+    # ── Staggered launch: strict pause between package opens ────────────────
+    LAUNCH_STAGGER_SECONDS: int = 30
+
+    # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
+    NHB_KILL_SWITCH_SECONDS: int = 60
+
+    # ── Presence poll must complete within strictly < 15 seconds ────────────
+    PRESENCE_POLL_TIMEOUT_SECONDS: int = 14
+
+    # Legacy alias — superseded by NHB_KILL_SWITCH_SECONDS.
+    NHB_RELAUNCH_COOLDOWN_SEC: int = 60
 
     # ── Presence offline confirmation counter retained for probe history ─────
-    NHB_OFFLINE_CONFIRMATIONS: int = 2
+    NHB_OFFLINE_CONFIRMATIONS: int = 1
 
     def __init__(
         self,
@@ -1236,7 +1245,7 @@ class WatchdogSupervisor:
         # Any lobby-like state from old sessions also maps to Dead.
         if initial_status:
             _legacy_to_launching = {
-                STATUS_JOINING, STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting",
+                STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting",
             }
             _legacy_to_dead = {
                 "In" + "-Lobby", "Lobby",
@@ -1263,7 +1272,8 @@ class WatchdogSupervisor:
         self._online_start_ts: dict[str, float] = {}  # when package first became Online (for Runtime display)
         self._grace_until: dict[str, float] = {}      # no relaunch until this ts
         self._nhb_offline_count: dict[str, int] = {}  # consecutive offline hits
-        self._nhb_cooldown_until: dict[str, float] = {}  # no NHB relaunch until this ts
+        self._nhb_since: dict[str, float] = {}  # when package entered No Heartbeat
+        self._nhb_cooldown_until: dict[str, float] = {}  # legacy; unused by kill-switch
         self._revive_count: dict[str, int] = {}
         self._failure_count: dict[str, int] = {}
 
@@ -1610,10 +1620,10 @@ class WatchdogSupervisor:
         """Detect public state: process check first, presence second.
 
         A. Process not running (PID vanished)              → Dead
-        B. Process running + presence InGame                 → In Game
-        C. Process running + presence Online (lobby)       → In Lobby
+        B. Process running + presence InGame                 → Online
+        C. Process running + presence Online (lobby)       → No Heartbeat
         D. Process running + local window/foreground hints   → Online
-        E. Process running + repeated offline after Online   → No Heartbeat
+        E. Process running + offline / lobby / API failure   → No Heartbeat
         """
         del entry
         t0 = time.monotonic()
@@ -1706,7 +1716,7 @@ class WatchdogSupervisor:
             detail = {
                 "process_running": "true",
                 "in_game": "false",
-                "heartbeat_ok": "true",
+                "heartbeat_ok": "false",
                 "warning_detected": "false",
                 "elapsed_ms": elapsed_ms,
                 "root_available": str(root_available).lower(),
@@ -1716,8 +1726,8 @@ class WatchdogSupervisor:
                 "heartbeat_age_sec": heartbeat_age_sec,
                 "reason": "roblox_presence_in_lobby",
             }
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_IN_LOBBY)
-            return STATUS_IN_LOBBY, detail
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+            return STATUS_NO_HEARTBEAT, detail
 
         api_status = str(pres_detail.get("roblox_api_status") or "")
         presence_error = str(pres_detail.get("presence_error") or "")
@@ -1754,33 +1764,31 @@ class WatchdogSupervisor:
                 "elapsed_ms": elapsed_ms,
                 "root_available": str(root_available).lower(),
                 "foreground_package": foreground_package,
-                "activity": "Checking",
+                "activity": "No Heartbeat",
                 "in_game_proof": "unknown",
                 "heartbeat_age_sec": heartbeat_age_sec,
                 "reason": f"presence_api_{api_status}",
             }
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_CHECKING)
-            return STATUS_CHECKING, detail
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+            return STATUS_NO_HEARTBEAT, detail
 
-        if presence_offline and was_recently_online:
-            count = self._nhb_offline_count.get(pkg, 0) + 1
-            self._nhb_offline_count[pkg] = count
-            if count >= self.NHB_OFFLINE_CONFIRMATIONS:
-                detail = {
-                    "process_running": "true",
-                    "in_game": "false",
-                    "heartbeat_ok": "false",
-                    "warning_detected": "false",
-                    "elapsed_ms": elapsed_ms,
-                    "root_available": str(root_available).lower(),
-                    "foreground_package": foreground_package,
-                    "activity": "",
-                    "in_game_proof": "true",
-                    "heartbeat_age_sec": heartbeat_age_sec,
-                    "reason": "presence_offline_after_recent_online",
-                }
-                self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-                return STATUS_NO_HEARTBEAT, detail
+        if presence_offline:
+            self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
+            detail = {
+                "process_running": "true",
+                "in_game": "false",
+                "heartbeat_ok": "false",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "",
+                "in_game_proof": "false",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": "presence_offline",
+            }
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+            return STATUS_NO_HEARTBEAT, detail
 
         if not presence_offline and (presence is None or presence_unknown) and local_in_game_hint:
             self._nhb_offline_count[pkg] = 0
@@ -1951,7 +1959,7 @@ class WatchdogSupervisor:
 
         Recovery rules:
         - Dead        → launch_package_for_current_config
-        - No Heartbeat → am force-stop <pkg>, then launch_package_for_current_config
+        - No Heartbeat → track stall; after 60s force-stop → Dead → Reopening
         - Online      → update last_online_ts, keep monitoring
         """
         logger = self._logger
@@ -1992,74 +2000,40 @@ class WatchdogSupervisor:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
         elif state == STATUS_NO_HEARTBEAT:
-            # ── Cooldown guard — prevent instant force-stop/relaunch loops ────
-            cooldown_sec = self.NHB_RELAUNCH_COOLDOWN_SEC
-            cooldown_until = self._nhb_cooldown_until.get(pkg, 0.0)
-            if now < cooldown_until:
-                # Still in cooldown window: log and skip this round.
+            nhb_since = self._nhb_since.get(pkg)
+            if nhb_since is None:
+                self._nhb_since[pkg] = now
                 log_event(
-                    logger, "debug", "[DENG_REJOIN_NO_HEARTBEAT_COOLDOWN]",
+                    logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_TRACK]",
                     package=pkg,
-                    cooldown_sec=cooldown_sec,
-                    remaining_sec=round(cooldown_until - now, 1),
-                    started_at=round(cooldown_until - cooldown_sec, 3),
-                    relaunch_at=round(cooldown_until, 3),
-                    reason="avoid_crash",
-                    status="waiting",
+                    started_at=round(now, 3),
+                    kill_switch_sec=self.NHB_KILL_SWITCH_SECONDS,
                 )
                 return
-            # Set (or renew) the cooldown window before acting.
-            self._nhb_cooldown_until[pkg] = now + cooldown_sec
+            elapsed = now - nhb_since
+            if elapsed < self.NHB_KILL_SWITCH_SECONDS:
+                log_event(
+                    logger, "debug", "[DENG_REJOIN_NO_HEARTBEAT_WAIT]",
+                    package=pkg,
+                    elapsed_sec=round(elapsed, 1),
+                    remaining_sec=round(self.NHB_KILL_SWITCH_SECONDS - elapsed, 1),
+                )
+                return
             log_event(
-                logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_COOLDOWN]",
+                logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_KILL_SWITCH]",
                 package=pkg,
-                cooldown_sec=cooldown_sec,
-                started_at=round(now, 3),
-                relaunch_at=round(now + cooldown_sec, 3),
-                reason="avoid_crash",
-                status="cooldown_set_proceeding",
+                elapsed_sec=round(elapsed, 1),
+                action="force_stop",
+                reason="continuous_no_heartbeat_exceeded_60s",
             )
-
-            action = (
-                "close_then_private_url_relaunch" if url_configured
-                else "close_then_app_only_relaunch"
-            )
-            log_event(
-                logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
-                package=pkg, state="No Heartbeat",
-                private_url_mode=url_context.get("private_url_mode", "global"),
-                url_mode=url_context.get("url_mode", "app_only"),
-                url_config_source=url_context.get("url_config_source", "blank"),
-                private_url_configured=str(url_configured).lower(),
-                action=action,
-                reason="heartbeat_stalled_or_presence_offline",
-            )
-            self._set_status(pkg, STATUS_REOPENING)
-            if callable(render_callback):
-                try:
-                    render_callback()
-                except Exception:  # noqa: BLE001
-                    pass
-            # Force-stop ONLY this package, then relaunch.
+            self._nhb_since.pop(pkg, None)
+            self._nhb_cooldown_until.pop(pkg, None)
             try:
                 android.force_stop_package(pkg)
                 time.sleep(1.5)
             except Exception:  # noqa: BLE001
                 pass
-            success = self._do_launch(pkg, entry, "no_heartbeat_recovery")
-            if success:
-                self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
-                self._nhb_offline_count[pkg] = 0
-                self._set_grace(pkg, now)
-                # v1.0.4: same Launching vs Joining split as the Dead
-                # recovery branch above — see comment there.
-                self._set_status(
-                    pkg, STATUS_JOINING if url_configured else STATUS_LAUNCHING
-                )
-                # Reset online_start_ts — package is relaunching.
-                self._online_start_ts.pop(pkg, None)
-            else:
-                self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
+            return
 
         elif state in _METRIC_ACTIVE_STATES:
             log_event(
@@ -2358,6 +2332,11 @@ class WatchdogSupervisor:
                     _ps.clear_launch_lock(pkg, "supervisor_dead_state")
                 self._set_status(pkg, state)
                 self._prev_state[pkg] = state
+
+                if state == STATUS_NO_HEARTBEAT and prev != STATUS_NO_HEARTBEAT:
+                    self._nhb_since.setdefault(pkg, now)
+                elif state != STATUS_NO_HEARTBEAT:
+                    self._nhb_since.pop(pkg, None)
 
                 # Track metric-active timestamps for RAM/runtime loops.
                 if state in _METRIC_ACTIVE_STATES:

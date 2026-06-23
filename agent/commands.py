@@ -5905,29 +5905,22 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _render_phase()
                 continue
 
-            phase[package] = "Checking"
-            _render_phase("Waiting for Roblox presence...")
-            gate_state = _wait_for_sequential_presence_online(
-                runtime_entry,
-                runtime_cfg,
-                poll_seconds=7.0,
-                render_callback=_render_phase,
-            )
-            phase[package] = gate_state
-            launch_ok[package] = gate_state == "Online"
-            if gate_state != "Online":
-                launch_err[package] = f"presence_gate:{gate_state.lower()}"
-            _render_phase()
+            phase[package] = "Joining"
+            launch_ok[package] = True
+            launch_err[package] = ""
+            _render_phase("Joining...")
             _start_log.info(
-                "[DENG_REJOIN_SEQUENTIAL_LAUNCH] package=%s index=%d/%d"
-                " launcher=%s gate_state=%s success=%s",
+                "[DENG_REJOIN_STAGGERED_LAUNCH] package=%s index=%d/%d"
+                " launcher=%s phase=joining success=true",
                 package,
                 index,
                 len(entries),
                 "private_url" if _has_url else "app_only",
-                gate_state,
-                str(launch_ok[package]).lower(),
             )
+            if index < len(entries):
+                import time as _t
+                from .supervisor import WatchdogSupervisor as _WS
+                _t.sleep(_WS.LAUNCH_STAGGER_SECONDS)
 
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
 
@@ -6051,7 +6044,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         initial_status: dict[str, str] = {}
         table_rows: list[tuple] = []
         detail_rows: list[dict[str, str]] = []
-        scanned_states = _ps.scan_all_package_states_root([e["package"] for e in entries])
         for index, entry in enumerate(entries, start=1):
             pkg      = entry["package"]
             username = _account_username_for_table(entry)
@@ -6063,9 +6055,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                 safe_err = mask_urls_in_text(err) or "Launch failed"
                 stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             else:
-                row = scanned_states.get(pkg)
-                state = _ps.map_row_to_supervisor_status(row) if row else "Launching"
-                stat_internal = row.reason if row else "launch command sent"
+                from .supervisor import STATUS_JOINING
+                state = STATUS_JOINING
+                stat_internal = "launch command sent; watchdog will verify presence"
             initial_status[pkg] = state
             table_rows.append((index, pkg, username, state))
             detail_rows.append(
@@ -6200,36 +6192,30 @@ def cmd_start(args: argparse.Namespace) -> int:
         # never reach the live supervisor dashboard.
         _STATE_DISPLAY_MAP: dict[str, str] = {
             # Live watchdog states — keep as-is.
-            "No Heartbeat":     "Dead",
+            "No Heartbeat":     "No Heartbeat",
             "Online":           "Online",
             "In Game":          "Online",
-            "In Lobby":         "In Lobby",
+            "In Lobby":         "No Heartbeat",
             "Join Failed":      "Failed",
             "Wrong Game / Wrong Server": "Failed",
             "Dead":             "Dead",
             "Reopening":        "Reopening",
             "Relaunching":      "Reopening",
-            "Launching":         "Launching",
+            "Launching":        "Launching",
             "Checking":         "Checking",
             "Pending":          "Pending",
-            # v1.0.4: Joining is now a real supervisor state but the
-            # Termux terminal user doesn't care about the
-            # open-app / open-URL distinction — they just want
-            # "Launching" until it's "Online". So we collapse it here.
-            # The APK still sees the full Joining state via the
-            # separate _SUPERVISOR_TO_PUBLIC_STATE map.
-            "Joining":          "Launching",
-            "Join Unconfirmed": "Launching",
-            # Transient post-launch / startup → Launching
-            "Preparing":        "Launching",
+            "Joining":          "Joining",
+            "Join Unconfirmed": "Joining",
+            "Preparing":        "Preparing",
+            "Clear Cache":      "Clear Cache",
             "Unknown":          "Launching",
             # Alive + in-game states → Online
             "Launched":         "Online",
             "In Server":        "Online",
             "Background":       "Online",
             "Warning":          "Online",
-            # App open but not in game -> Dead.
-            "Lobby":            "Dead",
+            # App open but not in game -> No Heartbeat.
+            "Lobby":            "No Heartbeat",
             # Recovery / disconnect states
             "Reconnecting":     "Reopening",
             "Disconnected":     "Dead",
@@ -6279,7 +6265,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
                 if disp in ("Dead", "Failed"):
                     return "N/A"
-                if disp in ("Preparing", "Clear Cache", "Launching", "Reopening", "Checking..."):
+                if disp in ("Preparing", "Clear Cache", "Launching", "Joining", "Reopening", "Checking", "Checking..."):
                     return "0 MB"
                 cached = _usage_cache.get(pkg)
                 if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:

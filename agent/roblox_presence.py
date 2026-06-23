@@ -70,7 +70,7 @@ _PRESENCE_URL = "https://presence.roblox.com/v1/presence/users"
 
 PRESENCE_TTL: float = 8.0           # cache window for a single user's presence
 USERNAME_LOOKUP_TTL: float = 86400.0  # username → id resolution rarely changes
-HTTP_TIMEOUT: float = 6.0
+HTTP_TIMEOUT: float = 14.0  # strictly < 15s presence poll budget
 
 # User-Agent must look like a real client; some Roblox edge nodes 403 on
 # default Python urllib UA.  We don't impersonate a browser — just identify
@@ -558,15 +558,23 @@ def resolve_presence_state(
 
     if is_offline:
         return PresenceResolution(
-            state="Dead",
+            state="No Heartbeat",
             reason="presence_offline",
             server_verification="presence_offline",
             **common,
         )
 
     if is_lobby:
+        elapsed = float(launch_elapsed_seconds or 0.0)
+        if elapsed > float(join_timeout_seconds):
+            return PresenceResolution(
+                state="No Heartbeat",
+                reason="presence_lobby_join_timeout",
+                server_verification="not_playing",
+                **common,
+            )
         return PresenceResolution(
-            state="In Lobby",
+            state="No Heartbeat",
             reason="presence_online_not_playing",
             server_verification="not_playing",
             **common,

@@ -128,7 +128,10 @@ class TestPublicStates(unittest.TestCase):
         "Offline", "Preparing", "Background", "Warning", "Unknown",
         "Failed", "Layout", "Join Failed", "Wrong Game / Wrong Server",
     ]
-    _ALLOWED_PUBLIC = {"Layout", "Launching", "Online", "Reopening", "Failed", "Dead"}
+    _ALLOWED_PUBLIC = {
+        "Layout", "Launching", "Joining", "Online", "Reopening", "Failed", "Dead",
+        "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
+    }
 
     def _get_display_map(self):
         # Extract _STATE_DISPLAY_MAP from cmd_start source via AST.
@@ -151,18 +154,9 @@ class TestPublicStates(unittest.TestCase):
                         return ast.literal_eval(node.value)
         return {}
 
-    def test_no_joining_in_public_display(self) -> None:
-        """v1.0.4: Joining IS a supervisor state now (APK sees the full
-        Dead → Launching → Joining → Online sequence), but the Termux
-        TERMINAL collapses it to Launching to keep the start view
-        simple. Joining is allowed as a KEY in the display map; it
-        must NOT be a display VALUE.
-        """
+    def test_joining_is_public_display_state(self) -> None:
         smap = self._get_display_map()
-        if "Joining" in smap:
-            self.assertNotEqual(smap["Joining"], "Joining",
-                "Termux terminal must not show 'Joining' as a display value")
-            self.assertIn(smap["Joining"], self._ALLOWED_PUBLIC)
+        self.assertEqual(smap.get("Joining"), "Joining")
 
     def test_no_join_unconfirmed_in_public_display(self) -> None:
         smap = self._get_display_map()
@@ -176,20 +170,20 @@ class TestPublicStates(unittest.TestCase):
         self.assertNotEqual(smap["In Server"], "In Server")
         self.assertIn(smap["In Server"], self._ALLOWED_PUBLIC)
 
-    def test_no_lobby_in_public_display(self) -> None:
+    def test_no_lobby_maps_to_no_heartbeat(self) -> None:
         smap = self._get_display_map()
         self.assertIn("Lobby", smap)
-        self.assertNotEqual(smap["Lobby"], "Lobby")
+        self.assertEqual(smap["Lobby"], "No Heartbeat")
         self.assertIn(smap["Lobby"], self._ALLOWED_PUBLIC)
 
     def test_reconnecting_maps_to_reopening(self) -> None:
         smap = self._get_display_map()
         self.assertEqual(smap.get("Reconnecting"), "Reopening")
 
-    def test_in_lobby_maps_to_dead(self) -> None:
+    def test_in_lobby_maps_to_no_heartbeat(self) -> None:
         smap = self._get_display_map()
-        displayed = smap.get("In-Lobby", "Dead")
-        self.assertEqual(displayed, "Dead")
+        displayed = smap.get("In Lobby", "No Heartbeat")
+        self.assertEqual(displayed, "No Heartbeat")
 
     def test_dead_stays_dead(self) -> None:
         smap = self._get_display_map()
@@ -464,8 +458,8 @@ class TestRobloxPresenceAPI(unittest.TestCase):
         failed = rp.resolve_presence_state(
             presence, process_alive=True, launch_elapsed_seconds=120, join_timeout_seconds=90
         )
-        self.assertEqual(lobby.state, "Dead")
-        self.assertEqual(failed.state, "Dead")
+        self.assertEqual(lobby.state, "No Heartbeat")
+        self.assertEqual(failed.state, "No Heartbeat")
 
     def test_parse_expected_target_from_private_server_url(self) -> None:
         from agent.url_utils import parse_expected_target_from_url
@@ -628,7 +622,7 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
             state, detail = watcher._detect_package_state("com.roblox.client", entry)
 
         self.assertEqual(state, sup.STATUS_ONLINE)
-        self.assertEqual(watcher._presence_last_detail["com.roblox.client"]["roblox_api_status"], "disabled")
+        self.assertEqual(watcher._presence_last_detail["com.roblox.client"]["roblox_api_status"], "success")
 
     def test_watchdog_presence_unknown_keeps_local_online_hint(self) -> None:
         import agent.supervisor as sup
