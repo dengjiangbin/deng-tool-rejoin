@@ -432,6 +432,48 @@ def fetch_presence_one(
     ))
 
 
+def _presence_needs_public_fallback(result: PresenceResult) -> bool:
+    """True when the cookie pass cannot prove in-game and may be stale."""
+    return bool(result.is_offline or result.is_unknown)
+
+
+def fetch_presence_dual_verified(
+    user_id: int | None,
+    *,
+    cookie: str | None = None,
+    refresh: bool = True,
+) -> PresenceResult:
+    """Cookie-authenticated pass first, then public user-id fallback.
+
+    Roblox can return stale or empty cookie-authenticated presence rows when
+    multiple clones on one IP poll simultaneously.  When the cookie pass says
+    offline/unknown, re-check via the public endpoint before declaring NHB.
+    """
+    if not user_id or user_id <= 0:
+        return PresenceResult(user_id=0, presence_type=PresenceType.UNKNOWN)
+
+    if cookie:
+        cookie_result = fetch_presence_one(user_id, cookie=cookie, refresh=refresh)
+        if cookie_result.is_in_game:
+            return cookie_result
+        if not _presence_needs_public_fallback(cookie_result):
+            return cookie_result
+        _log.info(
+            "dual_verify public fallback uid=%s cookie_type=%s",
+            user_id,
+            cookie_result.presence_type.name,
+        )
+        public_result = fetch_presence_one(user_id, cookie=None, refresh=refresh)
+        if public_result.is_in_game:
+            _log.info("dual_verify public pass rescued in_game uid=%s", user_id)
+            return public_result
+        if cookie_result.is_unknown and not public_result.is_unknown:
+            return public_result
+        return cookie_result
+
+    return fetch_presence_one(user_id, cookie=None, refresh=refresh)
+
+
 def fetch_presence_for_user_ids(
     user_ids: Sequence[int],
     *,

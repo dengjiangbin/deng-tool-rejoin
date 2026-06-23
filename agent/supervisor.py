@@ -1198,12 +1198,15 @@ class WatchdogSupervisor:
     DEFAULT_GRACE_SECONDS: int = 30
 
     # ── Staggered launch: strict pause between package opens ────────────────
-    LAUNCH_STAGGER_SECONDS: int = 30
+    LAUNCH_STAGGER_SECONDS: int = 15
 
     # ── Round-robin watchdog: visible Checking hold + tail pause per package ─
     PACKAGE_ROUND_ROBIN_SECONDS: int = 10
     PACKAGE_CHECKING_HOLD_SECONDS: float = 2.0
     PACKAGE_ROUND_ROBIN_TAIL_SECONDS: float = 8.0
+
+    # ── Blocking recovery gate: poll interval while fixing one package ───────
+    RECOVERY_GATE_POLL_SECONDS: float = 5.0
 
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
@@ -1695,7 +1698,7 @@ class WatchdogSupervisor:
                 return None
 
             detail["roblox_api_used"] = "true"
-            presence = _rp.fetch_presence_one(uid, cookie=cookie)
+            presence = _rp.fetch_presence_dual_verified(uid, cookie=cookie)
             ptype = getattr(presence, "presence_type", None)
             if getattr(presence, "is_unknown", False):
                 detail["roblox_api_status"] = "network_error"
@@ -1724,6 +1727,88 @@ class WatchdogSupervisor:
                     detail["roblox_api_status"] = "failed"
             detail["presence_error"] = str(exc)[:160]
             return None
+
+    def _evaluate_package_presence_isolated(
+        self, pkg: str, entry: dict[str, Any]
+    ) -> str:
+        """Re-evaluate a single package during the blocking recovery gate."""
+        self._set_status(pkg, STATUS_CHECKING)
+        try:
+            if self._needs_launching_evaluation(pkg):
+                state, _detail = self._evaluate_launching_or_pending(pkg, entry)
+            else:
+                state, _detail = self._detect_package_state(pkg, entry)
+        except Exception:  # noqa: BLE001
+            state = str(self.status_map.get(pkg) or STATUS_NO_HEARTBEAT)
+        return state
+
+    def _run_blocking_recovery_gate(
+        self,
+        pkg: str,
+        entry: dict[str, Any],
+        *,
+        package_index: int,
+        package_total: int,
+        render_callback: Any = None,
+    ) -> None:
+        """Halt round-robin until one package reaches Online or stable Dead."""
+        logger = self._logger
+        log_event(
+            logger,
+            "info",
+            "[DENG_REJOIN_RECOVERY_GATE_ENTER]",
+            package=pkg,
+            package_index=package_index,
+            package_total=package_total,
+            poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
+        )
+        while not self.stop_event.is_set():
+            self.checking_label = f"Recovering Package {package_index}/{package_total}"
+            cb = render_callback or self._render_callback
+            if callable(cb):
+                try:
+                    cb()
+                except Exception:  # noqa: BLE001
+                    pass
+            state = self._evaluate_package_presence_isolated(pkg, entry)
+            self._set_status(pkg, state)
+            self._prev_state[pkg] = state
+            if state == STATUS_ONLINE:
+                self._nhb_since.pop(pkg, None)
+                log_event(
+                    logger,
+                    "info",
+                    "[DENG_REJOIN_RECOVERY_GATE_EXIT]",
+                    package=pkg,
+                    result="online",
+                )
+                break
+            if state == STATUS_DEAD:
+                log_event(
+                    logger,
+                    "info",
+                    "[DENG_REJOIN_RECOVERY_GATE_EXIT]",
+                    package=pkg,
+                    result="dead",
+                )
+                break
+            log_event(
+                logger,
+                "info",
+                "[DENG_REJOIN_RECOVERY_GATE_POLL]",
+                package=pkg,
+                state=state,
+                poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
+            )
+            self._interruptible_sleep(self.RECOVERY_GATE_POLL_SECONDS)
+        else:
+            log_event(
+                logger,
+                "info",
+                "[DENG_REJOIN_RECOVERY_GATE_EXIT]",
+                package=pkg,
+                result="stopped",
+            )
 
     # ─── State detection ─────────────────────────────────────────────────────
 
@@ -2172,13 +2257,15 @@ class WatchdogSupervisor:
         prev: str,
         now: float,
         render_callback: Any = None,
-    ) -> None:
+    ) -> bool:
         """Apply recovery action based on current state.
 
         Recovery rules:
         - Dead        → launch_package_for_current_config
         - No Heartbeat → track stall; after 60s force-stop → Dead → Reopening
         - Online      → update last_online_ts, keep monitoring
+
+        Returns True when a blocking recovery gate should run for this package.
         """
         logger = self._logger
         url_context = private_url_launch_context(entry, self.cfg)
@@ -2211,11 +2298,12 @@ class WatchdogSupervisor:
                 self._set_status(pkg, STATUS_LAUNCHING)
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
+            return True
 
         elif state == STATUS_NO_HEARTBEAT:
             if self.status_map.get(pkg) == STATUS_ONLINE:
                 self._nhb_since.pop(pkg, None)
-                return
+                return False
             if self._in_loading_grace(pkg):
                 self._nhb_since.pop(pkg, None)
                 log_event(
@@ -2227,7 +2315,7 @@ class WatchdogSupervisor:
                     ),
                     action="suppress_nhb_kill_switch",
                 )
-                return
+                return False
             nhb_since = self._nhb_since.get(pkg)
             now_mono = time.monotonic()
             if nhb_since is None:
@@ -2238,7 +2326,7 @@ class WatchdogSupervisor:
                     started_at=round(now_mono, 3),
                     kill_switch_sec=self.NHB_KILL_SWITCH_SECONDS,
                 )
-                return
+                return False
             elapsed = now_mono - nhb_since
             if elapsed < self.NHB_KILL_SWITCH_SECONDS:
                 log_event(
@@ -2247,7 +2335,7 @@ class WatchdogSupervisor:
                     elapsed_sec=round(elapsed, 1),
                     remaining_sec=round(self.NHB_KILL_SWITCH_SECONDS - elapsed, 1),
                 )
-                return
+                return False
             log_event(
                 logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_KILL_SWITCH]",
                 package=pkg,
@@ -2265,7 +2353,7 @@ class WatchdogSupervisor:
                     render_callback()
                 except Exception:  # noqa: BLE001
                     pass
-            return
+            return True
 
         elif state in _METRIC_ACTIVE_STATES:
             self._nhb_since.pop(pkg, None)
@@ -2276,6 +2364,8 @@ class WatchdogSupervisor:
                 action="monitor_only",
             )
             self._check_ram_optimization(pkg, entry, now, render_callback=render_callback)
+
+        return False
 
     # ─── RAM optimization ─────────────────────────────────────────────────────
 
@@ -2643,9 +2733,10 @@ class WatchdogSupervisor:
                     self._online_start_ts.pop(pkg, None)
                     _maybe_render(force=True)
 
+                recovery_gate = False
                 if state not in {STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
                     if state == STATUS_NO_HEARTBEAT and not self._in_loading_grace(pkg):
-                        self._handle_state(
+                        recovery_gate = self._handle_state(
                             pkg, entry, state, prev, now, render_callback=render_callback
                         )
                     elif state != STATUS_NO_HEARTBEAT and (
@@ -2653,14 +2744,25 @@ class WatchdogSupervisor:
                             STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED
                         }
                     ):
-                        self._handle_state(
+                        recovery_gate = self._handle_state(
                             pkg, entry, state, prev, now, render_callback=render_callback
                         )
 
                     if self.status_map.get(pkg) == STATUS_DEAD and state != STATUS_DEAD:
-                        self._handle_state(
+                        recovery_gate = self._handle_state(
                             pkg, entry, STATUS_DEAD, prev, now, render_callback=render_callback
-                        )
+                        ) or recovery_gate
+
+                if recovery_gate:
+                    self._run_blocking_recovery_gate(
+                        pkg,
+                        entry,
+                        package_index=idx,
+                        package_total=total,
+                        render_callback=render_callback,
+                    )
+                    _maybe_render()
+                    continue
 
                 _maybe_render()
                 if not self.stop_event.is_set():

@@ -170,9 +170,9 @@ class PresenceProfileTests(unittest.TestCase):
 
 
 class StaggeredLaunchTests(unittest.TestCase):
-    def test_launch_stagger_constant_is_30_seconds(self) -> None:
+    def test_launch_stagger_constant_is_15_seconds(self) -> None:
         from agent.supervisor import WatchdogSupervisor
-        self.assertEqual(WatchdogSupervisor.LAUNCH_STAGGER_SECONDS, 30)
+        self.assertEqual(WatchdogSupervisor.LAUNCH_STAGGER_SECONDS, 15)
 
     def test_presence_timeout_under_15_seconds(self) -> None:
         from agent.roblox_presence import HTTP_TIMEOUT

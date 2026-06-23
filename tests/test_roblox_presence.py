@@ -219,5 +219,73 @@ class TestNeverRaises(unittest.TestCase):
         self.assertEqual(calls[1].get("X-CSRF-TOKEN"), "tok123")
 
 
+class TestDualPresenceVerification(unittest.TestCase):
+    def setUp(self) -> None:
+        rp.clear_presence_cache()
+
+    def test_public_fallback_rescues_false_offline_cookie_pass(self) -> None:
+        calls: list[tuple[str, object | None]] = []
+
+        def _post(url, body, *, cookie=None, timeout=rp.HTTP_TIMEOUT):
+            calls.append((url, cookie))
+            if cookie:
+                return {"userPresences": [{"userPresenceType": 0, "userId": 12345}]}
+            return {
+                "userPresences": [
+                    {
+                        "userPresenceType": 2,
+                        "userId": 12345,
+                        "placeId": 999,
+                        "rootPlaceId": 888,
+                        "lastLocation": "Game",
+                    }
+                ]
+            }
+
+        with mock.patch.object(rp, "_post_json", side_effect=_post):
+            result = rp.fetch_presence_dual_verified(
+                12345,
+                cookie="cookie-value-long-enough",
+            )
+
+        self.assertTrue(result.is_in_game)
+        self.assertEqual(len(calls), 2)
+        self.assertIsNotNone(calls[0][1])
+        self.assertIsNone(calls[1][1])
+
+    def test_cookie_in_game_skips_public_fallback(self) -> None:
+        calls: list[tuple[str, object | None]] = []
+
+        def _post(url, body, *, cookie=None, timeout=rp.HTTP_TIMEOUT):
+            calls.append((url, cookie))
+            return {
+                "userPresences": [
+                    {"userPresenceType": 2, "userId": 12345, "placeId": 1}
+                ]
+            }
+
+        with mock.patch.object(rp, "_post_json", side_effect=_post):
+            result = rp.fetch_presence_dual_verified(
+                12345,
+                cookie="cookie-value-long-enough",
+            )
+
+        self.assertTrue(result.is_in_game)
+        self.assertEqual(len(calls), 1)
+
+    def test_both_passes_offline_returns_offline(self) -> None:
+        def _post(url, body, *, cookie=None, timeout=rp.HTTP_TIMEOUT):
+            return {"userPresences": [{"userPresenceType": 0, "userId": 12345}]}
+
+        with mock.patch.object(rp, "_post_json", side_effect=_post):
+            result = rp.fetch_presence_dual_verified(
+                12345,
+                cookie="cookie-value-long-enough",
+            )
+
+        self.assertTrue(result.is_offline)
+        self.assertFalse(result.is_in_game)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

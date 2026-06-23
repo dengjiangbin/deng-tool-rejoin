@@ -17,6 +17,7 @@ if str(PROJECT) not in sys.path:
 from agent import android
 from agent.supervisor import (
     STATUS_CHECKING,
+    STATUS_DEAD,
     STATUS_LAUNCHING,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
@@ -307,6 +308,86 @@ class TestLoadingGracePeriod(unittest.TestCase):
              patch.object(sup, "_check_ram_optimization"):
             sup._handle_state(_PKG, _entry(), STATUS_ONLINE, STATUS_NO_HEARTBEAT, time.time())
         self.assertNotIn(_PKG, sup._nhb_since)
+
+
+class TestBlockingRecoveryGate(unittest.TestCase):
+    def test_recovery_gate_poll_constant_is_5_seconds(self) -> None:
+        self.assertEqual(WatchdogSupervisor.RECOVERY_GATE_POLL_SECONDS, 5.0)
+
+    def test_watchdog_loop_source_uses_blocking_recovery_gate(self) -> None:
+        loop_src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
+        gate_src = inspect.getsource(WatchdogSupervisor._run_blocking_recovery_gate)
+        self.assertIn("_run_blocking_recovery_gate", loop_src)
+        self.assertIn("RECOVERY_GATE", gate_src)
+
+    def test_recovery_gate_halts_round_robin_until_online(self) -> None:
+        sup = WatchdogSupervisor(
+            [_entry(_PKG), _entry(_PKG2)],
+            _cfg(),
+            initial_status={_PKG: STATUS_ONLINE, _PKG2: STATUS_ONLINE},
+        )
+        sup.mark_all_launches_completed()
+        events: list[tuple[str, str]] = []
+        gate_polls = {"n": 0}
+
+        def _detect(pkg, entry, **kwargs):
+            events.append(("detect", pkg))
+            if pkg == _PKG and sum(1 for kind, p in events if kind == "detect" and p == _PKG) == 1:
+                return (STATUS_DEAD, {"reason": "process_missing"})
+            return (STATUS_ONLINE, {"reason": "mock_online"})
+
+        def _isolated(pkg, entry):
+            events.append(("gate", pkg))
+            gate_polls["n"] += 1
+            return STATUS_ONLINE if gate_polls["n"] >= 1 else STATUS_LAUNCHING
+
+        with patch.object(sup, "_detect_package_state", side_effect=_detect), \
+             patch.object(sup, "_evaluate_package_presence_isolated", side_effect=_isolated), \
+             patch.object(sup, "_do_launch", return_value=True), \
+             patch.object(sup, "_interruptible_sleep"), \
+             patch("agent.supervisor.db.insert_event"), \
+             patch("agent.supervisor.db.insert_heartbeat"), \
+             patch("agent.supervisor.log_event"):
+            sup.start_daemon(display_interval=0.05)
+
+            def _stop_soon() -> None:
+                time.sleep(0.25)
+                sup.stop("test")
+
+            threading.Thread(target=_stop_soon, daemon=True).start()
+            if sup._watchdog_thread is not None:
+                sup._watchdog_thread.join(timeout=5.0)
+
+        pkg2_detect_idx = next(
+            (i for i, ev in enumerate(events) if ev == ("detect", _PKG2)),
+            None,
+        )
+        first_gate_idx = next(
+            (i for i, ev in enumerate(events) if ev[0] == "gate"),
+            None,
+        )
+        self.assertIsNotNone(first_gate_idx, f"expected recovery gate, events={events}")
+        self.assertGreater(gate_polls["n"], 0)
+        if pkg2_detect_idx is not None and first_gate_idx is not None:
+            self.assertGreater(
+                pkg2_detect_idx,
+                first_gate_idx,
+                f"package 2 must not be checked before recovery gate completes: {events}",
+            )
+
+    def test_recovery_gate_exits_on_dead(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
+        with patch.object(sup, "_evaluate_package_presence_isolated", return_value=STATUS_DEAD), \
+             patch.object(sup, "_interruptible_sleep") as mock_sleep, \
+             patch("agent.supervisor.log_event"):
+            sup._run_blocking_recovery_gate(
+                _PKG,
+                _entry(),
+                package_index=1,
+                package_total=1,
+            )
+        mock_sleep.assert_not_called()
+        self.assertEqual(sup.status_map.get(_PKG), STATUS_DEAD)
 
 
 if __name__ == "__main__":
