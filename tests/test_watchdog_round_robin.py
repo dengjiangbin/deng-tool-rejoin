@@ -68,11 +68,38 @@ class TestRoundRobinWatchdog(unittest.TestCase):
         self.assertIn("_interruptible_sleep", src)
         self.assertIn("WATCHDOG_ROUND_ROBIN_PAUSE", src)
 
+    def test_prelaunch_pending_skipped_in_watchdog_loop(self) -> None:
+        sup = WatchdogSupervisor(
+            [_entry(_PKG), _entry(_PKG2)],
+            _cfg(),
+            initial_status={_PKG: STATUS_PENDING, _PKG2: STATUS_LAUNCHING},
+        )
+        detect_calls: list[str] = []
+
+        def _track_detect(pkg, entry, **kwargs):
+            detect_calls.append(pkg)
+            return (STATUS_ONLINE, {"reason": "mock"})
+
+        with patch.object(sup, "_detect_package_state", side_effect=_track_detect), \
+             patch.object(sup, "_evaluate_launching_or_pending", side_effect=_track_detect), \
+             patch.object(sup, "_interruptible_sleep"), \
+             patch("agent.supervisor.db.insert_event"), \
+             patch("agent.supervisor.db.insert_heartbeat"), \
+             patch("agent.supervisor.log_event"):
+            sup.start_daemon(display_interval=0.05)
+            time.sleep(0.2)
+            sup.stop("test")
+            if sup._watchdog_thread is not None:
+                sup._watchdog_thread.join(timeout=3.0)
+
+        self.assertNotIn(_PKG, detect_calls, "Pending package must not be presence-checked")
+        self.assertIn(_PKG2, detect_calls, "Launched package must be checked")
+
     def test_sequential_packages_sleep_hold_then_tail(self) -> None:
         sup = WatchdogSupervisor(
             [_entry(_PKG), _entry(_PKG2)],
             _cfg(),
-            initial_status={_PKG: STATUS_LAUNCHING, _PKG2: STATUS_PENDING},
+            initial_status={_PKG: STATUS_LAUNCHING, _PKG2: STATUS_LAUNCHING},
         )
         sleep_calls: list[float] = []
         presence = MagicMock()

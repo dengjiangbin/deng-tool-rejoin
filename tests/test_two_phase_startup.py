@@ -99,9 +99,15 @@ class TestLaunchingWatchdogEvaluation(unittest.TestCase):
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertIn("cookie", detail.get("reason", ""))
 
-    def test_pending_package_is_evaluated(self) -> None:
+    def test_pending_package_not_evaluated_until_launch(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_PENDING})
+        self.assertFalse(sup._needs_launching_evaluation(_PKG))
+        self.assertTrue(sup._is_prelaunch_pending(_PKG))
+
+    def test_launching_package_is_evaluated(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         self.assertTrue(sup._needs_launching_evaluation(_PKG))
+        self.assertFalse(sup._is_prelaunch_pending(_PKG))
 
     def test_checking_set_during_launching_eval(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})

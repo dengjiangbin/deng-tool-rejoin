@@ -1696,14 +1696,18 @@ class WatchdogSupervisor:
     # ─── State detection ─────────────────────────────────────────────────────
 
     def _needs_launching_evaluation(self, pkg: str) -> bool:
-        """True when a package is waiting for first post-launch presence proof."""
+        """True when a launched package awaits first post-launch presence proof."""
         current = str(self.status_map.get(pkg) or "").strip()
-        return current in {STATUS_LAUNCHING, STATUS_PENDING}
+        return current == STATUS_LAUNCHING
+
+    def _is_prelaunch_pending(self, pkg: str) -> bool:
+        """True while staggered launch has not opened this clone yet."""
+        return str(self.status_map.get(pkg) or "").strip() == STATUS_PENDING
 
     def _evaluate_launching_or_pending(
         self, pkg: str, entry: dict[str, Any]
     ) -> tuple[str, dict[str, Any]]:
-        """Launching/Pending → Checking → Online | No Heartbeat | Dead.
+        """Launching → Checking → Online | No Heartbeat | Dead.
 
         Forces an immediate cookie rescan so cloned APK shared_prefs are read
         via root before the presence API call.  Cookie/identity failures map
@@ -2456,6 +2460,18 @@ class WatchdogSupervisor:
 
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = f"Checking Package {idx}/{total}"
+
+                if self._is_prelaunch_pending(pkg):
+                    log_event(
+                        logger, "info", "[DENG_REJOIN_WATCHDOG_SKIP_PRELAUNCH]",
+                        round=self._round,
+                        index=idx,
+                        total=total,
+                        package=pkg,
+                        reason="staggered_launch_not_started",
+                    )
+                    continue
+
                 _maybe_render(force=True)
                 check_started = time.monotonic()
                 try:
