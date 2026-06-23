@@ -751,18 +751,33 @@ def _cookie_from_webview_db(tmp_db_path: str) -> str:
 
 
 def _root_scan_shared_prefs(package: str, *, timeout: int, max_bytes: int) -> str:
-    base = f"/data/data/{package}/shared_prefs"
-    files = root_access.list_root_glob(f"{base}/*.xml", timeout=timeout, max_results=32)
-    hints = ("cookie", "auth", "session", "roblox", "account", "user", "pkg_preferences")
-    priority = [path for path in files if any(h in path.lower() for h in hints)]
-    ordered = (priority + [path for path in files if path not in priority])[:24]
-    for abs_path in ordered:
+    """Aggressively scan clone shared_prefs via ``su -c`` for .ROBLOSECURITY."""
+    glob_patterns = (
+        f"/data/data/{package}/shared_prefs/*.xml",
+        f"/data/user/0/{package}/shared_prefs/*.xml",
+        f"/data/user_de/0/{package}/shared_prefs/*.xml",
+        f"/data_mirror/data_ce/null/0/{package}/shared_prefs/*.xml",
+    )
+    hints = ("cookie", "auth", "session", "roblox", "account", "user", "pkg_preferences", "roblosecurity")
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for pattern in glob_patterns:
+        try:
+            files = root_access.list_root_glob(pattern, timeout=timeout, max_results=32)
+        except Exception:  # noqa: BLE001
+            files = []
+        priority = [path for path in files if any(h in path.lower() for h in hints)]
+        for path in priority + [p for p in files if p not in priority]:
+            if path not in seen:
+                seen.add(path)
+                ordered.append(path)
+    for abs_path in ordered[:32]:
         content = root_access.read_root_file(abs_path, max_bytes=max_bytes, timeout=timeout)
         if not content:
             continue
         cookie = cookie_from_pref_xml(content)
         if cookie:
-            _log.info("Auto-detected ROBLOSECURITY for %s via shared_prefs", package)
+            _log.info("Auto-detected ROBLOSECURITY for %s via root_shared_prefs", package)
             return cookie
     return ""
 

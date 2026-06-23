@@ -1485,7 +1485,7 @@ class WatchdogSupervisor:
 
     # ─── Presence fetching (process-check-first; presence is supplementary) ──
 
-    def _fetch_presence(self, pkg: str) -> Any:
+    def _fetch_presence(self, pkg: str, *, force_cookie_rescan: bool = False) -> Any:
         """Fetch Roblox presence for the package account via isolated HTTP.
 
         Returns a PresenceResult or None.  Called only when the Android
@@ -1562,9 +1562,12 @@ class WatchdogSupervisor:
                 return None
 
             cookie = self._presence_cookies.get(pkg)
-            if not cookie:
+            if not cookie or force_cookie_rescan:
                 last_cookie_attempt = self._presence_cookie_lookup_at.get(pkg, 0.0)
-                if (time.monotonic() - last_cookie_attempt) >= 120.0:
+                should_try_cookie = force_cookie_rescan or (
+                    (time.monotonic() - last_cookie_attempt) >= 120.0
+                )
+                if should_try_cookie:
                     self._presence_cookie_lookup_at[pkg] = time.monotonic()
                     try:
                         from agent.roblox_presence import detect_roblox_cookie
@@ -1574,12 +1577,19 @@ class WatchdogSupervisor:
                             entry=self.entry_by_pkg.get(pkg),
                             config=self.cfg,
                             use_root=True,
+                            force_rescan=force_cookie_rescan,
                         )
                         if cookie:
                             self._presence_cookies[pkg] = cookie
                             detail["roblox_cookie_source"] = "auto_detect"
                     except Exception:  # noqa: BLE001
                         pass
+
+            if not cookie and force_cookie_rescan:
+                detail["roblox_api_used"] = "false"
+                detail["roblox_api_status"] = "skipped"
+                detail["presence_error"] = "missing_cookie"
+                return None
 
             detail["roblox_api_used"] = "true"
             presence = _rp.fetch_presence_one(uid, cookie=cookie)
@@ -1614,8 +1624,62 @@ class WatchdogSupervisor:
 
     # ─── State detection ─────────────────────────────────────────────────────
 
-    def _detect_package_state(
+    def _needs_joining_evaluation(self, pkg: str) -> bool:
+        """True when a package is waiting for first post-launch presence proof."""
+        current = str(self.status_map.get(pkg) or "").strip()
+        prev = str(self._prev_state.get(pkg) or "").strip()
+        return current in {STATUS_JOINING, STATUS_PENDING} or prev in {STATUS_JOINING, STATUS_PENDING}
+
+    def _evaluate_joining_or_pending(
         self, pkg: str, entry: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
+        """Joining/Pending → Checking → Online | No Heartbeat | Dead.
+
+        Forces an immediate cookie rescan so cloned APK shared_prefs are read
+        via root before the presence API call.  Cookie/identity failures map
+        to No Heartbeat so the 60s kill-switch can recover the package.
+        """
+        self._set_status(pkg, STATUS_CHECKING)
+        self._presence_cookie_lookup_at.pop(pkg, None)
+        self._presence_lookup_attempt_at.pop(pkg, None)
+
+        state, detail = self._detect_package_state(
+            pkg, entry, force_cookie_rescan=True
+        )
+
+        pres_detail = self._presence_last_detail.get(pkg, {})
+        presence_error = str(pres_detail.get("presence_error") or "")
+        cookie_missing = not str(self._presence_cookies.get(pkg) or "").strip()
+        api_status = str(pres_detail.get("roblox_api_status") or "")
+
+        if state in {STATUS_PENDING, STATUS_CHECKING} or (
+            state == STATUS_NO_HEARTBEAT
+            and str(detail.get("reason") or "") in {
+                "presence_user_id_pending",
+                "cookie_extraction_failed",
+                "missing_cookie",
+            }
+        ):
+            state = STATUS_NO_HEARTBEAT
+            detail = dict(detail)
+            detail["activity"] = "No Heartbeat"
+            detail["heartbeat_ok"] = "false"
+            detail["reason"] = (
+                "cookie_extraction_failed"
+                if cookie_missing or presence_error == "missing_cookie"
+                else "presence_identity_unavailable"
+            )
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+        elif state == STATUS_NO_HEARTBEAT and api_status in {
+            "failed", "rate_limited", "network_error", "timeout", "skipped",
+        }:
+            detail = dict(detail)
+            detail["reason"] = f"presence_api_{api_status}"
+
+        return state, detail
+
+    def _detect_package_state(
+        self, pkg: str, entry: dict[str, Any], *, force_cookie_rescan: bool = False
     ) -> tuple[str, dict[str, Any]]:
         """Detect public state: process check first, presence second.
 
@@ -1672,7 +1736,7 @@ class WatchdogSupervisor:
         presence_lobby = False
 
         try:
-            presence = self._fetch_presence(pkg)
+            presence = self._fetch_presence(pkg, force_cookie_rescan=force_cookie_rescan)
             if presence is not None:
                 if getattr(presence, "is_in_game", False):
                     in_game = True
@@ -1733,6 +1797,7 @@ class WatchdogSupervisor:
         presence_error = str(pres_detail.get("presence_error") or "")
 
         if process_running and presence is None and presence_error == "missing_user_id":
+            pending_state = STATUS_PENDING if not force_cookie_rescan else STATUS_NO_HEARTBEAT
             detail = {
                 "process_running": "true",
                 "in_game": "false",
@@ -1741,13 +1806,30 @@ class WatchdogSupervisor:
                 "elapsed_ms": elapsed_ms,
                 "root_available": str(root_available).lower(),
                 "foreground_package": foreground_package,
-                "activity": "Pending",
+                "activity": "Pending" if pending_state == STATUS_PENDING else "No Heartbeat",
                 "in_game_proof": "unknown",
                 "heartbeat_age_sec": heartbeat_age_sec,
                 "reason": "presence_user_id_pending",
             }
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_PENDING)
-            return STATUS_PENDING, detail
+            self._log_state_evidence(pkg, detail, pres_detail, pending_state)
+            return pending_state, detail
+
+        if process_running and presence is None and presence_error == "missing_cookie":
+            detail = {
+                "process_running": "true",
+                "in_game": "false",
+                "heartbeat_ok": "false",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "No Heartbeat",
+                "in_game_proof": "unknown",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": "cookie_extraction_failed",
+            }
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+            return STATUS_NO_HEARTBEAT, detail
 
         if process_running and presence is None and api_status in {
             "failed",
@@ -2266,8 +2348,12 @@ class WatchdogSupervisor:
 
                 prev = self._prev_state.get(pkg, self.status_map.get(pkg, ""))
                 error_text = ""
+                joining_eval = self._needs_joining_evaluation(pkg)
                 try:
-                    state, detail = self._detect_package_state(pkg, entry)
+                    if joining_eval:
+                        state, detail = self._evaluate_joining_or_pending(pkg, entry)
+                    else:
+                        state, detail = self._detect_package_state(pkg, entry)
                 except Exception as exc:  # noqa: BLE001
                     error_text = str(exc)[:180]
                     state = prev if prev in {STATUS_ONLINE, STATUS_NO_HEARTBEAT, STATUS_DEAD} else STATUS_NO_HEARTBEAT
@@ -2320,7 +2406,8 @@ class WatchdogSupervisor:
                 prev_pinned = self._prev_state.get(pkg)
                 pin_states = {STATUS_LAUNCHING, STATUS_JOINING, STATUS_REOPENING}
                 if (
-                    self._in_grace(pkg, now)
+                    not joining_eval
+                    and self._in_grace(pkg, now)
                     and prev_pinned in pin_states
                     and state in pin_states
                     and state not in {STATUS_ONLINE, STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_FAILED}

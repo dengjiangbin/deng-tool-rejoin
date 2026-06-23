@@ -26,6 +26,7 @@ from agent import android
 from agent.supervisor import (
     STATUS_DEAD,
     STATUS_IN_LOBBY,
+    STATUS_JOINING,
     STATUS_LAUNCHING,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
@@ -279,6 +280,20 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail["process_running"], "true")
         self.assertEqual(detail["heartbeat_ok"], "false")
+
+    def test_joining_package_evaluated_in_watchdog_loop(self):
+        """Joining must not zombie — watchdog runs joining evaluation path."""
+        sup = _make_sup(initial_status={_PKG: STATUS_JOINING})
+        presence = MagicMock()
+        presence.is_in_game = True
+        presence.is_offline = False
+        presence.is_lobby = False
+        presence.is_unknown = False
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
+             patch.object(sup, "_fetch_presence", return_value=presence):
+            self.assertTrue(sup._needs_joining_evaluation(_PKG))
+            state, _ = sup._evaluate_joining_or_pending(_PKG, _make_entry())
+        self.assertEqual(state, STATUS_ONLINE)
 
     # Test 13
     def test_process_running_presence_in_game_returns_in_game(self):

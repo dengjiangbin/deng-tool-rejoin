@@ -5789,6 +5789,31 @@ def cmd_start(args: argparse.Namespace) -> int:
                 str(_stop_ok).lower(), _stop_err,
             )
 
+        # ── PHASE 1 (continued): batch Clear Cache — all packages, no delays ───
+        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
+        prep_gfx: dict[str, str] = {}
+        prep_cache: dict[str, str] = {}
+        _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
+        _set_all_phase("Clear Cache", "Clearing cache for all packages...")
+        for entry in entries:
+            package = entry["package"]
+            try:
+                _cache_result = android.clear_package_cache_verified(package)
+            except Exception as _exc:  # noqa: BLE001
+                _cache_result = {"success": False, "skipped": False, "error": str(_exc)[:80]}
+            prep_cache[package] = (
+                "Cleared" if _cache_result.get("success")
+                else "Skipped" if _cache_result.get("skipped")
+                else "Failed"
+            )
+            low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
+            try:
+                prep_gfx[package] = android.apply_low_graphics_optimization(package, enabled=low)
+            except Exception:  # noqa: BLE001
+                prep_gfx[package] = "error"
+        _start_session.mark("batch_clear_cache_done", package_count=len(entries))
+        _start_session.mark("package_preparation_done", package_count=len(entries))
+
         # 2) Compute window layout silently (no public phase change).
         try:
             _start_session.mark("layout_begin")
@@ -5830,10 +5855,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         else:
             _start_log.info("start: No launch URL configured — clones will open Roblox home")
 
-        # ── Sequential launch queue ───────────────────────────────────────────
-        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
-        prep_gfx: dict[str, str] = {}
-        prep_cache: dict[str, str] = {}
+        # ── PHASE 2: staggered launching (30s between packages) ───────────────
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
         launch_attempted: dict[str, bool] = {}
@@ -5847,40 +5869,6 @@ def cmd_start(args: argparse.Namespace) -> int:
             launch_attempted[package] = True
             for later in entries[index:]:
                 phase[later["package"]] = "Pending"
-            phase[package] = "Preparing"
-            _render_phase("Preparing next package...")
-            try:
-                _pid_before = android.get_package_pid(package, _prep_root)
-                android.force_stop_package(package, _prep_root)
-                import time as _t
-                _t.sleep(0.3)
-                _pid_after = android.get_package_pid(package, _prep_root)
-                if _pid_after:
-                    _t.sleep(0.8)
-                    android.force_stop_package(package, _prep_root)
-                    _t.sleep(0.3)
-                    _pid_after = android.get_package_pid(package, _prep_root)
-            except Exception as _exc:  # noqa: BLE001
-                _start_log.debug("sequential prep force-stop error for %s: %s", package, _exc)
-
-            phase[package] = "Clear Cache"
-            _render_phase()
-            _cache_result: dict[str, object] = {}
-            try:
-                _cache_result = android.clear_package_cache_verified(package)
-            except Exception as _exc:  # noqa: BLE001
-                _cache_result = {"success": False, "skipped": False, "error": str(_exc)[:80]}
-            prep_cache[package] = (
-                "Cleared" if _cache_result.get("success")
-                else "Skipped" if _cache_result.get("skipped")
-                else "Failed"
-            )
-            low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
-            try:
-                prep_gfx[package] = android.apply_low_graphics_optimization(package, enabled=low)
-            except Exception:  # noqa: BLE001
-                prep_gfx[package] = "error"
-
             phase[package] = "Launching"
             _render_phase("Launching clone...")
             package_cfg = dict(runtime_cfg)
