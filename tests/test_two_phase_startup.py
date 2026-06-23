@@ -1,10 +1,9 @@
-"""Two-phase startup and Joining watchdog evaluation regression tests."""
+"""Two-phase startup and Launching watchdog evaluation regression tests."""
 
 from __future__ import annotations
 
 import inspect
 import sys
-import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -15,7 +14,7 @@ if str(PROJECT) not in sys.path:
 
 from agent.supervisor import (
     STATUS_CHECKING,
-    STATUS_JOINING,
+    STATUS_LAUNCHING,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
     STATUS_PENDING,
@@ -73,9 +72,9 @@ class TestTwoPhaseStartupSource(unittest.TestCase):
         self.assertIn('_set_all_phase("Clear Cache"', src)
 
 
-class TestJoiningWatchdogEvaluation(unittest.TestCase):
-    def test_joining_transitions_to_checking_then_online(self) -> None:
-        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_JOINING})
+class TestLaunchingWatchdogEvaluation(unittest.TestCase):
+    def test_launching_transitions_to_checking_then_online(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         presence = MagicMock()
         presence.is_in_game = True
         presence.is_offline = False
@@ -83,29 +82,29 @@ class TestJoiningWatchdogEvaluation(unittest.TestCase):
         presence.is_unknown = False
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence) as fetch:
-            state, _ = sup._evaluate_joining_or_pending(_PKG, _entry())
+            state, _ = sup._evaluate_launching_or_pending(_PKG, _entry())
         fetch.assert_called_once()
         self.assertEqual(fetch.call_args.kwargs.get("force_cookie_rescan"), True)
         self.assertEqual(state, STATUS_ONLINE)
 
-    def test_joining_cookie_failure_maps_to_no_heartbeat(self) -> None:
-        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_JOINING})
+    def test_launching_cookie_failure_maps_to_no_heartbeat(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup._presence_last_detail[_PKG] = {
             "roblox_api_status": "skipped",
             "presence_error": "missing_cookie",
         }
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
-            state, detail = sup._evaluate_joining_or_pending(_PKG, _entry())
+            state, detail = sup._evaluate_launching_or_pending(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertIn("cookie", detail.get("reason", ""))
 
     def test_pending_package_is_evaluated(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_PENDING})
-        self.assertTrue(sup._needs_joining_evaluation(_PKG))
+        self.assertTrue(sup._needs_launching_evaluation(_PKG))
 
-    def test_checking_set_during_joining_eval(self) -> None:
-        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_JOINING})
+    def test_checking_set_during_launching_eval(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         seen: list[str] = []
         original_set = sup._set_status
 
@@ -119,7 +118,7 @@ class TestJoiningWatchdogEvaluation(unittest.TestCase):
                  "_detect_package_state",
                  return_value=(STATUS_ONLINE, {"reason": "roblox_presence_in_game"}),
              ):
-            sup._evaluate_joining_or_pending(_PKG, _entry())
+            sup._evaluate_launching_or_pending(_PKG, _entry())
         self.assertIn(STATUS_CHECKING, seen)
 
 

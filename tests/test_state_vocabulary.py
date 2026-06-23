@@ -7,7 +7,7 @@ Watchdog steady states:
 
 Legacy constants are kept in supervisor.py for backward compatibility of
 old _PackageWorker tests but must NOT be produced by WatchdogSupervisor.
-Joining is emitted after staggered launch and during Dead recovery when a URL is configured.
+Packages remain Launching until the round-robin watchdog confirms Online.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ import unittest
 from agent.supervisor import (
     STATUS_DEAD,
     STATUS_DISCONNECTED,
-    STATUS_JOINING,
     STATUS_LAUNCHED,
     STATUS_LAUNCHING,
     STATUS_LOBBY,
@@ -34,11 +33,15 @@ class TestStateConstants(unittest.TestCase):
     def test_required_legacy_states_exist(self) -> None:
         self.assertEqual(STATUS_LAUNCHING, "Launching")
         self.assertEqual(STATUS_LAUNCHED, "Launched")
-        self.assertEqual(STATUS_JOINING, "Joining")    # deprecated, kept for compat
         self.assertEqual(STATUS_ONLINE, "Online")
         self.assertEqual(STATUS_LOBBY, "Lobby")
         self.assertEqual(STATUS_OFFLINE, "Offline")
         self.assertEqual(STATUS_DISCONNECTED, "Disconnected")
+
+    def test_joining_constant_removed(self) -> None:
+        import agent.supervisor as sup_mod
+
+        self.assertFalse(hasattr(sup_mod, "STATUS_JOINING"))
 
     def test_new_watchdog_states_exist(self) -> None:
         """Live steady-state machine constants must exist."""
@@ -86,23 +89,25 @@ class TestStatusColors(unittest.TestCase):
         self.assertNotEqual(out_d, "Disconnected")
 
 
-class TestInitialStartTableUsesJoining(unittest.TestCase):
-    """Post-launch initial status must be Joining until watchdog verifies presence."""
+class TestInitialStartTableUsesLaunching(unittest.TestCase):
+    """Post-launch initial status must stay Launching until watchdog verifies presence."""
 
-    def test_post_launch_always_joining_after_successful_launch(self) -> None:
-        from agent.supervisor import STATUS_JOINING
+    def test_post_launch_stays_launching_after_successful_launch(self) -> None:
         for _has_url in (True, False):
             launch_ok = True
             if not launch_ok:
                 state = "Failed"
             else:
-                state = STATUS_JOINING
-            self.assertEqual(state, STATUS_JOINING,
-                f"expected Joining with has_url={_has_url}, got {state}")
+                state = STATUS_LAUNCHING
+            self.assertEqual(
+                state,
+                STATUS_LAUNCHING,
+                f"expected Launching with has_url={_has_url}, got {state}",
+            )
 
     def test_failed_launch_stays_failed(self) -> None:
         launch_ok = False
-        state = "Failed" if not launch_ok else "Joining"
+        state = "Failed" if not launch_ok else STATUS_LAUNCHING
         self.assertEqual(state, "Failed")
 
 

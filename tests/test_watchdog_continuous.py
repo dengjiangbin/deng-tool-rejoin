@@ -26,7 +26,6 @@ from agent import android
 from agent.supervisor import (
     STATUS_DEAD,
     STATUS_IN_LOBBY,
-    STATUS_JOINING,
     STATUS_LAUNCHING,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
@@ -159,7 +158,7 @@ class TestBlankPrivateServerUrl(unittest.TestCase):
         """No Heartbeat: force_stop only after 60s continuous stall."""
         sup = _make_sup(private_url="")
         now = time.time()
-        with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
+        with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
              patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
@@ -193,22 +192,14 @@ class TestConfiguredPrivateServerUrl(unittest.TestCase):
         mock_launch.assert_called_once_with(entry, sup.cfg, "dead_recovery")
 
     # Test 7
-    def test_configured_url_dead_recovery_sets_joining(self):
-        """v1.0.4: with a private URL configured, Dead recovery moves
-        to STATUS_JOINING (not Launching), because perform_rejoin opens
-        the deep link as part of the same call. This is exactly the
-        Launching-vs-Joining split the APK now surfaces:
-            Launching = opened the Roblox package
-            Joining   = opened the private-server URL
-        Without a URL, the test below confirms it stays Launching.
-        """
-        from agent.supervisor import STATUS_JOINING
+    def test_configured_url_dead_recovery_sets_launching(self):
+        """Dead recovery always returns Launching; watchdog confirms Online later."""
         entry = _make_entry(private_url=self._URL)
         sup = _make_sup(private_url=self._URL)
         with patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=False)), \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             sup._handle_state(_PKG, entry, STATUS_DEAD, STATUS_LAUNCHING, time.time())
-        self.assertEqual(sup.status_map.get(_PKG), STATUS_JOINING)
+        self.assertEqual(sup.status_map.get(_PKG), STATUS_LAUNCHING)
 
     def test_no_url_dead_recovery_sets_launching(self):
         """v1.0.4: without a private URL, Dead recovery stays Launching."""
@@ -228,7 +219,7 @@ class TestConfiguredPrivateServerUrl(unittest.TestCase):
         sup._last_online_ts[_PKG] = now - 10
         sup._nhb_offline_count[_PKG] = sup.NHB_OFFLINE_CONFIRMATIONS
         with patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
-             patch.object(android, "force_stop_package") as mock_stop, \
+             patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
             sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
@@ -281,9 +272,9 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail["process_running"], "true")
         self.assertEqual(detail["heartbeat_ok"], "false")
 
-    def test_joining_package_evaluated_in_watchdog_loop(self):
-        """Joining must not zombie — watchdog runs joining evaluation path."""
-        sup = _make_sup(initial_status={_PKG: STATUS_JOINING})
+    def test_launching_package_evaluated_in_watchdog_loop(self):
+        """Launching must not zombie — watchdog runs launching evaluation path."""
+        sup = _make_sup(initial_status={_PKG: STATUS_LAUNCHING})
         presence = MagicMock()
         presence.is_in_game = True
         presence.is_offline = False
@@ -291,8 +282,8 @@ class TestStateDetection(unittest.TestCase):
         presence.is_unknown = False
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
-            self.assertTrue(sup._needs_joining_evaluation(_PKG))
-            state, _ = sup._evaluate_joining_or_pending(_PKG, _make_entry())
+            self.assertTrue(sup._needs_launching_evaluation(_PKG))
+            state, _ = sup._evaluate_launching_or_pending(_PKG, _make_entry())
         self.assertEqual(state, STATUS_ONLINE)
 
     # Test 13
@@ -492,18 +483,15 @@ class TestWatchdogContinuity(unittest.TestCase):
 
         sup._detect_package_state = counting_detect
 
-        # Stop after 2 rounds
-        _original_sup_interval = sup._sup_interval
-        sup._sup_interval = lambda: 1  # very short interval
-
+        # Stop after 2 rounds — round-robin pauses are patched to zero in tests.
         def _stop_after_2_rounds():
-            # Let loop run for enough time to complete 2 rounds (2 pkg Ã— 2 rounds Ã— 1s = 4s)
-            time.sleep(4.5)
+            time.sleep(1.5)
             sup.stop_event.set()
 
         t = threading.Thread(target=_stop_after_2_rounds, daemon=True)
 
-        with patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+        with patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch.object(sup, "_interruptible_sleep"):
             t.start()
             sup.run_forever(display_interval=99)
             t.join(timeout=10)
@@ -541,7 +529,7 @@ class TestWatchdogContinuity(unittest.TestCase):
         now = time.time()
         sup._last_online_ts[_PKG] = now - 1
         with patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
-             patch.object(android, "force_stop_package") as mock_stop, \
+             patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
             sup._handle_state(_PKG, _make_entry(), STATUS_NO_HEARTBEAT, STATUS_ONLINE, now)
@@ -759,10 +747,10 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
         self.assertNotRegex(src, r'run_command\s*\([^)]*logcat')
 
     # Test 27
-    def test_joining_preserved_in_initial_status(self):
-        """WatchdogSupervisor preserves Joining from staggered launch handoff."""
+    def test_joining_initial_status_maps_to_launching(self):
+        """Legacy Joining handoff normalizes to Launching."""
         sup = _make_sup(initial_status={_PKG: "Joining"})
-        self.assertEqual(sup.status_map.get(_PKG), "Joining")
+        self.assertEqual(sup.status_map.get(_PKG), STATUS_LAUNCHING)
 
     # Test 28
     def test_no_removed_launch_action_text_in_state_machine(self):
@@ -829,7 +817,7 @@ class TestRunningNotPlayingRecovery(unittest.TestCase):
     def test_no_heartbeat_blank_url_force_stops_after_kill_switch(self):
         sup = _make_sup(private_url="")
         now = time.time()
-        with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
+        with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
              patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
@@ -843,7 +831,7 @@ class TestRunningNotPlayingRecovery(unittest.TestCase):
         sup = _make_sup(private_url=url)
         entry = _make_entry(private_url=url)
         now = time.time()
-        with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
+        with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
              patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)

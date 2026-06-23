@@ -22,7 +22,6 @@ from agent.supervisor import (
     STATUS_FAILED,
     STATUS_IN_GAME,
     STATUS_IN_LOBBY,
-    STATUS_JOINING,
     STATUS_LAUNCHING,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
@@ -101,7 +100,7 @@ class DeadRecoveryTests(unittest.TestCase):
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             sup._handle_state(_PKG, _entry(), STATUS_DEAD, STATUS_ONLINE, time.time())
         launch.assert_called_once()
-        self.assertIn(sup.status_map[_PKG], {STATUS_LAUNCHING, STATUS_JOINING, STATUS_REOPENING, STATUS_RELAUNCHING})
+        self.assertIn(sup.status_map[_PKG], {STATUS_LAUNCHING, STATUS_REOPENING, STATUS_RELAUNCHING})
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_FAILED})
         with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()), \
              patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=True)) as launch, \

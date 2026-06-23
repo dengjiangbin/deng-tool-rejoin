@@ -372,21 +372,8 @@ def get_monitor_status_summary() -> dict[str, Any]:
 # ── Status provider ─────────────────────────────────────────────────────────
 
 
-# v1.0.4: APK-visible state vocabulary is now exactly five values:
-#
-#   Dead          — process not running, or in lobby/not playing (so the
-#                   tool should relaunch / rejoin).
-#   Launching     — open-package command issued, process is starting.
-#                   This is BEFORE the private-server join intent.
-#   Joining       — private-server URL join intent has been issued; the
-#                   package is trying to enter that server.
-#   Online        — process confirmed in-game / healthy heartbeat.
-#   No Heartbeat  — process likely alive but no healthy heartbeat — will
-#                   trigger relaunch/rejoin after cooldown.
-#
-# `In-Lobby` is intentionally NOT in this set anymore. Per user feedback,
-# treating "Lobby" as a distinct state was blocking relaunch/rejoin —
-# it now collapses to `Dead` so the supervisor's recovery loop kicks in.
+# v1.0.5: APK-visible state vocabulary — Dead, Launching, Online, No Heartbeat.
+# Joining was removed; packages stay Launching until the watchdog confirms Online.
 _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
     # Healthy / in-game.
     "Online": "Online",
@@ -398,11 +385,8 @@ _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
     "Launched": "Launching",
     "Preparing": "Launching",
     "Relaunching": "Reopening",
-    # Process is in the join-private-URL phase. `Join Unconfirmed`
-    # collapses here because the supervisor uses it for "deep link
-    # opened but no in-game proof yet" — same user-visible meaning.
-    "Joining": "Joining",
-    "Join Unconfirmed": "Joining",
+    "Joining": "Launching",
+    "Join Unconfirmed": "Launching",
     # Heartbeat lost on a known-good process. Reconnecting / Background
     # collapse here because they all describe "process alive, gameplay
     # uncertain" and the supervisor's relaunch cooldown handles them.
@@ -428,7 +412,7 @@ _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
 
 # Public allow-list for cross-checking: exactly five values.
 APK_VISIBLE_STATES: frozenset[str] = frozenset(
-    {"Dead", "Launching", "Joining", "Online", "No Heartbeat"}
+    {"Dead", "Launching", "Online", "No Heartbeat"}
 )
 
 

@@ -60,16 +60,10 @@ MAX_PACKAGES_PER_PUSH = 64
 
 # Allowed states (mirrors agent.supervisor STATUS_* but kept local on purpose
 # so the bridge does not depend on supervisor imports).
-# v1.0.4: canonical 5 APK-visible states — Dead, Launching, Joining,
-# Online, No Heartbeat. Legacy supervisor vocabulary (Relaunching,
-# Reconnecting, Background, etc.) is still accepted because the bridge
-# is permissive at the wire level — the autostart mapper in
-# `monitor_autostart._SUPERVISOR_TO_PUBLIC_STATE` is what collapses
-# everything down to the public 5 before the bytes leave the device.
-# "In-Lobby" is intentionally absent everywhere now.
+# v1.0.5: canonical 4 APK-visible states — Dead, Launching, Online, No Heartbeat.
 ALLOWED_STATES = frozenset({
     "Online", "Dead", "Reopening", "Relaunching", "No Heartbeat",
-    "Launching", "Joining",
+    "Launching",
     "Unknown", "Offline", "Preparing",
     "Background", "Reconnecting", "Warning", "Failed",
     "Closed", "Launched", "Disconnected",

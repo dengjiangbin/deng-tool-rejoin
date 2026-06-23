@@ -246,14 +246,14 @@ class TestWatchdogSleepNonNegative(unittest.TestCase):
                 f"_PackageWorker._sleep: time.sleep called with negative value {s}")
 
     def test_sleep_code_clamps_to_zero(self) -> None:
-        """Inspect watchdog loop source to confirm max(0.0, ...) guard."""
+        """Inspect interruptible sleep helper to confirm max(0.0, ...) guard."""
         import inspect
         from agent.supervisor import WatchdogSupervisor
-        src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
+        src = inspect.getsource(WatchdogSupervisor._interruptible_sleep)
         self.assertIn(
             "max(0.0,",
             src,
-            "_run_watchdog_loop() sleep must use max(0.0, ...) to prevent negative sleep",
+            "_interruptible_sleep() must use max(0.0, ...) to prevent negative sleep",
         )
 
     def test_stagger_render_loop_clamps_negative_sleep(self) -> None:

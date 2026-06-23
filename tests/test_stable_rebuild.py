@@ -129,7 +129,7 @@ class TestPublicStates(unittest.TestCase):
         "Failed", "Layout", "Join Failed", "Wrong Game / Wrong Server",
     ]
     _ALLOWED_PUBLIC = {
-        "Layout", "Launching", "Joining", "Online", "Reopening", "Failed", "Dead",
+        "Layout", "Launching", "Online", "Reopening", "Failed", "Dead",
         "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
     }
 
@@ -154,9 +154,11 @@ class TestPublicStates(unittest.TestCase):
                         return ast.literal_eval(node.value)
         return {}
 
-    def test_joining_is_public_display_state(self) -> None:
+    def test_joining_maps_to_launching_in_display(self) -> None:
         smap = self._get_display_map()
-        self.assertEqual(smap.get("Joining"), "Joining")
+        if "Joining" in smap:
+            self.assertEqual(smap.get("Joining"), "Launching")
+        self.assertEqual(smap.get("Join Unconfirmed"), "Launching")
 
     def test_no_join_unconfirmed_in_public_display(self) -> None:
         smap = self._get_display_map()

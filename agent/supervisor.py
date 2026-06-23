@@ -173,15 +173,6 @@ STATUS_WRONG_GAME        = "Wrong Game / Wrong Server"
 # Richer state constants for improved UX
 STATUS_LOBBY             = "Lobby"             # App open at home/lobby, no URL join active
 STATUS_IN_SERVER         = "In Server"         # Strong evidence: game experience loaded
-STATUS_JOINING           = "Joining"            # v1.0.4: REHABILITATED — distinct
-                                                # phase emitted by WatchdogSupervisor when
-                                                # a private-server URL deep link has been
-                                                # opened but no in-game proof yet. The
-                                                # APK shows Dead → Launching (open
-                                                # package) → Joining (open private URL)
-                                                # → Online. Watchdog never emits
-                                                # Joining when no URL is configured —
-                                                # in that case Launching applies.
 STATUS_CLOSED            = "Closed"            # App cleanly not running after a session
 STATUS_JOIN_UNCONFIRMED  = "Join " + "Unconfirmed"  # App healthy but no in-game evidence yet
 # State vocabulary aligned to user-facing terminology:
@@ -574,7 +565,7 @@ class _PackageWorker(threading.Thread):
             self.has_private_url = bool(self.desired_url)
             # Launch timeout: how many seconds before forcing a re-check
             _launching_timeout = max(90, grace * 4)
-            if self.has_private_url and self.status_map.get(self.package) in {STATUS_LAUNCHING, STATUS_JOINING}:
+            if self.has_private_url and self.status_map.get(self.package) in {STATUS_LAUNCHING, "Joining"}:
                 now_launch = time.time()
                 if self.launching_since is None:
                     self.launching_since = now_launch
@@ -610,7 +601,7 @@ class _PackageWorker(threading.Thread):
                 # STATUS_JOINING is no longer set by live paths (Kaeru-style).
                 # Only STATUS_LAUNCHING is used post-relaunch.
                 current_st = self.status_map.get(self.package, "")
-                if self.launching_since is not None and current_st in {STATUS_LAUNCHING, STATUS_JOINING}:
+                if self.launching_since is not None and current_st in {STATUS_LAUNCHING, "Joining"}:
                     elapsed_since_launch = time.time() - self.launching_since
                     if elapsed_since_launch > _launching_timeout:
                         # App hasn't become healthy after 4× grace — force-check now
@@ -770,7 +761,7 @@ class _PackageWorker(threading.Thread):
                     # Promote from Launching to an appropriate healthy state.
                     # Use prev_before_check because STATUS_CHECKING is transient.
                     self.launching_since = None
-                    if prev_before_check in {STATUS_LAUNCHING, STATUS_JOINING}:
+                    if prev_before_check in {STATUS_LAUNCHING, "Joining"}:
                         # Kaeru-style: process alive = Online (stable rebuild p-9e3f2a8d1c).
                         # STATUS_JOINING is a legacy alias; live paths now use STATUS_LAUNCHING.
                         target = self._post_launch_state()
@@ -1209,6 +1200,9 @@ class WatchdogSupervisor:
     # ── Staggered launch: strict pause between package opens ────────────────
     LAUNCH_STAGGER_SECONDS: int = 30
 
+    # ── Round-robin watchdog: pause between per-package evaluations ─────────
+    PACKAGE_ROUND_ROBIN_SECONDS: int = 10
+
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
 
@@ -1250,7 +1244,7 @@ class WatchdogSupervisor:
         # Any lobby-like state from old sessions also maps to Dead.
         if initial_status:
             _legacy_to_launching = {
-                STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting",
+                STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting", "Joining",
             }
             _legacy_to_dead = {
                 "In" + "-Lobby", "Lobby",
@@ -1368,6 +1362,8 @@ class WatchdogSupervisor:
         self.stop_event.set()
 
     def _set_status(self, pkg: str, status: str) -> None:
+        if str(status or "").strip() == "Joining":
+            status = STATUS_LAUNCHING
         with self._state_lock:
             old = self.status_map.get(pkg)
             self.status_map[pkg] = status
@@ -1697,16 +1693,15 @@ class WatchdogSupervisor:
 
     # ─── State detection ─────────────────────────────────────────────────────
 
-    def _needs_joining_evaluation(self, pkg: str) -> bool:
+    def _needs_launching_evaluation(self, pkg: str) -> bool:
         """True when a package is waiting for first post-launch presence proof."""
         current = str(self.status_map.get(pkg) or "").strip()
-        prev = str(self._prev_state.get(pkg) or "").strip()
-        return current in {STATUS_JOINING, STATUS_PENDING} or prev in {STATUS_JOINING, STATUS_PENDING}
+        return current in {STATUS_LAUNCHING, STATUS_PENDING}
 
-    def _evaluate_joining_or_pending(
+    def _evaluate_launching_or_pending(
         self, pkg: str, entry: dict[str, Any]
     ) -> tuple[str, dict[str, Any]]:
-        """Joining/Pending → Checking → Online | No Heartbeat | Dead.
+        """Launching/Pending → Checking → Online | No Heartbeat | Dead.
 
         Forces an immediate cookie rescan so cloned APK shared_prefs are read
         via root before the presence API call.  Cookie/identity failures map
@@ -2173,14 +2168,7 @@ class WatchdogSupervisor:
             if success:
                 self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
                 self._set_grace(pkg, now)
-                # v1.0.4: Launching = opened app only; Joining = opened
-                # private-server URL. perform_rejoin already opens the
-                # deep link when a URL is configured, so we report
-                # Joining in that case so the APK can show the right
-                # transition. Without URL, the launch is just "app open".
-                self._set_status(
-                    pkg, STATUS_JOINING if url_configured else STATUS_LAUNCHING
-                )
+                self._set_status(pkg, STATUS_LAUNCHING)
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
@@ -2214,11 +2202,8 @@ class WatchdogSupervisor:
             )
             self._nhb_since.pop(pkg, None)
             self._nhb_cooldown_until.pop(pkg, None)
-            try:
-                android.force_stop_package(pkg)
+            if self._force_stop_target_package(pkg):
                 time.sleep(1.5)
-            except Exception:  # noqa: BLE001
-                pass
             self._set_status(pkg, STATUS_DEAD)
             if callable(render_callback):
                 try:
@@ -2353,6 +2338,39 @@ class WatchdogSupervisor:
         )
         return
 
+    def _interruptible_sleep(self, seconds: float) -> None:
+        """Sleep in 1s slices so stop_event can interrupt promptly."""
+        deadline = time.monotonic() + max(0.0, float(seconds))
+        while not self.stop_event.is_set() and time.monotonic() < deadline:
+            time.sleep(max(0.0, min(1.0, deadline - time.monotonic())))
+
+    def _force_stop_target_package(self, pkg: str) -> bool:
+        """Laser-focused ``am force-stop`` for one configured clone only."""
+        target = str(pkg or "").strip()
+        if not target or target not in self.packages:
+            return False
+        if android._is_force_stop_protected(target):
+            log_event(
+                self._logger,
+                "warning",
+                "[DENG_REJOIN_FORCE_STOP_BLOCKED]",
+                package=target,
+                reason="protected_package",
+            )
+            return False
+        try:
+            android.force_stop_package(target, self._root_info)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                self._logger,
+                "warning",
+                "[DENG_REJOIN_FORCE_STOP_FAILED]",
+                package=target,
+                error=str(exc)[:160],
+            )
+            return False
+
     # ─── Main loop ────────────────────────────────────────────────────────────
 
     def run_forever(
@@ -2408,10 +2426,9 @@ class WatchdogSupervisor:
             self._round += 1
             now = time.time()
             now_mono = time.monotonic()
-            interval = self._sup_interval()
             total = len(self.packages)
+            round_robin_sec = float(self.PACKAGE_ROUND_ROBIN_SECONDS)
 
-            # Determine if any entry has a private URL (for probe log).
             _any_url = any(
                 bool(str(effective_private_server_url(e, self.cfg) or "").strip())
                 for e in self.entries
@@ -2420,7 +2437,7 @@ class WatchdogSupervisor:
                 logger, "info", "[DENG_REJOIN_WATCHDOG_ROUND]",
                 round=self._round,
                 total_packages=total,
-                interval_sec=interval,
+                round_robin_sec=round_robin_sec,
                 private_url_configured=str(_any_url).lower(),
             )
             log_event(
@@ -2429,7 +2446,6 @@ class WatchdogSupervisor:
                 total=total,
             )
 
-            # ── Sequential per-package check ──────────────────────────────────
             checked = 0
             round_started = time.monotonic()
             for idx, pkg in enumerate(self.packages, 1):
@@ -2438,6 +2454,7 @@ class WatchdogSupervisor:
 
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = f"Checking Package {idx}/{total}"
+                _maybe_render(force=True)
                 check_started = time.monotonic()
                 try:
                     from . import safe_io as _safe_io
@@ -2462,10 +2479,11 @@ class WatchdogSupervisor:
 
                 prev = self._prev_state.get(pkg, self.status_map.get(pkg, ""))
                 error_text = ""
-                joining_eval = self._needs_joining_evaluation(pkg)
+                launching_eval = self._needs_launching_evaluation(pkg)
+                self._set_status(pkg, STATUS_CHECKING)
                 try:
-                    if joining_eval:
-                        state, detail = self._evaluate_joining_or_pending(pkg, entry)
+                    if launching_eval:
+                        state, detail = self._evaluate_launching_or_pending(pkg, entry)
                     else:
                         state, detail = self._detect_package_state(pkg, entry)
                 except Exception as exc:  # noqa: BLE001
@@ -2506,7 +2524,6 @@ class WatchdogSupervisor:
                 )
                 checked += 1
 
-                # Force-close must recover as Dead, never terminal Failed.
                 if state == STATUS_FAILED:
                     try:
                         ev = self._fast_alive_evidence(pkg)
@@ -2515,12 +2532,10 @@ class WatchdogSupervisor:
                     except Exception:  # noqa: BLE001
                         state = STATUS_DEAD
 
-                # Root scanner is authoritative: never pin Launching when the
-                # process is dead/offline or when Online evidence exists.
                 prev_pinned = self._prev_state.get(pkg)
-                pin_states = {STATUS_LAUNCHING, STATUS_JOINING, STATUS_REOPENING}
+                pin_states = {STATUS_LAUNCHING, STATUS_REOPENING}
                 if (
-                    not joining_eval
+                    not launching_eval
                     and self._in_grace(pkg, now)
                     and prev_pinned in pin_states
                     and state in pin_states
@@ -2539,7 +2554,6 @@ class WatchdogSupervisor:
                 elif state != STATUS_NO_HEARTBEAT:
                     self._nhb_since.pop(pkg, None)
 
-                # Track metric-active timestamps for RAM/runtime loops.
                 if state in _METRIC_ACTIVE_STATES:
                     self._last_online_ts[pkg] = now
                     if prev not in _METRIC_ACTIVE_STATES:
@@ -2551,29 +2565,34 @@ class WatchdogSupervisor:
                     self._online_start_ts.pop(pkg, None)
                     _maybe_render(force=True)
 
-                if state in {STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
-                    _maybe_render(force=True)
-                    continue
+                if state not in {STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
+                    if state == STATUS_NO_HEARTBEAT:
+                        self._handle_state(
+                            pkg, entry, state, prev, now, render_callback=render_callback
+                        )
+                    elif not self._in_grace(pkg, now) or state in {
+                        STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED
+                    }:
+                        self._handle_state(
+                            pkg, entry, state, prev, now, render_callback=render_callback
+                        )
 
-                # No Heartbeat kill-switch must run even during launch grace.
-                if state == STATUS_NO_HEARTBEAT:
-                    self._handle_state(
-                        pkg, entry, state, prev, now, render_callback=render_callback
-                    )
-                elif not self._in_grace(pkg, now) or state in {
-                    STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED
-                }:
-                    self._handle_state(
-                        pkg, entry, state, prev, now, render_callback=render_callback
-                    )
+                    if self.status_map.get(pkg) == STATUS_DEAD and state != STATUS_DEAD:
+                        self._handle_state(
+                            pkg, entry, STATUS_DEAD, prev, now, render_callback=render_callback
+                        )
 
-                # Dead recovery after NHB kill-switch may have force-stopped pkg.
-                if self.status_map.get(pkg) == STATUS_DEAD and state != STATUS_DEAD:
-                    self._handle_state(
-                        pkg, entry, STATUS_DEAD, prev, now, render_callback=render_callback
+                _maybe_render()
+                if idx < total and not self.stop_event.is_set():
+                    log_event(
+                        logger, "info", "[DENG_REJOIN_WATCHDOG_ROUND_ROBIN_PAUSE]",
+                        round=self._round,
+                        package=pkg,
+                        next_package_index=idx + 1,
+                        pause_sec=round_robin_sec,
                     )
+                    self._interruptible_sleep(round_robin_sec)
 
-            # ── Watchdog continuity probe ─────────────────────────────────────
             _counts = {
                 "online":       sum(1 for v in self.status_map.values() if v == STATUS_ONLINE),
                 "dead":         sum(1 for v in self.status_map.values() if v == STATUS_DEAD),
@@ -2584,7 +2603,7 @@ class WatchdogSupervisor:
                 online_packages=_counts["online"],
                 dead_packages=_counts["dead"],
                 no_heartbeat_packages=_counts["no_heartbeat"],
-                next_round_in_sec=interval,
+                next_round_robin_sec=round_robin_sec,
             )
             log_event(
                 logger, "info", "[DENG_REJOIN_WATCHDOG_ROUND_END]",
@@ -2594,21 +2613,8 @@ class WatchdogSupervisor:
                 duration_ms=int((time.monotonic() - round_started) * 1000),
             )
 
-            # ── Cycle "Checking Package" back to 1/N immediately ──────────────
-            # Without this, the label stays at "N/N" for the full sleep interval
-            # which makes the watchdog appear frozen after the last package.
-            # Resetting to "1/N" right after the round ends gives the user the
-            # visible  3/3 → 1/3  transition that confirms the loop is alive.
-            # Guard: only reset while still running — if stop_event was set
-            # inside the last detect call, preserve "N/N" for clean shutdown.
             if not self.stop_event.is_set():
                 self.checking_label = f"Checking Package 1/{total}"
-
-            # ── Sleep (interruptible, keep rendering) ─────────────────────────
-            _sleep_deadline = time.time() + interval
-            while not self.stop_event.is_set() and time.time() < _sleep_deadline:
-                _maybe_render()
-                time.sleep(max(0.0, min(1.0, _sleep_deadline - time.time())))
 
         db.insert_event("INFO", "watchdog_supervisor_stopped", "session ended by user")
         log_event(logger, "info", "watchdog_supervisor_stopped")

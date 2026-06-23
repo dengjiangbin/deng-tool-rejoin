@@ -14,7 +14,7 @@ if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
 from agent.supervisor import (
-    STATUS_JOINING,
+    STATUS_LAUNCHING,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
     WatchdogSupervisor,
@@ -52,7 +52,7 @@ def _alive_evidence() -> dict:
 
 class TestWatchdogDaemonThread(unittest.TestCase):
     def test_start_daemon_returns_immediately(self) -> None:
-        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_JOINING})
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         rounds = {"n": 0}
 
         def _slow_loop(**_kwargs) -> None:
@@ -74,7 +74,7 @@ class TestWatchdogDaemonThread(unittest.TestCase):
         sup = WatchdogSupervisor(
             [_entry(_PKG), _entry(_PKG2)],
             _cfg(),
-            initial_status={_PKG: STATUS_JOINING, _PKG2: STATUS_JOINING},
+            initial_status={_PKG: STATUS_LAUNCHING, _PKG2: STATUS_LAUNCHING},
         )
         transitions: list[str] = []
         presence = MagicMock()
@@ -106,8 +106,9 @@ class TestWatchdogDaemonThread(unittest.TestCase):
     def test_nhb_kill_switch_uses_monotonic_clock(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
         sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
-        with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
-             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+        with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch("time.sleep"):
             sup._handle_state(_PKG, _entry(), STATUS_NO_HEARTBEAT, STATUS_ONLINE, time.time())
         mock_stop.assert_called_once_with(_PKG)
         self.assertEqual(sup.status_map.get(_PKG), "Dead")
@@ -116,8 +117,9 @@ class TestWatchdogDaemonThread(unittest.TestCase):
         sup = WatchdogSupervisor([_entry()], _cfg())
         sup._grace_until[_PKG] = time.time() + 300
         sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 1)
-        with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
-             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+        with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_stop, \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch("time.sleep"):
             sup._handle_state(_PKG, _entry(), STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, time.time())
         mock_stop.assert_called_once()
 

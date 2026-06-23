@@ -5862,7 +5862,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         # ── Bootstrap watchdog daemon BEFORE staggered launch ─────────────────
         from .supervisor import (
             STATUS_FAILED as _STATUS_FAILED,
-            STATUS_JOINING as _STATUS_JOINING,
             STATUS_LAUNCHING as _STATUS_LAUNCHING,
             STATUS_ONLINE as _STATUS_ONLINE,
             STATUS_PENDING as _STATUS_PENDING,
@@ -5933,14 +5932,14 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _render_phase()
                 continue
 
-            phase[package] = "Joining"
-            _supervisor._set_status(package, _STATUS_JOINING)
+            phase[package] = "Launching"
+            _supervisor._set_status(package, _STATUS_LAUNCHING)
             launch_ok[package] = True
             launch_err[package] = ""
-            _render_phase("Joining...")
+            _render_phase("Launching...")
             _start_log.info(
                 "[DENG_REJOIN_STAGGERED_LAUNCH] package=%s index=%d/%d"
-                " launcher=%s phase=joining success=true watchdog_daemon=%s",
+                " launcher=%s phase=launching success=true watchdog_daemon=%s",
                 package,
                 index,
                 len(entries),
@@ -6089,8 +6088,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 safe_err = mask_urls_in_text(err) or "Launch failed"
                 stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             else:
-                from .supervisor import STATUS_JOINING
-                state = STATUS_JOINING
+                from .supervisor import STATUS_LAUNCHING
+                state = STATUS_LAUNCHING
                 stat_internal = "launch command sent; watchdog will verify presence"
             initial_status[pkg] = state
             table_rows.append((index, pkg, username, state))
@@ -6201,8 +6200,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             pkg = entry["package"]
             if not launch_ok.get(pkg):
                 _supervisor._set_status(pkg, _STATUS_FAILED)
-            elif _supervisor.status_map.get(pkg) not in {_STATUS_JOINING, _STATUS_ONLINE}:
-                _supervisor._set_status(pkg, _STATUS_JOINING)
+            elif _supervisor.status_map.get(pkg) not in {_STATUS_LAUNCHING, _STATUS_ONLINE}:
+                _supervisor._set_status(pkg, _STATUS_LAUNCHING)
         _live_map = _supervisor.status_map
         _start_session.mark("supervisor_begin", package_count=len(runtime_entries))
 
@@ -6224,8 +6223,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Launching":        "Launching",
             "Checking":         "Checking",
             "Pending":          "Pending",
-            "Joining":          "Joining",
-            "Join Unconfirmed": "Joining",
+            "Join Unconfirmed": "Launching",
             "Preparing":        "Preparing",
             "Clear Cache":      "Clear Cache",
             "Unknown":          "Launching",
@@ -6285,7 +6283,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
                 if disp in ("Dead", "Failed"):
                     return "N/A"
-                if disp in ("Preparing", "Clear Cache", "Launching", "Joining", "Reopening", "Checking", "Checking..."):
+                if disp in ("Preparing", "Clear Cache", "Launching", "Reopening", "Checking", "Checking..."):
                     return "0 MB"
                 cached = _usage_cache.get(pkg)
                 if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:

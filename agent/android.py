@@ -821,12 +821,42 @@ def run_android_command(
     return res
 
 
+_FORCE_STOP_PROTECTED_PACKAGES: frozenset[str] = frozenset({
+    "android",
+    "com.android.systemui",
+    "com.android.launcher",
+    "com.android.launcher3",
+    "com.termux",
+    "com.termux.boot",
+    "com.termux.api",
+})
+
+
 def force_stop_package(package: str, root_info: RootInfo | None = None) -> CommandResult:
     package = validate_package_name(package)
+    if _is_force_stop_protected(package):
+        return CommandResult(
+            ("am", "force-stop", package),
+            126,
+            "",
+            f"protected package: {package}",
+        )
     info = root_info or detect_root()
     if not info.available:
         return CommandResult(("am", "force-stop", package), 126, "", "root unavailable")
     return run_root_command(["am", "force-stop", package], root_tool=info.tool, timeout=PROCESS_TIMEOUT_SECONDS)
+
+
+def _is_force_stop_protected(package: str) -> bool:
+    """Packages that must never receive ``am force-stop`` from the watchdog."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return True
+    if pkg in _FORCE_STOP_PROTECTED_PACKAGES:
+        return True
+    if pkg.startswith("com.termux"):
+        return True
+    return False
 
 
 def get_package_pid(package: str, root_info: RootInfo | None = None) -> str:

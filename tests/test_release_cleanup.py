@@ -570,14 +570,12 @@ class TestNoHeartbeatKillSwitch(unittest.TestCase):
         sup._nhb_since[pkg] = time.monotonic() - (WatchdogSupervisor.NHB_KILL_SWITCH_SECONDS + 5)
 
         with unittest.mock.patch.object(sup, "_do_launch") as mock_launch, \
-             unittest.mock.patch("agent.supervisor.android") as mock_android, \
+             unittest.mock.patch.object(sup, "_force_stop_target_package", return_value=True) as mock_kill, \
              unittest.mock.patch("time.sleep"):
-            mock_android.force_stop_package.return_value = unittest.mock.MagicMock(ok=True)
-            mock_android.effective_private_server_url = unittest.mock.MagicMock(return_value="")
             entry = sup.entry_by_pkg[pkg]
             sup._handle_state(pkg, entry, STATUS_NO_HEARTBEAT, STATUS_NO_HEARTBEAT, now)
 
-        mock_android.force_stop_package.assert_called_once_with(pkg)
+        mock_kill.assert_called_once_with(pkg)
         mock_launch.assert_not_called()
 
     def test_nhb_kill_switch_does_not_affect_other_packages(self) -> None:
