@@ -138,14 +138,28 @@ class PresenceProfileTests(unittest.TestCase):
         self.assertEqual(STATUS_IN_GAME, STATUS_ONLINE)
         ram_check.assert_called_once()
 
-    def test_transient_presence_api_failure_returns_no_heartbeat(self) -> None:
+    def test_transient_presence_api_rate_limit_preserves_state(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_ONLINE})
+        sup._prev_state[_PKG] = STATUS_ONLINE
+        sup._last_online_ts[_PKG] = time.time()
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
+             patch.object(
+                 sup,
+                 "_fetch_presence",
+                 side_effect=__import__("agent.roblox_presence", fromlist=["RobloxRateLimitedError"]).RobloxRateLimitedError("presence"),
+             ):
+            state, detail = sup._detect_package_state(_PKG, _entry())
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertIn("preserve_state", detail["reason"])
+
+    def test_transient_presence_network_failure_returns_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
-        sup._presence_last_detail[_PKG] = {"roblox_api_status": "rate_limited"}
+        sup._presence_last_detail[_PKG] = {"roblox_api_status": "network_error"}
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertIn("presence_api_rate_limited", detail["reason"])
+        self.assertIn("presence_api_network_error", detail["reason"])
 
     def test_in_lobby_state_maps_to_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())

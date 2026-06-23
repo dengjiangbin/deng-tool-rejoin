@@ -121,6 +121,14 @@ class SafeHttpStatusError(SafeHttpError):
         self.body = body
 
 
+HTTP_TOO_MANY_REQUESTS = 429
+
+
+def is_rate_limited_status(status: int) -> bool:
+    """Return True when an HTTP status is Roblox/API rate limiting."""
+    return int(status) == HTTP_TOO_MANY_REQUESTS
+
+
 # ── curl backend ──────────────────────────────────────────────────────────────
 
 

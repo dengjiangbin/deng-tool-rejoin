@@ -131,6 +131,7 @@ class TestPublicStates(unittest.TestCase):
     _ALLOWED_PUBLIC = {
         "Layout", "Launching", "Online", "Reopening", "Failed", "Dead",
         "No Heartbeat", "Checking", "Preparing", "Clear Cache", "Pending",
+        "Suspended",
     }
 
     def _get_display_map(self):

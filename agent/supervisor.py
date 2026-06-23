@@ -186,6 +186,7 @@ STATUS_DISCONNECTED      = "Disconnected"
 #   Dead          — process not running
 # Running-but-not-in-game now maps directly to No Heartbeat.
 STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running but not actively playing
+STATUS_SUSPENDED     = "Suspended"     # Recovery circuit breaker tripped
 
 # Presence-confirmed steady states that kick off RAM/runtime metric loops.
 _METRIC_ACTIVE_STATES = frozenset({
@@ -1207,6 +1208,10 @@ class WatchdogSupervisor:
 
     # ── Blocking recovery gate: poll interval while fixing one package ───────
     RECOVERY_GATE_POLL_SECONDS: float = 5.0
+    RECOVERY_GATE_MAX_ATTEMPTS: int = 3
+
+    # ── Roblox presence API 429 shield ───────────────────────────────────────
+    PRESENCE_RATE_LIMIT_BACKOFF_SECONDS: float = 15.0
 
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
@@ -1302,6 +1307,9 @@ class WatchdogSupervisor:
         self._presence_lookup_attempt_at: dict[str, float] = {}
         self._presence_last_detail: dict[str, dict[str, Any]] = {}
         self._presence_expected_targets: dict[str, Any] = {}
+        self._presence_rate_limit_until: float = 0.0
+        self._watchdog_round_rate_limited: bool = False
+        self._recovery_gate_attempts: dict[str, int] = {}
         self._root_info = android.detect_root()
 
         for e in self.entries:
@@ -1476,6 +1484,83 @@ class WatchdogSupervisor:
         if not launched:
             return False
         return (time.monotonic() - float(launched)) < float(self.LOADING_GRACE_SECONDS)
+
+    def _note_presence_rate_limit(self) -> None:
+        """Arm the 429 safe-state shield and round-robin cooling backoff."""
+        until = time.monotonic() + float(self.PRESENCE_RATE_LIMIT_BACKOFF_SECONDS)
+        self._presence_rate_limit_until = max(self._presence_rate_limit_until, until)
+        self._watchdog_round_rate_limited = True
+
+    def _presence_rate_limit_active(self) -> bool:
+        return time.monotonic() < float(self._presence_rate_limit_until)
+
+    def _preserve_package_state_on_rate_limit(
+        self,
+        pkg: str,
+        *,
+        t0: float,
+        pres_detail: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Keep the last known good state when Roblox returns HTTP 429."""
+        preserved = str(self._prev_state.get(pkg) or self.status_map.get(pkg) or "").strip()
+        if preserved in {STATUS_CHECKING, STATUS_PENDING, ""}:
+            preserved = STATUS_ONLINE if self._last_online_ts.get(pkg) else STATUS_LAUNCHING
+        if preserved == STATUS_NO_HEARTBEAT and self._last_online_ts.get(pkg):
+            preserved = STATUS_ONLINE
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        detail = {
+            "process_running": "true",
+            "in_game": "unknown",
+            "heartbeat_ok": "unknown",
+            "warning_detected": "false",
+            "elapsed_ms": elapsed_ms,
+            "root_available": str(bool(getattr(self._root_info, "available", False))).lower(),
+            "foreground_package": "",
+            "activity": preserved,
+            "in_game_proof": "unknown",
+            "reason": "presence_api_rate_limited_preserve_state",
+        }
+        self._log_state_evidence(
+            pkg,
+            detail,
+            pres_detail or self._presence_last_detail.get(pkg, {}),
+            preserved,
+        )
+        return preserved, detail
+
+    def _deploy_gate_recovery_cycle(
+        self,
+        pkg: str,
+        entry: dict[str, Any],
+        now: float,
+        render_callback: Any = None,
+    ) -> None:
+        """Force-stop and relaunch one package during the recovery gate."""
+        logger = self._logger
+        log_event(
+            logger,
+            "info",
+            "[DENG_REJOIN_RECOVERY_GATE_CYCLE]",
+            package=pkg,
+            action="force_stop_relaunch",
+        )
+        if self._process_alive_fast(pkg):
+            if self._force_stop_target_package(pkg):
+                time.sleep(1.5)
+        self._set_status(pkg, STATUS_REOPENING)
+        self._mark_launched(pkg)
+        if callable(render_callback):
+            try:
+                render_callback()
+            except Exception:  # noqa: BLE001
+                pass
+        success = self._do_launch(pkg, entry, "recovery_gate_retry")
+        if success:
+            self._set_grace(pkg, now)
+            self._mark_launched(pkg)
+            self._set_status(pkg, STATUS_LAUNCHING)
+        else:
+            self._set_status(pkg, STATUS_DEAD)
 
     def _in_grace(self, pkg: str, now: float) -> bool:
         return now < self._grace_until.get(pkg, 0.0)
@@ -1698,7 +1783,13 @@ class WatchdogSupervisor:
                 return None
 
             detail["roblox_api_used"] = "true"
-            presence = _rp.fetch_presence_dual_verified(uid, cookie=cookie)
+            try:
+                presence = _rp.fetch_presence_dual_verified(uid, cookie=cookie)
+            except _rp.RobloxRateLimitedError:
+                detail["roblox_api_status"] = "rate_limited"
+                detail["presence_error"] = "http_429"
+                self._note_presence_rate_limit()
+                raise
             ptype = getattr(presence, "presence_type", None)
             if getattr(presence, "is_unknown", False):
                 detail["roblox_api_status"] = "network_error"
@@ -1714,10 +1805,19 @@ class WatchdogSupervisor:
         except Exception as exc:  # noqa: BLE001
             from . import safe_http as _sh
 
+            if isinstance(exc, _rp.RobloxRateLimitedError):
+                detail["roblox_api_used"] = "true"
+                detail["roblox_api_status"] = "rate_limited"
+                detail["presence_error"] = "http_429"
+                self._note_presence_rate_limit()
+                raise
             detail["roblox_api_used"] = "true" if detail.get("roblox_user_id") else "false"
             if isinstance(exc, _sh.SafeHttpStatusError) and int(getattr(exc, "status_code", 0) or 0) == 429:
                 detail["roblox_api_status"] = "rate_limited"
-            elif isinstance(exc, _sh.SafeHttpNetworkError):
+                detail["presence_error"] = "http_429"
+                self._note_presence_rate_limit()
+                raise _rp.RobloxRateLimitedError("presence_fetch") from exc
+            if isinstance(exc, _sh.SafeHttpNetworkError):
                 detail["roblox_api_status"] = "network_error"
             else:
                 err_text = str(exc).lower()
@@ -1761,7 +1861,10 @@ class WatchdogSupervisor:
             package_index=package_index,
             package_total=package_total,
             poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
+            max_attempts=self.RECOVERY_GATE_MAX_ATTEMPTS,
         )
+        attempt = 0
+        now = time.time()
         while not self.stop_event.is_set():
             self.checking_label = f"Recovering Package {package_index}/{package_total}"
             cb = render_callback or self._render_callback
@@ -1775,31 +1878,55 @@ class WatchdogSupervisor:
             self._prev_state[pkg] = state
             if state == STATUS_ONLINE:
                 self._nhb_since.pop(pkg, None)
+                self._recovery_gate_attempts.pop(pkg, None)
                 log_event(
                     logger,
                     "info",
                     "[DENG_REJOIN_RECOVERY_GATE_EXIT]",
                     package=pkg,
                     result="online",
+                    attempts=attempt,
                 )
                 break
             if state == STATUS_DEAD:
+                self._recovery_gate_attempts.pop(pkg, None)
                 log_event(
                     logger,
                     "info",
                     "[DENG_REJOIN_RECOVERY_GATE_EXIT]",
                     package=pkg,
                     result="dead",
+                    attempts=attempt,
                 )
                 break
+
+            attempt += 1
+            self._recovery_gate_attempts[pkg] = attempt
+            if attempt >= self.RECOVERY_GATE_MAX_ATTEMPTS:
+                self._set_status(pkg, STATUS_SUSPENDED)
+                self._recovery_gate_attempts.pop(pkg, None)
+                log_event(
+                    logger,
+                    "warning",
+                    "[DENG_REJOIN_RECOVERY_CIRCUIT_BREAKER]",
+                    package=pkg,
+                    attempts=attempt,
+                    result="suspended",
+                    action="release_watchdog_queue",
+                )
+                break
+
             log_event(
                 logger,
                 "info",
                 "[DENG_REJOIN_RECOVERY_GATE_POLL]",
                 package=pkg,
                 state=state,
+                attempt=attempt,
+                max_attempts=self.RECOVERY_GATE_MAX_ATTEMPTS,
                 poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
             )
+            self._deploy_gate_recovery_cycle(pkg, entry, now, render_callback=render_callback)
             self._interruptible_sleep(self.RECOVERY_GATE_POLL_SECONDS)
         else:
             log_event(
@@ -1950,6 +2077,13 @@ class WatchdogSupervisor:
             self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_DEAD)
             return STATUS_DEAD, detail
 
+        if self._presence_rate_limit_active() or self._watchdog_round_rate_limited:
+            return self._preserve_package_state_on_rate_limit(
+                pkg,
+                t0=t0,
+                pres_detail=self._presence_last_detail.get(pkg, {}),
+            )
+
         in_game = False
         presence_offline = False
         presence_unknown = False
@@ -1967,8 +2101,16 @@ class WatchdogSupervisor:
                     presence_offline = True
                 elif getattr(presence, "is_unknown", False):
                     presence_unknown = True
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            from . import roblox_presence as _rp
+
+            if isinstance(exc, _rp.RobloxRateLimitedError):
+                self._note_presence_rate_limit()
+                return self._preserve_package_state_on_rate_limit(
+                    pkg,
+                    t0=t0,
+                    pres_detail=self._presence_last_detail.get(pkg, {}),
+                )
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         last_online = self._last_online_ts.get(pkg, 0.0)
@@ -2054,7 +2196,6 @@ class WatchdogSupervisor:
 
         if process_running and presence is None and api_status in {
             "failed",
-            "rate_limited",
             "network_error",
             "timeout",
             "skipped",
@@ -2592,6 +2733,7 @@ class WatchdogSupervisor:
             now_mono = time.monotonic()
             total = len(self.packages)
             round_robin_sec = float(self.PACKAGE_ROUND_ROBIN_SECONDS)
+            self._watchdog_round_rate_limited = False
 
             _any_url = any(
                 bool(str(effective_private_server_url(e, self.cfg) or "").strip())
@@ -2615,6 +2757,14 @@ class WatchdogSupervisor:
             for idx, pkg in enumerate(self.packages, 1):
                 if self.stop_event.is_set():
                     break
+
+                if str(self.status_map.get(pkg) or "").strip() == STATUS_SUSPENDED:
+                    log_event(
+                        logger, "info", "[DENG_REJOIN_WATCHDOG_SKIP_SUSPENDED]",
+                        round=self._round,
+                        package=pkg,
+                    )
+                    continue
 
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = f"Checking Package {idx}/{total}"
@@ -2798,6 +2948,16 @@ class WatchdogSupervisor:
 
             if not self.stop_event.is_set():
                 self.checking_label = f"Checking Package 1/{total}"
+
+            if self._watchdog_round_rate_limited and not self.stop_event.is_set():
+                log_event(
+                    logger,
+                    "info",
+                    "[DENG_REJOIN_PRESENCE_RATE_LIMIT_BACKOFF]",
+                    backoff_sec=self.PRESENCE_RATE_LIMIT_BACKOFF_SECONDS,
+                    until=round(self._presence_rate_limit_until, 3),
+                )
+                self._interruptible_sleep(self.PRESENCE_RATE_LIMIT_BACKOFF_SECONDS)
 
         db.insert_event("INFO", "watchdog_supervisor_stopped", "session ended by user")
         log_event(logger, "info", "watchdog_supervisor_stopped")

@@ -61,9 +61,14 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from . import root_access, safe_http
 from .config import validate_package_name, validate_roblosecurity_cookie
+from .safe_http import is_rate_limited_status
 from .url_utils import RobloxExpectedTarget
 
 _log = logging.getLogger("deng.rejoin.roblox_presence")
+
+
+class RobloxRateLimitedError(Exception):
+    """Raised when Roblox returns HTTP 429 Too Many Requests."""
 
 # Public endpoints — both accept anonymous POST with a JSON body.
 _USERNAME_LOOKUP_URL = "https://users.roblox.com/v1/usernames/users"
@@ -224,9 +229,9 @@ def _post_json(
                 status, resp_headers, payload = _roblox_post_once(
                     url, body, headers=retry_headers, timeout=timeout,
                 )
-        if status == 429:
+        if is_rate_limited_status(status):
             _log.debug("presence POST rate limited: %s", url)
-            return None
+            raise RobloxRateLimitedError(url)
         if status >= 400:
             _log.debug("presence POST HTTP %s: %s", status, url)
             return None
@@ -234,6 +239,8 @@ def _post_json(
     except safe_http.SafeHttpNetworkError as exc:
         _log.debug("presence POST network error: %s", exc)
         return None
+    except RobloxRateLimitedError:
+        raise
     except safe_http.SafeHttpError as exc:
         _log.debug("presence POST safe_http error: %s", exc)
         return None
@@ -389,9 +396,12 @@ def fetch_presence(
     BATCH = 100
     for i in range(0, len(fresh), BATCH):
         batch = fresh[i:i + BATCH]
-        payload = _post_json(
-            _PRESENCE_URL, {"userIds": batch}, cookie=cookie,
-        )
+        try:
+            payload = _post_json(
+                _PRESENCE_URL, {"userIds": batch}, cookie=cookie,
+            )
+        except RobloxRateLimitedError:
+            raise
         seen_in_batch: set[int] = set()
         if isinstance(payload, dict):
             rows = payload.get("userPresences")
