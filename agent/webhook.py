@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,9 +19,11 @@ from typing import Any
 
 from .url_utils import mask_launch_url
 from . import safe_http
+from .runtime_format import format_runtime_compact
 
-WEBHOOK_MODES = {"new_message", "edit_message"}
-MIN_WEBHOOK_INTERVAL_SECONDS = 30
+WEBHOOK_MODES = {"edit", "new_post", "none"}
+MIN_WEBHOOK_INTERVAL_MINUTES = 5
+MAX_WEBHOOK_INTERVAL_MINUTES = 1_440
 MASK = "***MASKED***"
 
 # ─── Discord embed color constants ────────────────────────────────────────────
@@ -62,18 +65,20 @@ def mask_webhook_url(url: str | None) -> str:
     return f"{parsed.scheme or 'https'}://{host}/api/webhooks/{MASK}"
 
 
-def validate_webhook_interval(seconds: int) -> int:
+def validate_webhook_interval(minutes: int) -> int:
     try:
-        value = int(seconds)
+        if isinstance(minutes, str) and not minutes.strip().isdigit():
+            raise ValueError
+        value = int(minutes)
     except (TypeError, ValueError) as exc:
-        raise WebhookError("Webhook interval must be a number") from exc
-    if value < MIN_WEBHOOK_INTERVAL_SECONDS:
-        raise WebhookError("Webhook interval must be at least 30 seconds to avoid spam/rate limits")
+        raise WebhookError("Webhook interval must be whole minutes") from exc
+    if not MIN_WEBHOOK_INTERVAL_MINUTES <= value <= MAX_WEBHOOK_INTERVAL_MINUTES:
+        raise WebhookError("Webhook interval must be 5 to 1440 minutes")
     return value
 
 
 def should_send_webhook(config_data: dict[str, Any], *, now: float | None = None) -> bool:
-    if not config_data.get("webhook_enabled"):
+    if str(config_data.get("webhook_mode") or "none") == "none":
         return False
     now = time.time() if now is None else now
     last = config_data.get("webhook_last_sent_at") or 0
@@ -81,8 +86,8 @@ def should_send_webhook(config_data: dict[str, Any], *, now: float | None = None
         last_value = float(last)
     except (TypeError, ValueError):
         last_value = 0.0
-    interval = validate_webhook_interval(config_data.get("webhook_interval_seconds", 300))
-    return now - last_value >= interval
+    interval = validate_webhook_interval(config_data.get("webhook_interval_minutes", 5))
+    return now - last_value >= interval * 60
 
 
 # ─── Embed builder helpers ────────────────────────────────────────────────────
@@ -200,12 +205,19 @@ def build_status_embed_payload(
 
     # Per-app application details
     detail_lines: list[str] = []
+    snapshot_by_package = {str(row.get("package") or ""): row for row in (supervisor_snapshot or [])}
     for e in entries:
         stats = app_stats.get(e["package"], {})
+        snap = snapshot_by_package.get(e["package"], {})
         indicator = "🟢" if stats.get("online") else "🔴"
-        label = (e["username"] or "").strip() or "Unknown"
+        label = str(snap.get("username") or e["username"] or e["package"]).strip()
         detail_lines.append(f"{indicator} {label}")
         sub: list[str] = []
+        if snap.get("online_since") and stats.get("online"):
+            try:
+                sub.append("\u23f1\ufe0f " + format_runtime_compact(time.time() - float(snap["online_since"])))
+            except (TypeError, ValueError):
+                pass
         uptime = _format_uptime(stats.get("uptime_start"))
         if uptime:
             sub.append(f"⏱️ {uptime}")
@@ -416,3 +428,106 @@ def send_webhook_update(
             return 200 <= response.status < 300, f"discord webhook HTTP {response.status}", message_id
     except urllib.error.URLError as exc:
         return False, f"webhook failed: {exc}", None
+
+
+def _discord_json_request(url: str, payload: dict[str, Any], method: str) -> tuple[bool, str, str | None]:
+    """Issue one bounded Discord request; HTTP failures are returned, never raised."""
+    body = json.dumps(payload).encode("utf-8")
+    try:
+        if method == "POST":
+            status, _headers, response = safe_http.post_with_response(url, body, timeout=10)
+        elif safe_http._http_backend() == "curl":  # curl keeps Termux TLS outside Python.
+            headers = safe_http._build_curl_header_args({"Content-Type": "application/json"})
+            status, _headers, response = safe_http._run_curl_with_headers(
+                ["-X", method, "--data-binary", "@-"] + headers + [url], stdin_bytes=body, timeout=10,
+            )
+        else:
+            request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method=method)
+            try:
+                with urllib.request.urlopen(request, timeout=10) as result:  # noqa: S310 - validated webhook URL
+                    status, response = int(result.status), result.read()
+            except urllib.error.HTTPError as exc:
+                status, response = int(exc.code), exc.read()
+    except Exception as exc:  # network errors must not affect the watchdog
+        return False, f"webhook request failed: {type(exc).__name__}", None
+    if not 200 <= status < 300:
+        return False, f"webhook HTTP {status}", None
+    try:
+        message_id = str(json.loads(response.decode("utf-8", errors="replace")).get("id") or "") or None
+    except (ValueError, TypeError):
+        message_id = None
+    return True, f"webhook HTTP {status}", message_id
+
+
+def send_periodic_status(
+    config_data: dict[str, Any], *, supervisor_snapshot: list[dict[str, Any]], app_stats: dict[str, Any]
+) -> tuple[bool, str]:
+    """Send/update one monitor embed according to the configured user mode."""
+    mode = str(config_data.get("webhook_mode") or "none")
+    if mode == "none":
+        return False, "webhook disabled"
+    url = validate_webhook_url(config_data.get("webhook_url"))
+    payload = build_status_embed_payload(config_data, event="monitor", app_stats=app_stats, supervisor_snapshot=supervisor_snapshot)
+    if mode == "edit" and config_data.get("webhook_last_message_id"):
+        edit_url = f"{url.rstrip('/')}/messages/{config_data['webhook_last_message_id']}?wait=true"
+        ok, message, _message_id = _discord_json_request(edit_url, payload, "PATCH")
+        if ok:
+            config_data["webhook_last_sent_at"] = time.time()
+            return True, "edited monitor message"
+    post_url = url + ("&" if "?" in url else "?") + "wait=true"
+    ok, message, message_id = _discord_json_request(post_url, payload, "POST")
+    if ok:
+        config_data["webhook_last_sent_at"] = time.time()
+        if mode == "edit" and message_id:
+            config_data["webhook_last_message_id"] = message_id
+    return ok, message
+
+
+class WebhookStatusReporter:
+    """Daemon reporter started only by Start; it never controls package state."""
+
+    def __init__(self, config_data: dict[str, Any], supervisor: Any, entries: list[dict[str, Any]], save_callback: Any) -> None:
+        self.config_data, self.supervisor, self.entries, self.save_callback = config_data, supervisor, entries, save_callback
+        self.stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if str(self.config_data.get("webhook_mode") or "none") == "none":
+            return
+        self.thread = threading.Thread(target=self._run, name="deng-webhook-status", daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        if self.thread:
+            self.thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                from . import android
+                snapshot = self.supervisor.get_status_snapshot(self.entries)
+                mem = android.get_memory_info()
+                self.config_data["_mem_info"] = mem
+                self.config_data["_cpu_pct"] = android.get_cpu_usage()
+                self.config_data["_temp_c"] = android.get_temperature()
+                app_stats = {
+                    str(row.get("package") or ""): {
+                        "online": row.get("status") == "Online",
+                        "memory_mb": row.get("ram_mb"),
+                        "cpu_pct": self.config_data["_cpu_pct"],
+                    }
+                    for row in snapshot
+                }
+                ok, message = send_periodic_status(self.config_data, supervisor_snapshot=snapshot, app_stats=app_stats)
+                if ok:
+                    self.save_callback(self.config_data)
+                else:
+                    import logging
+                    logging.getLogger(__name__).warning("webhook monitor update skipped: %s", message)
+            except Exception as exc:  # reporting is strictly best-effort
+                import logging
+                logging.getLogger(__name__).warning("webhook monitor update failed: %s", type(exc).__name__)
+            interval = validate_webhook_interval(self.config_data.get("webhook_interval_minutes", 5)) * 60
+            if self.stop_event.wait(interval):
+                return

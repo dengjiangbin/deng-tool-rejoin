@@ -120,8 +120,9 @@ def default_config() -> dict[str, Any]:
         "launch_url": "",
         "webhook_enabled": False,
         "webhook_url": "",
-        "webhook_mode": "new_message",
+        "webhook_mode": "none",
         "webhook_message_id": "",
+        "webhook_interval_minutes": 5,
         "webhook_interval_seconds": 300,
         "webhook_snapshot_enabled": False,
         "webhook_send_snapshot": False,
@@ -703,9 +704,12 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         merged["webhook_snapshot_enabled"] = False
         merged["webhook_send_snapshot"] = False
 
-    webhook_mode = str(merged.get("webhook_mode", "new_message")).strip().lower()
+    webhook_mode = str(merged.get("webhook_mode", "none")).strip().lower()
+    webhook_mode = {"new_message": "new_post", "edit_message": "edit"}.get(webhook_mode, webhook_mode)
     if webhook_mode not in WEBHOOK_MODES:
-        raise ConfigError("webhook_mode must be new_message or edit_message")
+        raise ConfigError("webhook_mode must be edit, new_post, or none")
+    if not merged["webhook_enabled"]:
+        webhook_mode = "none"
     merged["webhook_mode"] = webhook_mode
     merged["webhook_url"] = str(merged.get("webhook_url") or "").strip()
     if merged["webhook_enabled"]:
@@ -716,16 +720,21 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["webhook_message_id"] = str(merged.get("webhook_message_id") or "").strip()
     merged["webhook_last_message_id"] = str(merged.get("webhook_last_message_id") or "").strip()
     merged["webhook_last_sent_at"] = merged.get("webhook_last_sent_at") or 0
-    if merged["webhook_enabled"]:
+    raw_minutes = merged.get("webhook_interval_minutes")
+    if raw_minutes is None:
+        raw_minutes = max(5, int(merged.get("webhook_interval_seconds", 300)) // 60)
+    if webhook_mode != "none":
         try:
-            merged["webhook_interval_seconds"] = validate_webhook_interval(merged.get("webhook_interval_seconds", 300))
+            merged["webhook_interval_minutes"] = validate_webhook_interval(raw_minutes)
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc
     else:
-        try:
-            merged["webhook_interval_seconds"] = int(merged.get("webhook_interval_seconds", 300))
-        except (TypeError, ValueError):
-            merged["webhook_interval_seconds"] = 300
+        merged["webhook_interval_minutes"] = 5
+        merged["webhook_url"] = ""
+        merged["webhook_message_id"] = ""
+        merged["webhook_last_message_id"] = ""
+    merged["webhook_enabled"] = webhook_mode != "none"
+    merged["webhook_interval_seconds"] = merged["webhook_interval_minutes"] * 60
 
     auto_resize_mode = str(merged.get("auto_resize_mode", "off")).strip().lower()
     if auto_resize_mode not in AUTO_RESIZE_MODES:

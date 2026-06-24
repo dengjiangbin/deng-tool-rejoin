@@ -102,6 +102,7 @@ _license_session_validated = False
 # Set True when the user manually entered a license key and verification succeeded.
 _license_manual_verification_success = False
 from . import snapshot, webhook, window_layout
+from .runtime_format import format_runtime_compact
 from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_urls_in_text, validate_launch_url
 
 COMMANDS = {
@@ -2547,29 +2548,29 @@ def _setup_launch_link(draft: dict[str, Any], *, allow_back: bool = True) -> Non
 
 def _setup_webhook(draft: dict[str, Any]) -> None:
     print()
-    print("Discord Webhook Setup")
-    print("DENG can send safe status updates to Discord. The webhook URL is stored locally and masked in screens/logs.")
-    print("1. No")
-    print("2. Yes, send new messages")
-    print("3. Yes, edit one existing status message when possible")
+    print("Webhook")
+    print("1. Edit")
+    print("2. New Post")
+    print("3. None")
     choice = _prompt("Choose webhook mode", "1").strip()
-    if choice == "1":
+    if choice == "3":
         draft["webhook_enabled"] = False
         draft["webhook_snapshot_enabled"] = False
         draft["webhook_send_snapshot"] = False
-        draft["webhook_mode"] = "new_message"
+        draft["webhook_mode"] = "none"
+        draft["webhook_url"] = ""
+        draft["webhook_last_message_id"] = ""
         return
     draft["webhook_enabled"] = True
-    draft["webhook_mode"] = "new_message" if choice == "2" else "edit_message"
+    draft["webhook_mode"] = "edit" if choice == "1" else "new_post"
+    _setup_webhook_interval(draft)
     while True:
-        value = _prompt("Discord webhook URL", str(draft.get("webhook_url") or "")).strip()
+        value = _prompt("Enter Discord webhook URL", "").strip()
         try:
             draft["webhook_url"] = webhook.validate_webhook_url(value)
             break
         except ValueError as exc:
             print(f"Webhook URL is not valid: {exc}")
-    if draft["webhook_mode"] == "edit_message":
-        draft["webhook_message_id"] = _prompt("Existing message ID (optional)", str(draft.get("webhook_message_id") or ""))
 
 
 def _setup_snapshot(draft: dict[str, Any]) -> None:
@@ -2585,22 +2586,11 @@ def _setup_snapshot(draft: dict[str, Any]) -> None:
 
 def _setup_webhook_interval(draft: dict[str, Any]) -> None:
     print()
-    print("Webhook Info Interval")
-    print("Short intervals can spam Discord or hit rate limits. Minimum is 30 seconds.")
-    choices = {"1": 30, "2": 60, "3": 300, "4": 600}
-    print("1. 30 seconds")
-    print("2. 1 minute")
-    print("3. 5 minutes")
-    print("4. 10 minutes")
-    print("5. Custom")
-    choice = _prompt("Choose interval", "3").strip()
-    if choice in choices:
-        draft["webhook_interval_seconds"] = choices[choice]
-        return
     while True:
-        value = _prompt_int("Webhook interval seconds", int(draft.get("webhook_interval_seconds", 300)), 30)
+        value = _prompt("Enter webhook interval in minutes (5-1440)", str(draft.get("webhook_interval_minutes", 5))).strip()
         try:
-            draft["webhook_interval_seconds"] = webhook.validate_webhook_interval(value)
+            draft["webhook_interval_minutes"] = webhook.validate_webhook_interval(value)
+            draft["webhook_interval_seconds"] = draft["webhook_interval_minutes"] * 60
             return
         except ValueError as exc:
             print(exc)
@@ -3625,15 +3615,14 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         print(termux_ui.separator("-"))
         url = draft.get("webhook_url", "") or ""
         masked_url = webhook.mask_webhook_url(url) if url else "Not Set"
-        interval = draft.get("webhook_interval_seconds", 300)
-        mode = draft.get("webhook_mode", "new_message")
-        mode_label = "Edit Message" if mode == "edit_message" else "New Message"
+        interval = draft.get("webhook_interval_minutes", 5)
+        mode = draft.get("webhook_mode", "none")
+        mode_label = {"edit": "Edit", "new_post": "New Post", "none": "None"}.get(mode, "None")
         snap = draft.get("webhook_snapshot_enabled", False)
         snap_enabled = bool(url) and snap
         print("Current Webhook:")
-        print(f"  URL: {masked_url}")
-        print(f"  Interval: {interval} Seconds")
-        print(f"  Mode: {mode_label}")
+        print(f"  Webhook: {mode_label + ' every ' + str(interval) + 'm' if mode != 'none' else 'None'}")
+        print(f"  Webhook URL: {'configured' if url and mode != 'none' else 'not configured'}")
         print(f"  Snapshot: {'Enabled' if snap_enabled else 'Disabled'}")
         print()
         print("1. Webhook URL")
@@ -3701,25 +3690,26 @@ def _config_webhook_mode(draft: dict[str, Any]) -> None:
     """Set the webhook operating mode."""
     print()
     print("Webhook Mode")
-    print("1. Off")
-    print("2. Status Monitor (New Messages)")
-    print("3. Alert Only (New Messages)")
-    print("4. Status + Alerts (Edit Message)")
-    current_enabled = draft.get("webhook_enabled", False)
-    current_mode = draft.get("webhook_mode", "new_message")
-    default = "1" if not current_enabled else ("4" if current_mode == "edit_message" else "2")
+    print("1. Edit")
+    print("2. New Post")
+    print("3. None")
+    current_mode = draft.get("webhook_mode", "none")
+    default = {"edit": "1", "new_post": "2", "none": "3"}.get(current_mode, "3")
     _wmc = safe_io.safe_prompt(f"Choose [{default}]: ", default=default)
     choice = (_wmc or default).strip() or default
-    if choice == "1":
+    if choice == "3":
         draft["webhook_enabled"] = False
         draft["webhook_snapshot_enabled"] = False
         draft["webhook_send_snapshot"] = False
-    elif choice in {"2", "3"}:
+        draft["webhook_mode"] = "none"
+        draft["webhook_url"] = ""
+        draft["webhook_last_message_id"] = ""
+    elif choice == "2":
         draft["webhook_enabled"] = True
-        draft["webhook_mode"] = "new_message"
-    elif choice == "4":
+        draft["webhook_mode"] = "new_post"
+    elif choice == "1":
         draft["webhook_enabled"] = True
-        draft["webhook_mode"] = "edit_message"
+        draft["webhook_mode"] = "edit"
     else:
         print("Unknown choice. Keeping current mode.")
 
@@ -3848,7 +3838,7 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print("You will set:")
     print("  1. Roblox package / clone app (pick from detection, or manual fallback)")
     print("  2. Private URL")
-    print("  3. Save and start")
+    print("  3. Webhook (optional)")
     print()
     print("Package detection:")
     print("  The tool scans installed Roblox apps against safe hints. Pick from the table.")
@@ -3868,6 +3858,8 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     draft["screen_mode"] = DEFAULT_SCREEN_MODE
     print("\nStep 2 of 2: Private URL")
     _setup_launch_link(draft, allow_back=False)
+    print("\nWebhook (optional)")
+    _setup_webhook(draft)
     draft["first_setup_completed"] = True
     try:
         saved = save_config(draft)
@@ -3909,6 +3901,8 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
                 draft = _config_menu_package(draft)
             elif choice == "2":
                 draft = _config_menu_launch_link(draft)
+            elif choice == "3":
+                draft = _config_menu_webhook(draft)
             else:
                 termux_ui.print_invalid_option()
                 safe_io.press_enter()
@@ -5421,21 +5415,6 @@ def cmd_package_key(args: argparse.Namespace) -> int:
     return 0
 
 
-def format_runtime_compact(seconds: float) -> str:
-    """Render the runtime column with its largest unit and one smaller unit."""
-    total = max(0, int(seconds))
-    days, remainder = divmod(total, 86_400)
-    if days:
-        return f"{days}D {remainder // 3_600}H"
-    hours, remainder = divmod(total, 3_600)
-    if hours:
-        return f"{hours}H {remainder // 60}m"
-    minutes, remainder = divmod(total, 60)
-    if minutes:
-        return f"{minutes}m {remainder}s"
-    return f"{total}s"
-
-
 def cmd_start(args: argparse.Namespace) -> int:
     use_color = not args.no_color
     _start_lock: LockManager | None = None
@@ -6385,6 +6364,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             pass
 
         _supervisor.set_render_callback(_live_dashboard)
+        # The reporter is deliberately separate from the watchdog: it starts
+        # only after Start reaches live monitoring and cannot alter package state.
+        _webhook_reporter = webhook.WebhookStatusReporter(cfg, _supervisor, entries, save_config)
+        _webhook_reporter.start()
         signal.signal(signal.SIGTERM, _supervisor._handle_stop)
         signal.signal(signal.SIGINT, _supervisor._handle_stop)
         _allowed_stop_sources = {"sigterm", "sigint", "ctrl_c", "user_exit", "fatal_error"}
@@ -6419,6 +6402,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             _transition_lifecycle("STOPPED", "fatal_error")
             _start_session.finish("fatal_error")
             return _report_start_dashboard_crash(exc, session=_start_session)
+        finally:
+            _webhook_reporter.stop()
 
         _stop_source = str(getattr(_supervisor, "stop_source", "") or "").strip()
         if _stop_source in _allowed_stop_sources:

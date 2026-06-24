@@ -19,9 +19,9 @@ class WebhookTests(unittest.TestCase):
             validate_webhook_url("https://example.com/api/webhooks/123/token")
 
     def test_interval_minimum(self):
-        self.assertEqual(validate_webhook_interval(30), 30)
+        self.assertEqual(validate_webhook_interval(5), 5)
         with self.assertRaises(WebhookError):
-            validate_webhook_interval(29)
+            validate_webhook_interval(4)
 
 
 class WebhookStatusEmbedTests(unittest.TestCase):
@@ -97,4 +97,3 @@ class WebhookStatusEmbedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
