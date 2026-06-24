@@ -11,7 +11,7 @@ Slash commands
 
 Button handlers
 ---------------
-  Generate Key   (Discord link button -> https://tool.deng.my.id)
+  Generate Key   (Discord link button -> https://aio.deng.my.id/license)
   Reset HWID     (custom_id = "license_panel:reset_hwid")
   Redeem Key     (custom_id = "license_panel:redeem")
   Select Version (custom_id = "license_panel:select_version")
@@ -881,7 +881,7 @@ class PanelView(discord.ui.View):
             style=discord.ButtonStyle.link,
             label="Generate Key",
             emoji="🔑",
-            url="https://tool.deng.my.id",
+            url="https://aio.deng.my.id/license",
             row=0,
         )
         existing = [child for child in self.children if getattr(child, "label", "") != "Generate Key"]

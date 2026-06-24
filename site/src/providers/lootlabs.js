@@ -83,7 +83,7 @@ function getLootLabsEncryptUrl() {
 }
 
 function getPublicUrl() {
-  return cleanEnvValue('TOOL_SITE_PUBLIC_URL', 'https://tool.deng.my.id').replace(/\/+$/, '');
+  return cleanEnvValue('TOOL_SITE_PUBLIC_URL', 'https://aio.deng.my.id').replace(/\/+$/, '');
 }
 
 /** True when LootLabs Redirect API can be used. */

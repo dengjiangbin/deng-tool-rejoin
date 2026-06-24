@@ -22,7 +22,7 @@ const { formatWibTimestamp, licenseExportFilename } = require('./licenseFormat')
 const linkvertise = require('./providers/linkvertise');
 const lootlabs = require('./providers/lootlabs');
 const { signChallenge, verifyChallenge, isStateSecretConfigured } = require('./crypto');
-const { canonicalPublicUrl, internalApiBaseUrl, requestHost } = require('./publicDomain');
+const { canonicalPublicUrl, requestHost } = require('./publicDomain');
 const { buildClearSessionCookieOptions } = require('./sessionCookieConfig');
 
 const router = express.Router();
@@ -34,13 +34,13 @@ const DEFAULT_PROVIDER_CONFIG = {
     // callback. Verification happens server-side via the Anti-Bypass API.
     enabled: 'false',
     monetizedUrl: 'https://link-hub.net/5914830/XEpUhZ8TdtyV',
-    completeUrl: 'https://tool.deng.my.id/unlock/linkvertise/complete',
+    completeUrl: 'https://aio.deng.my.id/unlock/linkvertise/complete',
     publisherId: '5914830',
   },
   lootlabs: {
     enabled: 'true',
     monetizedUrl: 'https://lootdest.org/s?TqZQAW38',
-    completeUrl: 'https://tool.deng.my.id/unlock/lootlabs/complete',
+    completeUrl: 'https://aio.deng.my.id/unlock/lootlabs/complete',
   },
 };
 
@@ -350,8 +350,17 @@ function safeFlash(req, key, value) {
 
 function tokenizedCompleteUrl(provider, returnToken) {
   const cfg = getProviderConfig(provider);
-  const base = cfg?.completeUrl || `${internalApiBaseUrl()}/unlock/${provider}/complete`;
-  const url = new URL(base);
+  const fallback = `${publicUrl()}/unlock/${provider}/complete`;
+  const configured = cfg?.completeUrl || fallback;
+  const url = new URL(configured);
+  // A previous deployment could leave a legacy completion URL in the process
+  // environment. Completion links are shown to users/providers, so migrate
+  // that host at the boundary rather than leaking it into a new session.
+  if (url.hostname === 'tool.deng.my.id') {
+    const canonical = new URL(publicUrl());
+    url.protocol = canonical.protocol;
+    url.host = canonical.host;
+  }
   url.searchParams.set('t', returnToken);
   return url.toString();
 }
@@ -949,7 +958,7 @@ async function handleProvider(req, res) {
       const signedState = signChallenge(workingRow.id, 'lootlabs', Date.now() + ttlMs);
       const callbackUrl = lootlabs.buildLootLabsCallbackUrl({
         signedState,
-        publicUrl: internalApiBaseUrl(),
+        publicUrl: publicUrl(),
       });
 
       const requestId = require('crypto').randomBytes(6).toString('hex');

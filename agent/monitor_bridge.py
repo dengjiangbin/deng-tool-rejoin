@@ -8,7 +8,7 @@ payload of any sensitive fields, and POSTs it to the DENG Tool backend.
 Activation
 ----------
 * Disabled by default. Enable by setting env var ``DENG_MONITOR_BRIDGE_ENABLED=1``.
-* Requires ``DENG_MONITOR_BRIDGE_URL`` (defaults to ``https://tool.deng.my.id``).
+* Requires ``DENG_MONITOR_BRIDGE_URL`` (defaults to ``https://aio.deng.my.id``).
 * Requires a bridge token issued by the backend after license verification,
   passed via ``DENG_MONITOR_BRIDGE_TOKEN`` or the constructor.
 
@@ -43,7 +43,7 @@ from typing import Any, Callable
 logger = logging.getLogger("deng.monitor_bridge")
 
 # ── Defaults / env tunables ─────────────────────────────────────────────────
-DEFAULT_BRIDGE_URL = "https://tool.deng.my.id"
+DEFAULT_BRIDGE_URL = "https://aio.deng.my.id"
 DEFAULT_PUSH_INTERVAL_SECONDS = 2.0
 DEFAULT_SNAPSHOT_INTERVAL_SECONDS = 30
 MIN_BACKOFF_SECONDS = 5.0

@@ -157,6 +157,7 @@
       font-weight:700;
       font-family:var(--font);
       cursor:pointer;
+      text-decoration:none;
       position:relative;
       z-index:1;
       pointer-events:auto;
@@ -3598,8 +3599,9 @@
     <div class="sidebar-divider" aria-hidden="true"></div>
     <%- include('partials/deng-sidebar-nav', { sidebarNavMode: 'tracker' }) %>
     <nav class="inventory-main-nav inventory-main-nav--mobile" data-mobile-tracker-tabs aria-label="Main sections">
+      <button type="button" class="inventory-main-nav__tab" data-inventory-section="dashboard">Daily Report</button>
       <button type="button" class="inventory-main-nav__tab is-active" data-inventory-section="accounts">Live Tracker</button>
-      <button type="button" class="inventory-main-nav__tab" data-inventory-section="dashboard">Dashboard</button>
+      <a class="inventory-main-nav__tab" href="/license">My License</a>
     </nav>
     </div>
     <div class="inventory-sidebar__spacer" aria-hidden="true"></div>

@@ -9,7 +9,7 @@ Android monitoring companion for DENG Tool: Rejoin.
   upgrade in-place)*
 * **Min SDK:** 26 (Android 8.0+)
 * **Target SDK:** 34
-* **Backend:** `https://tool.deng.my.id` (override at build time, see below)
+* **Backend:** `https://aio.deng.my.id` (override at build time, see below)
 
 > **Note on versioning.** This APK has its own Android release version
 > (`versionName` in `app/build.gradle.kts`). That version is **independent**

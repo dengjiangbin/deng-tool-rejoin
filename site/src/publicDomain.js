@@ -153,8 +153,9 @@ function isCanonicalPublicRequest(req) {
 }
 
 function oauthReturnPublicBase(req) {
-  if (isCanonicalPublicRequest(req)) return canonicalPublicUrl();
-  if (isLegacyPublicHost(requestHost(req))) return internalApiBaseUrl();
+  // OAuth state is returned to a browser, never to an internal client.  A
+  // visitor who starts from a legacy bookmark must complete on the canonical
+  // public host so cookies and subsequent navigation stay on aio.
   return canonicalPublicUrl();
 }
 

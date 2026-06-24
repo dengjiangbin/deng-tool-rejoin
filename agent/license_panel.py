@@ -57,7 +57,7 @@ BUTTON_REDEEM     = "license_panel:redeem"
 BUTTON_KEY_STATS  = "license_panel:key_stats"
 BUTTON_SELECT_VERSION = "license_panel:select_version"
 
-PANEL_LOGO_URL = "https://tool.deng.my.id/public/img/deng-logo.png"
+PANEL_LOGO_URL = "https://aio.deng.my.id/public/img/deng-logo.png"
 
 # ── Slash command names ────────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ def build_panel_embed() -> dict[str, Any]:
     ─────────
     • Title       : "DENG Tool: Rejoin Panel"
     • Description : compact mobile-friendly blockquote button guide
-    • Footer      : "DENG Tool • https://tool.deng.my.id • Secure & Automated"
+    • Footer      : "DENG Tool • https://aio.deng.my.id • Secure & Automated"
     """
     return {
         "title": "DENG Tool: Rejoin Panel",
@@ -108,7 +108,7 @@ def build_panel_embed() -> dict[str, Any]:
             "> \U0001f4e6 Select Version\n"
             "> Choose which package version to install."
         ),
-        "footer": {"text": "DENG Tool \u2022 https://tool.deng.my.id \u2022 Secure & Automated"},
+        "footer": {"text": "DENG Tool \u2022 https://aio.deng.my.id \u2022 Secure & Automated"},
         "thumbnail": {"url": PANEL_LOGO_URL},
     }
 
@@ -139,7 +139,7 @@ def build_panel_buttons() -> list[dict[str, Any]]:
                     "type": 2,
                     "style": 5,
                     "label": "Generate Key",
-                    "url": "https://tool.deng.my.id",
+                    "url": "https://aio.deng.my.id/license",
                     "emoji": {"name": "\U0001f511"},
                 },
                 {
