@@ -625,7 +625,34 @@ def _capture_webhook_debug() -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
         return mask(data) if isinstance(data, dict) else {"available": False}
     except (OSError, ValueError, TypeError):
-        return {"available": False, "reason": "no webhook runtime record"}
+        try:
+            from .config import load_config
+            cfg = load_config()
+        except Exception:  # noqa: BLE001
+            cfg = {}
+        mode = str(cfg.get("webhook_mode") or "none")
+        url = str(cfg.get("webhook_url") or "")
+        return {
+            "available": True,
+            "mode": mode,
+            "interval_minutes": cfg.get("webhook_interval_minutes", 5),
+            "url_present": bool(url),
+            "url_masked": mask(url),
+            "raw_url_never_included": True,
+            "edit_message_id_present": bool(cfg.get("webhook_last_message_id")),
+            "last_message_id_present": bool(cfg.get("webhook_last_message_id")),
+            "scheduler_enabled": False,
+            "scheduler_running": False,
+            "scheduler_loop_count": 0,
+            "last_send_result": "skipped",
+            "reason_skipped": "start_not_reached_or_no_runtime_record",
+            "last_http_status": "",
+            "last_http_error_redacted": "",
+            "last_exception_type": "",
+            "last_exception_message_redacted": "",
+            "last_response_body_redacted": "",
+            "next_scheduled_send_at": "",
+        }
 
 
 def _capture_installed_build(errors: list[dict[str, str]]) -> dict[str, Any]:
