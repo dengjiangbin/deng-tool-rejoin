@@ -497,7 +497,7 @@ def _python_post_json(
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     connect_to, max_to = _normalize_timeout(timeout)
     try:
-        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=max_to) as resp:  # noqa: S310
             raw = resp.read(_MAX_RESPONSE_BYTES)
             if not raw.strip():
                 return {}
@@ -531,7 +531,7 @@ def _python_get_json(
     req = urllib.request.Request(url, headers=headers, method="GET")
     connect_to, max_to = _normalize_timeout(timeout)
     try:
-        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=max_to) as resp:  # noqa: S310
             raw = resp.read(_MAX_RESPONSE_BYTES)
             return json.loads(raw)  # type: ignore[return-value]
     except urllib.error.HTTPError as exc:
@@ -577,7 +577,7 @@ def _python_get_raw(
     req = urllib.request.Request(url, headers=headers, method="GET")
     connect_to, max_to = _normalize_timeout(timeout)
     try:
-        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=max_to) as resp:  # noqa: S310
             return int(resp.status), resp.read(_MAX_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
         try:
@@ -676,7 +676,7 @@ def post_with_response(
     req = urllib.request.Request(url, data=body_bytes, headers=merged_headers, method="POST")
     connect_to, max_to = _normalize_timeout(timeout)
     try:
-        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=max_to) as resp:  # noqa: S310
             hdrs = {k.lower(): v for k, v in resp.headers.items()}
             return int(resp.status), hdrs, resp.read(_MAX_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
@@ -732,7 +732,7 @@ def post_raw(
     req = urllib.request.Request(url, data=body_bytes, headers=merged_headers, method="POST")
     connect_to, max_to = _normalize_timeout(timeout)
     try:
-        with urllib.request.urlopen(req, timeout=(connect_to, max_to)) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=max_to) as resp:  # noqa: S310
             return int(resp.status), resp.read(_MAX_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
         try:
