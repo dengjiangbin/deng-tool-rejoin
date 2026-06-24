@@ -3624,6 +3624,7 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         print("1. Mode")
         print("2. Interval")
         print("3. URL")
+        print("4. Test Webhook Now")
         print("0. Back")
         print(termux_ui.separator("-"))
         _whc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -3642,8 +3643,10 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         elif choice == "3":
             _config_webhook_url(draft)
             draft = save_config(draft)
+        elif choice == "4":
+            _test_webhook_now(draft)
         else:
-            print("Please choose 1-3 or 0.")
+            print("Please choose 1-4 or 0.")
     return draft
 
 
@@ -3694,6 +3697,18 @@ def _config_webhook_mode(draft: dict[str, Any]) -> None:
         draft["webhook_mode"] = "edit"
     else:
         print("Unknown choice. Keeping current mode.")
+
+
+def _test_webhook_now(draft: dict[str, Any]) -> None:
+    """Installed-menu action using the same production sender as the reporter."""
+    try:
+        ok, result = webhook.send_periodic_status(draft, supervisor_snapshot=[], app_stats={})
+        if ok:
+            print(f"Webhook test sent: {result}")
+        else:
+            print(f"Webhook test failed: {result}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Webhook test failed: {type(exc).__name__}")
 
 
 def _test_webhook(draft: dict[str, Any]) -> None:
@@ -6308,6 +6323,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         _supervisor.set_render_callback(_live_dashboard)
         # The reporter is deliberately separate from the watchdog: it starts
         # only after Start reaches live monitoring and cannot alter package state.
+        webhook.record_webhook_trace(
+            source="cmd_start", start_selected=True, config_path_read=str(CONFIG_PATH),
+            webhook_mode=cfg.get("webhook_mode"),
+        )
         _webhook_reporter = webhook.WebhookStatusReporter(cfg, _supervisor, entries, save_config)
         _webhook_reporter.start()
         signal.signal(signal.SIGTERM, _supervisor._handle_stop)

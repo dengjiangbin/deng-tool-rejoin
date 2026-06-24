@@ -620,10 +620,19 @@ def _capture_last_failing_command() -> dict[str, Any]:
 
 def _capture_webhook_debug() -> dict[str, Any]:
     """Read the bounded, redacted scheduler/send record written at runtime."""
+    trace_path = DATA_DIR / "webhook-trace.jsonl"
+    trace: list[dict[str, Any]] = []
+    try:
+        trace = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()[-32:] if line.strip()]
+    except (OSError, ValueError, TypeError):
+        trace = []
     path = DATA_DIR / "webhook-debug.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return mask(data) if isinstance(data, dict) else {"available": False}
+        result = mask(data) if isinstance(data, dict) else {"available": False}
+        result["trace_file_missing"] = not bool(trace)
+        result["trace"] = trace
+        return result
     except (OSError, ValueError, TypeError):
         try:
             from .config import load_config
@@ -652,6 +661,8 @@ def _capture_webhook_debug() -> dict[str, Any]:
             "last_exception_message_redacted": "",
             "last_response_body_redacted": "",
             "next_scheduled_send_at": "",
+            "trace_file_missing": not bool(trace),
+            "trace": trace,
         }
 
 

@@ -75,7 +75,7 @@ class WebhookCliRecoveryTests(unittest.TestCase):
         self.assertIn('print("2. interval")', source)
         self.assertIn('print("3. url")', source)
         self.assertNotIn("snapshot", source)
-        self.assertNotIn("test webhook", source)
+        self.assertIn("4. test webhook now", source)
 
 
 if __name__ == "__main__":

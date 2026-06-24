@@ -37,6 +37,18 @@ WEBHOOK_USERNAME = "DENG Tool Rejoin"
 WEBHOOK_AVATAR_URL = "https://aio.deng.my.id/public/img/deng-logo.png"
 
 
+def record_webhook_trace(**fields: Any) -> None:
+    """Persist redacted installed-flow markers for probe consumption."""
+    record = {"timestamp": time.time(), "pid": os.getpid(), **fields}
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        path = DATA_DIR / "webhook-trace.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError:
+        pass
+
+
 class WebhookError(ValueError):
     """Raised for invalid webhook configuration."""
 
@@ -468,19 +480,25 @@ def send_periodic_status(
     config_data: dict[str, Any], *, supervisor_snapshot: list[dict[str, Any]], app_stats: dict[str, Any]
 ) -> tuple[bool, str]:
     """Send/update one monitor embed according to the configured user mode."""
+    record_webhook_trace(source="send_periodic_status", send_periodic_status_entered=True)
     mode = str(config_data.get("webhook_mode") or "none")
     if mode == "none":
+        record_webhook_trace(source="send_periodic_status", http_method="", http_status="", reason_skipped="mode_none")
         return False, "webhook disabled"
     url = validate_webhook_url(config_data.get("webhook_url"))
     payload = build_status_embed_payload(config_data, event="monitor", app_stats=app_stats, supervisor_snapshot=supervisor_snapshot)
     if mode == "edit" and config_data.get("webhook_last_message_id"):
         edit_url = f"{url.rstrip('/')}/messages/{config_data['webhook_last_message_id']}?wait=true"
+        record_webhook_trace(source="send_periodic_status", http_method="PATCH")
         ok, message, _message_id = _discord_json_request(edit_url, payload, "PATCH")
+        record_webhook_trace(source="send_periodic_status", http_method="PATCH", http_status=message)
         if ok:
             config_data["webhook_last_sent_at"] = time.time()
             return True, "edited monitor message"
     post_url = url + ("&" if "?" in url else "?") + "wait=true"
+    record_webhook_trace(source="send_periodic_status", http_method="POST")
     ok, message, message_id = _discord_json_request(post_url, payload, "POST")
+    record_webhook_trace(source="send_periodic_status", http_method="POST", http_status=message)
     if ok:
         config_data["webhook_last_sent_at"] = time.time()
         if mode == "edit" and message_id:
@@ -521,7 +539,8 @@ class WebhookStatusReporter:
         if str(self.config_data.get("webhook_mode") or "none") == "none":
             self._record(reason_skipped="mode_none", scheduler_enabled=False)
             return
-        self._record(scheduler_enabled=True, start_pressed_at=time.time())
+        self._record(scheduler_enabled=True, timer_armed=True, start_pressed_at=time.time())
+        record_webhook_trace(source="WebhookStatusReporter.start", timer_armed=True, webhook_mode=self.config_data.get("webhook_mode"))
         self.thread = threading.Thread(target=self._run, name="deng-webhook-status", daemon=True)
         self.thread.start()
 
@@ -535,7 +554,8 @@ class WebhookStatusReporter:
         while not self.stop_event.is_set():
             try:
                 self.loop_count += 1
-                self._record(scheduler_running=True, last_webhook_tick_at=time.time(), last_send_mode=self.config_data.get("webhook_mode"), last_send_attempt_at=time.time())
+                self._record(scheduler_running=True, reporter_tick_started=True, last_webhook_tick_at=time.time(), last_send_mode=self.config_data.get("webhook_mode"), last_send_attempt_at=time.time())
+                record_webhook_trace(source="WebhookStatusReporter._run", reporter_tick_started=True)
                 try:
                     from . import android
                     snapshot = self.supervisor.get_status_snapshot(self.entries)
@@ -546,6 +566,7 @@ class WebhookStatusReporter:
                 except Exception as telemetry_exc:  # telemetry must never suppress delivery
                     snapshot = []
                     self._record(telemetry_error_redacted=type(telemetry_exc).__name__)
+                    record_webhook_trace(source="WebhookStatusReporter._run", telemetry_result="failure", error=type(telemetry_exc).__name__)
                 app_stats = {
                     str(row.get("package") or ""): {
                         "online": row.get("status") == "Online",
@@ -566,6 +587,8 @@ class WebhookStatusReporter:
                 self._record(last_send_result="failure", last_exception_type=type(exc).__name__, last_exception_message_redacted=str(exc)[:200])
                 import logging
                 logging.getLogger(__name__).warning("webhook monitor update failed: %s", type(exc).__name__)
+            finally:
+                record_webhook_trace(source="WebhookStatusReporter._run", reporter_tick_completed=True)
             interval = validate_webhook_interval(self.config_data.get("webhook_interval_minutes", 5)) * 60
             if self.stop_event.wait(interval):
                 return
