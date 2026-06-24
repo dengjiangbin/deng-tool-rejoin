@@ -102,9 +102,7 @@ def _format_uptime(start_iso: str | None) -> str:
         if start.tzinfo is None:
             start = start.replace(tzinfo=timezone.utc)
         elapsed = max(0, int((datetime.now(timezone.utc) - start).total_seconds()))
-        hours = elapsed // 3600
-        minutes = (elapsed % 3600) // 60
-        return f"{hours}h {minutes:02d}m"
+        return format_runtime_compact(elapsed)
     except (ValueError, TypeError):
         return ""
 
