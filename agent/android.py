@@ -119,7 +119,7 @@ def process_cmdline_scan_args(package: str) -> list[str]:
 # Confirmed from real cloud-phone probe (Samsung SM-N9810 fingerprint
 # c1q:13/TP1A.220624.014, probe id p-368a65d699).
 _ANDROID_SYSTEM_BINARIES: frozenset[str] = frozenset({
-    "am", "cmd", "dumpsys", "getprop", "input", "logcat", "monkey", "pm",
+    "am", "cmd", "dumpsys", "getprop", "input", "logcat", "pm",
     "pgrep", "pidof", "ps", "service", "settings", "setprop", "wm", "ime",
 })
 _ANDROID_BIN_DIRS: tuple[str, ...] = ("/system/bin", "/system/xbin", "/vendor/bin")
@@ -829,7 +829,12 @@ def build_detached_force_stop_relaunch_script(
         "#!/system/bin/sh\n"
         f"am force-stop {shlex.quote(pkg)}\n"
         f"sleep {pause:g}\n"
-        f"monkey -p {shlex.quote(pkg)} -c android.intent.category.LAUNCHER 1\n"
+        f"LAUNCHER_ACT=$(cmd package resolve-activity --brief {shlex.quote(pkg)} 2>/dev/null | grep -v 'No activity found' | tail -n 1)\n"
+        "if [ -n \"$LAUNCHER_ACT\" ]; then\n"
+        "  am start -n \"$LAUNCHER_ACT\"\n"
+        "else\n"
+        f"  am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {shlex.quote(pkg)}\n"
+        "fi\n"
     )
 
 
@@ -1169,15 +1174,12 @@ def launch_app(package: str) -> CommandResult:
     Tries in order:
     1. am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p <package>
     2. cmd package resolve-activity --brief <package> then am start -n <component>
-    3. monkey -p <package> -c android.intent.category.LAUNCHER 1 (optional fallback)
 
     Never raises FileNotFoundError. Returns a CommandResult indicating the outcome.
     """
     package = validate_package_name(package)
     am = _find_command("am", "/system/bin/am")
     cmd_bin = _find_command("cmd", "/system/bin/cmd")
-    monkey_bin = _find_command("monkey", "/system/bin/monkey")
-
     last_result: CommandResult | None = None
 
     # Method 1: am start with MAIN + LAUNCHER intent, freeform-windowed.
@@ -1224,16 +1226,6 @@ def launch_app(package: str) -> CommandResult:
                     return result2
                 last_result = result2
 
-    # Method 3: monkey fallback (optional, may not be available)
-    if monkey_bin:
-        result3 = run_command(
-            [monkey_bin, "-p", package, "-c", "android.intent.category.LAUNCHER", "1"],
-            timeout=PROCESS_TIMEOUT_SECONDS,
-        )
-        if result3.ok:
-            return result3
-        last_result = result3
-
     # All methods failed — return best available failure result
     if last_result:
         return last_result
@@ -1241,7 +1233,7 @@ def launch_app(package: str) -> CommandResult:
         ("am", "start", package),
         127,
         "",
-        "Android launcher commands unavailable: am/cmd/monkey not found",
+        "Android launcher commands unavailable: am/cmd not found",
     )
 
 

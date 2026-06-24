@@ -266,6 +266,7 @@ class TestNeverRaises(unittest.TestCase):
         self.assertNotIn("create_default_context", src)
 
     def test_post_json_csrf_retry_on_403(self) -> None:
+        rp.clear_presence_cache()
         calls: list[dict[str, str]] = []
 
         def _fake(url, body, *, headers, timeout):
@@ -283,6 +284,25 @@ class TestNeverRaises(unittest.TestCase):
         self.assertEqual(out, {"data": [{"id": 1, "name": "alice"}]})
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1].get("X-CSRF-TOKEN"), "tok123")
+
+    def test_post_json_reuses_cached_csrf_token(self) -> None:
+        rp.clear_presence_cache()
+        calls: list[dict[str, str]] = []
+
+        def _fake(url, body, *, headers, timeout):
+            calls.append(dict(headers))
+            if len(calls) == 1:
+                return 403, {"x-csrf-token": "tok456"}, None
+            return 200, {}, {"userPresences": [{"userPresenceType": 2, "userId": 1}]}
+
+        with mock.patch.object(rp, "_roblox_post_once", side_effect=_fake):
+            first = rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}, cookie="cookie-value-long")
+            second = rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}, cookie="cookie-value-long")
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[1].get("X-CSRF-TOKEN"), "tok456")
+        self.assertEqual(calls[2].get("X-CSRF-TOKEN"), "tok456")
 
 
 class TestDualPresenceVerification(unittest.TestCase):

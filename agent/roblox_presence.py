@@ -48,6 +48,7 @@ Never raises.  Network/JSON/SSL failures all return safe defaults.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 import sqlite3
@@ -176,6 +177,9 @@ _PRESENCE_CACHE: dict[int, tuple[float, PresenceResult]] = {}
 _USERNAME_LOCK = threading.Lock()
 _USERNAME_CACHE: dict[str, tuple[float, int | None]] = {}
 
+_CSRF_LOCK = threading.Lock()
+_CSRF_TOKEN_CACHE: dict[str, str] = {}
+
 
 # ─── http helper ─────────────────────────────────────────────────────────────
 
@@ -184,6 +188,11 @@ def _extract_csrf_token(response_headers: Mapping[str, str]) -> str:
         if str(key).lower() == "x-csrf-token" and str(value).strip():
             return str(value).strip()
     return ""
+
+
+def _csrf_cache_key(cookie: str) -> str:
+    """Return a non-reversible in-memory key for a cookie-bound CSRF token."""
+    return hashlib.sha256(cookie.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def _decode_post_json_body(body_bytes: bytes) -> Mapping[str, object] | None:
@@ -230,11 +239,19 @@ def _post_json(
     if not isinstance(body, Mapping):
         return None
 
-    headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    headers = {
+        "User-Agent": _USER_AGENT,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
     if cookie:
         masked = mask_cookie(cookie)
         _log.debug("attaching cookie (masked=%s)", masked)
         headers["Cookie"] = f".ROBLOSECURITY={cookie}"
+        with _CSRF_LOCK:
+            cached_csrf = _CSRF_TOKEN_CACHE.get(_csrf_cache_key(cookie))
+        if cached_csrf:
+            headers["X-CSRF-TOKEN"] = cached_csrf
 
     try:
         status, resp_headers, payload = _roblox_post_once(
@@ -243,6 +260,8 @@ def _post_json(
         if cookie and status == 403:
             csrf = _extract_csrf_token(resp_headers)
             if csrf:
+                with _CSRF_LOCK:
+                    _CSRF_TOKEN_CACHE[_csrf_cache_key(cookie)] = csrf
                 retry_headers = dict(headers)
                 retry_headers["X-CSRF-TOKEN"] = csrf
                 _log.debug("roblox CSRF retry for %s", url)
@@ -572,6 +591,8 @@ def clear_presence_cache() -> None:
         _PRESENCE_CACHE.clear()
     with _USERNAME_LOCK:
         _USERNAME_CACHE.clear()
+    with _CSRF_LOCK:
+        _CSRF_TOKEN_CACHE.clear()
 
 
 # ─── Supervisor integration helpers ──────────────────────────────────────────

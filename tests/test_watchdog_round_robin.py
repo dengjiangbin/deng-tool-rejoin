@@ -320,7 +320,7 @@ class TestLoadingGracePeriod(unittest.TestCase):
 
 
 class TestCookieOnlyDetection(unittest.TestCase):
-    def test_root_pidof_miss_skips_presence(self) -> None:
+    def test_root_pgrep_miss_skips_presence(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup._root_info = MagicMock(available=True, tool="su")
         result = MagicMock(ok=False, stdout="")
@@ -328,7 +328,7 @@ class TestCookieOnlyDetection(unittest.TestCase):
              patch.object(sup, "_fetch_presence", side_effect=AssertionError("presence must be skipped")):
             state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertEqual(detail["reason"], "root_pidof_missing")
+        self.assertEqual(detail["reason"], "root_pgrep_missing")
 
     def test_offline_presence_after_grace_is_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})

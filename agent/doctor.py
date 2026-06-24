@@ -215,12 +215,12 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
             readable = [str(window_layout.app_cloner_prefs_path(package)) for package in packages if window_layout.app_cloner_prefs_path(package).exists()]
             items.append(_item("PASS" if readable else "WARN", "App Cloner XML access", ", ".join(readable) if readable else "no preference XML found", "Missing XML is OK; DENG will still launch apps."))
 
-    launch_tools = android.command_exists("am") and android.command_exists("monkey")
+    launch_tools = android.command_exists("am") and android.command_exists("cmd")
     items.append(
         _item(
             "PASS" if launch_tools else "WARN",
             "Launch commands",
-            "am and monkey are available" if launch_tools else "am and/or monkey not found in PATH",
+            "am and cmd are available" if launch_tools else "am and/or cmd not found in PATH",
             "Android launch commands are required for rejoin attempts.",
         )
     )

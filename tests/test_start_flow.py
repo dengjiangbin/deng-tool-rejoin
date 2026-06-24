@@ -104,7 +104,7 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("Final:", text)
         self.assertIn("unknown", text.lower())
 
-    def test_start_table_does_not_contain_monkey(self):
+    def test_start_table_does_not_contain_stress_launcher_text(self):
         rows = [_row(1, "com.roblox.client", "Main", "Launching")]
         combined = build_start_table(rows) + "\n" + build_final_summary(
             [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}],
@@ -302,14 +302,14 @@ class SinglePackageLaunchTests(unittest.TestCase):
 class LauncherFallbackTests(unittest.TestCase):
     """Verify multi-method Android launch fallback in android.py."""
 
-    def test_missing_monkey_falls_back_to_am(self):
-        """If monkey is unavailable, launch_app must succeed using am."""
+    def test_am_launch_succeeds_without_extra_launcher_tools(self):
+        """The primary explicit intent launch is sufficient when am exists."""
 
         def fake_find(*names):
             for name in names:
                 if name in ("am", "/system/bin/am"):
                     return "/system/bin/am"
-            return None  # monkey and cmd unavailable
+            return None  # cmd unavailable
 
         def fake_run(cmd, **kwargs):
             if cmd and "am" in str(cmd[0]):
@@ -322,8 +322,8 @@ class LauncherFallbackTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
 
-    def test_missing_monkey_no_file_not_found_error(self):
-        """launch_app must never raise FileNotFoundError when monkey is missing."""
+    def test_missing_launcher_tools_no_file_not_found_error(self):
+        """launch_app must never raise FileNotFoundError when tools are missing."""
 
         def fake_find(*names):
             return None  # nothing available
@@ -349,18 +349,16 @@ class LauncherFallbackTests(unittest.TestCase):
         with unittest.mock.patch("agent.android._find_command", return_value=None):
             result = amod.launch_app("com.roblox.client")
 
-        self.assertIn("am/cmd/monkey", result.stderr)
+        self.assertIn("am/cmd", result.stderr)
 
-    def test_am_method_tried_before_monkey(self):
-        """Method 1 (am MAIN LAUNCHER) is tried before monkey."""
+    def test_am_main_intent_is_the_first_launch_method(self):
+        """Method 1 is an explicit MAIN/LAUNCHER intent launch."""
         call_log = []
 
         def fake_find(*names):
             for name in names:
                 if name in ("am", "/system/bin/am"):
                     return "/system/bin/am"
-                if name in ("monkey", "/system/bin/monkey"):
-                    return "/system/bin/monkey"
             return None
 
         def fake_run(cmd, **kwargs):
@@ -375,22 +373,24 @@ class LauncherFallbackTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         first_cmd = call_log[0] if call_log else []
-        self.assertFalse(any("monkey" in str(x) for x in first_cmd), "monkey was called before am")
+        self.assertIn("am", str(first_cmd[0]))
 
-    def test_monkey_used_as_fallback_when_am_fails(self):
-        """When am fails, monkey is tried as the final fallback."""
+    def test_resolved_activity_is_used_when_main_intent_fails(self):
+        """A resolved explicit activity is the non-random fallback."""
 
         def fake_find(*names):
             for name in names:
                 if name in ("am", "/system/bin/am"):
                     return "/system/bin/am"
-                if name in ("monkey", "/system/bin/monkey"):
-                    return "/system/bin/monkey"
+                if name in ("cmd", "/system/bin/cmd"):
+                    return "/system/bin/cmd"
             return None
 
         def fake_run(cmd, **kwargs):
-            if cmd and "monkey" in str(cmd[0]):
-                return amod.CommandResult(tuple(cmd), 0, "Events injected: 1", "")
+            if cmd[:4] == ["/system/bin/cmd", "package", "resolve-activity", "--brief"]:
+                return amod.CommandResult(tuple(cmd), 0, "com.roblox.client/.MainActivity", "")
+            if cmd and "am" in str(cmd[0]) and "-n" in cmd:
+                return amod.CommandResult(tuple(cmd), 0, "Starting", "")
             return amod.CommandResult(tuple(cmd), 1, "", "failed")
 
         with unittest.mock.patch("agent.android._find_command", side_effect=fake_find), \

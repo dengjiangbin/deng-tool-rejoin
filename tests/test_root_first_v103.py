@@ -164,7 +164,7 @@ class SelftestTests(unittest.TestCase):
              mock.patch("agent.selftest.root_access.root_required_preflight", return_value=pre), \
              mock.patch("agent.selftest.package_username.scan_package_username_root", return_value=scan), \
              mock.patch("agent.selftest.launch_verify.doctor_package_report", return_value=["ok"]), \
-             mock.patch("agent.selftest.launch_verify.launch_package_root", return_value=(mock.Mock(ok=True, returncode=0), "root_monkey")), \
+             mock.patch("agent.selftest.launch_verify.launch_package_root", return_value=(mock.Mock(ok=True, returncode=0), "root_am_start_n")), \
              mock.patch("agent.selftest.package_state.scan_all_package_states_root", return_value={}), \
              mock.patch("agent.selftest.package_state.scan_package_state_root") as scan_one, \
              mock.patch("agent.selftest.package_username.username_display_for_package") as urow, \

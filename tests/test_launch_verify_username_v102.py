@@ -28,7 +28,7 @@ class LaunchVerifyTests(unittest.TestCase):
             result = launch_verify.verify_launch(
                 "com.test.app",
                 launch_result=fake_result,
-                launch_method="root_monkey",
+                launch_method="root_am_start_n",
                 wait_seconds=1.0,
                 poll_interval=0.01,
             )

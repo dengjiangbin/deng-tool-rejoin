@@ -19,13 +19,15 @@ _PKG = "com.moons.litesc"
 
 
 class TestDetachedRecovery(unittest.TestCase):
-    def test_build_detached_script_batches_force_stop_and_monkey(self) -> None:
+    def test_build_detached_script_batches_force_stop_and_explicit_activity(self) -> None:
         script = android.build_detached_force_stop_relaunch_script(_PKG)
         shell = android.build_detached_force_stop_relaunch_shell(_PKG, root_tool="su")
         self.assertIn("#!/system/bin/sh", script)
         self.assertIn("am force-stop", script)
         self.assertIn("sleep 3.5", script)
-        self.assertIn("monkey -p", script)
+        self.assertIn("cmd package resolve-activity --brief", script)
+        self.assertIn("am start -n \"$LAUNCHER_ACT\"", script)
+        self.assertNotIn("monkey", script)
         self.assertIn(_PKG, script)
         self.assertIn("su -c", shell)
         self.assertIn(f"/data/local/tmp/relaunch_{_PKG}.sh", shell)
@@ -53,7 +55,9 @@ class TestDetachedRecovery(unittest.TestCase):
         self.assertEqual(write_args[:2], ["sh", "-c"])
         self.assertIn(f"/data/local/tmp/relaunch_{_PKG}.sh", write_args[2])
         self.assertIn("am force-stop", write_args[2])
-        self.assertIn("monkey -p", write_args[2])
+        self.assertIn("cmd package resolve-activity --brief", write_args[2])
+        self.assertIn("am start -n \"$LAUNCHER_ACT\"", write_args[2])
+        self.assertNotIn("monkey", write_args[2])
         self.assertIn("chmod 700", write_args[2])
 
     def test_mount_master_root_tries_mm_before_fallback(self) -> None:

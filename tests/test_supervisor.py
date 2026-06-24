@@ -37,15 +37,15 @@ class TestRootCookieLiveness(unittest.TestCase):
         )
         return supervisor
 
-    def test_missing_root_pidof_is_immediate_no_heartbeat_without_presence(self) -> None:
+    def test_missing_root_pgrep_is_immediate_no_heartbeat_without_presence(self) -> None:
         supervisor = self._supervisor()
         result = MagicMock(ok=False, stdout="")
         with patch("agent.android.run_root_command", return_value=result) as pidof, \
              patch.object(supervisor, "_fetch_presence") as fetch:
             state, detail = supervisor._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertEqual(detail["reason"], "root_pidof_missing")
-        pidof.assert_called_once_with(["pidof", _PKG], root_tool="su", timeout=2)
+        self.assertEqual(detail["reason"], "root_pgrep_missing")
+        pidof.assert_called_once_with(["pgrep", "-f", _PKG], root_tool="su", timeout=2)
         fetch.assert_not_called()
 
     def test_live_root_process_then_cookie_ingame_is_online(self) -> None:

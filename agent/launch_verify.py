@@ -236,26 +236,19 @@ def launch_package_root(
         res = _root_shell(cmd, timeout=20)
         if res.ok:
             return android.CommandResult((pre.tool or "su", "-c", cmd), 0, res.stdout, res.stderr), "root_am_start_n"
-    monkey = _root_shell(
-        f"monkey -p {package} -c android.intent.category.LAUNCHER 1",
-        timeout=15,
+    cmd = (
+        "am start -W --user current "
+        "-a android.intent.action.MAIN "
+        "-c android.intent.category.LAUNCHER "
+        f"-p {package}"
     )
-    if monkey.ok:
-        return android.CommandResult(
-            (pre.tool or "su", "-c", "monkey"),
-            0,
-            monkey.stdout,
-            monkey.stderr,
-        ), "root_monkey"
-    if component:
-        cmd = f"am start -W --user current -n {component}"
-        res = _root_shell(cmd, timeout=20)
-        return android.CommandResult(
-            (pre.tool or "su", "-c", cmd),
-            res.returncode,
-            res.stdout,
-            res.stderr or res.error,
-        ), "root_am_start_n"
+    res = _root_shell(cmd, timeout=20)
+    return android.CommandResult(
+        (pre.tool or "su", "-c", cmd),
+        res.returncode,
+        res.stdout,
+        res.stderr or res.error,
+    ), "root_am_start_main"
     return android.CommandResult(
         ("su", "-c", "launch"),
         1,
@@ -406,7 +399,10 @@ def doctor_package_report(package: str) -> list[str]:
     lines.append(f"  foreground_before_launch: {fg or '-'}")
     if resumed:
         lines.append(f"  resumed_before_launch: {resumed[:180]}")
-    launch_cmd = f"monkey -p {package} -c android.intent.category.LAUNCHER 1"
+    launch_cmd = (
+        "am start -W --user current -a android.intent.action.MAIN "
+        f"-c android.intent.category.LAUNCHER -p {package}"
+    )
     if component:
         launch_cmd = f"am start -W --user current -n {component}"
     lines.append(f"  launch_command: su -c '{launch_cmd}'")

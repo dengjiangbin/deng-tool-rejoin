@@ -1446,7 +1446,7 @@ class WatchdogSupervisor:
         )
 
     def _root_process_running(self, pkg: str) -> tuple[bool, bool]:
-        """Return ``(running, checked)`` from one isolated root ``pidof`` probe."""
+        """Return ``(running, checked)`` from one isolated root full-cmdline probe."""
         try:
             package = android.validate_package_name(pkg)
         except Exception:  # noqa: BLE001
@@ -1456,7 +1456,7 @@ class WatchdogSupervisor:
             return False, False
         try:
             result = android.run_root_command(
-                ["pidof", package], root_tool=root_tool, timeout=2,
+                ["pgrep", "-f", package], root_tool=root_tool, timeout=2,
             )
             return bool(result.ok and (result.stdout or "").strip()), True
         except Exception:  # noqa: BLE001
@@ -1626,7 +1626,7 @@ class WatchdogSupervisor:
                 "info",
                 "[DENG_REJOIN_RECOVERY_DETACHED_DISPATCH]",
                 package=pkg,
-                action="root_tmp_script_force_stop_monkey",
+                action="root_tmp_script_force_stop_activity",
             )
             success = True
         else:
@@ -2140,8 +2140,8 @@ class WatchdogSupervisor:
                 "activity": "",
                 "in_game_proof": "false",
                 "heartbeat_age_sec": heartbeat_age_sec,
-                "presence_source": "root_pidof",
-                "reason": "root_pidof_evaluated",
+                "presence_source": "root_pgrep_full_cmdline",
+                "reason": "root_pgrep_evaluated",
             }
             detail.update(overrides)
             return detail
@@ -2153,7 +2153,7 @@ class WatchdogSupervisor:
             self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
             detail = _detail_base(
                 activity="No Heartbeat",
-                reason="root_pidof_missing",
+                reason="root_pgrep_missing",
             )
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
             return STATUS_NO_HEARTBEAT, detail
@@ -2434,7 +2434,7 @@ class WatchdogSupervisor:
                     logger, "info", "[DENG_REJOIN_ROOT_PROCESS_HARD_DROP]",
                     package=pkg,
                     action="force_stop_relaunch",
-                    reason="root_pidof_missing",
+                    reason="root_pgrep_missing",
                 )
                 self._nhb_since.pop(pkg, None)
                 self._nhb_cooldown_until.pop(pkg, None)
@@ -2822,7 +2822,7 @@ class WatchdogSupervisor:
                     state = STATUS_NO_HEARTBEAT
                 process_hard_drop = (
                     state == STATUS_NO_HEARTBEAT
-                    and str(detail.get("reason") or "") == "root_pidof_missing"
+                    and str(detail.get("reason") or "") == "root_pgrep_missing"
                 )
 
                 prev_pinned = self._prev_state.get(pkg)
