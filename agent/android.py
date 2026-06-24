@@ -115,6 +115,50 @@ def process_cmdline_scan_args(package: str) -> list[str]:
     return ["sh", "-c", script, "deng-proc-scan", package]
 
 
+_PROCESS_SCAN_EXCLUSIONS: tuple[str, ...] = (
+    "relaunch", "termux", "grep", "bash", "sh",
+)
+
+
+def process_ps_scan_args(package: str) -> list[str]:
+    """Return a sanitized ``ps -ef`` liveness scan for one Android package.
+
+    Clone process names can be masked or truncated, so short-name probes are
+    not reliable liveness evidence. The package remains an argv parameter
+    and the pipeline excludes Termux and detached relaunch scripts.
+    """
+    package = validate_package_name(package)
+    script = (
+        "target=$1; "
+        "ps -ef 2>/dev/null | grep -F -- \"$target\" "
+        "| grep -v -E 'relaunch|termux|grep|bash|sh' | head -n 1"
+    )
+    return ["sh", "-c", script, "deng-ps-scan", package]
+
+
+def ps_output_has_live_package(output: str, package: str) -> bool:
+    """Return whether *output* contains a non-automation row for *package*."""
+    package = validate_package_name(package)
+    for line in str(output or "").splitlines():
+        lowered = line.lower()
+        if package not in line:
+            continue
+        if any(marker in lowered for marker in _PROCESS_SCAN_EXCLUSIONS):
+            continue
+        return True
+    return False
+
+
+def process_ps_first_pid(output: str, package: str) -> str:
+    """Extract the first numeric PID from one sanitized ``ps -ef`` row."""
+    if not ps_output_has_live_package(output, package):
+        return ""
+    for token in str(output).split():
+        if token.isdigit() and int(token) > 0:
+            return token
+    return ""
+
+
 # Android system binaries that live in /system/bin (or /system/xbin) but
 # are NOT in Termux's default PATH.  Without this resolution every call to
 # dumpsys/wm/cmd/settings/etc. fails with ENOENT in Termux, silently
@@ -123,7 +167,7 @@ def process_cmdline_scan_args(package: str) -> list[str]:
 # c1q:13/TP1A.220624.014, probe id p-368a65d699).
 _ANDROID_SYSTEM_BINARIES: frozenset[str] = frozenset({
     "am", "cmd", "dumpsys", "getprop", "input", "logcat", "pm",
-    "pgrep", "pidof", "ps", "service", "settings", "setprop", "wm", "ime",
+    "pidof", "ps", "service", "settings", "setprop", "wm", "ime",
 })
 _ANDROID_BIN_DIRS: tuple[str, ...] = ("/system/bin", "/system/xbin", "/vendor/bin")
 
@@ -983,14 +1027,10 @@ def get_package_pid(package: str, root_info: RootInfo | None = None) -> str:
     res = run_root_command(["pidof", "-s", package], root_tool=info.tool, timeout=5)
     if res.ok and res.stdout.strip().isdigit():
         return res.stdout.strip()
-    # Exact process-name fallback. Do not use ps|grep or pgrep -f: both can
-    # match the detached relaunch script's filename rather than the Android
-    # app process.
-    res2 = run_root_command(["pgrep", "-x", package], root_tool=info.tool, timeout=5)
-    for token in (res2.stdout or "").split():
-        if token.isdigit():
-            return token
-    return ""
+    # ps -ef covers masked clone process names while excluding Termux and
+    # relaunch_<package>.sh helper rows before returning a PID.
+    res2 = run_root_command(process_ps_scan_args(package), root_tool=info.tool, timeout=5)
+    return process_ps_first_pid(res2.stdout or "", package) if res2.ok else ""
 
 
 def clear_package_cache_verified(
@@ -1358,7 +1398,7 @@ def is_process_running(package: str) -> bool:
     ``pidof``.  We try a layered set of checks:
 
       1. ``pidof <package>`` (works only for short names ≤ 15 chars).
-      2. ``pgrep -x <package>`` (exact process name; usually root-free).
+      2. Sanitized ``ps -ef`` package scan (excludes Termux/relaunch helpers).
       3. Fallback to scanning ``/proc/*/cmdline`` directly for an exact argv
          token or Android ``--nice-name`` (longer names).
 
@@ -1374,19 +1414,17 @@ def is_process_running(package: str) -> bool:
     except Exception:  # noqa: BLE001
         pass
 
-    # 2. pgrep -x — exact process names only.  A detached relaunch script has
-    # the package in its filename, so pgrep -f would create a false liveness hit.
+    # 2. Clone packages can have masked process names. Use ps output only when
+    # it survives the explicit automation/Termux exclusion filter.
     try:
-        result = run_command(
-            ["pgrep", "-x", package], timeout=PROCESS_TIMEOUT_SECONDS,
-        )
-        if result.ok and bool(result.stdout.strip()):
+        result = run_command(process_ps_scan_args(package), timeout=PROCESS_TIMEOUT_SECONDS)
+        if result.ok and ps_output_has_live_package(result.stdout, package):
             return True
     except Exception:  # noqa: BLE001
         pass
 
     # 3. Direct /proc cmdline scan — handles long clone package names where
-    # pidof and pgrep -x cannot see their full process identity.
+    # pidof and ps cannot see their full process identity.
     try:
         scan = run_command(process_cmdline_scan_args(package), timeout=PROCESS_TIMEOUT_SECONDS)
         if scan.ok and scan.stdout.strip():
@@ -1426,7 +1464,7 @@ def is_process_running_any(package: str, root_tool: str | None = None) -> bool:
 def is_process_running_root(package: str) -> bool:
     """Check process via root su for stronger evidence when standard checks fail.
 
-    Uses exact-name ``su pidof`` and ``su pgrep -x`` fallbacks. Never raises.
+    Uses ``su pidof`` and a sanitized ``su ps -ef`` fallback. Never raises.
     """
     package = validate_package_name(package)
     root_info = detect_root()
@@ -1436,10 +1474,10 @@ def is_process_running_root(package: str) -> bool:
         res = run_root_command(["pidof", package], root_tool=root_info.tool, timeout=5)
         if res.ok and bool(res.stdout.strip()):
             return True
-        pgrep_res = run_root_command(
-            ["pgrep", "-x", package], root_tool=root_info.tool, timeout=5,
+        ps_res = run_root_command(
+            process_ps_scan_args(package), root_tool=root_info.tool, timeout=5,
         )
-        if pgrep_res.ok and (pgrep_res.stdout or "").strip():
+        if ps_res.ok and ps_output_has_live_package(ps_res.stdout, package):
             return True
     except Exception:  # noqa: BLE001
         pass

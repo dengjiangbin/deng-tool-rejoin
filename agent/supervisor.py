@@ -1208,6 +1208,8 @@ class WatchdogSupervisor:
 
     # ── Blocking recovery gate: poll interval while fixing one package ───────
     RECOVERY_GATE_POLL_SECONDS: float = 5.0
+    RECOVERY_MAX_CONSECUTIVE_LAUNCHES: int = 3
+    RECOVERY_LAUNCH_THROTTLE_SECONDS: float = 60.0
 
     # ── Roblox presence API fault shield (429 / 5xx / timeout) ───────────────
     PRESENCE_RATE_LIMIT_BACKOFF_SECONDS: float = 15.0
@@ -1301,6 +1303,8 @@ class WatchdogSupervisor:
         self._nhb_cooldown_until: dict[str, float] = {}  # legacy; unused by kill-switch
         self._revive_count: dict[str, int] = {}
         self._failure_count: dict[str, int] = {}
+        self._recovery_launch_attempts: dict[str, int] = {}
+        self._recovery_throttle_until: dict[str, float] = {}
 
         # ── Per-package RAM optimization tracking ─────────────────────────────
         self._ram_last_check_at: dict[str, float] = {}   # last RAM measurement ts
@@ -1446,12 +1450,7 @@ class WatchdogSupervisor:
         )
 
     def _root_process_running(self, pkg: str) -> tuple[bool, bool]:
-        """Return ``(running, checked)`` from one exact root process-name probe.
-
-        ``pgrep -f`` is deliberately forbidden here: detached recovery scripts
-        include the package in their filename and would otherwise keep a dead
-        app falsely pinned Online.
-        """
+        """Return ``(running, checked)`` from one sanitized root ``ps`` probe."""
         try:
             package = android.validate_package_name(pkg)
         except Exception:  # noqa: BLE001
@@ -1461,9 +1460,9 @@ class WatchdogSupervisor:
             return False, False
         try:
             result = android.run_root_command(
-                ["pgrep", "-x", package], root_tool=root_tool, timeout=2,
+                android.process_ps_scan_args(package), root_tool=root_tool, timeout=2,
             )
-            return bool(result.ok and (result.stdout or "").strip()), True
+            return android.ps_output_has_live_package(result.stdout, package), True
         except Exception:  # noqa: BLE001
             return False, True
 
@@ -1637,9 +1636,11 @@ class WatchdogSupervisor:
         entry: dict[str, Any],
         now: float,
         render_callback: Any = None,
-    ) -> None:
+    ) -> bool:
         """Force-stop and relaunch one package during the recovery gate."""
         logger = self._logger
+        if not self._reserve_recovery_launch_attempt(pkg):
+            return False
         log_event(
             logger,
             "info",
@@ -1681,6 +1682,41 @@ class WatchdogSupervisor:
         else:
             self._set_status(pkg, STATUS_DEAD)
         self._post_recovery_memory_flush()
+        return True
+
+    def _reserve_recovery_launch_attempt(self, pkg: str) -> bool:
+        """Reserve one recovery launch, pausing after three unverified attempts."""
+        now = time.monotonic()
+        until = self._recovery_throttle_until.get(pkg, 0.0)
+        if now < until:
+            log_event(
+                self._logger, "warning", "[DENG_REJOIN_RECOVERY_THROTTLED]",
+                package=pkg,
+                remaining_sec=round(until - now, 1),
+                action="sleep_before_next_package_relaunch",
+            )
+            return False
+        attempts = self._recovery_launch_attempts.get(pkg, 0) + 1
+        if attempts >= self.RECOVERY_MAX_CONSECUTIVE_LAUNCHES:
+            self._recovery_launch_attempts[pkg] = 0
+            self._recovery_throttle_until[pkg] = now + self.RECOVERY_LAUNCH_THROTTLE_SECONDS
+            log_event(
+                self._logger, "warning", "[DENG_REJOIN_RECOVERY_THROTTLE_ARMED]",
+                package=pkg,
+                attempts=attempts,
+                sleep_sec=self.RECOVERY_LAUNCH_THROTTLE_SECONDS,
+                action="sleep_before_next_package_relaunch",
+            )
+        else:
+            self._recovery_launch_attempts[pkg] = attempts
+        return True
+
+    def _recovery_throttle_remaining(self, pkg: str) -> float:
+        return max(0.0, self._recovery_throttle_until.get(pkg, 0.0) - time.monotonic())
+
+    def _clear_recovery_launch_throttle(self, pkg: str) -> None:
+        self._recovery_launch_attempts.pop(pkg, None)
+        self._recovery_throttle_until.pop(pkg, None)
 
     def _in_grace(self, pkg: str, now: float) -> bool:
         return now < self._grace_until.get(pkg, 0.0)
@@ -1731,6 +1767,19 @@ class WatchdogSupervisor:
                 root_running = bool(res.ok and res.stdout.strip())
             except Exception:  # noqa: BLE001
                 root_running = False
+            if not root_running:
+                try:
+                    process_check_attempted = True
+                    res = android.run_root_command(
+                        android.process_ps_scan_args(package),
+                        root_tool=root_tool,
+                        timeout=3,
+                    )
+                    root_running = bool(
+                        res.ok and android.ps_output_has_live_package(res.stdout, package)
+                    )
+                except Exception:  # noqa: BLE001
+                    root_running = False
             if not root_running:
                 try:
                     process_check_attempted = True
@@ -2015,9 +2064,8 @@ class WatchdogSupervisor:
     ) -> None:
         """Halt round-robin until one package reaches Online or stable Dead.
 
-        Recovery is deliberately unbounded.  A Lua false-negative must not
-        permanently suspend a package: the gate keeps polling and relaunches
-        whenever dual-layer liveness says it is needed.
+        Recovery keeps polling, but package launches are capped at three before
+        a 60-second cooling period so a false-negative cannot exhaust Termux.
         """
         logger = self._logger
         log_event(
@@ -2028,7 +2076,8 @@ class WatchdogSupervisor:
             package_index=package_index,
             package_total=package_total,
             poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
-            recovery_limit="unbounded",
+            recovery_launch_limit=self.RECOVERY_MAX_CONSECUTIVE_LAUNCHES,
+            recovery_throttle_sec=self.RECOVERY_LAUNCH_THROTTLE_SECONDS,
         )
         attempt = 0
         now = time.time()
@@ -2045,6 +2094,7 @@ class WatchdogSupervisor:
             self._prev_state[pkg] = state
             if state == STATUS_ONLINE:
                 self._nhb_since.pop(pkg, None)
+                self._clear_recovery_launch_throttle(pkg)
                 log_event(
                     logger,
                     "info",
@@ -2073,14 +2123,21 @@ class WatchdogSupervisor:
                 package=pkg,
                 state=state,
                 attempt=attempt,
-                recovery_limit="unbounded",
+                recovery_launch_limit=self.RECOVERY_MAX_CONSECUTIVE_LAUNCHES,
                 poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
             )
             # A just-dispatched launch needs time to start.  Poll Launching
             # and Waiting without force-stopping them again; otherwise the
             # launch timestamp is reset every pass and grace can never end.
             if state not in {STATUS_LAUNCHING, STATUS_WAITING}:
-                self._deploy_gate_recovery_cycle(pkg, entry, now, render_callback=render_callback)
+                dispatched = self._deploy_gate_recovery_cycle(
+                    pkg, entry, now, render_callback=render_callback,
+                )
+                if not dispatched:
+                    remaining = self._recovery_throttle_remaining(pkg)
+                    if remaining > 0:
+                        self._interruptible_sleep(remaining)
+                        continue
             self._interruptible_sleep(self.RECOVERY_GATE_POLL_SECONDS)
         else:
             log_event(
@@ -2180,8 +2237,8 @@ class WatchdogSupervisor:
                 "activity": "",
                 "in_game_proof": "false",
                 "heartbeat_age_sec": heartbeat_age_sec,
-                "presence_source": "root_pgrep_exact_name",
-                "reason": "root_pgrep_evaluated",
+                "presence_source": "root_ps_excluded",
+                "reason": "root_ps_evaluated",
             }
             detail.update(overrides)
             return detail
@@ -2193,7 +2250,7 @@ class WatchdogSupervisor:
             self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
             detail = _detail_base(
                 activity="No Heartbeat",
-                reason="root_pgrep_missing",
+                reason="root_ps_missing",
             )
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
             return STATUS_NO_HEARTBEAT, detail
@@ -2448,6 +2505,11 @@ class WatchdogSupervisor:
         url_configured = url_context.get("url_mode") == "private_url"
 
         if state == STATUS_DEAD:
+            if not self._reserve_recovery_launch_attempt(pkg):
+                remaining = self._recovery_throttle_remaining(pkg)
+                if remaining > 0:
+                    self._interruptible_sleep(remaining)
+                return False
             action = "private_url_relaunch" if url_configured else "app_only_relaunch"
             log_event(
                 logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
@@ -2498,7 +2560,7 @@ class WatchdogSupervisor:
                     logger, "info", "[DENG_REJOIN_ROOT_PROCESS_HARD_DROP]",
                     package=pkg,
                     action="force_stop_relaunch",
-                    reason="root_pgrep_missing",
+                    reason="root_ps_missing",
                 )
                 self._nhb_since.pop(pkg, None)
                 self._nhb_cooldown_until.pop(pkg, None)
@@ -2547,6 +2609,7 @@ class WatchdogSupervisor:
 
         elif state in _METRIC_ACTIVE_STATES:
             self._nhb_since.pop(pkg, None)
+            self._clear_recovery_launch_throttle(pkg)
             log_event(
                 logger, "info", "[DENG_REJOIN_ONLINE_STABLE]",
                 package=pkg,
@@ -2886,7 +2949,7 @@ class WatchdogSupervisor:
                     state = STATUS_NO_HEARTBEAT
                 process_hard_drop = (
                     state == STATUS_NO_HEARTBEAT
-                    and str(detail.get("reason") or "") == "root_pgrep_missing"
+                    and str(detail.get("reason") or "") == "root_ps_missing"
                 )
 
                 prev_pinned = self._prev_state.get(pkg)

@@ -42,7 +42,7 @@ class ResolveAndroidBinaryTests(unittest.TestCase):
     def test_resolves_known_binaries_to_system_bin(self) -> None:
         with patch.object(os.path, "isfile", side_effect=_exists), \
              patch.object(os, "access", side_effect=_access):
-            for name in ("dumpsys", "wm", "cmd", "settings", "am", "pm", "pidof", "pgrep"):
+            for name in ("dumpsys", "wm", "cmd", "settings", "am", "pm", "pidof", "ps"):
                 with self.subTest(name=name):
                     self.assertEqual(
                         android._resolve_android_binary(name),

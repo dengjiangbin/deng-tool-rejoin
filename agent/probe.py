@@ -11,7 +11,7 @@ write a real fix:
 * device info (Android release, SDK, model, kernel, screen, density)
 * freeform / resizable / DPI / window settings (global + secure + system)
 * available ``cmd activity`` / ``am`` / ``cmd window`` verbs
-* per-package: process detection (pidof + pgrep + /proc cmdline),
+* per-package: process detection (pidof + excluded ps + /proc cmdline),
   dumpsys window / activities / recents / SurfaceFlinger, shared_prefs XML,
   Roblox presence-API result
 * recent agent logs and the latest Start-time self-diagnostics
@@ -282,27 +282,25 @@ def _capture_process(package: str, errors: list[dict[str, str]]) -> dict[str, An
     """Run every process-detection variant we care about on the same package."""
     out: dict[str, Any] = {}
     out["pidof"] = _run(f"pidof {package}", ["pidof", package], errors, timeout=4).stdout
-    out["pgrep_f"] = _run(f"pgrep -f {package}", ["pgrep", "-f", package], errors, timeout=4).stdout
-    # /proc cmdline scan (truncated process names) — only attempt if root
-    # available.  We embed the package literally in a single-quoted ``sh -c``
-    # string; package names contain only ``[A-Za-z0-9._]`` so no escaping
-    # needed beyond rejecting anything weird.
-    safe_pkg = package if re.fullmatch(r"[A-Za-z0-9._]+", package) else ""
-    if safe_pkg and android.detect_root().available:
-        cmd = (
-            "for f in /proc/[0-9]*/cmdline; do "
-            f"grep -lZ {safe_pkg} \"$f\" 2>/dev/null; "
-            "done"
-        )
-        out["proc_cmdline_grep"] = _run(
-            "/proc/*/cmdline scan",
-            ["sh", "-c", cmd],
+    out["ps_excluded"] = _run(
+        f"ps -ef excluded {package}",
+        android.process_ps_scan_args(package),
+        errors,
+        root=android.detect_root().available,
+        timeout=4,
+    ).stdout
+    # Exact /proc fallback: it excludes the scanner and relaunch helper rather
+    # than treating a package substring in a script filename as app evidence.
+    if android.detect_root().available:
+        out["proc_cmdline_exact"] = _run(
+            "/proc/*/cmdline exact scan",
+            android.process_cmdline_scan_args(package),
             errors,
             root=True,
             timeout=8,
         ).stdout[:1500]
     else:
-        out["proc_cmdline_grep"] = ""
+        out["proc_cmdline_exact"] = ""
     # ps -A filtered to package.
     res = _run("ps -A", ["ps", "-A"], errors, timeout=6)
     out["ps_filtered"] = "\n".join(

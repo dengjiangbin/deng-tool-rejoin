@@ -180,8 +180,8 @@ def scan_package_state_root(
 
     base_evidence = {
         "root_pidof": evidence.get("root_pidof", ""),
-        "root_pgrep": evidence.get("root_pgrep", ""),
         "root_ps": evidence.get("root_ps", ""),
+        "root_proc_exact": evidence.get("root_proc_exact", ""),
         "resumed_line": evidence.get("resumed_line", ""),
         "window_line": evidence.get("window_line", ""),
     }

@@ -18,6 +18,7 @@ from agent.supervisor import (
     STATUS_WAITING,
     WatchdogSupervisor,
 )
+from agent import android
 from agent.commands import _ANSI_RESET, _ANSI_WHITE, _ANSI_YELLOW, _colorize_status
 
 
@@ -37,15 +38,15 @@ class TestRootCookieLiveness(unittest.TestCase):
         )
         return supervisor
 
-    def test_missing_root_pgrep_is_immediate_no_heartbeat_without_presence(self) -> None:
+    def test_missing_root_ps_is_immediate_no_heartbeat_without_presence(self) -> None:
         supervisor = self._supervisor()
         result = MagicMock(ok=False, stdout="")
         with patch("agent.android.run_root_command", return_value=result) as pidof, \
              patch.object(supervisor, "_fetch_presence") as fetch:
             state, detail = supervisor._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertEqual(detail["reason"], "root_pgrep_missing")
-        pidof.assert_called_once_with(["pgrep", "-x", _PKG], root_tool="su", timeout=2)
+        self.assertEqual(detail["reason"], "root_ps_missing")
+        pidof.assert_called_once_with(android.process_ps_scan_args(_PKG), root_tool="su", timeout=2)
         fetch.assert_not_called()
 
     def test_root_probe_cannot_match_detached_relaunch_filename(self) -> None:
@@ -57,12 +58,21 @@ class TestRootCookieLiveness(unittest.TestCase):
             running, checked = supervisor._root_process_running(_PKG)
         self.assertFalse(running, relaunch_filename)
         self.assertTrue(checked)
-        probe.assert_called_once_with(["pgrep", "-x", _PKG], root_tool="su", timeout=2)
+        probe.assert_called_once_with(android.process_ps_scan_args(_PKG), root_tool="su", timeout=2)
+
+    def test_ps_exclusion_rejects_relaunch_row_but_accepts_clone_row(self) -> None:
+        relaunch_row = f"root 913 1 0 sh /data/local/tmp/relaunch_{_PKG}.sh"
+        clone_row = f"u0_a104 4242 1 0 { _PKG }"
+        self.assertFalse(android.ps_output_has_live_package(relaunch_row, _PKG))
+        self.assertTrue(android.ps_output_has_live_package(clone_row, _PKG))
+        script = android.process_ps_scan_args(_PKG)[2]
+        self.assertIn("ps -ef", script)
+        self.assertIn("relaunch|termux|grep|bash|sh", script)
 
     def test_live_root_process_then_cookie_ingame_is_online(self) -> None:
         supervisor = self._supervisor()
         presence = MagicMock(is_in_game=True, is_lobby=False, is_offline=False, is_unknown=False)
-        result = MagicMock(ok=True, stdout="1234\n")
+        result = MagicMock(ok=True, stdout=f"u0_a104 1234 1 0 {_PKG}\n")
         with patch("agent.android.run_root_command", return_value=result), \
              patch.object(supervisor, "_fetch_presence", return_value=presence) as fetch:
             state, detail = supervisor._detect_package_state(_PKG, _entry())
@@ -72,7 +82,7 @@ class TestRootCookieLiveness(unittest.TestCase):
 
     def test_live_root_process_preserves_online_on_presence_api_failure(self) -> None:
         supervisor = self._supervisor()
-        result = MagicMock(ok=True, stdout="1234\n")
+        result = MagicMock(ok=True, stdout=f"u0_a104 1234 1 0 {_PKG}\n")
         from agent.roblox_presence import RobloxApiFaultError
         with patch("agent.android.run_root_command", return_value=result), \
              patch.object(
@@ -90,7 +100,7 @@ class TestRootCookieLiveness(unittest.TestCase):
         supervisor._set_status(_PKG, STATUS_WAITING)
         self.assertFalse(supervisor._needs_launching_evaluation(_PKG))
         presence = MagicMock(is_in_game=True, is_lobby=False, is_offline=False, is_unknown=False)
-        result = MagicMock(ok=True, stdout="1234\n")
+        result = MagicMock(ok=True, stdout=f"u0_a104 1234 1 0 {_PKG}\n")
         with patch("agent.android.run_root_command", return_value=result), \
              patch.object(supervisor, "_fetch_presence", return_value=presence):
             state, detail = supervisor._detect_package_state(_PKG, _entry())

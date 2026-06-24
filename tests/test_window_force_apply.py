@@ -297,7 +297,7 @@ class TestAliveDetectionForClones(unittest.TestCase):
         dumpsys_cache.invalidate()
 
     def test_exact_proc_scan_finds_long_clone_when_pidof_misses(self) -> None:
-        # A long name can evade pidof/pgrep -x; the exact /proc argv scan must
+        # A long name can evade pidof/ps; the exact /proc argv scan must
         # still find it without accepting a detached helper filename.
         calls: list[list[str]] = []
 
@@ -317,7 +317,7 @@ class TestAliveDetectionForClones(unittest.TestCase):
 
         with mock.patch.object(android, "run_command", fake_run):
             self.assertTrue(android.is_process_running("com.x.very.long.clone.name"))
-        self.assertNotIn(["pgrep", "-f", "com.x.very.long.clone.name"], calls)
+        self.assertFalse(any(call[:1] == ["pgrep"] for call in calls))
 
     def test_window_visible_accepts_has_surface_variant(self) -> None:
         """``hasSurface=true`` (no m-prefix) should also count as visible."""

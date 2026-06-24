@@ -320,7 +320,7 @@ class TestLoadingGracePeriod(unittest.TestCase):
 
 
 class TestCookieOnlyDetection(unittest.TestCase):
-    def test_root_pgrep_miss_skips_presence(self) -> None:
+    def test_root_ps_miss_skips_presence(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup._root_info = MagicMock(available=True, tool="su")
         result = MagicMock(ok=False, stdout="")
@@ -328,7 +328,20 @@ class TestCookieOnlyDetection(unittest.TestCase):
              patch.object(sup, "_fetch_presence", side_effect=AssertionError("presence must be skipped")):
             state, detail = sup._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
-        self.assertEqual(detail["reason"], "root_pgrep_missing")
+        self.assertEqual(detail["reason"], "root_ps_missing")
+
+    def test_recovery_launches_throttle_after_three_attempts(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg())
+        with patch("agent.supervisor.time.monotonic", return_value=100.0), \
+             patch("agent.supervisor.log_event"):
+            self.assertTrue(sup._reserve_recovery_launch_attempt(_PKG))
+            self.assertTrue(sup._reserve_recovery_launch_attempt(_PKG))
+            self.assertTrue(sup._reserve_recovery_launch_attempt(_PKG))
+            self.assertFalse(sup._reserve_recovery_launch_attempt(_PKG))
+        self.assertEqual(sup._recovery_throttle_until[_PKG], 160.0)
+        with patch("agent.supervisor.time.monotonic", return_value=160.0), \
+             patch("agent.supervisor.log_event"):
+            self.assertTrue(sup._reserve_recovery_launch_attempt(_PKG))
 
     def test_recovery_gate_does_not_relaunch_while_waiting(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: "Waiting"})

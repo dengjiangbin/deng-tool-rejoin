@@ -24,7 +24,7 @@ def test_probe_p_b133b9a410_has_eight_configured_packages_all_not_running() -> N
     assert len(pkgs) == 8
     names = {e.get("package") for e in pkgs if isinstance(e, dict)}
     assert "com.moons.litesc" in names
-    # pidof/pgrep failures for every configured package → none running.
+    # pidof/process-scan failures for every configured package → none running.
     steps = {e.get("step", "") for e in (probe.get("errors") or [])}
     for pkg in names:
         assert any(pkg in s and "pidof" in s for s in steps)

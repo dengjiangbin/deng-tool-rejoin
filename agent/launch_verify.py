@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -57,7 +58,6 @@ class LaunchVerificationResult:
         lines.append(
             "process_checks: "
             f"root_pidof={pe.get('root_pidof', '')!s} "
-            f"root_pgrep={pe.get('root_pgrep', '')!s} "
             f"root_ps={pe.get('root_ps', '')!s} "
             f"root_running={pe.get('root_running', False)!s} "
             f"foreground={pe.get('foreground', False)!s}"
@@ -127,9 +127,8 @@ def collect_process_evidence(package: str) -> dict[str, Any]:
     package = validate_package_name(package)
     out: dict[str, Any] = {
         "root_pidof": "",
-        "root_pgrep": "",
         "root_ps": "",
-        "root_proc_grep": "",
+        "root_proc_exact": "",
         "root_running": False,
         "foreground": False,
         "resumed_line": "",
@@ -137,19 +136,15 @@ def collect_process_evidence(package: str) -> dict[str, Any]:
     }
     pidof = _root_shell(f"pidof {package} 2>/dev/null || true")
     out["root_pidof"] = (pidof.stdout or "").strip()[:120]
-    pgrep = _root_shell(f"pgrep -f {package} 2>/dev/null | head -5 || true")
-    out["root_pgrep"] = (pgrep.stdout or "").strip()[:120]
-    ps = _root_shell(
-        f"ps -A -o PID,USER,NAME,ARGS 2>/dev/null | grep -F {package} | head -3 || true"
-    )
+    ps = _root_shell(shlex.join(android.process_ps_scan_args(package)))
     out["root_ps"] = (ps.stdout or "").strip()[:200]
-    proc = _root_shell(
-        f"for f in /proc/[0-9]*/cmdline; do tr '\\0' ' ' < \"$f\" 2>/dev/null; done "
-        f"| grep -F {package} | head -2 || true",
-        timeout=10,
+    proc = _root_shell(shlex.join(android.process_cmdline_scan_args(package)), timeout=10)
+    out["root_proc_exact"] = (proc.stdout or "").strip()[:200]
+    out["root_running"] = bool(
+        out["root_pidof"]
+        or android.ps_output_has_live_package(out["root_ps"], package)
+        or out["root_proc_exact"]
     )
-    out["root_proc_grep"] = (proc.stdout or "").strip()[:200]
-    out["root_running"] = bool(out["root_pidof"] or out["root_pgrep"] or out["root_ps"] or out["root_proc_grep"])
 
     activity = _root_shell(
         "dumpsys activity activities 2>/dev/null | "
@@ -356,7 +351,7 @@ def verify_launch(
     elif launch_result is not None and launch_result.ok:
         result.failure_reason = "launch_accepted_but_not_alive"
         result.possible_causes.extend([
-            "root process checks found no pid/pgrep/ps match",
+            "root process checks found no pid/ps match",
             "resumed/window dumpsys did not show target package",
             "app may have exited immediately after launch",
         ])
