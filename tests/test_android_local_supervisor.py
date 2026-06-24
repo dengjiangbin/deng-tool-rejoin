@@ -21,7 +21,7 @@ ENTRY = {"package": PKG, "enabled": True, "roblox_user_id": 12345}
 
 def _alive() -> dict[str, bool]:
     return {
-        "process": True, "activity": False, "running": True, "root_running": False, "window": False,
+        "process": True, "activity": True, "running": True, "root_running": False, "window": False,
         "surface": False, "foreground": False, "strict_alive": True,
     }
 
@@ -78,13 +78,26 @@ class AndroidLocalSupervisorTests(unittest.TestCase):
 
     def test_missing_android_evidence_is_dead(self) -> None:
         sup = self._supervisor()
+        sup._set_status(PKG, STATUS_ONLINE)
+        sup._missing_evidence_since[PKG] = time.monotonic() - 16
         with patch("agent.android.package_installed", return_value=True), \
              patch("agent.android.get_package_alive_evidence", return_value={"strict_alive": False}):
             state, _detail = sup._detect_package_state(PKG, ENTRY)
         self.assertEqual(state, STATUS_DEAD)
 
+    def test_online_row_stays_online_until_fifteen_seconds_missing(self) -> None:
+        sup = self._supervisor()
+        sup._set_status(PKG, STATUS_ONLINE)
+        with patch("agent.android.package_installed", return_value=True), \
+             patch("agent.android.get_package_alive_evidence", return_value={"strict_alive": False}):
+            state, detail = sup._detect_package_state(PKG, ENTRY)
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertEqual(detail["reason"], "missing_evidence_confirmation_pending")
+
     def test_stale_task_surface_and_foreground_cannot_fake_online(self) -> None:
         sup = self._supervisor()
+        sup._set_status(PKG, STATUS_ONLINE)
+        sup._missing_evidence_since[PKG] = time.monotonic() - 16
         stale = {
             "task": True, "surface": True, "foreground": True,
             "window": False, "running": False, "root_running": False,

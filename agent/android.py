@@ -1737,7 +1737,7 @@ def get_current_android_package_evidence(package: str) -> dict[str, object]:
             break
 
     evidence["running"] = bool(evidence["process"])
-    evidence["alive"] = bool(evidence["process"] or evidence["activity"] or evidence["window"])
+    evidence["alive"] = bool(evidence["process"] and (evidence["activity"] or evidence["window"]))
     evidence["strict_alive"] = evidence["alive"]
     return evidence
     try:

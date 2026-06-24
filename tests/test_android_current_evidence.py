@@ -31,17 +31,18 @@ class CurrentAndroidEvidenceTests(unittest.TestCase):
         with patch("agent.android.run_android_command", side_effect=run):
             return android.get_current_android_package_evidence(PKG)
 
-    def test_active_exact_process_record_is_alive(self) -> None:
+    def test_process_only_is_not_alive(self) -> None:
         ev = self._evidence(processes=f"ProcessRecord{{abc 4242:{PKG}/u0a104}}\n  pid=4242")
         self.assertTrue(ev["process"])
-        self.assertTrue(ev["strict_alive"])
+        self.assertFalse(ev["strict_alive"])
 
     def test_live_activity_attached_to_process_is_alive(self) -> None:
         text = (
             f"ActivityRecord{{abc u0 {PKG}/.Main t42}}\n"
             f"  packageName={PKG} state=PAUSED app=ProcessRecord{{abc 4242:{PKG}/u0a104}}\n"
         )
-        ev = self._evidence(activities=text)
+        process = f"ProcessRecord{{abc 4242:{PKG}/u0a104}}\n  pid=4242\n"
+        ev = self._evidence(processes=process, activities=text)
         self.assertTrue(ev["activity"])
         self.assertTrue(ev["strict_alive"])
 
@@ -50,7 +51,8 @@ class CurrentAndroidEvidenceTests(unittest.TestCase):
             f"Window{{abc u0 {PKG}/.Main}}\n"
             "  mHasSurface=true mAppDied=false isReadyForDisplay()=true\n"
         )
-        ev = self._evidence(windows=text)
+        process = f"ProcessRecord{{abc 4242:{PKG}/u0a104}}\n  pid=4242\n"
+        ev = self._evidence(processes=process, windows=text)
         self.assertTrue(ev["window"])
         self.assertTrue(ev["strict_alive"])
 

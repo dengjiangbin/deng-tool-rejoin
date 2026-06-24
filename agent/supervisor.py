@@ -1214,6 +1214,7 @@ class WatchdogSupervisor:
 
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
+    MISSING_EVIDENCE_CONFIRM_SECONDS: float = 15.0
 
     # ── Post-launch transition allowance before presence becomes decisive ───
     LOADING_GRACE_SECONDS: int = 30
@@ -1269,7 +1270,7 @@ class WatchdogSupervisor:
         self.on_status_change = on_status_change
 
         # Dashboard: "Checking Package X/Y" — updated by inner loop, read by callback.
-        self.checking_label: str = f"Checking Package 0/{len(self.packages)}" if self.packages else "Checking Package 0/0"
+        self.checking_label: str = ""
 
         self._round: int = 0
 
@@ -1291,6 +1292,7 @@ class WatchdogSupervisor:
         self._recovery_throttle_until: dict[str, float] = {}
         self._relaunch_inflight: set[str] = set()
         self._relaunch_verify_until: dict[str, float] = {}
+        self._missing_evidence_since: dict[str, float] = {}
 
         # ── Per-package RAM optimization tracking ─────────────────────────────
         self._ram_last_check_at: dict[str, float] = {}   # last RAM measurement ts
@@ -1382,10 +1384,11 @@ class WatchdogSupervisor:
 
     def _set_status(self, pkg: str, status: str) -> None:
         requested = str(status or "").strip()
+        if requested in {STATUS_CHECKING, STATUS_PENDING, STATUS_WAITING, "Joining"}:
+            return
         if requested in {STATUS_PREPARING, STATUS_CLEAR_CACHE, STATUS_LAUNCHING, STATUS_RELAUNCHING, STATUS_REOPENING}:
             status = requested
-        elif requested in {STATUS_CHECKING, STATUS_PENDING, STATUS_WAITING, "Joining", "Reconnecting"}:
-            # Internal sampling labels collapse to the visible launch workflow.
+        elif requested == "Reconnecting":
             status = STATUS_LAUNCHING
         elif requested not in {STATUS_ONLINE, STATUS_DEAD}:
             status = STATUS_DEAD
@@ -2076,7 +2079,7 @@ class WatchdogSupervisor:
         attempt = 0
         now = time.time()
         while not self.stop_event.is_set():
-            self.checking_label = f"Recovering Package {package_index}/{package_total}"
+            self.checking_label = ""
             cb = render_callback or self._render_callback
             if callable(cb):
                 try:
@@ -2228,14 +2231,24 @@ class WatchdogSupervisor:
             )
             self._relaunch_inflight.discard(pkg)
             self._relaunch_verify_until.pop(pkg, None)
+            self._missing_evidence_since.pop(pkg, None)
+        elif self.status_map.get(pkg) in {STATUS_LAUNCHING, STATUS_RELAUNCHING} and self._in_loading_grace(pkg):
+            state = self.status_map[pkg]
+            reason = "launch_grace_started"
         elif pkg in self._relaunch_inflight and time.monotonic() < verify_until:
             state = STATUS_RELAUNCHING
             reason = "android_relaunch_verification_pending"
         else:
-            state = STATUS_DEAD
-            reason = "package_not_installed" if not installed else "android_alive_evidence_missing"
-            self._relaunch_inflight.discard(pkg)
-            self._relaunch_verify_until.pop(pkg, None)
+            missing_since = self._missing_evidence_since.setdefault(pkg, time.monotonic())
+            missing_for = time.monotonic() - missing_since
+            if missing_for < self.MISSING_EVIDENCE_CONFIRM_SECONDS:
+                state = STATUS_ONLINE if self.status_map.get(pkg) == STATUS_ONLINE else STATUS_LAUNCHING
+                reason = "missing_evidence_confirmation_pending"
+            else:
+                state = STATUS_DEAD
+                reason = "no_current_android_evidence"
+                self._relaunch_inflight.discard(pkg)
+                self._relaunch_verify_until.pop(pkg, None)
         detail = {
             "process_running": "not_used",
             "process_evidence": str(process_evidence).lower(),
@@ -2254,6 +2267,7 @@ class WatchdogSupervisor:
             "heartbeat_age_sec": "not_used",
             "presence_source": "not_used",
             "reason": reason,
+            "missing_evidence_duration_sec": round(time.monotonic() - self._missing_evidence_since.get(pkg, time.monotonic()), 1),
             "process_block_id": str(evidence.get("process_block_id") or ""),
             "activity_block_id": str(evidence.get("activity_block_id") or ""),
             "window_block_id": str(evidence.get("window_block_id") or ""),
@@ -2947,7 +2961,7 @@ class WatchdogSupervisor:
                     break
 
                 entry = self.entry_by_pkg[pkg]
-                self.checking_label = f"Checking Package {idx}/{total}"
+                self.checking_label = ""
 
                 _maybe_render(force=True)
                 check_started = time.monotonic()
@@ -3121,7 +3135,7 @@ class WatchdogSupervisor:
             )
 
             if not self.stop_event.is_set():
-                self.checking_label = f"Checking Package 1/{total}"
+                self.checking_label = ""
 
             if self._watchdog_round_rate_limited and not self.stop_event.is_set():
                 log_event(
