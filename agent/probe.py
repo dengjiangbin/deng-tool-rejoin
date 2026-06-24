@@ -599,6 +599,25 @@ def _capture_all_logs(errors: list[dict[str, str]]) -> dict[str, dict[str, Any]]
     return out
 
 
+def _capture_latest_crash_log(logs: dict[str, Any]) -> dict[str, Any]:
+    """Return a bounded, pinned traceback proof independent of bulk log tails."""
+    for name in ("crash.log", "crash_faulthandler.log"):
+        item = logs.get(name)
+        if isinstance(item, dict):
+            tail = str(item.get("tail") or "")
+            return {"name": name, "tail": tail[-16_384:]}
+    return {"name": "", "tail": ""}
+
+
+def _capture_last_failing_command() -> dict[str, Any]:
+    path = DATA_DIR / "last-command.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {"command": str(data.get("command") or ""), "at": str(data.get("at") or "")}
+    except (OSError, ValueError, TypeError):
+        return {"command": "", "at": ""}
+
+
 def _capture_installed_build(errors: list[dict[str, str]]) -> dict[str, Any]:
     """Read ``~/.deng-tool/rejoin/.installed-build.json`` if present.
 
@@ -1163,10 +1182,12 @@ def collect_probe(
     out["packages"] = pkgs
     out["log_tail"] = _capture_log_tail(errors)
     out["logs"] = _capture_all_logs(errors)
+    out["latest_crash_log"] = _capture_latest_crash_log(out["logs"])
     out["installed_build"] = _capture_installed_build(errors)
     out["wrapper"] = _capture_wrapper_script(errors)
     out["last_start_diagnostics"] = _capture_last_diagnostics(errors)
     out["start_crash_state"] = _capture_start_crash_state(errors)
+    out["last_failing_command"] = _capture_last_failing_command()
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
     try:
         from .config import get_package_display_username
@@ -1324,6 +1345,14 @@ _PROBE_DROP_ORDER: tuple[str, ...] = (
     "dumpsys_global.window_windows_full",
 )
 
+# These are the minimum facts needed to diagnose a runtime failure.  The
+# generic payload clamp must never evict them after the large Android captures
+# have been removed.
+_PROBE_PINNED_FIELDS = frozenset({
+    "latest_crash_log", "installed_build", "wrapper",
+    "last_start_diagnostics", "start_crash_state", "last_failing_command",
+})
+
 
 def compact_probe_errors(errors: list[Any]) -> list[dict[str, str]]:
     """Dedupe and cap probe step errors before serialization."""
@@ -1377,7 +1406,7 @@ def clamp_probe_payload_size(
     dropped = list(report.get("dropped") or [])
     if _raw_size(slim) > max_raw_bytes:
         for key in list(slim.keys()):
-            if key in {"summary", "probe_version", "captured_at_iso", "errors", "_upload_trim"}:
+            if key in {"summary", "probe_version", "captured_at_iso", "errors", "_upload_trim"} | _PROBE_PINNED_FIELDS:
                 continue
             val = slim.get(key)
             if isinstance(val, str) and len(val) > 4000:
@@ -1395,7 +1424,7 @@ def clamp_probe_payload_size(
                     break
             if not removed:
                 for key in list(slim.keys()):
-                    if key in {"summary", "probe_version", "captured_at_iso"}:
+                    if key in {"summary", "probe_version", "captured_at_iso"} | _PROBE_PINNED_FIELDS:
                         continue
                     slim.pop(key, None)
                     dropped.append(f"pop:{key}")
@@ -1443,7 +1472,7 @@ def prepare_probe_upload_payload(
                 break
         if not dropped:
             for key in list(trimmed.keys()):
-                if key in {"summary", "probe_version", "captured_at_iso", "errors"}:
+                if key in {"summary", "probe_version", "captured_at_iso", "errors"} | _PROBE_PINNED_FIELDS:
                     continue
                 trimmed.pop(key, None)
                 dropped = True

@@ -50,7 +50,7 @@ class ConfigError(ValueError):
 
 
 SELECTED_PACKAGE_MODES = {"single", "multiple"}
-WEBHOOK_MODES = {"new_message", "edit_message"}
+WEBHOOK_MODES = {"edit", "new_post", "none"}
 AUTO_RESIZE_MODES = {"off", "auto", "preview"}
 SCREEN_MODES = {"landscape"}
 DEFAULT_SCREEN_MODE = "landscape"

@@ -49,6 +49,7 @@ from .config import (
 )
 from .constants import (
     APP_HOME,
+    DATA_DIR,
     CONFIG_PATH,
     CRASH_LOG_PATH,
     DB_PATH,
@@ -413,6 +414,17 @@ def _write_cli_crash_log(exc: BaseException, *, context: str = "cli") -> None:
         with CRASH_LOG_PATH.open("a", encoding="utf-8", errors="replace") as fh:
             fh.write(f"\n[{_monitor_now_iso()}] {context}: {exc.__class__.__name__}: {exc}\n")
             traceback.print_exc(file=fh)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _record_last_command(command: str) -> None:
+    """Persist the command before dispatch so a later probe names the failure."""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        (DATA_DIR / "last-command.json").write_text(
+            json.dumps({"command": command, "at": _monitor_now_iso()}), encoding="utf-8"
+        )
     except Exception:  # noqa: BLE001
         pass
 
@@ -8187,6 +8199,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     safe_io.setup_faulthandler()
+    _record_last_command(str(args.resolved_command or "menu"))
     # Silence internal namespace loggers so warnings/errors never leak to terminal.
     try:
         from .logger import silence_public_loggers
