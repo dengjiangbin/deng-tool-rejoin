@@ -1364,6 +1364,20 @@ class WatchdogSupervisor:
 
     # ─── Internal helpers ─────────────────────────────────────────────────────
 
+    def _record_runtime_session_state(
+        self, pkg: str, previous_state: str, state: str, now: float
+    ) -> None:
+        """Maintain the one current Online session used by the runtime column."""
+        if state in _METRIC_ACTIVE_STATES:
+            self._last_online_ts[pkg] = now
+            if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
+                self._online_start_ts[pkg] = now
+        else:
+            self._online_start_ts.pop(pkg, None)
+
+        if state == STATUS_DEAD:
+            self._last_online_ts.pop(pkg, None)
+
     def _handle_stop(self, signum: Any, frame: Any) -> None:
         source = "sigterm" if signum == signal.SIGTERM else ("sigint" if signum == signal.SIGINT else f"signal_{signum}")
         self.stop_source = source
@@ -2086,8 +2100,10 @@ class WatchdogSupervisor:
                     cb()
                 except Exception:  # noqa: BLE001
                     pass
+            previous_state = self._prev_state.get(pkg, self.status_map.get(pkg, ""))
             state = self._evaluate_package_presence_isolated(pkg, entry)
             self._set_status(pkg, state)
+            self._record_runtime_session_state(pkg, previous_state, state, time.time())
             self._prev_state[pkg] = state
             if state == STATUS_ONLINE:
                 self._nhb_since.pop(pkg, None)
@@ -3065,15 +3081,8 @@ class WatchdogSupervisor:
                 else:
                     self._nhb_since.pop(pkg, None)
 
-                if state in _METRIC_ACTIVE_STATES:
-                    self._last_online_ts[pkg] = now
-                    if prev not in _METRIC_ACTIVE_STATES:
-                        self._online_start_ts[pkg] = now
-                elif pkg in self._online_start_ts and state not in _METRIC_ACTIVE_STATES:
-                    del self._online_start_ts[pkg]
+                self._record_runtime_session_state(pkg, prev, state, now)
                 if state == STATUS_DEAD:
-                    self._last_online_ts.pop(pkg, None)
-                    self._online_start_ts.pop(pkg, None)
                     _maybe_render(force=True)
 
                 recovery_gate = False

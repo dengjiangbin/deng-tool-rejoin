@@ -5421,6 +5421,21 @@ def cmd_package_key(args: argparse.Namespace) -> int:
     return 0
 
 
+def format_runtime_compact(seconds: float) -> str:
+    """Render the runtime column with its largest unit and one smaller unit."""
+    total = max(0, int(seconds))
+    days, remainder = divmod(total, 86_400)
+    if days:
+        return f"{days}D {remainder // 3_600}H"
+    hours, remainder = divmod(total, 3_600)
+    if hours:
+        return f"{hours}H {remainder // 60}m"
+    minutes, remainder = divmod(total, 60)
+    if minutes:
+        return f"{minutes}m {remainder}s"
+    return f"{total}s"
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     use_color = not args.no_color
     _start_lock: LockManager | None = None
@@ -6284,22 +6299,6 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Offline":          "Dead",
         }
 
-        def _fmt_runtime(secs: float) -> str:
-            """Format elapsed seconds as compact d/h/m/s string."""
-            s = int(secs)
-            if s <= 0:
-                return "0s"
-            d, s = divmod(s, 86400)
-            h, s = divmod(s, 3600)
-            m, s = divmod(s, 60)
-            if d:
-                return f"{d}d {h}h {m}m {s}s"
-            if h:
-                return f"{h}h {m}m {s}s"
-            if m:
-                return f"{m}m {s}s"
-            return f"{s}s"
-
         def _live_dashboard() -> None:
             """Clear screen and redraw banner + live telemetry table."""
             safe_io.set_crash_context(phase="render_loop", session_id=_start_session_id)
@@ -6320,7 +6319,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 start_ts = getattr(_supervisor, "_online_start_ts", {}).get(pkg, 0.0)
                 if not start_ts:
                     return "0s"
-                return _fmt_runtime(max(0.0, _now_ts - start_ts))
+                return format_runtime_compact(max(0.0, _now_ts - start_ts))
 
             def _get_usage(pkg: str) -> str:
                 raw_state = _live_map.get(pkg, "Unknown")
