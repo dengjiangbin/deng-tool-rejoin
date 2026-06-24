@@ -296,8 +296,9 @@ class TestAliveDetectionForClones(unittest.TestCase):
         from agent import dumpsys_cache
         dumpsys_cache.invalidate()
 
-    def test_pgrep_finds_process_when_pidof_misses(self) -> None:
-        # pidof returns nothing (truncation); pgrep -f matches full cmdline.
+    def test_exact_proc_scan_finds_long_clone_when_pidof_misses(self) -> None:
+        # A long name can evade pidof/pgrep -x; the exact /proc argv scan must
+        # still find it without accepting a detached helper filename.
         calls: list[list[str]] = []
 
         def fake_run(cmd, timeout=None):
@@ -308,7 +309,7 @@ class TestAliveDetectionForClones(unittest.TestCase):
                 stderr = ""
             if cmd[:1] == ["pidof"]:
                 return _R()
-            if cmd[:2] == ["pgrep", "-f"]:
+            if cmd[:3] == ["sh", "-c", android.process_cmdline_scan_args("com.x.very.long.clone.name")[2]]:
                 _R.ok = True
                 _R.stdout = "1234\n"
                 return _R()
@@ -316,6 +317,7 @@ class TestAliveDetectionForClones(unittest.TestCase):
 
         with mock.patch.object(android, "run_command", fake_run):
             self.assertTrue(android.is_process_running("com.x.very.long.clone.name"))
+        self.assertNotIn(["pgrep", "-f", "com.x.very.long.clone.name"], calls)
 
     def test_window_visible_accepts_has_surface_variant(self) -> None:
         """``hasSurface=true`` (no m-prefix) should also count as visible."""

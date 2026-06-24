@@ -45,8 +45,19 @@ class TestRootCookieLiveness(unittest.TestCase):
             state, detail = supervisor._detect_package_state(_PKG, _entry())
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail["reason"], "root_pgrep_missing")
-        pidof.assert_called_once_with(["pgrep", "-f", _PKG], root_tool="su", timeout=2)
+        pidof.assert_called_once_with(["pgrep", "-x", _PKG], root_tool="su", timeout=2)
         fetch.assert_not_called()
+
+    def test_root_probe_cannot_match_detached_relaunch_filename(self) -> None:
+        """A helper named relaunch_<package>.sh is not the app process."""
+        supervisor = self._supervisor()
+        relaunch_filename = f"/data/local/tmp/relaunch_{_PKG}.sh"
+        result = MagicMock(ok=False, stdout="")
+        with patch("agent.android.run_root_command", return_value=result) as probe:
+            running, checked = supervisor._root_process_running(_PKG)
+        self.assertFalse(running, relaunch_filename)
+        self.assertTrue(checked)
+        probe.assert_called_once_with(["pgrep", "-x", _PKG], root_tool="su", timeout=2)
 
     def test_live_root_process_then_cookie_ingame_is_online(self) -> None:
         supervisor = self._supervisor()

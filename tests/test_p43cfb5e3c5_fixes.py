@@ -272,6 +272,22 @@ class TestGetPackageRamUsage(unittest.TestCase):
         self.assertEqual(result["usage_mb"], "256 MB")
         self.assertEqual(result["success"], True)
 
+    def test_first_supervised_package_uses_its_pid_for_dumpsys(self) -> None:
+        """The first package must not lose its RAM value to shared output parsing."""
+        from unittest.mock import patch
+        package = "com.moons.litesc"
+        with patch("agent.android.detect_root") as mock_root, \
+             patch("agent.android.get_package_pid", return_value="4242"), \
+             patch("agent.android.get_app_memory_mb", return_value=512.0) as memory, \
+             patch("builtins.open", side_effect=OSError("proc unavailable")):
+            mock_root.return_value = type("RI", (), {"available": True, "tool": "su"})()
+            from agent.android import get_package_ram_usage
+            result = get_package_ram_usage(package)
+        memory.assert_called_once_with("4242")
+        self.assertEqual(result["usage_mb"], "512 MB")
+        self.assertEqual(result["method"], "dumpsys_meminfo_pid")
+        self.assertTrue(result["success"])
+
     def test_missing_proc_file_does_not_crash(self) -> None:
         """Even if /proc/PID/status doesn't exist, must return safely."""
         from unittest.mock import patch, mock_open

@@ -94,9 +94,10 @@ def process_cmdline_scan_args(package: str) -> list[str]:
     """Return a safe /proc cmdline scan command for one package.
 
     The package name is passed as ``$1`` rather than embedded in the shell
-    program.  That lets the script skip its own shell process and parent ``su``
-    process, avoiding the self-match that made killed packages look alive in
-    probe p-03b5e2269a.
+    program. That lets the script skip its own shell process and parent ``su``
+    process. It also matches the package only as an exact argv token or
+    Android ``--nice-name`` value, never as a filename substring in a detached
+    relaunch script.
     """
     package = validate_package_name(package)
     script = (
@@ -106,7 +107,9 @@ def process_cmdline_scan_args(package: str) -> list[str]:
         "[ \"$pid\" = \"$self\" ] && continue; "
         "[ \"$pid\" = \"$parent\" ] && continue; "
         "cmd=$(tr '\\000' ' ' < \"$f\" 2>/dev/null) || continue; "
-        "case \"$cmd\" in *\"$target\"*) echo \"$pid\"; exit 0;; esac; "
+        "case \" $cmd \" in "
+        "\" $target \"*|*\" --nice-name=$target \"*) echo \"$pid\"; exit 0;; "
+        "esac; "
         "done; exit 1"
     )
     return ["sh", "-c", script, "deng-proc-scan", package]
@@ -980,14 +983,14 @@ def get_package_pid(package: str, root_info: RootInfo | None = None) -> str:
     res = run_root_command(["pidof", "-s", package], root_tool=info.tool, timeout=5)
     if res.ok and res.stdout.strip().isdigit():
         return res.stdout.strip()
-    # Fallback: busybox ps / ps -A grep
-    sh = (
-        f"ps -A 2>/dev/null | grep -F '{package}' | grep -v grep"
-        f" | awk '{{print $2}}' | head -n1"
-    )
-    res2 = run_root_command(["sh", "-c", sh], root_tool=info.tool, timeout=6)
-    pid = (res2.stdout or "").strip()
-    return pid if pid.isdigit() else ""
+    # Exact process-name fallback. Do not use ps|grep or pgrep -f: both can
+    # match the detached relaunch script's filename rather than the Android
+    # app process.
+    res2 = run_root_command(["pgrep", "-x", package], root_tool=info.tool, timeout=5)
+    for token in (res2.stdout or "").split():
+        if token.isdigit():
+            return token
+    return ""
 
 
 def clear_package_cache_verified(
@@ -1355,10 +1358,9 @@ def is_process_running(package: str) -> bool:
     ``pidof``.  We try a layered set of checks:
 
       1. ``pidof <package>`` (works only for short names ≤ 15 chars).
-      2. ``pgrep -f <package>`` (matches full cmdline; usually root-free).
-      3. ``ps -A`` with substring match — but ``ps`` shows truncated comm too,
-         so this is only useful for short names.
-      4. Fallback to scanning ``/proc/*/cmdline`` directly (longer names).
+      2. ``pgrep -x <package>`` (exact process name; usually root-free).
+      3. Fallback to scanning ``/proc/*/cmdline`` directly for an exact argv
+         token or Android ``--nice-name`` (longer names).
 
     Never raises.  Returns True when ANY method finds a hit.
     """
@@ -1372,29 +1374,19 @@ def is_process_running(package: str) -> bool:
     except Exception:  # noqa: BLE001
         pass
 
-    # 2. pgrep -f — matches full /proc/<pid>/cmdline, so the truncation
-    # limitation of comm does not apply.  Available on most Termux setups.
+    # 2. pgrep -x — exact process names only.  A detached relaunch script has
+    # the package in its filename, so pgrep -f would create a false liveness hit.
     try:
         result = run_command(
-            ["pgrep", "-f", package], timeout=PROCESS_TIMEOUT_SECONDS,
+            ["pgrep", "-x", package], timeout=PROCESS_TIMEOUT_SECONDS,
         )
         if result.ok and bool(result.stdout.strip()):
             return True
     except Exception:  # noqa: BLE001
         pass
 
-    # 3. ps -A with substring match (works for short names).
-    try:
-        ps_result = run_command(["ps", "-A"], timeout=PROCESS_TIMEOUT_SECONDS)
-        if ps_result.ok and any(
-            package in line for line in ps_result.stdout.splitlines()
-        ):
-            return True
-    except Exception:  # noqa: BLE001
-        pass
-
-    # 4. Direct /proc cmdline scan — handles long clone package names where
-    # both pidof and ps -A see a truncated comm.  Single shell pipeline.
+    # 3. Direct /proc cmdline scan — handles long clone package names where
+    # pidof and pgrep -x cannot see their full process identity.
     try:
         scan = run_command(process_cmdline_scan_args(package), timeout=PROCESS_TIMEOUT_SECONDS)
         if scan.ok and scan.stdout.strip():
@@ -1434,7 +1426,7 @@ def is_process_running_any(package: str, root_tool: str | None = None) -> bool:
 def is_process_running_root(package: str) -> bool:
     """Check process via root su for stronger evidence when standard checks fail.
 
-    Uses su pidof and su ps as fallbacks.  Never raises.
+    Uses exact-name ``su pidof`` and ``su pgrep -x`` fallbacks. Never raises.
     """
     package = validate_package_name(package)
     root_info = detect_root()
@@ -1444,12 +1436,10 @@ def is_process_running_root(package: str) -> bool:
         res = run_root_command(["pidof", package], root_tool=root_info.tool, timeout=5)
         if res.ok and bool(res.stdout.strip()):
             return True
-        ps_res = run_root_command(
-            ["sh", "-c", "ps -A 2>/dev/null | grep -F -- \"$1\" | grep -v grep", "deng-ps-scan", package],
-            root_tool=root_info.tool,
-            timeout=6,
+        pgrep_res = run_root_command(
+            ["pgrep", "-x", package], root_tool=root_info.tool, timeout=5,
         )
-        if ps_res.ok and package in ps_res.stdout:
+        if pgrep_res.ok and (pgrep_res.stdout or "").strip():
             return True
     except Exception:  # noqa: BLE001
         pass
@@ -1826,10 +1816,18 @@ def get_memory_info() -> dict[str, int]:
     return {"total_mb": total, "free_mb": free, "percent_free": percent}
 
 
-def get_app_memory_mb(package: str) -> float | None:
-    """Get approximate RAM usage for a running package in MB via dumpsys meminfo."""
-    package = validate_package_name(package)
-    result = run_android_command(["dumpsys", "meminfo", package], timeout=8, prefer_root=False)
+def get_app_memory_mb(package_or_pid: str) -> float | None:
+    """Get approximate RAM usage in MB via one targeted ``dumpsys meminfo`` call.
+
+    A PID resolved from the exact package process is preferred. A validated
+    package name remains a safe fallback when no PID is available.
+    """
+    target = str(package_or_pid or "").strip()
+    if not target:
+        return None
+    if not target.isdigit():
+        target = validate_package_name(target)
+    result = run_android_command(["dumpsys", "meminfo", target], timeout=8, prefer_root=False)
     if not result.ok:
         return None
     # Look for "TOTAL PSS:" or similar summary line (KB → MB)
@@ -1854,14 +1852,15 @@ def get_package_ram_usage(
     Strategy (in order, first success wins):
     1. ``/proc/<pid>/smaps_rollup`` RSS/PSS — best if accessible.
     2. ``/proc/<pid>/status`` VmRSS — fast readable PID fallback.
-    3. ``dumpsys meminfo <package>`` TOTAL PSS/RSS.
+    3. ``dumpsys meminfo <pid>`` TOTAL PSS/RSS (package only when no PID exists).
     4. Return ``N/A`` on failure so UI cells are never blank.
 
     Returns a dict with:
       pid           – PID string used (empty if not found)
       rss_kb        – raw kilobytes (0 on failure)
       usage_mb      – formatted string e.g. "256 MB", "1.2 GB", or "N/A"
-      method        – one of "proc_status" / "dumpsys_meminfo" / "unknown"
+      method        – one of ``proc_*`` / ``dumpsys_meminfo_pid`` /
+                      ``dumpsys_meminfo_package`` / ``unknown``
       success       – bool
       error         – error string (empty on success)
 
@@ -1917,12 +1916,15 @@ def get_package_ram_usage(
                 except OSError:
                     pass  # fall through to strategy 2
 
-        # ── Strategy 2: dumpsys meminfo ───────────────────────────────────
+        # ── Strategy 2: targeted dumpsys meminfo ──────────────────────────
         if not success:
-            mb = get_app_memory_mb(package)
+            # Query the exact PID when available. This avoids bulk-output
+            # parsing and guarantees the first supervised package is treated
+            # exactly like every later package.
+            mb = get_app_memory_mb(pid_str or package)
             if mb is not None:
                 rss_kb = int(mb * 1024)
-                method = "dumpsys_meminfo"
+                method = "dumpsys_meminfo_pid" if pid_str else "dumpsys_meminfo_package"
                 success = True
 
     except Exception as exc:  # noqa: BLE001

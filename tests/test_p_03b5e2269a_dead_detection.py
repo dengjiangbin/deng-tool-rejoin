@@ -230,6 +230,8 @@ class ProcessScanRegressionTests(unittest.TestCase):
         self.assertEqual(args[-1], _PKG)
         self.assertNotIn(_PKG, args[2])
         self.assertIn("target=$1", args[2])
+        self.assertIn("--nice-name=$target", args[2])
+        self.assertNotIn('case "$cmd" in *"$target"*', args[2])
 
 
 if __name__ == "__main__":

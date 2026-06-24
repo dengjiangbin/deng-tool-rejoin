@@ -1446,7 +1446,12 @@ class WatchdogSupervisor:
         )
 
     def _root_process_running(self, pkg: str) -> tuple[bool, bool]:
-        """Return ``(running, checked)`` from one isolated root full-cmdline probe."""
+        """Return ``(running, checked)`` from one exact root process-name probe.
+
+        ``pgrep -f`` is deliberately forbidden here: detached recovery scripts
+        include the package in their filename and would otherwise keep a dead
+        app falsely pinned Online.
+        """
         try:
             package = android.validate_package_name(pkg)
         except Exception:  # noqa: BLE001
@@ -1456,7 +1461,7 @@ class WatchdogSupervisor:
             return False, False
         try:
             result = android.run_root_command(
-                ["pgrep", "-f", package], root_tool=root_tool, timeout=2,
+                ["pgrep", "-x", package], root_tool=root_tool, timeout=2,
             )
             return bool(result.ok and (result.stdout or "").strip()), True
         except Exception:  # noqa: BLE001
@@ -2175,7 +2180,7 @@ class WatchdogSupervisor:
                 "activity": "",
                 "in_game_proof": "false",
                 "heartbeat_age_sec": heartbeat_age_sec,
-                "presence_source": "root_pgrep_full_cmdline",
+                "presence_source": "root_pgrep_exact_name",
                 "reason": "root_pgrep_evaluated",
             }
             detail.update(overrides)
