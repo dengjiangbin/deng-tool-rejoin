@@ -530,12 +530,16 @@ class WebhookStatusReporter:
             try:
                 self.loop_count += 1
                 self._record(scheduler_running=True, last_webhook_tick_at=time.time(), last_send_mode=self.config_data.get("webhook_mode"), last_send_attempt_at=time.time())
-                from . import android
-                snapshot = self.supervisor.get_status_snapshot(self.entries)
-                mem = android.get_memory_info()
-                self.config_data["_mem_info"] = mem
-                self.config_data["_cpu_pct"] = android.get_cpu_usage()
-                self.config_data["_temp_c"] = android.get_temperature()
+                try:
+                    from . import android
+                    snapshot = self.supervisor.get_status_snapshot(self.entries)
+                    mem = android.get_memory_info()
+                    self.config_data["_mem_info"] = mem
+                    self.config_data["_cpu_pct"] = android.get_cpu_usage()
+                    self.config_data["_temp_c"] = android.get_temperature()
+                except Exception as telemetry_exc:  # telemetry must never suppress delivery
+                    snapshot = []
+                    self._record(telemetry_error_redacted=type(telemetry_exc).__name__)
                 app_stats = {
                     str(row.get("package") or ""): {
                         "online": row.get("status") == "Online",
