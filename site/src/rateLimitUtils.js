@@ -15,12 +15,15 @@ function cleanEnv(name, fallback = '') {
 function resolveTrustProxySetting() {
   const raw = cleanEnv('TOOL_SITE_TRUST_PROXY');
   if (!raw) {
-    return process.env.NODE_ENV === 'production';
+    // One local proxy hop (cloudflared/nginx) is enough for the deployed
+    // topology. Boolean `true` is rejected by express-rate-limit because it
+    // would trust a client-supplied forwarding chain without a hop limit.
+    return process.env.NODE_ENV === 'production' ? 1 : false;
   }
-  if (/^(1|true|yes|on)$/i.test(raw)) return true;
+  if (/^(1|true|yes|on)$/i.test(raw)) return 1;
   if (/^(0|false|no|off)$/i.test(raw)) return false;
   const hops = Number(raw);
-  return Number.isFinite(hops) && hops >= 0 ? hops : true;
+  return Number.isFinite(hops) && hops >= 0 ? hops : 1;
 }
 
 function resolveClientIp(req) {

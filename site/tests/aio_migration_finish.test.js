@@ -91,3 +91,22 @@ test('license generation uses a browser route and renders one server-owned block
   assert.match(sidebarCss, /\.inventory-main-nav__tab:visited/);
   assert.match(sidebarCss, /text-decoration: none/);
 });
+
+test('production rate limiting trusts a bounded proxy hop', () => {
+  const nodeEnv = process.env.NODE_ENV;
+  const trustProxy = process.env.TOOL_SITE_TRUST_PROXY;
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.TOOL_SITE_TRUST_PROXY;
+    delete require.cache[require.resolve('../src/rateLimitUtils')];
+    const { resolveTrustProxySetting } = require('../src/rateLimitUtils');
+    assert.equal(resolveTrustProxySetting(), 1);
+    process.env.TOOL_SITE_TRUST_PROXY = 'true';
+    assert.equal(resolveTrustProxySetting(), 1);
+  } finally {
+    if (nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = nodeEnv;
+    if (trustProxy === undefined) delete process.env.TOOL_SITE_TRUST_PROXY;
+    else process.env.TOOL_SITE_TRUST_PROXY = trustProxy;
+  }
+});
