@@ -2567,8 +2567,6 @@ def _setup_webhook(draft: dict[str, Any]) -> None:
     choice = _prompt("Choose webhook mode", "1").strip()
     if choice == "3":
         draft["webhook_enabled"] = False
-        draft["webhook_snapshot_enabled"] = False
-        draft["webhook_send_snapshot"] = False
         draft["webhook_mode"] = "none"
         draft["webhook_url"] = ""
         draft["webhook_last_message_id"] = ""
@@ -2583,17 +2581,6 @@ def _setup_webhook(draft: dict[str, Any]) -> None:
             break
         except ValueError as exc:
             print(f"Webhook URL is not valid: {exc}")
-
-
-def _setup_snapshot(draft: dict[str, Any]) -> None:
-    print()
-    print("Phone Snapshot For Webhook")
-    print("A snapshot may include private information visible on screen. Only enable it on your own phone/cloud phone.")
-    print("1. No")
-    print("2. Yes, attach snapshot")
-    enabled = _prompt("Choose snapshot option", "1").strip() == "2"
-    draft["webhook_snapshot_enabled"] = enabled
-    draft["webhook_send_snapshot"] = enabled
 
 
 def _setup_webhook_interval(draft: dict[str, Any]) -> None:
@@ -3617,7 +3604,7 @@ def _resolve_per_package_key_display(draft: dict[str, Any], package: str) -> str
 
 
 def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
-    """Webhook submenu: URL / Interval / Mode / Snapshot / Test Webhook."""
+    """Webhook submenu: only Mode, Interval, and masked URL."""
     if not _is_interactive():
         return draft
     while True:
@@ -3630,18 +3617,13 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         interval = draft.get("webhook_interval_minutes", 5)
         mode = draft.get("webhook_mode", "none")
         mode_label = {"edit": "Edit", "new_post": "New Post", "none": "None"}.get(mode, "None")
-        snap = draft.get("webhook_snapshot_enabled", False)
-        snap_enabled = bool(url) and snap
         print("Current Webhook:")
         print(f"  Webhook: {mode_label + ' every ' + str(interval) + 'm' if mode != 'none' else 'None'}")
         print(f"  Webhook URL: {'configured' if url and mode != 'none' else 'not configured'}")
-        print(f"  Snapshot: {'Enabled' if snap_enabled else 'Disabled'}")
         print()
-        print("1. Webhook URL")
+        print("1. Webhook Mode")
         print("2. Webhook Interval")
-        print("3. Webhook Mode")
-        print("4. Snapshot")
-        print("5. Test Webhook")
+        print("3. Webhook URL")
         print("0. Back")
         print(termux_ui.separator("-"))
         _whc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -3651,28 +3633,17 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         if choice == "0":
             break
         elif choice == "1":
-            _config_webhook_url(draft)
+            _config_webhook_mode(draft)
             draft = save_config(draft)
         elif choice == "2":
             _setup_webhook_interval(draft)
             draft = save_config(draft)
             print("Webhook Interval Saved.")
         elif choice == "3":
-            _config_webhook_mode(draft)
+            _config_webhook_url(draft)
             draft = save_config(draft)
-            print("Webhook Mode Saved.")
-        elif choice == "4":
-            if draft.get("webhook_url"):
-                _setup_snapshot(draft)
-                draft = save_config(draft)
-                print("Snapshot Setting Saved.")
-            else:
-                print("Set Webhook URL First.")
-                safe_io.press_enter()
-        elif choice == "5":
-            _test_webhook(draft)
         else:
-            print("Please choose 1-5 or 0.")
+            print("Please choose 1-3 or 0.")
     return draft
 
 
@@ -3680,19 +3651,20 @@ def _config_webhook_url(draft: dict[str, Any]) -> None:
     """Set or update the webhook URL. The full URL is never printed."""
     print()
     print("Webhook URL")
-    print("Leave blank to skip.")
+    print("Enter a new URL, or leave blank to keep the current value.")
     current = draft.get("webhook_url", "") or ""
     if current:
         print(f"Current: {webhook.mask_webhook_url(current)}")
     else:
         print("Current: Not Set")
-    value = _prompt("Discord Webhook URL (blank to skip)", "").strip()
+    value = _prompt("Discord Webhook URL", "").strip()
     if not value:
         print("Skipped.")
         return
     try:
         draft["webhook_url"] = webhook.validate_webhook_url(value)
-        draft["webhook_enabled"] = True
+        if value != current:
+            draft["webhook_last_message_id"] = ""
         print("Webhook URL Saved.")
     except ValueError as exc:
         print(f"Webhook URL Is Not Valid: {exc}")
@@ -3711,8 +3683,6 @@ def _config_webhook_mode(draft: dict[str, Any]) -> None:
     choice = (_wmc or default).strip() or default
     if choice == "3":
         draft["webhook_enabled"] = False
-        draft["webhook_snapshot_enabled"] = False
-        draft["webhook_send_snapshot"] = False
         draft["webhook_mode"] = "none"
         draft["webhook_url"] = ""
         draft["webhook_last_message_id"] = ""
@@ -4428,14 +4398,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"  Status updates: {_yes_no(cfg['webhook_enabled'])}")
     if cfg["webhook_enabled"]:
         print(f"  Mode: {cfg['webhook_mode']}")
-        print(f"  Snapshot: {_yes_no(cfg['webhook_snapshot_enabled'])}")
-        print(f"  Interval: {cfg['webhook_interval_seconds']} seconds")
+        print(f"  Interval: {cfg['webhook_interval_minutes']} minutes")
         print(f"  URL: {safe.get('webhook_url') or 'Not set'}")
         tags = cfg.get("webhook_tags") or []
         if tags:
             print(f"  Tags: {', '.join(tags)}")
     else:
-        print("  Snapshot: Disabled")
         print("  Interval: Disabled")
     print()
     print("License")
@@ -6162,44 +6130,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 )
 
         # ── Webhook ─────────────────────────────────────────────────────────
-        snapshot_path = None
-        if cfg.get("webhook_enabled") and cfg.get("webhook_snapshot_enabled"):
-            from . import snapshot as _snapshot
-            _snapshot.cleanup_old_snapshots(int(cfg.get("snapshot_max_age_seconds", 300)))
-            snapshot_path, _snap_message = _snapshot.capture_snapshot()
-            if snapshot_path:
-                cfg["snapshot_temp_path"] = str(snapshot_path)
-
-        if cfg.get("webhook_enabled"):
-            mem_info = android.get_memory_info()
-            cpu_pct = android.get_cpu_usage()
-            temp_c = android.get_temperature()
-            cfg["_mem_info"] = mem_info
-            cfg["_cpu_pct"] = cpu_pct
-            cfg["_temp_c"] = temp_c
-
-            app_stats: dict[str, Any] = {}
-            for entry in entries:
-                pkg = entry["package"]
-                is_online = initial_status.get(pkg) == "Online"
-                mem_mb = android.get_app_memory_mb(pkg) if is_online else None
-                app_stats[pkg] = {
-                    "online": is_online,
-                    "memory_mb": mem_mb,
-                    "cpu_pct": None,
-                    "uptime_start": start_times.get(pkg),
-                }
-
-            ok_wh, message_wh, message_id = webhook.send_webhook_update(
-                cfg,
-                event="start",
-                snapshot_path=snapshot_path,
-                force=True,
-                app_stats=app_stats,
-            )
-            if message_id:
-                cfg["webhook_last_message_id"] = message_id
-
         cfg["package_start_times"] = start_times
         save_config(cfg)
 
