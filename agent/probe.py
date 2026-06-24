@@ -618,6 +618,16 @@ def _capture_last_failing_command() -> dict[str, Any]:
         return {"command": "", "at": ""}
 
 
+def _capture_webhook_debug() -> dict[str, Any]:
+    """Read the bounded, redacted scheduler/send record written at runtime."""
+    path = DATA_DIR / "webhook-debug.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return mask(data) if isinstance(data, dict) else {"available": False}
+    except (OSError, ValueError, TypeError):
+        return {"available": False, "reason": "no webhook runtime record"}
+
+
 def _capture_installed_build(errors: list[dict[str, str]]) -> dict[str, Any]:
     """Read ``~/.deng-tool/rejoin/.installed-build.json`` if present.
 
@@ -1188,6 +1198,7 @@ def collect_probe(
     out["last_start_diagnostics"] = _capture_last_diagnostics(errors)
     out["start_crash_state"] = _capture_start_crash_state(errors)
     out["last_failing_command"] = _capture_last_failing_command()
+    out["webhook_debug"] = _capture_webhook_debug()
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
     try:
         from .config import get_package_display_username
@@ -1350,7 +1361,7 @@ _PROBE_DROP_ORDER: tuple[str, ...] = (
 # have been removed.
 _PROBE_PINNED_FIELDS = frozenset({
     "latest_crash_log", "installed_build", "wrapper",
-    "last_start_diagnostics", "start_crash_state", "last_failing_command",
+    "last_start_diagnostics", "start_crash_state", "last_failing_command", "webhook_debug",
 })
 
 

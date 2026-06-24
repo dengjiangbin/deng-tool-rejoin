@@ -19,6 +19,7 @@ from typing import Any
 
 from .url_utils import mask_launch_url
 from . import safe_http
+from .constants import DATA_DIR
 from .runtime_format import format_runtime_compact
 
 WEBHOOK_MODES = {"edit", "new_post", "none"}
@@ -488,10 +489,33 @@ class WebhookStatusReporter:
         self.config_data, self.supervisor, self.entries, self.save_callback = config_data, supervisor, entries, save_callback
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
+        self.loop_count = 0
+        self.debug: dict[str, Any] = {
+            "mode": str(config_data.get("webhook_mode") or "none"),
+            "interval_minutes": config_data.get("webhook_interval_minutes", 5),
+            "url_present": bool(config_data.get("webhook_url")),
+            "url_masked": mask_webhook_url(config_data.get("webhook_url")),
+            "raw_url_never_included": True,
+            "edit_message_id_present": bool(config_data.get("webhook_last_message_id")),
+            "scheduler_enabled": False, "scheduler_running": False, "scheduler_loop_count": 0,
+            "started_by_command": "Start", "last_send_result": "not_started",
+        }
+
+    def _record(self, **changes: Any) -> None:
+        self.debug.update(changes)
+        self.debug["scheduler_loop_count"] = self.loop_count
+        self.debug["last_message_id_present"] = bool(self.config_data.get("webhook_last_message_id"))
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            (DATA_DIR / "webhook-debug.json").write_text(json.dumps(self.debug, sort_keys=True), encoding="utf-8")
+        except OSError:
+            pass
 
     def start(self) -> None:
         if str(self.config_data.get("webhook_mode") or "none") == "none":
+            self._record(reason_skipped="mode_none", scheduler_enabled=False)
             return
+        self._record(scheduler_enabled=True, start_pressed_at=time.time())
         self.thread = threading.Thread(target=self._run, name="deng-webhook-status", daemon=True)
         self.thread.start()
 
@@ -499,10 +523,13 @@ class WebhookStatusReporter:
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=1.0)
+        self._record(scheduler_running=False, scheduler_enabled=False, reason_skipped="stopped")
 
     def _run(self) -> None:
         while not self.stop_event.is_set():
             try:
+                self.loop_count += 1
+                self._record(scheduler_running=True, last_webhook_tick_at=time.time(), last_send_mode=self.config_data.get("webhook_mode"), last_send_attempt_at=time.time())
                 from . import android
                 snapshot = self.supervisor.get_status_snapshot(self.entries)
                 mem = android.get_memory_info()
@@ -520,10 +547,13 @@ class WebhookStatusReporter:
                 ok, message = send_periodic_status(self.config_data, supervisor_snapshot=snapshot, app_stats=app_stats)
                 if ok:
                     self.save_callback(self.config_data)
+                    self._record(last_send_result="success", last_http_error_redacted="", last_exception_type="", next_scheduled_send_at=time.time() + validate_webhook_interval(self.config_data.get("webhook_interval_minutes", 5)) * 60)
                 else:
+                    self._record(last_send_result="failure", last_http_error_redacted=message[:200], last_exception_type="", next_scheduled_send_at=time.time() + validate_webhook_interval(self.config_data.get("webhook_interval_minutes", 5)) * 60)
                     import logging
                     logging.getLogger(__name__).warning("webhook monitor update skipped: %s", message)
             except Exception as exc:  # reporting is strictly best-effort
+                self._record(last_send_result="failure", last_exception_type=type(exc).__name__, last_exception_message_redacted=str(exc)[:200])
                 import logging
                 logging.getLogger(__name__).warning("webhook monitor update failed: %s", type(exc).__name__)
             interval = validate_webhook_interval(self.config_data.get("webhook_interval_minutes", 5)) * 60

@@ -701,8 +701,6 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     webhook_mode = {"new_message": "new_post", "edit_message": "edit"}.get(webhook_mode, webhook_mode)
     if webhook_mode not in WEBHOOK_MODES:
         webhook_mode = "none"
-    if not merged["webhook_enabled"]:
-        webhook_mode = "none"
     merged["webhook_mode"] = webhook_mode
     merged["webhook_url"] = str(merged.get("webhook_url") or "").strip()
     if merged["webhook_url"]:

@@ -28,6 +28,13 @@ class WebhookCliRecoveryTests(unittest.TestCase):
         self.assertEqual(migrated["webhook_mode"], "none")
         self.assertFalse(migrated["webhook_enabled"])
 
+    def test_valid_mode_is_not_disabled_by_legacy_enabled_flag(self) -> None:
+        cfg = default_config()
+        cfg.update({"webhook_enabled": False, "webhook_mode": "new_post", "webhook_url": "https://discord.com/api/webhooks/123/token"})
+        migrated = validate_config(cfg)
+        self.assertEqual(migrated["webhook_mode"], "new_post")
+        self.assertTrue(migrated["webhook_enabled"])
+
     def test_real_main_menu_path_does_not_emit_internal_error_for_legacy_config(self) -> None:
         cfg = default_config()
         cfg.update({"webhook_enabled": True, "webhook_mode": "new_message", "webhook_url": "https://discord.com/api/webhooks/123/token"})
@@ -64,9 +71,9 @@ class WebhookCliRecoveryTests(unittest.TestCase):
 
     def test_webhook_menu_has_only_requested_controls(self) -> None:
         source = inspect.getsource(commands._config_menu_webhook).lower()
-        self.assertIn("webhook mode", source)
-        self.assertIn("webhook interval", source)
-        self.assertIn("webhook url", source)
+        self.assertIn('print("1. mode")', source)
+        self.assertIn('print("2. interval")', source)
+        self.assertIn('print("3. url")', source)
         self.assertNotIn("snapshot", source)
         self.assertNotIn("test webhook", source)
 
