@@ -16,22 +16,24 @@
     </div>
   </div>
 
-  <% if (flash && flash.error) { %>
-    <div class="block-notice license-block-notice license-flash-error" data-block-reason="<%= flash.blockReason || 'server_error' %>">
-      <%= flash.error %>
+  <%
+    var flashError = flash && flash.error ? flash.error : '';
+    var flashReason = flash && flash.blockReason ? flash.blockReason : '';
+  %>
+  <% if (flashError) { %>
+    <div class="block-notice license-block-notice license-flash-error" data-server-license-notice data-block-reason="<%= flashReason || 'server_error' %>" role="status">
+      <%= flashError %>
     </div>
-  <% } %>
-
-  <% if (flash && flash.cooldown && flash.cooldown > 0) { %>
-    <div class="cooldown-notice block-notice" data-block-reason="cooldown_active" data-seconds="<%= flash.cooldown %>">
+  <% } else if (flash && flash.cooldown && flash.cooldown > 0) { %>
+    <div class="cooldown-notice block-notice" data-server-license-notice data-block-reason="cooldown_active" data-seconds="<%= flash.cooldown %>" role="status">
       Cooldown active: <span class="countdown"></span>
     </div>
   <% } else if (!existingUnusedKey && cooldown && !cooldown.allowed && cooldown.secondsLeft > 0) { %>
-    <div class="cooldown-notice block-notice" data-block-reason="cooldown_active" data-seconds="<%= cooldown.secondsLeft %>">
+    <div class="cooldown-notice block-notice" data-server-license-notice data-block-reason="cooldown_active" data-seconds="<%= cooldown.secondsLeft %>" role="status">
       Cooldown active: <span class="countdown"></span>
     </div>
   <% } else if (eligibility && !eligibility.canGenerate && eligibility.blockReason === 'max_key_limit') { %>
-    <div class="block-notice license-block-notice" data-block-reason="max_key_limit">
+    <div class="block-notice license-block-notice" data-server-license-notice data-block-reason="max_key_limit" role="status">
       <%= eligibility.message || 'Key limit reached for your account.' %>
     </div>
   <% } %>
@@ -53,9 +55,9 @@
   <% } %>
 
   <div class="license-actions" data-license-actions data-csrf="<%= csrfToken %>" data-eligibility-refresh="1">
-    <form method="POST" action="/api/key/start" class="license-action-form">
+    <form method="POST" action="/license/generate" class="license-action-form">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <button type="submit" class="btn btn-primary btn-generate" id="btn-generate">
+      <button type="submit" class="btn btn-primary btn-generate" id="btn-generate"<%= eligibility && !eligibility.canGenerate ? ' disabled aria-disabled="true"' : '' %>>
         Generate Key
       </button>
     </form>

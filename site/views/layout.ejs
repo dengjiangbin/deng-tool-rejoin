@@ -172,7 +172,7 @@
   </nav>
 
   <main class="main-content">
-    <% if (flash && flash.error) { %>
+    <% if (flash && flash.error && !(typeof suppressLayoutFlash !== 'undefined' && suppressLayoutFlash)) { %>
       <div class="alert alert-error" role="alert"><%= flash.error %></div>
     <% } %>
     <% if (flash && flash.success) { %>

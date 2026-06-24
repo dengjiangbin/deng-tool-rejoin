@@ -13,8 +13,8 @@ let publicStatsCache = null;
 const DEFAULT_GLOBAL_MAX_KEYS = 2;
 const DEFAULT_GLOBAL_MAX_PANEL = 1;
 const KEY_SLOT_LIMIT_MESSAGE = (
-  'You already reached the maximum of 2 key slots. '
-  + 'Delete/reset/revoke an old key or contact an admin.'
+  'You have reached the 2 active-key limit. Reset HWID only moves a key to another device; '
+  + 'to free a slot, ask an admin to revoke an old key.'
 );
 const HWID_RESET_LIMIT_MESSAGE = (
   'You already used your 1 HWID reset for today. '

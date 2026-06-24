@@ -3393,6 +3393,54 @@ describe('provider UI and security gate', () => {
     assert.doesNotMatch(rendered.text, /No active key generation attempt was found/);
   });
 
+  test('license browser generation enters the provider page instead of exposing API JSON', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const page = await agent.get('/license');
+    const csrf = csrfFrom(page.text);
+    assert.match(page.text, /action="\/license\/generate"/);
+    assert.doesNotMatch(page.text, /action="\/api\/key\/start"/);
+
+    const started = await agent.post('/license/generate').type('form').send({ _csrf: csrf });
+    assert.equal(started.status, 200);
+    assert.match(started.headers['content-type'], /text\/html/);
+    assert.match(started.text, /Choose Provider/);
+    assert.doesNotMatch(started.text, /\{"challenge_id":/);
+
+    const directApiNavigation = await agent.get('/api/key/start');
+    assert.equal(directApiNavigation.status, 303);
+    assert.equal(directApiNavigation.headers.location, '/license');
+  });
+
+  test('max key limit is rendered once on the license page', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    memoryDb.license_key_limits.push({
+      id: randomUUID(),
+      scope: 'user',
+      max_keys: 2,
+      discord_user_id: 'discord-user-1',
+      updated_by_discord_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const redeemedAt = new Date().toISOString();
+    insertLicenseFixture('DENG-MAX-C-1111-2222-3333', { redeemed_at: redeemedAt, expires_at: null });
+    insertLicenseFixture('DENG-MAX-D-1111-2222-3333', { redeemed_at: redeemedAt, expires_at: null });
+
+    const blockedPage = await agent.get('/license');
+    const csrf = csrfFrom(blockedPage.text);
+    const blocked = await agent.post('/license/generate').type('form').send({ _csrf: csrf });
+    assert.equal(blocked.status, 302);
+    assert.equal(blocked.headers.location, '/license');
+
+    const rendered = await agent.get('/license');
+    const message = 'You have reached the 2 active-key limit.';
+    assert.equal(rendered.text.split(message).length - 1, 1);
+    assert.match(rendered.text, /data-server-license-notice/);
+    assert.doesNotMatch(rendered.text, /<main class="main-content">[\s\S]*alert-error[\s\S]*You have reached the 2 active-key limit/);
+  });
+
   test('findOrCreateResumableChallenge resumes open attempt instead of duplicating', async () => {
     const agent = request.agent(app);
     await login(agent);

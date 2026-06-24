@@ -164,6 +164,7 @@
 
   var btn = document.getElementById('btn-generate');
   var notice = document.querySelector('[data-eligibility-notice]');
+  var serverNotice = document.querySelector('[data-server-license-notice]');
 
   function formatBlockMessage(body) {
     if (!body || body.canGenerate) return '';
@@ -186,11 +187,30 @@
 
       if (body && body.canGenerate) {
         if (notice) notice.hidden = true;
+        if (serverNotice) serverNotice.hidden = true;
         if (btn && !document.querySelector('.unused-key-recovery')) btn.disabled = false;
         return;
       }
 
       var text = formatBlockMessage(body);
+      // The server rendered a fresh eligibility block for the same reason.
+      // Keep that one authoritative notice instead of adding a second client
+      // copy after the eligibility refresh completes.
+      if (serverNotice && (
+        serverNotice.dataset.blockReason === (body.blockReason || '')
+        || serverNotice.dataset.blockReason === 'server_error'
+      )) {
+        serverNotice.textContent = text;
+        serverNotice.hidden = !text;
+        if (notice) notice.hidden = true;
+        if (btn && (body.blockReason === 'cooldown_active' || body.blockReason === 'max_key_limit')) btn.disabled = true;
+        return;
+      }
+      if (document.querySelector('.unused-key-recovery') && body.blockReason === 'active_unredeemed_key') {
+        if (notice) notice.hidden = true;
+        if (btn) btn.disabled = true;
+        return;
+      }
       if (notice && text) {
         notice.textContent = text;
         notice.dataset.blockReason = body.blockReason || '';
@@ -414,6 +434,16 @@
         resetList.innerHTML = '<p class="empty-title">No Resettable Keys Found.</p>';
         showMessage(resetMessage, err.message || 'Could not load keys.', 'error');
       });
+  }
+
+  var generateForm = root.querySelector('.license-action-form');
+  if (generateForm) {
+    generateForm.addEventListener('submit', function() {
+      // Clear a client-only notice before the browser follows the server-owned
+      // generation flow. Any current block will be rendered exactly once by
+      // the destination page.
+      if (pageMessage) showMessage(pageMessage, '', 'success');
+    });
   }
 
   document.querySelectorAll('[data-open-license-modal]').forEach(function(button) {

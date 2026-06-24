@@ -141,6 +141,12 @@
   display: none;
 }
 
+/* The tracker mobile navigation mixes buttons and the My License anchor. */
+.inventory-main-nav__tab,
+.inventory-main-nav__tab:visited {
+  text-decoration: none;
+}
+
 @media (min-width: 769px) {
   .inventory-sidebar .inventory-main-nav--mobile,
   .inventory-sidebar.deng-app-sidebar [data-mobile-tracker-tabs],

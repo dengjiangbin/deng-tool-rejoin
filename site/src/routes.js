@@ -757,6 +757,7 @@ async function handleKeyStart(req, res) {
         }
         req.session.flash = {
           error: msg,
+          blockReason: 'max_key_limit',
           keyLimitReached: true,
           activeCount: eligibility.activeKeySlotCount,
           maxKeys: eligibility.maxKeyPolicyUsed,
@@ -1473,6 +1474,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
     delete req.session.recoveredExistingKey;
     res.render('license', {
       title: 'My License - DENG All In One',
+      suppressLayoutFlash: true,
       history,
       stats: summarizeHistory(activeHistory),
       cooldown,
@@ -1488,6 +1490,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
     console.error('[license]', err.message || err);
     res.render('license', {
       title: 'My License - DENG All In One',
+      suppressLayoutFlash: true,
       history: [],
       stats: summarizeHistory([]),
       cooldown: { allowed: true, secondsLeft: 0 },
@@ -1538,6 +1541,9 @@ router.get('/key/provider', requireLogin, repairSiteUser, async (req, res) => {
 
 router.post('/api/key/start', requireLogin, generateLimiter, handleKeyStart);
 router.post('/license/generate', requireLogin, generateLimiter, handleKeyStart);
+// The API endpoint is intentionally JSON-only. A normal browser navigation
+// should return to the form route instead of exposing a raw JSON response.
+router.get('/api/key/start', requireLogin, (_req, res) => res.redirect(303, '/license'));
 router.post('/api/key/provider', requireLogin, repairSiteUser, handleProvider);
 router.post('/api/key/provider/:provider', requireLogin, repairSiteUser, handleProvider);
 router.post('/license/provider', requireLogin, repairSiteUser, handleProvider);

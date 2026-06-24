@@ -74,3 +74,20 @@ test('login uses the homepage light blue and pink visual system', () => {
   assert.match(css, /linear-gradient\(135deg, #dbeafe 0%, #fce7f3 100%\)/);
   assert.match(css, /background: rgba\(255, 255, 255, 0\.78\)/);
 });
+
+test('license generation uses a browser route and renders one server-owned block notice', () => {
+  const license = read('site/views/license.ejs');
+  const layout = read('site/views/layout.ejs');
+  const appJs = read('site/public/js/app.js');
+  const routes = read('site/src/routes.js');
+  const sidebarCss = read('site/public/css/app-sidebar.css');
+
+  assert.match(license, /action="\/license\/generate"/);
+  assert.doesNotMatch(license, /action="\/api\/key\/start"/);
+  assert.match(license, /data-server-license-notice/);
+  assert.match(layout, /typeof suppressLayoutFlash !== 'undefined'/);
+  assert.match(appJs, /serverNotice\.dataset\.blockReason === \(body\.blockReason \|\| ''\)/);
+  assert.match(routes, /router\.get\('\/api\/key\/start', requireLogin, \(_req, res\) => res\.redirect\(303, '\/license'\)\)/);
+  assert.match(sidebarCss, /\.inventory-main-nav__tab:visited/);
+  assert.match(sidebarCss, /text-decoration: none/);
+});
