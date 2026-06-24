@@ -629,9 +629,12 @@ def _capture_webhook_debug() -> dict[str, Any]:
     path = DATA_DIR / "webhook-debug.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        result = mask(data) if isinstance(data, dict) else {"available": False}
+        result = sanitize_probe(data) if isinstance(data, dict) else {"available": False}
         result["trace_file_missing"] = not bool(trace)
         result["trace"] = trace
+        result["trace_path"] = str(trace_path)
+        result["latest_trace"] = trace[-1] if trace else {}
+        result["missing_markers"] = _missing_webhook_trace_markers(trace)
         return result
     except (OSError, ValueError, TypeError):
         try:
@@ -662,8 +665,20 @@ def _capture_webhook_debug() -> dict[str, Any]:
             "last_response_body_redacted": "",
             "next_scheduled_send_at": "",
             "trace_file_missing": not bool(trace),
+            "trace_path": str(trace_path),
             "trace": trace,
+            "latest_trace": trace[-1] if trace else {},
+            "missing_markers": _missing_webhook_trace_markers(trace),
         }
+
+
+def _missing_webhook_trace_markers(trace: list[dict[str, Any]]) -> list[str]:
+    required = (
+        "start_selected", "config_path_read", "webhook_mode", "timer_armed",
+        "reporter_tick_started", "telemetry_result", "send_periodic_status_entered",
+        "http_method", "http_status", "reporter_tick_completed",
+    )
+    return [marker for marker in required if not any(marker in row for row in trace)]
 
 
 def _capture_installed_build(errors: list[dict[str, str]]) -> dict[str, Any]:
