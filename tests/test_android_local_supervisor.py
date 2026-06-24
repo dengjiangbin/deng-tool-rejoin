@@ -37,7 +37,13 @@ class AndroidLocalSupervisorTests(unittest.TestCase):
              patch.object(sup, "_fetch_presence", side_effect=AssertionError("web presence used")):
             state, detail = sup._detect_package_state(PKG, ENTRY)
         self.assertEqual(state, STATUS_ONLINE)
-        self.assertEqual(detail["reason"], "android_alive_evidence")
+        self.assertEqual(detail["reason"], "android_alive_process_table")
+
+    def test_workflow_states_remain_visible_without_affecting_health(self) -> None:
+        sup = self._supervisor()
+        for state in ("Preparing", "Clear Cache", "Launching", "Relaunching"):
+            sup._set_status(PKG, state)
+            self.assertEqual(sup.status_map[PKG], state)
 
     def test_dead_package_clears_only_target_cache_then_relaunches(self) -> None:
         sup = self._supervisor()
@@ -76,6 +82,20 @@ class AndroidLocalSupervisorTests(unittest.TestCase):
              patch("agent.android.get_package_alive_evidence", return_value={"strict_alive": False}):
             state, _detail = sup._detect_package_state(PKG, ENTRY)
         self.assertEqual(state, STATUS_DEAD)
+
+    def test_stale_task_surface_and_foreground_cannot_fake_online(self) -> None:
+        sup = self._supervisor()
+        stale = {
+            "task": True, "surface": True, "foreground": True,
+            "window": False, "running": False, "root_running": False,
+            "pid": "", "pidof_rc": 1, "strict_alive": False,
+        }
+        with patch("agent.android.package_installed", return_value=True), \
+             patch("agent.android.get_package_alive_evidence", return_value=stale):
+            state, detail = sup._detect_package_state(PKG, ENTRY)
+        self.assertEqual(state, STATUS_DEAD)
+        self.assertEqual(detail["pid"], "")
+        self.assertEqual(detail["pidof_rc"], "1")
 
 
 if __name__ == "__main__":

@@ -155,7 +155,7 @@ STATUS_IN_GAME           = "Online"            # presence type 2 (legacy alias)
 STATUS_IN_LOBBY          = "In Lobby"          # Roblox presence type 1 (home/lobby)
 STATUS_OFFLINE           = "Offline"
 STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
-STATUS_LAUNCHING         = "Relaunching"
+STATUS_LAUNCHING         = "Launching"
 STATUS_REOPENING         = "Relaunching"        # legacy constant name
 STATUS_RELAUNCHING       = "Relaunching"
 STATUS_WAITING           = "Waiting"
@@ -1382,14 +1382,15 @@ class WatchdogSupervisor:
 
     def _set_status(self, pkg: str, status: str) -> None:
         requested = str(status or "").strip()
-        if requested in {STATUS_CHECKING, STATUS_PENDING, STATUS_WAITING, "Joining", "Launching"}:
-            # Sampling is not a public package state. Keep the last state until
-            # Android evidence produces Online, Dead, or Relaunching.
-            return
-        if requested in {STATUS_LAUNCHING, STATUS_REOPENING, STATUS_RELAUNCHING, "Reconnecting"}:
-            status = STATUS_RELAUNCHING
+        if requested in {STATUS_PREPARING, STATUS_CLEAR_CACHE, STATUS_LAUNCHING, STATUS_RELAUNCHING, STATUS_REOPENING}:
+            status = requested
+        elif requested in {STATUS_CHECKING, STATUS_PENDING, STATUS_WAITING, "Joining", "Reconnecting"}:
+            # Internal sampling labels collapse to the visible launch workflow.
+            status = STATUS_LAUNCHING
         elif requested not in {STATUS_ONLINE, STATUS_DEAD}:
             status = STATUS_DEAD
+        if requested in {STATUS_REOPENING, STATUS_RELAUNCHING}:
+            status = STATUS_RELAUNCHING
         with self._state_lock:
             old = self.status_map.get(pkg)
             self.status_map[pkg] = status
@@ -2213,11 +2214,14 @@ class WatchdogSupervisor:
             evidence = android.get_package_alive_evidence(pkg) if installed else {}
         except Exception:  # noqa: BLE001
             evidence = {}
+        process_evidence = bool(evidence.get("running") or evidence.get("root_running"))
+        window_evidence = bool(evidence.get("window"))
         alive = bool(evidence.get("strict_alive", False))
         verify_until = self._relaunch_verify_until.get(pkg, 0.0)
         if alive:
             state = STATUS_ONLINE
-            reason = "android_alive_evidence"
+            proof = "pid" if evidence.get("pid") else ("process_table" if process_evidence else "live_window")
+            reason = f"android_alive_{proof}"
             self._relaunch_inflight.discard(pkg)
             self._relaunch_verify_until.pop(pkg, None)
         elif pkg in self._relaunch_inflight and time.monotonic() < verify_until:
@@ -2229,7 +2233,14 @@ class WatchdogSupervisor:
             self._relaunch_inflight.discard(pkg)
             self._relaunch_verify_until.pop(pkg, None)
         detail = {
-            "process_running": str(bool(evidence.get("running") or evidence.get("root_running"))).lower(),
+            "pid": str(evidence.get("pid") or ""),
+            "pidof_rc": str(evidence.get("pidof_rc", 1)),
+            "process_running": str(process_evidence).lower(),
+            "process_evidence": str(process_evidence).lower(),
+            "activity_evidence": str(bool(evidence.get("foreground"))).lower(),
+            "window_evidence": str(window_evidence).lower(),
+            "surface_evidence": str(bool(evidence.get("surface"))).lower(),
+            "recent_task_evidence": "diagnostic_only",
             "in_game": "not_used",
             "heartbeat_ok": "not_used",
             "warning_detected": "false",
@@ -2433,7 +2444,13 @@ class WatchdogSupervisor:
             self._logger, "info", "[DENG_REJOIN_STATE_EVIDENCE]",
             package=pkg,
             process_running=detail.get("process_running", "unknown"),
-            pid="",
+            pid=detail.get("pid", ""),
+            pidof_rc=detail.get("pidof_rc", 1),
+            process_evidence=detail.get("process_evidence", "false"),
+            activity_evidence=detail.get("activity_evidence", "false"),
+            window_evidence=detail.get("window_evidence", "false"),
+            surface_evidence=detail.get("surface_evidence", "false"),
+            recent_task_evidence=detail.get("recent_task_evidence", "diagnostic_only"),
             root_available=detail.get("root_available", "false"),
             foreground_package=detail.get("foreground_package", ""),
             activity=detail.get("activity", ""),

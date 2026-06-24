@@ -1667,7 +1667,7 @@ def is_package_surface_in_surfaceflinger(package: str) -> bool:
         return False
 
 
-def get_package_alive_evidence(package: str) -> dict[str, bool]:
+def get_package_alive_evidence(package: str) -> dict[str, object]:
     """Comprehensive multi-source check for package aliveness.
 
     Returns a dict with evidence from multiple sources:
@@ -1690,10 +1690,10 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
 
     Never raises; always returns a valid dict.
     """
-    _dead: dict[str, bool] = {
+    _dead: dict[str, object] = {
         "running": False, "task": False, "window": False, "root_running": False,
         "surface": False, "foreground": False,
-        "alive": False, "strict_alive": False,
+        "alive": False, "strict_alive": False, "pid": "", "pidof_rc": 1,
     }
     package_str = package
     try:
@@ -1704,6 +1704,20 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
     running = False
     try:
         running = is_process_running(package_str)
+    except Exception:  # noqa: BLE001
+        pass
+
+    pid = ""
+    pidof_rc = 1
+    try:
+        root_info = detect_root()
+        if root_info.available and root_info.tool:
+            pid_result = run_root_command(
+                ["pidof", "-s", package_str], root_tool=root_info.tool, timeout=3,
+            )
+            pidof_rc = int(pid_result.returncode)
+            if pid_result.ok and (pid_result.stdout or "").strip().isdigit():
+                pid = (pid_result.stdout or "").strip()
     except Exception:  # noqa: BLE001
         pass
 
@@ -1750,8 +1764,8 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
     # STRICT aliveness: process OR drawing window OR composited surface OR
     # the system says this package is currently foreground.  Task alone is
     # still NOT enough — it lingers after a close.
-    process_alive = running or root_running
-    visual_alive = window or surface or foreground
+    process_alive = bool(pid) or running or root_running
+    visual_alive = window
     strict_alive = process_alive or visual_alive
     return {
         "running":      running,
@@ -1762,6 +1776,8 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
         "foreground":   foreground,
         "alive":        strict_alive,
         "strict_alive": strict_alive,
+        "pid":          pid,
+        "pidof_rc":     pidof_rc,
     }
 
 
