@@ -60,10 +60,9 @@ MAX_PACKAGES_PER_PUSH = 64
 
 # Allowed states (mirrors agent.supervisor STATUS_* but kept local on purpose
 # so the bridge does not depend on supervisor imports).
-# v1.0.5: canonical 4 APK-visible states — Dead, Launching, Online, No Heartbeat.
+# Canonical APK-visible states mirror the Android-local watchdog.
 ALLOWED_STATES = frozenset({
-    "Online", "Dead", "Relaunching", "No Heartbeat",
-    "Launching",
+    "Online", "Dead", "Relaunching",
     "Unknown", "Offline", "Preparing",
     "Background", "Reconnecting", "Warning", "Failed",
     "Closed", "Launched", "Disconnected",

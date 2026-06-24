@@ -155,7 +155,7 @@ STATUS_IN_GAME           = "Online"            # presence type 2 (legacy alias)
 STATUS_IN_LOBBY          = "In Lobby"          # Roblox presence type 1 (home/lobby)
 STATUS_OFFLINE           = "Offline"
 STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
-STATUS_LAUNCHING         = "Launching"
+STATUS_LAUNCHING         = "Relaunching"
 STATUS_REOPENING         = "Relaunching"        # legacy constant name
 STATUS_RELAUNCHING       = "Relaunching"
 STATUS_WAITING           = "Waiting"
@@ -183,22 +183,14 @@ STATUS_DISCONNECTED      = "Disconnected"
 # ── Live watchdog vocabulary (WatchdogSupervisor) ────────────────────────────
 # These three states are the ONLY public steady states produced by WatchdogSupervisor:
 #   Online        — process running and in-game
-#   No Heartbeat  — process running but NOT playing (lobby, stuck, frozen, no heartbeat)
 #   Dead          — process not running
-# Running-but-not-in-game now maps directly to No Heartbeat.
-STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running but not actively playing
 
 # Presence-confirmed steady states that kick off RAM/runtime metric loops.
-_METRIC_ACTIVE_STATES = frozenset({
-    STATUS_ONLINE,
-    STATUS_IN_GAME,
-    STATUS_IN_LOBBY,
-})
+_METRIC_ACTIVE_STATES = frozenset({STATUS_ONLINE})
 
 # All healthy states — used for legacy _PackageWorker state-machine guards.
 # WatchdogSupervisor never reads _HEALTHY_STATES; only _PackageWorker uses it.
 # STATUS_LOBBY stays in _HEALTHY_STATES for _PackageWorker backward compat.
-# WatchdogSupervisor never produces Lobby; its display map maps Lobby → No Heartbeat.
 _HEALTHY_STATES = frozenset({
     STATUS_ONLINE, STATUS_LAUNCHED,
     # Legacy aliases for _PackageWorker only; never produced by WatchdogSupervisor.
@@ -1169,8 +1161,7 @@ class WatchdogSupervisor:
     """Continuous sequential watchdog with deterministic live detection.
 
     States produced (public):
-        Online        — Process running, in game, healthy heartbeat/presence.
-        No Heartbeat  — Process running, but not playing normally, stalled, or offline signal.
+        Online        — Android reports current package/process evidence.
         Dead          — Process not running (force-closed, crashed, stopped).
         Launching     — Transient: initial launch sent, waiting for first state detection.
 
@@ -1263,24 +1254,17 @@ class WatchdogSupervisor:
         self.status_map: dict[str, str] = {
             pkg: STATUS_LAUNCHING for pkg in self.packages
         }
-        # Normalize initial_status: remove legacy/transient labels.
-        # Running-but-not-in-game is Dead.
-        # Any lobby-like state from old sessions also maps to Dead.
+        # Normalize prior sessions to the Android-local public vocabulary.
         if initial_status:
-            _legacy_to_launching = {
-                STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting", "Joining",
-            }
-            _legacy_to_dead = {
-                "In" + "-Lobby", "Lobby",
-            }
             for pkg, st in initial_status.items():
                 if pkg in self.status_map:
-                    if st in _legacy_to_dead:
-                        self.status_map[pkg] = STATUS_DEAD
-                    elif st in _legacy_to_launching:
-                        self.status_map[pkg] = STATUS_LAUNCHING
+                    value = str(st or "").strip()
+                    if value == STATUS_ONLINE:
+                        self.status_map[pkg] = STATUS_ONLINE
+                    elif value in {STATUS_RELAUNCHING, STATUS_REOPENING, STATUS_LAUNCHING, "Launching", "Reconnecting"}:
+                        self.status_map[pkg] = STATUS_RELAUNCHING
                     else:
-                        self.status_map[pkg] = st
+                        self.status_map[pkg] = STATUS_DEAD
 
         self.on_status_change = on_status_change
 
@@ -1299,12 +1283,14 @@ class WatchdogSupervisor:
         self._last_launched_at: dict[str, float] = {}  # monotonic ts of last open/reopen
         self._grace_until: dict[str, float] = {}      # no relaunch until this ts
         self._nhb_offline_count: dict[str, int] = {}  # consecutive offline hits
-        self._nhb_since: dict[str, float] = {}  # when package entered No Heartbeat
+        self._nhb_since: dict[str, float] = {}  # legacy recovery timing map
         self._nhb_cooldown_until: dict[str, float] = {}  # legacy; unused by kill-switch
         self._revive_count: dict[str, int] = {}
         self._failure_count: dict[str, int] = {}
         self._recovery_launch_attempts: dict[str, int] = {}
         self._recovery_throttle_until: dict[str, float] = {}
+        self._relaunch_inflight: set[str] = set()
+        self._relaunch_verify_until: dict[str, float] = {}
 
         # ── Per-package RAM optimization tracking ─────────────────────────────
         self._ram_last_check_at: dict[str, float] = {}   # last RAM measurement ts
@@ -1395,8 +1381,15 @@ class WatchdogSupervisor:
         self.stop_event.set()
 
     def _set_status(self, pkg: str, status: str) -> None:
-        if str(status or "").strip() == "Joining":
-            status = STATUS_LAUNCHING
+        requested = str(status or "").strip()
+        if requested in {STATUS_CHECKING, STATUS_PENDING, STATUS_WAITING, "Joining", "Launching"}:
+            # Sampling is not a public package state. Keep the last state until
+            # Android evidence produces Online, Dead, or Relaunching.
+            return
+        if requested in {STATUS_LAUNCHING, STATUS_REOPENING, STATUS_RELAUNCHING, "Reconnecting"}:
+            status = STATUS_RELAUNCHING
+        elif requested not in {STATUS_ONLINE, STATUS_DEAD}:
+            status = STATUS_DEAD
         with self._state_lock:
             old = self.status_map.get(pkg)
             self.status_map[pkg] = status
@@ -1490,7 +1483,7 @@ class WatchdogSupervisor:
         self._set_status(pkg, STATUS_LAUNCHING)
 
     def _mark_launched(self, pkg: str) -> None:
-        """Record a fresh open/reopen and reset No Heartbeat kill-switch tracking."""
+        """Record a fresh open/reopen and reset legacy recovery timing."""
         with self._state_lock:
             self._last_launched_at[pkg] = time.monotonic()
             self._nhb_since.pop(pkg, None)
@@ -1557,7 +1550,7 @@ class WatchdogSupervisor:
         preserved = str(self._prev_state.get(pkg) or self.status_map.get(pkg) or "").strip()
         if preserved in {STATUS_CHECKING, STATUS_PENDING, ""}:
             preserved = STATUS_ONLINE if self._last_online_ts.get(pkg) else STATUS_LAUNCHING
-        if preserved == STATUS_NO_HEARTBEAT and self._last_online_ts.get(pkg):
+        if preserved == STATUS_DEAD and self._last_online_ts.get(pkg):
             preserved = STATUS_ONLINE
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         detail = {
@@ -1607,7 +1600,7 @@ class WatchdogSupervisor:
         preserved = str(self._prev_state.get(pkg) or self.status_map.get(pkg) or "").strip()
         if preserved in {
             "", STATUS_CHECKING, STATUS_PENDING, STATUS_LAUNCHING,
-            STATUS_WAITING, STATUS_NO_HEARTBEAT, STATUS_DEAD,
+            STATUS_WAITING, STATUS_DEAD,
         }:
             preserved = STATUS_ONLINE
         detail = {
@@ -2050,7 +2043,7 @@ class WatchdogSupervisor:
             else:
                 state, _detail = self._detect_package_state(pkg, entry)
         except Exception:  # noqa: BLE001
-            state = str(self.status_map.get(pkg) or STATUS_NO_HEARTBEAT)
+            state = str(self.status_map.get(pkg) or STATUS_DEAD)
         return state
 
     def _run_blocking_recovery_gate(
@@ -2162,11 +2155,13 @@ class WatchdogSupervisor:
     def _evaluate_launching_or_pending(
         self, pkg: str, entry: dict[str, Any]
     ) -> tuple[str, dict[str, Any]]:
-        """Launching → Checking → Online | No Heartbeat | Dead.
+        """Evaluate a launched package from Android-local evidence only."""
+        return self._detect_android_package_state(pkg)
+
+        """Legacy detector body retained below this early return.
 
         Forces an immediate cookie rescan so cloned APK shared_prefs are read
-        via root before the presence API call.  Cookie/identity failures map
-        to No Heartbeat so the 60s kill-switch can recover the package.
+        via root before the presence API call.
         """
         self._set_status(pkg, STATUS_CHECKING)
         self._presence_cookie_lookup_at.pop(pkg, None)
@@ -2182,24 +2177,24 @@ class WatchdogSupervisor:
         api_status = str(pres_detail.get("roblox_api_status") or "")
 
         if state in {STATUS_PENDING, STATUS_CHECKING} or (
-            state == STATUS_NO_HEARTBEAT
+            state == STATUS_DEAD
             and str(detail.get("reason") or "") in {
                 "presence_user_id_pending",
                 "cookie_extraction_failed",
                 "missing_cookie",
             }
         ):
-            state = STATUS_NO_HEARTBEAT
+            state = STATUS_DEAD
             detail = dict(detail)
-            detail["activity"] = "No Heartbeat"
+            detail["activity"] = "Dead"
             detail["heartbeat_ok"] = "false"
             detail["reason"] = (
                 "cookie_extraction_failed"
                 if cookie_missing or presence_error == "missing_cookie"
                 else "presence_identity_unavailable"
             )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-        elif state == STATUS_NO_HEARTBEAT and api_status in {
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_DEAD)
+        elif state == STATUS_DEAD and api_status in {
             "failed", "rate_limited", "network_error", "timeout", "skipped",
         }:
             detail = dict(detail)
@@ -2207,9 +2202,54 @@ class WatchdogSupervisor:
 
         return state, detail
 
+    def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
+        """Classify one package from installed + live Android evidence only."""
+        t0 = time.monotonic()
+        try:
+            installed = android.package_installed(pkg)
+        except Exception:  # noqa: BLE001
+            installed = False
+        try:
+            evidence = android.get_package_alive_evidence(pkg) if installed else {}
+        except Exception:  # noqa: BLE001
+            evidence = {}
+        alive = bool(evidence.get("strict_alive", False))
+        verify_until = self._relaunch_verify_until.get(pkg, 0.0)
+        if alive:
+            state = STATUS_ONLINE
+            reason = "android_alive_evidence"
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+        elif pkg in self._relaunch_inflight and time.monotonic() < verify_until:
+            state = STATUS_RELAUNCHING
+            reason = "android_relaunch_verification_pending"
+        else:
+            state = STATUS_DEAD
+            reason = "package_not_installed" if not installed else "android_alive_evidence_missing"
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+        detail = {
+            "process_running": str(bool(evidence.get("running") or evidence.get("root_running"))).lower(),
+            "in_game": "not_used",
+            "heartbeat_ok": "not_used",
+            "warning_detected": "false",
+            "elapsed_ms": int((time.monotonic() - t0) * 1000),
+            "root_available": "not_required",
+            "foreground_package": pkg if evidence.get("foreground") else "",
+            "activity": state,
+            "in_game_proof": "android_local",
+            "heartbeat_age_sec": "not_used",
+            "presence_source": "not_used",
+            "reason": reason,
+        }
+        self._log_state_evidence(pkg, detail, {}, state)
+        return state, detail
+
     def _detect_package_state(
         self, pkg: str, entry: dict[str, Any], *, force_cookie_rescan: bool = False
     ) -> tuple[str, dict[str, Any]]:
+        return self._detect_android_package_state(pkg)
+
         """Determine liveness from root process evidence, then cookie presence."""
         del entry
         t0 = time.monotonic()
@@ -2249,11 +2289,11 @@ class WatchdogSupervisor:
             self._clear_lobby_state(pkg)
             self._nhb_offline_count[pkg] = self._nhb_offline_count.get(pkg, 0) + 1
             detail = _detail_base(
-                activity="No Heartbeat",
+                activity="Dead",
                 reason="root_ps_missing",
             )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-            return STATUS_NO_HEARTBEAT, detail
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_DEAD)
+            return STATUS_DEAD, detail
 
         if self._presence_api_fault_active() or self._watchdog_round_rate_limited:
             if process_checked and process_running:
@@ -2349,17 +2389,17 @@ class WatchdogSupervisor:
                 activity=profile or ("Lobby" if presence_lobby else "Offline"),
                 reason="presence_lobby" if presence_lobby else "presence_offline",
             )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-            return STATUS_NO_HEARTBEAT, detail
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_DEAD)
+            return STATUS_DEAD, detail
 
         if presence_unknown:
             detail = _presence_detail(
-                activity="No Heartbeat",
+                activity="Dead",
                 in_game_proof="unknown",
                 reason="presence_unavailable_after_transition",
             )
-            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
-            return STATUS_NO_HEARTBEAT, detail
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_DEAD)
+            return STATUS_DEAD, detail
 
         # Neither layer has declared the package offline.  Keep the previous
         # good state (or Launching for a first observation) instead of treating
@@ -2368,7 +2408,7 @@ class WatchdogSupervisor:
             preserved = STATUS_PENDING
         else:
             preserved = str(self._prev_state.get(pkg) or self.status_map.get(pkg) or "").strip()
-        if preserved in {"", STATUS_CHECKING, STATUS_PENDING, STATUS_NO_HEARTBEAT}:
+        if preserved in {"", STATUS_CHECKING, STATUS_PENDING, STATUS_DEAD}:
             preserved = (
                 STATUS_PENDING
                 if presence is None and presence_error == "missing_user_id"
@@ -2495,7 +2535,6 @@ class WatchdogSupervisor:
 
         Recovery rules:
         - Dead        → launch_package_for_current_config
-        - No Heartbeat → track stall; after 60s force-stop → Dead → Relaunching
         - Online      → update last_online_ts, keep monitoring
 
         Returns True when a blocking recovery gate should run for this package.
@@ -2505,6 +2544,8 @@ class WatchdogSupervisor:
         url_configured = url_context.get("url_mode") == "private_url"
 
         if state == STATUS_DEAD:
+            if pkg in self._relaunch_inflight:
+                return False
             if not self._reserve_recovery_launch_attempt(pkg):
                 remaining = self._recovery_throttle_remaining(pkg)
                 if remaining > 0:
@@ -2521,7 +2562,16 @@ class WatchdogSupervisor:
                 action=action,
                 reason="process_not_running",
             )
+            self._relaunch_inflight.add(pkg)
             self._set_status(pkg, STATUS_REOPENING)
+            cache_result = android.clear_package_cache_verified(pkg)
+            log_event(
+                logger, "info", "[DENG_REJOIN_DEAD_PACKAGE_CACHE_CLEAR]",
+                package=pkg,
+                success=str(bool(cache_result.get("success"))).lower(),
+                method=cache_result.get("method", ""),
+                error=cache_result.get("error", ""),
+            )
             self._mark_launched(pkg)
             if callable(render_callback):
                 try:
@@ -2532,14 +2582,17 @@ class WatchdogSupervisor:
             if success:
                 self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
                 self._set_grace(pkg, now)
+                self._relaunch_verify_until[pkg] = time.monotonic() + float(self.LOADING_GRACE_SECONDS)
                 self._mark_launched(pkg)
-                self._set_status(pkg, STATUS_LAUNCHING)
+                self._set_status(pkg, STATUS_RELAUNCHING)
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
+                self._relaunch_inflight.discard(pkg)
+                self._relaunch_verify_until.pop(pkg, None)
             self._post_recovery_memory_flush()
             return True
 
-        elif state == STATUS_NO_HEARTBEAT:
+        elif state == "__retired_state__":
             if self.status_map.get(pkg) == STATUS_ONLINE:
                 self._nhb_since.pop(pkg, None)
                 return False
@@ -2572,7 +2625,7 @@ class WatchdogSupervisor:
             if nhb_since is None:
                 self._nhb_since[pkg] = now_mono
                 log_event(
-                    logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_TRACK]",
+                    logger, "info", "[DENG_REJOIN_RETIRED_STALL_TRACK]",
                     package=pkg,
                     started_at=round(now_mono, 3),
                     kill_switch_sec=self.NHB_KILL_SWITCH_SECONDS,
@@ -2581,18 +2634,18 @@ class WatchdogSupervisor:
             elapsed = now_mono - nhb_since
             if elapsed < self.NHB_KILL_SWITCH_SECONDS:
                 log_event(
-                    logger, "debug", "[DENG_REJOIN_NO_HEARTBEAT_WAIT]",
+                    logger, "debug", "[DENG_REJOIN_RETIRED_STALL_WAIT]",
                     package=pkg,
                     elapsed_sec=round(elapsed, 1),
                     remaining_sec=round(self.NHB_KILL_SWITCH_SECONDS - elapsed, 1),
                 )
                 return False
             log_event(
-                logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_KILL_SWITCH]",
+                logger, "info", "[DENG_REJOIN_RETIRED_STALL_KILL_SWITCH]",
                 package=pkg,
                 elapsed_sec=round(elapsed, 1),
                 action="force_stop",
-                reason="continuous_no_heartbeat_exceeded_60s",
+                reason="retired_stall_path",
             )
             self._nhb_since.pop(pkg, None)
             self._nhb_cooldown_until.pop(pkg, None)
@@ -2909,7 +2962,7 @@ class WatchdogSupervisor:
                         state, detail = self._detect_package_state(pkg, entry)
                 except Exception as exc:  # noqa: BLE001
                     error_text = str(exc)[:180]
-                    state = prev if prev in {STATUS_ONLINE, STATUS_NO_HEARTBEAT, STATUS_DEAD} else STATUS_NO_HEARTBEAT
+                    state = prev if prev in {STATUS_ONLINE, STATUS_DEAD} else STATUS_DEAD
                     detail = {
                         "process_running": "unknown",
                         "in_game": "unknown",
@@ -2946,9 +2999,9 @@ class WatchdogSupervisor:
                 checked += 1
 
                 if state == STATUS_FAILED:
-                    state = STATUS_NO_HEARTBEAT
+                    state = STATUS_DEAD
                 process_hard_drop = (
-                    state == STATUS_NO_HEARTBEAT
+                    state == STATUS_DEAD
                     and str(detail.get("reason") or "") == "root_ps_missing"
                 )
 
@@ -2969,10 +3022,10 @@ class WatchdogSupervisor:
                 self._set_status(pkg, state)
                 self._prev_state[pkg] = state
 
-                if state == STATUS_NO_HEARTBEAT and prev != STATUS_NO_HEARTBEAT:
+                if False:
                     if process_hard_drop or not self._in_loading_grace(pkg):
                         self._nhb_since.setdefault(pkg, now_mono)
-                elif state != STATUS_NO_HEARTBEAT:
+                else:
                     self._nhb_since.pop(pkg, None)
 
                 if state in _METRIC_ACTIVE_STATES:
@@ -2988,19 +3041,12 @@ class WatchdogSupervisor:
 
                 recovery_gate = False
                 if state not in {STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
-                    if state == STATUS_NO_HEARTBEAT and (
-                        process_hard_drop or not self._in_loading_grace(pkg)
-                    ):
+                    if state == STATUS_DEAD:
                         recovery_gate = self._handle_state(
                             pkg, entry, state, prev, now,
                             render_callback=render_callback,
-                            immediate_recovery=process_hard_drop,
                         )
-                    elif state != STATUS_NO_HEARTBEAT and (
-                        not self._in_grace(pkg, now) or state in {
-                            STATUS_DEAD, STATUS_FAILED, STATUS_JOIN_FAILED
-                        }
-                    ):
+                    elif state == STATUS_ONLINE:
                         recovery_gate = self._handle_state(
                             pkg, entry, state, prev, now, render_callback=render_callback
                         )
@@ -3036,13 +3082,11 @@ class WatchdogSupervisor:
             _counts = {
                 "online":       sum(1 for v in self.status_map.values() if v == STATUS_ONLINE),
                 "dead":         sum(1 for v in self.status_map.values() if v == STATUS_DEAD),
-                "no_heartbeat": sum(1 for v in self.status_map.values() if v == STATUS_NO_HEARTBEAT),
             }
             log_event(
                 logger, "info", "[DENG_REJOIN_WATCHDOG_CONTINUES]",
                 online_packages=_counts["online"],
                 dead_packages=_counts["dead"],
-                no_heartbeat_packages=_counts["no_heartbeat"],
                 next_round_robin_sec=round_robin_sec,
             )
             log_event(

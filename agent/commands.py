@@ -4522,7 +4522,6 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Relaunching":       _ANSI_WHITE,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
-        "No Heartbeat":      _ANSI_RED,      # running but not playing normally
         ("Join" + "ing"):    _ANSI_CYAN,     # legacy alias
         "Join Failed":       _ANSI_RED,
         "Wrong Game / Wrong Server": _ANSI_RED,
@@ -4559,7 +4558,6 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Ready":             _ANSI_YELLOW,
         "Launching":         _ANSI_WHITE,
         "Relaunching":       _ANSI_WHITE,
-        "No Heartbeat":      _ANSI_RED,
         "Dead":              _ANSI_RED,
         "Failed":            _ANSI_RED,
     }.get(base_key, "")
@@ -4702,7 +4700,6 @@ def build_account_mapping_table(rows: list[tuple[str, str, str, str, str, str]])
 
 _FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
     ("online", "online."),
-    ("no heartbeat", "no heartbeat (recovering)."),
     ("reconnecting", "reconnecting."),
     ("launching", "launching."),
     ("preparing", "preparing."),
@@ -4720,7 +4717,6 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     "Lobby":             "lobby",
     "In Server":         "online",         # confirmed in target server
     ("Join " + "Unconfirmed"):  "launching",
-    "No Heartbeat":      "no heartbeat",   # was in game, heartbeat stalled
     ("Join" + "ing"):    "launching",
     "Reconnecting":      "reconnecting",
     "Launching":         "launching",
@@ -6260,7 +6256,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         # never reach the live supervisor dashboard.
         _STATE_DISPLAY_MAP: dict[str, str] = {
             # Live watchdog states — keep as-is.
-            "No Heartbeat":     "No Heartbeat",
             "Online":           "Online",
             "In Game":          "Online",
             "In Lobby":         "Lobby",

@@ -657,7 +657,7 @@ def resolve_presence_state(
 
     if local_stuck_detected:
         return PresenceResolution(
-            state="No Heartbeat",
+            state="Dead",
             reason="local_stuck_detector",
             server_verification="local_override",
         )
@@ -730,7 +730,7 @@ def resolve_presence_state(
 
     if is_offline:
         return PresenceResolution(
-            state="No Heartbeat",
+            state="Dead",
             reason="presence_offline",
             server_verification="presence_offline",
             **common,
@@ -740,13 +740,13 @@ def resolve_presence_state(
         elapsed = float(launch_elapsed_seconds or 0.0)
         if elapsed > float(join_timeout_seconds):
             return PresenceResolution(
-                state="No Heartbeat",
+                state="Dead",
                 reason="presence_lobby_join_timeout",
                 server_verification="not_playing",
                 **common,
             )
         return PresenceResolution(
-            state="No Heartbeat",
+            state="Dead",
             reason="presence_online_not_playing",
             server_verification="not_playing",
             **common,

@@ -187,7 +187,6 @@ def _wait_for_launch_ready(package: str, cfg: dict[str, Any]) -> dict[str, Any]:
 _DETACHED_RECOVERY_REASONS = frozenset({
     "recovery_gate_retry",
     "dead_recovery",
-    "no_heartbeat_recovery",
     "watchdog_recovery",
     "process_missing",
 })
@@ -688,8 +687,6 @@ def launch_package_for_current_config(
     This function MUST be used by:
     - Initial Start launch (via cmd_start loop)
     - Dead recovery (watchdog detects process gone)
-    - No Heartbeat recovery (watchdog force-stops then relaunches)
-    - No Heartbeat recovery (private URL relaunch when configured)
     - Supervisor resurrection
 
     [DENG_REJOIN_CANONICAL_LAUNCHER] probe_id=p-ea167faf5f

@@ -372,8 +372,7 @@ def get_monitor_status_summary() -> dict[str, Any]:
 # ── Status provider ─────────────────────────────────────────────────────────
 
 
-# v1.0.5: APK-visible state vocabulary — Dead, Launching, Online, No Heartbeat.
-# Joining was removed; packages stay Launching until the watchdog confirms Online.
+# APK-visible state vocabulary mirrors Android-local watchdog state.
 _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
     # Healthy / in-game.
     "Online": "Online",
@@ -390,9 +389,8 @@ _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
     # Heartbeat lost on a known-good process. Reconnecting / Background
     # collapse here because they all describe "process alive, gameplay
     # uncertain" and the supervisor's relaunch cooldown handles them.
-    "No Heartbeat": "No Heartbeat",
-    "Reconnecting": "No Heartbeat",
-    "Background": "No Heartbeat",
+    "Reconnecting": "Relaunching",
+    "Background": "Dead",
     # Genuinely not running, OR returned to lobby / not-playing. The
     # user explicitly does NOT want `In-Lobby` as a separate state —
     # lobby must map to Dead so the watchdog re-issues a launch/rejoin.
@@ -412,7 +410,7 @@ _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
 
 # Public allow-list for cross-checking: exactly five values.
 APK_VISIBLE_STATES: frozenset[str] = frozenset(
-    {"Dead", "Launching", "Online", "No Heartbeat"}
+    {"Dead", "Relaunching", "Online"}
 )
 
 
