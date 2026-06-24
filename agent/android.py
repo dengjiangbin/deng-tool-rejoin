@@ -812,7 +812,8 @@ def build_detached_force_stop_relaunch_shell(
     tool = str(root_tool or "su").strip() or "su"
     script_path = f"/data/local/tmp/relaunch_{pkg}.sh"
     detached_script = (
-        f"sh {shlex.quote(script_path)} < /dev/null > /dev/null 2>&1 &"
+        f"setsid nohup sh {shlex.quote(script_path)} "
+        "< /dev/null > /dev/null 2>&1 &"
     )
     return f"{shlex.quote(tool)} -c {shlex.quote(detached_script)}"
 

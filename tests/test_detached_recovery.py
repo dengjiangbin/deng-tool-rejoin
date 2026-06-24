@@ -31,6 +31,7 @@ class TestDetachedRecovery(unittest.TestCase):
         self.assertIn(_PKG, script)
         self.assertIn("su -c", shell)
         self.assertIn(f"/data/local/tmp/relaunch_{_PKG}.sh", shell)
+        self.assertIn("setsid nohup sh", shell)
         self.assertIn("< /dev/null", shell)
         self.assertIn("&'", shell)
 

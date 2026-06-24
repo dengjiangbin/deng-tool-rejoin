@@ -59,6 +59,20 @@ class TestRootCookieLiveness(unittest.TestCase):
         self.assertEqual(detail["reason"], "roblox_presence_in_game")
         fetch.assert_called_once_with(_PKG, force_cookie_rescan=False)
 
+    def test_live_root_process_preserves_online_on_presence_api_failure(self) -> None:
+        supervisor = self._supervisor()
+        result = MagicMock(ok=True, stdout="1234\n")
+        from agent.roblox_presence import RobloxApiFaultError
+        with patch("agent.android.run_root_command", return_value=result), \
+             patch.object(
+                 supervisor,
+                 "_fetch_presence",
+                 side_effect=RobloxApiFaultError("presence", fault="network"),
+             ):
+            state, detail = supervisor._detect_package_state(_PKG, _entry())
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertIn("process_alive_preserve_state", detail["reason"])
+
     def test_waiting_bypasses_launch_rescan_and_is_directly_evaluated(self) -> None:
         supervisor = self._supervisor()
         supervisor.mark_package_launched(_PKG)

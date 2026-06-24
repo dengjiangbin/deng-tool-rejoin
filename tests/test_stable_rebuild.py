@@ -631,17 +631,21 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         self.assertEqual(state, sup.STATUS_ONLINE)
         self.assertEqual(watcher._presence_last_detail["com.roblox.client"]["roblox_api_status"], "success")
 
-    def test_watchdog_presence_unknown_during_grace_stays_launching(self) -> None:
+    def test_watchdog_presence_unknown_during_grace_preserves_live_process(self) -> None:
         import agent.supervisor as sup
         from agent import roblox_presence as rp
 
         entry = {"package": "com.roblox.client", "roblox_user_id": 123}
         watcher = sup.WatchdogSupervisor([entry], {"supervisor": {}})
+        watcher._root_info = mock.Mock(available=True, tool="su")
         watcher.mark_package_launched("com.roblox.client")
         with mock.patch.object(
             watcher,
             "_fast_alive_evidence",
             side_effect=AssertionError("os probe"),
+        ), mock.patch(
+            "agent.android.run_root_command",
+            return_value=mock.Mock(ok=True, stdout="1234\n"),
         ), mock.patch.object(
             rp,
             "fetch_presence_one",
@@ -649,8 +653,8 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         ):
             state, detail = watcher._detect_package_state("com.roblox.client", entry)
 
-        self.assertEqual(state, sup.STATUS_WAITING)
-        self.assertEqual(detail["reason"], "presence_checked_loading_grace")
+        self.assertEqual(state, sup.STATUS_ONLINE)
+        self.assertIn("process_alive_preserve_state", detail["reason"])
 
 
 # ─── 6. YesCaptcha hidden from public UI ─────────────────────────────────────

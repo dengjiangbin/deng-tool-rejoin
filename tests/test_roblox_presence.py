@@ -304,6 +304,10 @@ class TestNeverRaises(unittest.TestCase):
         self.assertEqual(calls[1].get("X-CSRF-TOKEN"), "tok456")
         self.assertEqual(calls[2].get("X-CSRF-TOKEN"), "tok456")
 
+    def test_csrf_header_extraction_is_case_insensitive(self) -> None:
+        self.assertEqual(rp._extract_csrf_token({"x-csrf-token": "lower"}), "lower")
+        self.assertEqual(rp._extract_csrf_token({"X-CsRf-ToKeN": "mixed"}), "mixed")
+
 
 class TestDualPresenceVerification(unittest.TestCase):
     def setUp(self) -> None:

@@ -330,6 +330,17 @@ class TestCookieOnlyDetection(unittest.TestCase):
         self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail["reason"], "root_pgrep_missing")
 
+    def test_recovery_gate_does_not_relaunch_while_waiting(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: "Waiting"})
+        with patch.object(sup, "_evaluate_package_presence_isolated", return_value="Waiting"), \
+             patch.object(sup, "_deploy_gate_recovery_cycle") as cycle, \
+             patch.object(sup, "_interruptible_sleep", side_effect=lambda _seconds: sup.stop_event.set()), \
+             patch("agent.db.insert_event"):
+            sup._run_blocking_recovery_gate(
+                _PKG, _entry(), package_index=1, package_total=1,
+            )
+        cycle.assert_not_called()
+
     def test_offline_presence_after_grace_is_no_heartbeat(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: STATUS_LAUNCHING})
         sup._last_launched_at[_PKG] = time.monotonic() - (sup.LOADING_GRACE_SECONDS + 5)

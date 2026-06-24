@@ -1591,6 +1591,41 @@ class WatchdogSupervisor:
             fault=fault,
         )
 
+    def _preserve_live_process_on_api_fault(
+        self,
+        pkg: str,
+        *,
+        t0: float,
+        pres_detail: dict[str, Any] | None = None,
+        fault: str = "fault",
+    ) -> tuple[str, dict[str, Any]]:
+        """Keep a root-confirmed live package out of recovery on API failure."""
+        preserved = str(self._prev_state.get(pkg) or self.status_map.get(pkg) or "").strip()
+        if preserved in {
+            "", STATUS_CHECKING, STATUS_PENDING, STATUS_LAUNCHING,
+            STATUS_WAITING, STATUS_NO_HEARTBEAT, STATUS_DEAD,
+        }:
+            preserved = STATUS_ONLINE
+        detail = {
+            "process_running": "true",
+            "in_game": "unknown",
+            "heartbeat_ok": "unknown",
+            "warning_detected": "false",
+            "elapsed_ms": int((time.monotonic() - t0) * 1000),
+            "root_available": "true",
+            "foreground_package": "",
+            "activity": preserved,
+            "in_game_proof": "unknown",
+            "reason": f"presence_api_{fault}_process_alive_preserve_state",
+        }
+        self._log_state_evidence(
+            pkg,
+            detail,
+            pres_detail or self._presence_last_detail.get(pkg, {}),
+            preserved,
+        )
+        return preserved, detail
+
     def _deploy_gate_recovery_cycle(
         self,
         pkg: str,
@@ -2036,10 +2071,10 @@ class WatchdogSupervisor:
                 recovery_limit="unbounded",
                 poll_sec=self.RECOVERY_GATE_POLL_SECONDS,
             )
-            # A just-dispatched launch needs time to start.  Poll it without
-            # force-stopping it again; once grace expires a genuine
-            # No-Heartbeat result re-enters the relaunch path.
-            if state != STATUS_LAUNCHING:
+            # A just-dispatched launch needs time to start.  Poll Launching
+            # and Waiting without force-stopping them again; otherwise the
+            # launch timestamp is reset every pass and grace can never end.
+            if state not in {STATUS_LAUNCHING, STATUS_WAITING}:
                 self._deploy_gate_recovery_cycle(pkg, entry, now, render_callback=render_callback)
             self._interruptible_sleep(self.RECOVERY_GATE_POLL_SECONDS)
         else:
@@ -2159,6 +2194,13 @@ class WatchdogSupervisor:
             return STATUS_NO_HEARTBEAT, detail
 
         if self._presence_api_fault_active() or self._watchdog_round_rate_limited:
+            if process_checked and process_running:
+                return self._preserve_live_process_on_api_fault(
+                    pkg,
+                    t0=t0,
+                    pres_detail=pres_detail,
+                    fault="shield_active",
+                )
             return self._preserve_package_state_on_api_fault(
                 pkg,
                 t0=t0,
@@ -2174,6 +2216,13 @@ class WatchdogSupervisor:
 
             if isinstance(exc, _rp.RobloxApiFaultError):
                 self._note_presence_api_fault()
+                if process_checked and process_running:
+                    return self._preserve_live_process_on_api_fault(
+                        pkg,
+                        t0=t0,
+                        pres_detail=pres_detail,
+                        fault=str(getattr(exc, "fault", "fault") or "fault"),
+                    )
                 return self._preserve_package_state_on_api_fault(
                     pkg,
                     t0=t0,
@@ -2184,6 +2233,19 @@ class WatchdogSupervisor:
 
         pres_detail = self._presence_last_detail.get(pkg, {})
         profile = str(pres_detail.get("roblox_presence_profile") or "")
+        api_status = str(pres_detail.get("roblox_api_status") or "")
+        presence_error = str(pres_detail.get("presence_error") or "")
+        presence_unknown = presence is None or bool(getattr(presence, "is_unknown", False))
+
+        if process_checked and process_running and presence_unknown and api_status in {
+            "failed", "rate_limited", "network_error", "server_error", "timeout",
+        }:
+            return self._preserve_live_process_on_api_fault(
+                pkg,
+                t0=t0,
+                pres_detail=pres_detail,
+                fault=api_status,
+            )
 
         def _presence_detail(**overrides: Any) -> dict[str, Any]:
             detail = _detail_base(
@@ -2215,11 +2277,8 @@ class WatchdogSupervisor:
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_WAITING)
             return STATUS_WAITING, detail
 
-        api_status = str(pres_detail.get("roblox_api_status") or "")
-        presence_error = str(pres_detail.get("presence_error") or "")
         presence_lobby = bool(presence is not None and getattr(presence, "is_lobby", False))
         presence_offline = bool(presence is not None and getattr(presence, "is_offline", False))
-        presence_unknown = presence is None or bool(getattr(presence, "is_unknown", False))
 
         if presence_lobby or presence_offline:
             self._clear_lobby_state(pkg)
