@@ -483,22 +483,22 @@ def send_periodic_status(
     record_webhook_trace(source="send_periodic_status", send_periodic_status_entered=True)
     mode = str(config_data.get("webhook_mode") or "none")
     if mode == "none":
-        record_webhook_trace(source="send_periodic_status", http_method="", http_status="", reason_skipped="mode_none")
+        record_webhook_trace(source="send_periodic_status", webhook_send_attempted=False, http_method="", http_status="", skip_reason="webhook_disabled")
         return False, "webhook disabled"
     url = validate_webhook_url(config_data.get("webhook_url"))
     payload = build_status_embed_payload(config_data, event="monitor", app_stats=app_stats, supervisor_snapshot=supervisor_snapshot)
     if mode == "edit" and config_data.get("webhook_last_message_id"):
         edit_url = f"{url.rstrip('/')}/messages/{config_data['webhook_last_message_id']}?wait=true"
-        record_webhook_trace(source="send_periodic_status", http_method="PATCH")
+        record_webhook_trace(source="send_periodic_status", webhook_message_id_present=True, webhook_send_attempted=True, http_method="PATCH")
         ok, message, _message_id = _discord_json_request(edit_url, payload, "PATCH")
-        record_webhook_trace(source="send_periodic_status", http_method="PATCH", http_status=message)
+        record_webhook_trace(source="send_periodic_status", http_method="PATCH", http_status=message, edit_rebootstrap_required=not ok)
         if ok:
             config_data["webhook_last_sent_at"] = time.time()
             return True, "edited monitor message"
     post_url = url + ("&" if "?" in url else "?") + "wait=true"
-    record_webhook_trace(source="send_periodic_status", http_method="POST")
+    record_webhook_trace(source="send_periodic_status", webhook_message_id_present=False, edit_bootstrap_required=(mode == "edit"), webhook_wait=True, webhook_send_attempted=True, http_method="POST")
     ok, message, message_id = _discord_json_request(post_url, payload, "POST")
-    record_webhook_trace(source="send_periodic_status", http_method="POST", http_status=message)
+    record_webhook_trace(source="send_periodic_status", http_method="POST", http_status=message, returned_message_id_present=bool(message_id), saved_message_id=bool(mode == "edit" and message_id))
     if ok:
         config_data["webhook_last_sent_at"] = time.time()
         if mode == "edit" and message_id:
