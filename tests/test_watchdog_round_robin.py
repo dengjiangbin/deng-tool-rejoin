@@ -280,12 +280,14 @@ class TestTermuxSafeForceStop(unittest.TestCase):
 
 
 class TestLoadingGracePeriod(unittest.TestCase):
-    def test_loading_grace_constant_is_120_seconds(self) -> None:
-        self.assertEqual(WatchdogSupervisor.LOADING_GRACE_SECONDS, 120)
+    def test_loading_grace_constant_is_30_seconds(self) -> None:
+        self.assertEqual(WatchdogSupervisor.LOADING_GRACE_SECONDS, 30)
 
     def test_nhb_kill_switch_blocked_during_loading_grace(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
-        sup._last_launched_at[_PKG] = time.monotonic() - 30.0
+        sup._last_launched_at[_PKG] = time.monotonic() - (
+            sup.LOADING_GRACE_SECONDS / 2
+        )
         sup._nhb_since[_PKG] = time.monotonic() - (sup.NHB_KILL_SWITCH_SECONDS + 5)
         with patch.object(sup, "_force_stop_target_package", return_value=True) as mock_kill, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \

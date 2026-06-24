@@ -1222,8 +1222,8 @@ class WatchdogSupervisor:
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
     NHB_KILL_SWITCH_SECONDS: int = 60
 
-    # ── Post-launch loading grace: suppress NHB kill-switch timer ───────────
-    LOADING_GRACE_SECONDS: int = 120
+    # ── Post-launch transition allowance before presence becomes decisive ───
+    LOADING_GRACE_SECONDS: int = 30
 
     # ── Main-thread dashboard repaint cadence (must be <= Checking hold) ───
     DASHBOARD_RENDER_INTERVAL_SECONDS: float = 1.0
@@ -1806,6 +1806,43 @@ class WatchdogSupervisor:
                 except Exception:  # noqa: BLE001
                     pass
 
+            # Obtain (or refresh) the clone's cookie before identity fallback.
+            # This lets the authenticated Roblox endpoint identify the exact
+            # account even when local prefs are unavailable or malformed.
+            cookie = self._presence_cookies.get(pkg)
+            if not cookie or force_cookie_rescan:
+                last_cookie_attempt = self._presence_cookie_lookup_at.get(pkg, 0.0)
+                should_try_cookie = force_cookie_rescan or (
+                    (time.monotonic() - last_cookie_attempt) >= 120.0
+                )
+                if should_try_cookie:
+                    self._presence_cookie_lookup_at[pkg] = time.monotonic()
+                    try:
+                        from agent.roblox_presence import detect_roblox_cookie
+
+                        cookie = detect_roblox_cookie(
+                            pkg,
+                            entry=self.entry_by_pkg.get(pkg),
+                            config=self.cfg,
+                            use_root=True,
+                            force_rescan=force_cookie_rescan,
+                        )
+                        if cookie:
+                            self._presence_cookies[pkg] = cookie
+                            detail["roblox_cookie_source"] = "auto_detect"
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            if uid <= 0 and cookie:
+                try:
+                    authenticated_uid = _rp.authenticated_user_id(cookie)
+                except Exception:  # noqa: BLE001
+                    authenticated_uid = None
+                if authenticated_uid:
+                    uid = int(authenticated_uid)
+                    self._presence_user_ids[pkg] = uid
+                    detail["roblox_user_id_source"] = "authenticated_cookie"
+
             if uid <= 0:
                 uname = self._presence_usernames.get(pkg, "")
                 last_attempt = self._presence_lookup_attempt_at.get(pkg, 0.0)
@@ -1831,30 +1868,6 @@ class WatchdogSupervisor:
                 detail["roblox_api_status"] = "skipped"
                 detail["presence_error"] = "missing_user_id"
                 return None
-
-            cookie = self._presence_cookies.get(pkg)
-            if not cookie or force_cookie_rescan:
-                last_cookie_attempt = self._presence_cookie_lookup_at.get(pkg, 0.0)
-                should_try_cookie = force_cookie_rescan or (
-                    (time.monotonic() - last_cookie_attempt) >= 120.0
-                )
-                if should_try_cookie:
-                    self._presence_cookie_lookup_at[pkg] = time.monotonic()
-                    try:
-                        from agent.roblox_presence import detect_roblox_cookie
-
-                        cookie = detect_roblox_cookie(
-                            pkg,
-                            entry=self.entry_by_pkg.get(pkg),
-                            config=self.cfg,
-                            use_root=True,
-                            force_rescan=force_cookie_rescan,
-                        )
-                        if cookie:
-                            self._presence_cookies[pkg] = cookie
-                            detail["roblox_cookie_source"] = "auto_detect"
-                    except Exception:  # noqa: BLE001
-                        pass
 
             if not cookie and force_cookie_rescan:
                 detail["roblox_api_used"] = "false"
@@ -2041,9 +2054,9 @@ class WatchdogSupervisor:
     # ─── State detection ─────────────────────────────────────────────────────
 
     def _needs_launching_evaluation(self, pkg: str) -> bool:
-        """True when a launched package awaits active post-launch evaluation."""
+        """True only for the first post-launch cookie/identity rescan."""
         current = str(self.status_map.get(pkg) or "").strip()
-        return current in {STATUS_LAUNCHING, STATUS_WAITING}
+        return current == STATUS_LAUNCHING
 
     def _is_prelaunch_pending(self, pkg: str) -> bool:
         """True while staggered launch has not opened this clone yet."""
@@ -2214,6 +2227,15 @@ class WatchdogSupervisor:
             detail = _presence_detail(
                 activity=profile or ("Lobby" if presence_lobby else "Offline"),
                 reason="presence_lobby" if presence_lobby else "presence_offline",
+            )
+            self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
+            return STATUS_NO_HEARTBEAT, detail
+
+        if presence_unknown:
+            detail = _presence_detail(
+                activity="No Heartbeat",
+                in_game_proof="unknown",
+                reason="presence_unavailable_after_transition",
             )
             self._log_state_evidence(pkg, detail, pres_detail, STATUS_NO_HEARTBEAT)
             return STATUS_NO_HEARTBEAT, detail

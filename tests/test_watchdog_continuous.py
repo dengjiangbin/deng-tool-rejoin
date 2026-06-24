@@ -275,12 +275,12 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail["reason"], "presence_offline")
 
     # Test 12
-    def test_missing_presence_after_grace_preserves_launching(self):
+    def test_missing_presence_after_grace_returns_no_heartbeat(self):
         sup = _make_sup()
         self._past_loading_grace(sup)
         with patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_LAUNCHING)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail["process_running"], "unknown")
         self.assertEqual(detail["heartbeat_ok"], "false")
 
@@ -379,19 +379,18 @@ class TestStateDetection(unittest.TestCase):
         mock_launch.assert_called_once_with(entry, sup.cfg, "dead_recovery")
         self.assertEqual(sup.status_map[_PKG2], STATUS_ONLINE)
 
-    def test_missing_config_user_id_falls_back_without_presence(self):
-        """Without resolvable user id, presence is skipped and Pending is reported."""
+    def test_missing_config_user_id_becomes_no_heartbeat_after_transition(self):
+        """Missing identity cannot leave a post-transition package pending."""
         sup = _make_sup()
         self._past_loading_grace(sup)
-        from agent.supervisor import STATUS_PENDING
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
              patch.object(android, "discover_roblox_user_id_from_prefs", side_effect=AssertionError("prefs scan")), \
              patch("agent.roblox_presence.lookup_user_id", return_value=None), \
              patch("agent.roblox_presence.fetch_presence_one", side_effect=AssertionError("presence call")):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_PENDING)
-        self.assertIn("presence_unavailable_preserve_state", detail["reason"])
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertIn("presence_unavailable_after_transition", detail["reason"])
         self.assertEqual(sup._presence_last_detail[_PKG]["roblox_api_status"], "skipped")
 
     def test_username_lookup_used_for_presence_when_user_id_missing(self):
@@ -721,7 +720,7 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
              patch.object(sup, "_fast_alive_evidence", side_effect=AssertionError("os probe")), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_LAUNCHING)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertIn("presence", detail["reason"])
 
     def test_fast_alive_evidence_uses_short_root_timeouts(self):

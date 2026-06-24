@@ -82,6 +82,60 @@ class TestLookupUserId(unittest.TestCase):
         self.assertEqual(len(calls), 1, "should hit network only once for the same username")
 
 
+class TestAuthenticatedCookiePresence(unittest.TestCase):
+    def setUp(self) -> None:
+        rp.clear_presence_cache()
+
+    def test_cookie_authenticated_id_and_ingame_presence(self) -> None:
+        cookie = "cookie-value-long-enough"
+        with mock.patch.object(
+            rp.safe_http,
+            "get_json",
+            return_value={"id": 12345},
+        ) as authenticated, mock.patch.object(
+            rp,
+            "_post_json",
+            return_value={"userPresences": [{"userPresenceType": 2, "userId": 12345}]},
+        ) as presence:
+            user_id = rp.authenticated_user_id(cookie)
+            result = rp.fetch_presence_one(user_id, cookie=cookie, refresh=True)
+        self.assertEqual(user_id, 12345)
+        self.assertTrue(result.is_in_game)
+        self.assertEqual(authenticated.call_args.args[0], rp._AUTHENTICATED_USER_URL)
+        self.assertEqual(
+            authenticated.call_args.kwargs["headers"]["Cookie"],
+            f".ROBLOSECURITY={cookie}",
+        )
+        self.assertEqual(presence.call_args.args[0], rp._PRESENCE_URL)
+        self.assertEqual(presence.call_args.args[1], {"userIds": [12345]})
+
+    def test_cookie_authenticated_presence_type_zero_is_offline(self) -> None:
+        cookie = "cookie-value-long-enough"
+        with mock.patch.object(
+            rp.safe_http,
+            "get_json",
+            return_value={"id": "67890"},
+        ), mock.patch.object(
+            rp,
+            "_post_json",
+            return_value={"userPresences": [{"userPresenceType": 0, "userId": 67890}]},
+        ):
+            user_id = rp.authenticated_user_id(cookie)
+            result = rp.fetch_presence_one(user_id, cookie=cookie, refresh=True)
+        self.assertEqual(user_id, 67890)
+        self.assertTrue(result.is_offline)
+
+    def test_single_user_presence_allows_omitted_user_id(self) -> None:
+        with mock.patch.object(
+            rp,
+            "_post_json",
+            return_value={"userPresences": [{"userPresenceType": "2"}]},
+        ):
+            result = rp.fetch_presence_one(12345, refresh=True)
+        self.assertEqual(result.user_id, 12345)
+        self.assertTrue(result.is_in_game)
+
+
 # ─── fetch_presence ──────────────────────────────────────────────────────────
 
 class TestFetchPresence(unittest.TestCase):

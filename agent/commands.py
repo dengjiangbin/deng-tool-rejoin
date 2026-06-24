@@ -141,6 +141,7 @@ _ANSI_GREEN   = "\033[1;92m"   # bold bright green
 _ANSI_YELLOW  = "\033[1;93m"   # bold bright yellow
 _ANSI_RED     = "\033[1;91m"   # bold bright red
 _ANSI_CYAN    = "\033[1;96m"   # bold bright cyan
+_ANSI_WHITE   = "\033[1;97m"   # bold bright white
 _ANSI_BOLD    = "\033[1m"      # plain bold (no color)
 _ANSI_DIM     = "\033[2;37m"   # dim grey (Unknown only — intentionally low-contrast)
 _ANSI_RESET   = "\033[0m"
@@ -4517,8 +4518,8 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         ("Join " + "Unconfirmed"):  _ANSI_YELLOW,   # legacy alias
         "Ready":             _ANSI_YELLOW,
         "Starting":          _ANSI_YELLOW,
-        "Launching":         _ANSI_YELLOW,
-        "Relaunching":       _ANSI_YELLOW,
+        "Launching":         _ANSI_WHITE,
+        "Relaunching":       _ANSI_WHITE,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
         "No Heartbeat":      _ANSI_RED,      # running but not playing normally
@@ -4533,7 +4534,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Layout":       _ANSI_CYAN,   # internal only (not shown in public UI)
         "Docking":      _ANSI_CYAN,   # internal only
         "Waiting":      _ANSI_CYAN,
-        "Checking":     _ANSI_CYAN,
+        "Checking":     _ANSI_YELLOW,
         "Resizing":     _ANSI_CYAN,
         "Optimizing":   _ANSI_CYAN,
         "Reconnecting": _ANSI_CYAN,
@@ -4556,8 +4557,8 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Lobby":             _ANSI_GREEN,
         "In Server":         _ANSI_GREEN,
         "Ready":             _ANSI_YELLOW,
-        "Launching":         _ANSI_YELLOW,
-        "Relaunching":       _ANSI_YELLOW,
+        "Launching":         _ANSI_WHITE,
+        "Relaunching":       _ANSI_WHITE,
         "No Heartbeat":      _ANSI_RED,
         "Dead":              _ANSI_RED,
         "Failed":            _ANSI_RED,

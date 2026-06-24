@@ -18,7 +18,7 @@ from agent.supervisor import (
     STATUS_WAITING,
     WatchdogSupervisor,
 )
-from agent.commands import _ANSI_CYAN, _ANSI_RESET, _colorize_status
+from agent.commands import _ANSI_RESET, _ANSI_WHITE, _ANSI_YELLOW, _colorize_status
 
 
 _PKG = "com.moons.litesc"
@@ -59,23 +59,31 @@ class TestRootCookieLiveness(unittest.TestCase):
         self.assertEqual(detail["reason"], "roblox_presence_in_game")
         fetch.assert_called_once_with(_PKG, force_cookie_rescan=False)
 
-    def test_waiting_is_immediately_eligible_for_active_evaluation(self) -> None:
+    def test_waiting_bypasses_launch_rescan_and_is_directly_evaluated(self) -> None:
         supervisor = self._supervisor()
         supervisor.mark_package_launched(_PKG)
         supervisor._set_status(_PKG, STATUS_WAITING)
-        self.assertTrue(supervisor._needs_launching_evaluation(_PKG))
-        presence = MagicMock(is_in_game=False, is_lobby=False, is_offline=True, is_unknown=False)
+        self.assertFalse(supervisor._needs_launching_evaluation(_PKG))
+        presence = MagicMock(is_in_game=True, is_lobby=False, is_offline=False, is_unknown=False)
         result = MagicMock(ok=True, stdout="1234\n")
         with patch("agent.android.run_root_command", return_value=result), \
              patch.object(supervisor, "_fetch_presence", return_value=presence):
-            state, detail = supervisor._evaluate_launching_or_pending(_PKG, _entry())
-        self.assertEqual(state, STATUS_WAITING)
-        self.assertEqual(detail["reason"], "presence_checked_loading_grace")
+            state, detail = supervisor._detect_package_state(_PKG, _entry())
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertEqual(detail["reason"], "roblox_presence_in_game")
 
-    def test_checking_renders_cyan(self) -> None:
+    def test_status_colors_follow_launch_and_checking_contract(self) -> None:
         self.assertEqual(
             _colorize_status("Checking"),
-            f"{_ANSI_CYAN}Checking{_ANSI_RESET}",
+            f"{_ANSI_YELLOW}Checking{_ANSI_RESET}",
+        )
+        self.assertEqual(
+            _colorize_status("Launching"),
+            f"{_ANSI_WHITE}Launching{_ANSI_RESET}",
+        )
+        self.assertEqual(
+            _colorize_status("Relaunching"),
+            f"{_ANSI_WHITE}Relaunching{_ANSI_RESET}",
         )
 
 

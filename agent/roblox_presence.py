@@ -91,6 +91,7 @@ class RobloxRateLimitedError(RobloxApiFaultError):
 
 # Public endpoints — both accept anonymous POST with a JSON body.
 _USERNAME_LOOKUP_URL = "https://users.roblox.com/v1/usernames/users"
+_AUTHENTICATED_USER_URL = "https://users.roblox.com/v1/users/authenticated"
 _PRESENCE_URL = "https://presence.roblox.com/v1/presence/users"
 
 PRESENCE_TTL: float = 8.0           # cache window for a single user's presence
@@ -342,15 +343,50 @@ def lookup_user_id(username: str | None) -> int | None:
     return user_id
 
 
+def authenticated_user_id(cookie: str | None) -> int | None:
+    """Return the account ID authenticated by ``cookie``, without logging it.
+
+    This uses the official authenticated-user endpoint through ``safe_http``;
+    on Termux that means an isolated curl child with stdin detached from the
+    watchdog process.  A bad response or invalid cookie is deliberately a
+    normal ``None`` result rather than an exception that can pin a package in
+    an intermediate state.
+    """
+    token = str(cookie or "").strip()
+    if not token:
+        return None
+    try:
+        payload = safe_http.get_json(
+            _AUTHENTICATED_USER_URL,
+            headers={
+                "User-Agent": _USER_AGENT,
+                "Accept": "application/json",
+                "Cookie": f".ROBLOSECURITY={token}",
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+    except safe_http.SafeHttpError:
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    return _coerce_int(payload.get("id"))
+
+
 # ─── presence fetch ──────────────────────────────────────────────────────────
 
-def _parse_presence_row(row: Mapping[str, object]) -> PresenceResult | None:
+def _parse_presence_row(
+    row: Mapping[str, object], *, fallback_user_id: int | None = None,
+) -> PresenceResult | None:
     try:
         uid_raw = row.get("userId")
         if isinstance(uid_raw, str) and uid_raw.isdigit():
             uid = int(uid_raw)
         elif isinstance(uid_raw, int):
             uid = uid_raw
+        elif fallback_user_id and fallback_user_id > 0:
+            uid = fallback_user_id
         else:
             return None
     except Exception:  # noqa: BLE001
@@ -436,8 +472,13 @@ def fetch_presence(
                 for row in rows:
                     if not isinstance(row, dict):
                         continue
-                    pr = _parse_presence_row(row)
+                    pr = _parse_presence_row(
+                        row,
+                        fallback_user_id=batch[0] if len(batch) == 1 else None,
+                    )
                     if pr is None:
+                        continue
+                    if pr.user_id not in batch:
                         continue
                     out[pr.user_id] = pr
                     seen_in_batch.add(pr.user_id)
