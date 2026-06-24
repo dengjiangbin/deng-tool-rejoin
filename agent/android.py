@@ -1654,6 +1654,92 @@ def is_package_surface_in_surfaceflinger(package: str) -> bool:
         package_str = validate_package_name(package)
     except Exception:  # noqa: BLE001
         return False
+
+
+_ANDROID_DEAD_CONTEXT_RE = re.compile(
+    r"\b(?:bad processes|recent crashes|crash(?:ed|ing)?|died|dead|killed|removed|"
+    r"not responding|anr|isolated)\b",
+    re.IGNORECASE,
+)
+
+
+def _exact_package_in_text(text: str, package: str) -> bool:
+    return bool(re.search(rf"(?<![A-Za-z0-9_.]){re.escape(package)}(?![A-Za-z0-9_.])", text))
+
+
+def _dumpsys_record_blocks(text: str, marker: str) -> list[str]:
+    """Split a dumpsys section into marker-led blocks without fixed offsets."""
+    starts = [match.start() for match in re.finditer(re.escape(marker), text)]
+    return [text[start:starts[index + 1] if index + 1 < len(starts) else len(text)]
+            for index, start in enumerate(starts)]
+
+
+def get_current_android_package_evidence(package: str) -> dict[str, object]:
+    """Return only current Android process/activity/window proof for *package*.
+
+    Recents, AppOps, SurfaceFlinger, pidof, cookies, and previous state are
+    deliberately excluded.  A matching package string alone is never enough.
+    """
+    package = validate_package_name(package)
+    evidence: dict[str, object] = {
+        "process": False, "activity": False, "window": False,
+        "process_block_id": "", "activity_block_id": "", "window_block_id": "",
+        "task": False, "surface": False, "foreground": False,
+        "running": False, "root_running": False,
+        "alive": False, "strict_alive": False,
+    }
+
+    def _dump(args: list[str]) -> str:
+        try:
+            result = run_android_command(args, timeout=5, prefer_root=True)
+            return result.stdout if result.ok else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    process_dump = _dump(["dumpsys", "activity", "processes"])
+    for block in _dumpsys_record_blocks(process_dump, "ProcessRecord{"):
+        head = block[:900]
+        block_offset = process_dump.find(block)
+        prior_section = process_dump[:block_offset].lower()
+        in_bad_section = "bad processes" in prior_section or "recent crashes" in prior_section
+        if not _exact_package_in_text(head, package) or in_bad_section or _ANDROID_DEAD_CONTEXT_RE.search(head):
+            continue
+        first_line = head.splitlines()[0] if head.splitlines() else head
+        if re.search(rf"\b\d+:{re.escape(package)}(?:/|\b)", first_line):
+            evidence["process"] = True
+            evidence["process_block_id"] = first_line[:180]
+            break
+
+    activity_dump = _dump(["dumpsys", "activity", "activities"])
+    for block in _dumpsys_record_blocks(activity_dump, "ActivityRecord{"):
+        head = block[:1400]
+        if not _exact_package_in_text(head, package) or _ANDROID_DEAD_CONTEXT_RE.search(head):
+            continue
+        if "Activities=[]" in head or not re.search(r"app=ProcessRecord\{[^}]+\}", head):
+            continue
+        first_line = head.splitlines()[0] if head.splitlines() else head
+        evidence["activity"] = True
+        evidence["activity_block_id"] = first_line[:180]
+        break
+
+    window_dump = _dump(["dumpsys", "window", "windows"])
+    for block in _dumpsys_record_blocks(window_dump, "Window{"):
+        head = block[:1400]
+        if not _exact_package_in_text(head, package) or _ANDROID_DEAD_CONTEXT_RE.search(head):
+            continue
+        has_surface = re.search(r"\b(?:mHasSurface|hasSurface)=true\b", head, re.IGNORECASE)
+        app_alive = re.search(r"\bmAppDied=false\b", head, re.IGNORECASE)
+        ready = re.search(r"\b(?:isReadyForDisplay\(\)=true|mDrawState=HAS_DRAWN|isOnScreen=true)\b", head, re.IGNORECASE)
+        if has_surface and app_alive and ready:
+            first_line = head.splitlines()[0] if head.splitlines() else head
+            evidence["window"] = True
+            evidence["window_block_id"] = first_line[:180]
+            break
+
+    evidence["running"] = bool(evidence["process"])
+    evidence["alive"] = bool(evidence["process"] or evidence["activity"] or evidence["window"])
+    evidence["strict_alive"] = evidence["alive"]
+    return evidence
     try:
         from . import dumpsys_cache as _dc
         def _run(_args):
@@ -1690,6 +1776,8 @@ def get_package_alive_evidence(package: str) -> dict[str, object]:
 
     Never raises; always returns a valid dict.
     """
+    return get_current_android_package_evidence(package)
+
     _dead: dict[str, object] = {
         "running": False, "task": False, "window": False, "root_running": False,
         "surface": False, "foreground": False,

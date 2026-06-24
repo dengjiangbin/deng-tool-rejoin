@@ -2214,14 +2214,18 @@ class WatchdogSupervisor:
             evidence = android.get_package_alive_evidence(pkg) if installed else {}
         except Exception:  # noqa: BLE001
             evidence = {}
-        process_evidence = bool(evidence.get("running") or evidence.get("root_running"))
+        process_evidence = bool(evidence.get("process"))
+        activity_evidence = bool(evidence.get("activity"))
         window_evidence = bool(evidence.get("window"))
         alive = bool(evidence.get("strict_alive", False))
         verify_until = self._relaunch_verify_until.get(pkg, 0.0)
         if alive:
             state = STATUS_ONLINE
-            proof = "pid" if evidence.get("pid") else ("process_table" if process_evidence else "live_window")
-            reason = f"android_alive_{proof}"
+            reason = (
+                "current_process_record" if process_evidence else
+                "current_activity_record" if activity_evidence else
+                "current_window"
+            )
             self._relaunch_inflight.discard(pkg)
             self._relaunch_verify_until.pop(pkg, None)
         elif pkg in self._relaunch_inflight and time.monotonic() < verify_until:
@@ -2233,13 +2237,11 @@ class WatchdogSupervisor:
             self._relaunch_inflight.discard(pkg)
             self._relaunch_verify_until.pop(pkg, None)
         detail = {
-            "pid": str(evidence.get("pid") or ""),
-            "pidof_rc": str(evidence.get("pidof_rc", 1)),
-            "process_running": str(process_evidence).lower(),
+            "process_running": "not_used",
             "process_evidence": str(process_evidence).lower(),
-            "activity_evidence": str(bool(evidence.get("foreground"))).lower(),
+            "activity_evidence": str(activity_evidence).lower(),
             "window_evidence": str(window_evidence).lower(),
-            "surface_evidence": str(bool(evidence.get("surface"))).lower(),
+            "surface_evidence": "diagnostic_only",
             "recent_task_evidence": "diagnostic_only",
             "in_game": "not_used",
             "heartbeat_ok": "not_used",
@@ -2252,6 +2254,9 @@ class WatchdogSupervisor:
             "heartbeat_age_sec": "not_used",
             "presence_source": "not_used",
             "reason": reason,
+            "process_block_id": str(evidence.get("process_block_id") or ""),
+            "activity_block_id": str(evidence.get("activity_block_id") or ""),
+            "window_block_id": str(evidence.get("window_block_id") or ""),
         }
         self._log_state_evidence(pkg, detail, {}, state)
         return state, detail
@@ -2444,13 +2449,14 @@ class WatchdogSupervisor:
             self._logger, "info", "[DENG_REJOIN_STATE_EVIDENCE]",
             package=pkg,
             process_running=detail.get("process_running", "unknown"),
-            pid=detail.get("pid", ""),
-            pidof_rc=detail.get("pidof_rc", 1),
-            process_evidence=detail.get("process_evidence", "false"),
-            activity_evidence=detail.get("activity_evidence", "false"),
+            activity_process_evidence=detail.get("process_evidence", "false"),
+            activity_record_evidence=detail.get("activity_evidence", "false"),
             window_evidence=detail.get("window_evidence", "false"),
             surface_evidence=detail.get("surface_evidence", "false"),
-            recent_task_evidence=detail.get("recent_task_evidence", "diagnostic_only"),
+            recents_evidence=detail.get("recent_task_evidence", "diagnostic_only"),
+            active_process_block_id=detail.get("process_block_id", ""),
+            active_activity_block_id=detail.get("activity_block_id", ""),
+            active_window_block_id=detail.get("window_block_id", ""),
             root_available=detail.get("root_available", "false"),
             foreground_package=detail.get("foreground_package", ""),
             activity=detail.get("activity", ""),

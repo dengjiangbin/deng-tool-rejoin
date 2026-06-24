@@ -21,7 +21,7 @@ ENTRY = {"package": PKG, "enabled": True, "roblox_user_id": 12345}
 
 def _alive() -> dict[str, bool]:
     return {
-        "running": True, "root_running": False, "window": False,
+        "process": True, "activity": False, "running": True, "root_running": False, "window": False,
         "surface": False, "foreground": False, "strict_alive": True,
     }
 
@@ -37,7 +37,7 @@ class AndroidLocalSupervisorTests(unittest.TestCase):
              patch.object(sup, "_fetch_presence", side_effect=AssertionError("web presence used")):
             state, detail = sup._detect_package_state(PKG, ENTRY)
         self.assertEqual(state, STATUS_ONLINE)
-        self.assertEqual(detail["reason"], "android_alive_process_table")
+        self.assertEqual(detail["reason"], "current_process_record")
 
     def test_workflow_states_remain_visible_without_affecting_health(self) -> None:
         sup = self._supervisor()
@@ -94,8 +94,8 @@ class AndroidLocalSupervisorTests(unittest.TestCase):
              patch("agent.android.get_package_alive_evidence", return_value=stale):
             state, detail = sup._detect_package_state(PKG, ENTRY)
         self.assertEqual(state, STATUS_DEAD)
-        self.assertEqual(detail["pid"], "")
-        self.assertEqual(detail["pidof_rc"], "1")
+        self.assertEqual(detail["process_evidence"], "false")
+        self.assertEqual(detail["window_evidence"], "false")
 
 
 if __name__ == "__main__":
