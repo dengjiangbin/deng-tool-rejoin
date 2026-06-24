@@ -33,6 +33,8 @@ EMBED_COLOR_RED    = 0xED4245  # offline / error
 EMBED_COLOR_YELLOW = 0xFEE75C  # warning / captcha alert
 EMBED_COLOR_ORANGE = 0xE67E22  # starting / preparing
 EMBED_COLOR_GREY   = 0x36393F  # neutral / unknown
+WEBHOOK_USERNAME = "DENG Tool Rejoin"
+WEBHOOK_AVATAR_URL = "https://aio.deng.my.id/public/img/deng-logo.png"
 
 
 class WebhookError(ValueError):
@@ -253,7 +255,9 @@ def build_status_embed_payload(
 
     version = config_data.get("agent_version", "1.0.0")
     return {
-        "username": "DENG Tool: Rejoin",
+        "username": WEBHOOK_USERNAME,
+        "avatar_url": WEBHOOK_AVATAR_URL,
+        "allowed_mentions": {"parse": []},
         "embeds": [
             {
                 "title": "📊 DENG Status Monitor",
@@ -297,7 +301,9 @@ def build_alert_embed_payload(
 
     version = config_data.get("agent_version", "1.0.0")
     return {
-        "username": "DENG Tool: Rejoin",
+        "username": WEBHOOK_USERNAME,
+        "avatar_url": WEBHOOK_AVATAR_URL,
+        "allowed_mentions": {"parse": []},
         "embeds": [
             {
                 "title": "⚠️ Account Alert",
