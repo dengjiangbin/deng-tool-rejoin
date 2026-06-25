@@ -676,7 +676,9 @@ def _missing_webhook_trace_markers(trace: list[dict[str, Any]]) -> list[str]:
     required = (
         "start_selected", "config_path_read", "webhook_mode", "timer_armed",
         "reporter_tick_started", "telemetry_result", "send_periodic_status_entered",
-        "http_method", "http_status", "reporter_tick_completed",
+        "telemetry_build_started", "telemetry_build_result", "payload_build_started",
+        "payload_build_result", "send_attempted", "http_method", "http_status",
+        "send_result", "reporter_tick_completed",
     )
     return [marker for marker in required if not any(marker in row for row in trace)]
 

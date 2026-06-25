@@ -80,6 +80,72 @@ class WebhookTestChannelTests(unittest.TestCase):
         self.assertIn("Application Details", fields)
         self.assertIn("521 MB", fields["Application Details"])
 
+    def test_embed_does_not_crash_on_display_ram_strings(self) -> None:
+        cfg = self._cfg("new_post")
+        cfg.update({"_mem_info": {"free_mb": "1.2 GB", "percent_free": "15"}, "_cpu_pct": "68%", "_temp_c": "31.6"})
+        for raw in ("1.2 GB", "700 MB", 1445.0, "unknown"):
+            with self.subTest(raw=raw):
+                payload = webhook.build_status_embed_payload(
+                    cfg,
+                    supervisor_snapshot=[{"package": "com.example.clone", "username": "Main", "status": "Online"}],
+                    app_stats={"com.example.clone": {"online": True, "memory_mb": raw, "cpu_pct": "44.0%"}},
+                )
+                fields = {field["name"]: field["value"] for field in payload["embeds"][0]["fields"]}
+                self.assertIn("Application Details", fields)
+
+    def test_edit_mode_without_message_id_bootstraps_even_with_display_ram(self) -> None:
+        cfg = self._cfg("edit")
+        cfg.pop("webhook_last_message_id", None)
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "new-message")) as request:
+            ok, _ = webhook.send_periodic_status(
+                cfg,
+                supervisor_snapshot=[{"package": "com.example.clone", "username": "Main", "status": "Online"}],
+                app_stats={"com.example.clone": {"online": True, "memory_mb": "1.2 GB", "cpu_pct": "42.0%"}},
+            )
+        self.assertTrue(ok)
+        self.assertEqual(request.call_args.args[2], "POST")
+        self.assertEqual(cfg["webhook_last_message_id"], "new-message")
+
+    def test_edit_mode_second_send_patches_saved_message_id(self) -> None:
+        cfg = self._cfg("edit")
+        cfg["webhook_last_message_id"] = "saved-message"
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", None)) as request:
+            ok, _ = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
+        self.assertTrue(ok)
+        self.assertEqual(request.call_args.args[2], "PATCH")
+
+    def test_payload_builder_failure_falls_back_and_still_sends(self) -> None:
+        cfg = self._cfg("edit")
+        cfg.pop("webhook_last_message_id", None)
+        with patch("agent.webhook.build_status_embed_payload", side_effect=ValueError("bad telemetry")), \
+             patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "new-message")) as request:
+            ok, message = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
+        self.assertTrue(ok, message)
+        self.assertEqual(request.call_args.args[2], "POST")
+        self.assertEqual(cfg["webhook_last_message_id"], "new-message")
+
+    def test_reporter_path_emits_http_markers_for_production_sender(self) -> None:
+        class Supervisor:
+            def get_status_snapshot(self, entries):
+                return [{"package": "com.example.clone", "username": "Main", "status": "Online", "ram_mb": "1.2 GB"}]
+
+        cfg = self._cfg("edit")
+        cfg.pop("webhook_last_message_id", None)
+        traces = []
+        reporter = webhook.WebhookStatusReporter(cfg, Supervisor(), [{"package": "com.example.clone"}], lambda data: data)
+        reporter.stop_event.wait = lambda interval: True  # type: ignore[method-assign]
+        with patch("agent.webhook.record_webhook_trace", side_effect=lambda **fields: traces.append(fields)), \
+             patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "new-message")), \
+             patch("agent.android.get_memory_info", return_value={"free_mb": "700 MB", "percent_free": "15"}), \
+             patch("agent.android.get_cpu_usage", return_value="44.0%"), \
+             patch("agent.android.get_temperature", return_value="31.6"):
+            reporter._run()
+        self.assertTrue(any(row.get("reporter_tick_started") for row in traces))
+        self.assertTrue(any(row.get("send_periodic_status_entered") for row in traces))
+        self.assertTrue(any(row.get("http_method") == "POST" for row in traces))
+        self.assertTrue(any(row.get("http_status") == 200 for row in traces))
+        self.assertTrue(any(row.get("reporter_tick_completed") for row in traces))
+
     def test_reporter_is_started_only_in_start_monitoring_path(self) -> None:
         source = inspect.getsource(commands.cmd_start)
         self.assertIn("WebhookStatusReporter", source)

@@ -19,7 +19,7 @@ from typing import Any
 
 from .url_utils import mask_launch_url
 from . import safe_http
-from .constants import DATA_DIR
+from .constants import CONFIG_PATH, DATA_DIR
 from .runtime_format import format_runtime_compact
 
 WEBHOOK_MODES = {"edit", "new_post", "none"}
@@ -122,6 +122,82 @@ def _format_uptime(start_iso: str | None) -> str:
         return ""
 
 
+def _coerce_float(value: Any) -> float | None:
+    """Best-effort numeric coercion for raw telemetry values."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return float(int(value))
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text or text.lower() in {"n/a", "na", "none", "null", "unknown", "-"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _memory_mb_value(value: Any) -> float | None:
+    """Return a RAM value in MB from raw numbers or display strings.
+
+    Real Termux probes showed per-package RAM can arrive as formatted text such
+    as ``"1.2 GB"``.  Webhook payload rendering must treat that as optional
+    telemetry, not as a reason to skip Discord delivery.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    parts = text.replace(",", "").split()
+    number = _coerce_float(parts[0] if parts else text)
+    if number is None:
+        return None
+    unit = (parts[1] if len(parts) > 1 else "mb").lower()
+    if unit.startswith("g"):
+        return number * 1024
+    if unit.startswith("k"):
+        return number / 1024
+    return number
+
+
+def _format_memory_mb(value: Any) -> str | None:
+    mb = _memory_mb_value(value)
+    if mb is None:
+        return None
+    return f"{int(round(max(0.0, mb)))} MB"
+
+
+def _format_cpu_pct(value: Any) -> str | None:
+    if isinstance(value, str):
+        value = value.strip().rstrip("%")
+    pct = _coerce_float(value)
+    if pct is None:
+        return None
+    return f"{pct:.1f}%"
+
+
+def _format_system_ram(mem_info: Any) -> str | None:
+    if not isinstance(mem_info, dict):
+        return None
+    free = _format_memory_mb(mem_info.get("free_mb"))
+    if not free:
+        free = _format_memory_mb(mem_info.get("available_mb"))
+    if not free:
+        return None
+    pct = _coerce_float(mem_info.get("percent_free"))
+    pct_text = f" ({pct:.0f}%)" if pct is not None else ""
+    return f"💾 RAM: {free} free{pct_text}"
+
+
+def _redact_exception(exc: BaseException) -> str:
+    return str(exc).replace("\n", " ")[:200]
+
+
 # Status category mapping (supervisor STATUS_* → display bucket)
 _STATUS_CATEGORY: dict[str, str] = {
     "Online":        "online",
@@ -192,9 +268,18 @@ def build_status_embed_payload(
         color = EMBED_COLOR_RED
 
     # System stats (injected by caller via _mem_info, _cpu_pct, _temp_c keys)
-    mem_info: dict[str, int] = config_data.get("_mem_info") or {}
-    cpu_pct = config_data.get("_cpu_pct")
-    temp_c = config_data.get("_temp_c")
+    mem_info = config_data.get("_mem_info") or {}
+    if isinstance(mem_info, dict):
+        _free_mb = _memory_mb_value(mem_info.get("free_mb") or mem_info.get("available_mb"))
+        mem_info = {
+            **mem_info,
+            "free_mb": int(round(_free_mb)) if _free_mb is not None else 0,
+            "percent_free": int(round(_coerce_float(mem_info.get("percent_free")) or 0)),
+        }
+    else:
+        mem_info = {}
+    cpu_pct = _coerce_float(config_data.get("_cpu_pct"))
+    temp_c = _coerce_float(config_data.get("_temp_c"))
     sys_lines: list[str] = []
     if mem_info.get("free_mb"):
         sys_lines.append(f"💾 RAM: {mem_info['free_mb']}MB free ({mem_info.get('percent_free', 0)}%)")
@@ -234,10 +319,10 @@ def build_status_embed_payload(
         uptime = _format_uptime(stats.get("uptime_start"))
         if uptime:
             sub.append(f"⏱️ {uptime}")
-        mem = stats.get("memory_mb")
+        mem = _memory_mb_value(stats.get("memory_mb"))
         if mem is not None:
             sub.append(f"💾 {int(mem)} MB")
-        cpu = stats.get("cpu_pct")
+        cpu = _coerce_float(stats.get("cpu_pct"))
         if cpu is not None:
             sub.append(f"⚡ {cpu:.1f}%")
         if sub:
@@ -476,29 +561,88 @@ def _discord_json_request(url: str, payload: dict[str, Any], method: str) -> tup
     return True, f"webhook HTTP {status}", message_id
 
 
+def _http_status_from_message(message: str | None) -> int | None:
+    if not message:
+        return None
+    for token in str(message).replace(":", " ").split():
+        if token.isdigit():
+            value = int(token)
+            if 100 <= value <= 599:
+                return value
+    return None
+
+
+def _minimal_status_payload(config_data: dict[str, Any], *, event: str, error: str | None = None) -> dict[str, Any]:
+    """Fallback Discord payload used when optional telemetry formatting fails."""
+    title = "📊 DENG Status Monitor"
+    description = f"Event: **{event}**"
+    fields = [
+        {"name": "📱 Device", "value": str(config_data.get("device_name") or "unknown"), "inline": True},
+        {"name": "Telemetry", "value": "telemetry_unavailable", "inline": False},
+    ]
+    if error:
+        fields.append({"name": "⚠️ Payload warning", "value": error[:512], "inline": False})
+    return {
+        "username": WEBHOOK_USERNAME,
+        "avatar_url": WEBHOOK_AVATAR_URL,
+        "allowed_mentions": {"parse": []},
+        "embeds": [
+            {
+                "title": title,
+                "description": description,
+                "color": EMBED_COLOR_YELLOW,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "fields": fields,
+                "footer": {"text": f"DENG Tool: Rejoin • v{config_data.get('agent_version', '1.0.0')}"},
+            }
+        ],
+    }
+
+
 def send_periodic_status(
     config_data: dict[str, Any], *, supervisor_snapshot: list[dict[str, Any]], app_stats: dict[str, Any]
 ) -> tuple[bool, str]:
     """Send/update one monitor embed according to the configured user mode."""
-    record_webhook_trace(source="send_periodic_status", send_periodic_status_entered=True)
+    record_webhook_trace(
+        source="send_periodic_status",
+        send_periodic_status_entered=True,
+        webhook_mode=str(config_data.get("webhook_mode") or "none"),
+        config_path_read=str(CONFIG_PATH),
+        edit_message_id_present=bool(config_data.get("webhook_last_message_id")),
+    )
     mode = str(config_data.get("webhook_mode") or "none")
     if mode == "none":
-        record_webhook_trace(source="send_periodic_status", webhook_send_attempted=False, http_method="", http_status="", skip_reason="webhook_disabled")
+        record_webhook_trace(source="send_periodic_status", webhook_send_attempted=False, send_attempted=False, http_method="", http_status="", send_result="skipped", skip_reason="webhook_disabled")
         return False, "webhook disabled"
-    url = validate_webhook_url(config_data.get("webhook_url"))
-    payload = build_status_embed_payload(config_data, event="monitor", app_stats=app_stats, supervisor_snapshot=supervisor_snapshot)
+    try:
+        url = validate_webhook_url(config_data.get("webhook_url"))
+    except Exception as exc:
+        record_webhook_trace(source="send_periodic_status", send_attempted=False, send_result="failure", exception_type=type(exc).__name__, exception_message_redacted=_redact_exception(exc))
+        return False, f"webhook config error: {type(exc).__name__}"
+    record_webhook_trace(source="send_periodic_status", payload_build_started=True)
+    try:
+        payload = build_status_embed_payload(config_data, event="monitor", app_stats=app_stats, supervisor_snapshot=supervisor_snapshot)
+        record_webhook_trace(source="send_periodic_status", payload_build_result="success")
+    except Exception as exc:  # optional telemetry must never block Discord delivery
+        payload = _minimal_status_payload(config_data, event="monitor", error="telemetry_unavailable")
+        record_webhook_trace(
+            source="send_periodic_status",
+            payload_build_result="failure",
+            exception_type=type(exc).__name__,
+            exception_message_redacted=_redact_exception(exc),
+        )
     if mode == "edit" and config_data.get("webhook_last_message_id"):
         edit_url = f"{url.rstrip('/')}/messages/{config_data['webhook_last_message_id']}?wait=true"
-        record_webhook_trace(source="send_periodic_status", webhook_message_id_present=True, webhook_send_attempted=True, http_method="PATCH")
+        record_webhook_trace(source="send_periodic_status", webhook_message_id_present=True, webhook_send_attempted=True, send_attempted=True, http_method="PATCH", message_id_saved_or_used=True)
         ok, message, _message_id = _discord_json_request(edit_url, payload, "PATCH")
-        record_webhook_trace(source="send_periodic_status", http_method="PATCH", http_status=message, edit_rebootstrap_required=not ok)
+        record_webhook_trace(source="send_periodic_status", http_method="PATCH", http_status=_http_status_from_message(message) or message, discord_response_body_redacted=message[:200], edit_rebootstrap_required=not ok, send_result="success" if ok else "failure")
         if ok:
             config_data["webhook_last_sent_at"] = time.time()
             return True, "edited monitor message"
     post_url = url + ("&" if "?" in url else "?") + "wait=true"
-    record_webhook_trace(source="send_periodic_status", webhook_message_id_present=False, edit_bootstrap_required=(mode == "edit"), webhook_wait=True, webhook_send_attempted=True, http_method="POST")
+    record_webhook_trace(source="send_periodic_status", webhook_message_id_present=False, edit_bootstrap_required=(mode == "edit"), webhook_wait=True, webhook_send_attempted=True, send_attempted=True, http_method="POST", message_id_saved_or_used=False)
     ok, message, message_id = _discord_json_request(post_url, payload, "POST")
-    record_webhook_trace(source="send_periodic_status", http_method="POST", http_status=message, returned_message_id_present=bool(message_id), saved_message_id=bool(mode == "edit" and message_id))
+    record_webhook_trace(source="send_periodic_status", http_method="POST", http_status=_http_status_from_message(message) or message, discord_response_body_redacted=message[:200], returned_message_id_present=bool(message_id), saved_message_id=bool(mode == "edit" and message_id), message_id_saved_or_used=bool(mode == "edit" and message_id), send_result="success" if ok else "failure")
     if ok:
         config_data["webhook_last_sent_at"] = time.time()
         if mode == "edit" and message_id:
@@ -540,7 +684,7 @@ class WebhookStatusReporter:
             self._record(reason_skipped="mode_none", scheduler_enabled=False)
             return
         self._record(scheduler_enabled=True, timer_armed=True, start_pressed_at=time.time())
-        record_webhook_trace(source="WebhookStatusReporter.start", timer_armed=True, webhook_mode=self.config_data.get("webhook_mode"))
+        record_webhook_trace(source="WebhookStatusReporter.start", timer_armed=True, webhook_mode=self.config_data.get("webhook_mode"), config_path_read=str(CONFIG_PATH))
         self.thread = threading.Thread(target=self._run, name="deng-webhook-status", daemon=True)
         self.thread.start()
 
@@ -555,7 +699,7 @@ class WebhookStatusReporter:
             try:
                 self.loop_count += 1
                 self._record(scheduler_running=True, reporter_tick_started=True, last_webhook_tick_at=time.time(), last_send_mode=self.config_data.get("webhook_mode"), last_send_attempt_at=time.time())
-                record_webhook_trace(source="WebhookStatusReporter._run", reporter_tick_started=True)
+                record_webhook_trace(source="WebhookStatusReporter._run", reporter_tick=True, reporter_tick_started=True, telemetry_build_started=True)
                 try:
                     from . import android
                     snapshot = self.supervisor.get_status_snapshot(self.entries)
@@ -563,10 +707,11 @@ class WebhookStatusReporter:
                     self.config_data["_mem_info"] = mem
                     self.config_data["_cpu_pct"] = android.get_cpu_usage()
                     self.config_data["_temp_c"] = android.get_temperature()
+                    record_webhook_trace(source="WebhookStatusReporter._run", telemetry_build_result="success", telemetry_result="success")
                 except Exception as telemetry_exc:  # telemetry must never suppress delivery
                     snapshot = []
                     self._record(telemetry_error_redacted=type(telemetry_exc).__name__)
-                    record_webhook_trace(source="WebhookStatusReporter._run", telemetry_result="failure", error=type(telemetry_exc).__name__)
+                    record_webhook_trace(source="WebhookStatusReporter._run", telemetry_build_result="failure", telemetry_result="failure", error=type(telemetry_exc).__name__)
                 app_stats = {
                     str(row.get("package") or ""): {
                         "online": row.get("status") == "Online",
