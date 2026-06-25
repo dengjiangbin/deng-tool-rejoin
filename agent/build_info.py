@@ -273,9 +273,16 @@ def collect_version_info() -> dict[str, Any]:
     ib = load_installed_build()
     manifest = _load_release_manifest()
     runtime = inspect_protected_runtime()
+    product_version = str(
+        ib.get("version")
+        or bi.get("version")
+        or manifest.get("version")
+        or VERSION
+        or ""
+    )
     info: dict[str, Any] = {
         "product": PRODUCT_NAME,
-        "product_version": str(VERSION),
+        "product_version": product_version,
         "channel": str(ib.get("channel") or bi.get("channel") or ""),
         "git_commit": str(ib.get("git_commit") or bi.get("git_commit") or ""),
         "git_commit_short": _short(
