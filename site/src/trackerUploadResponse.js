@@ -24,8 +24,14 @@ function shouldReturn202(req, sessionKey) {
 function finishTrackerUploadResponse(req, res, responsePayload, sessionKey) {
   const route = trackerRouteLabel(req);
   const responseStartedAt = Date.now();
+  const acceptedAt = new Date(responseStartedAt).toISOString();
   recordResponseBeforeEnrichment();
   recordLatestPersistSuccess();
+  res.set('X-DENG-Served-By', 'deng-tracker-ingest');
+  res.set('X-DENG-Ingest-Route', '8792');
+  res.set('X-DENG-Tracker-Route', route);
+  res.set('X-DENG-Server-Now', acceptedAt);
+  res.set('X-DENG-Upload-Accepted-At', acceptedAt);
 
   const logResponseSent = (statusCode) => {
     console.log(
@@ -62,12 +68,18 @@ function finishTrackerUploadResponse(req, res, responsePayload, sessionKey) {
       snapshotComplete: responsePayload.snapshotComplete,
       lastSeenAt: responsePayload.lastSeenAt,
       serverTime: responsePayload.serverTime,
+      serverNow: acceptedAt,
+      uploadAcceptedAt: acceptedAt,
     });
   }
 
   schedulePostResponseFlush();
   logResponseSent(200);
-  return res.status(200).json(responsePayload);
+  return res.status(200).json({
+    ...responsePayload,
+    serverNow: responsePayload.serverNow || acceptedAt,
+    uploadAcceptedAt: responsePayload.uploadAcceptedAt || acceptedAt,
+  });
 }
 
 module.exports = {

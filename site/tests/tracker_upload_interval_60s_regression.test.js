@@ -47,13 +47,15 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.equal(inventoryUploadStaleAfterSeconds(60), 600);
   });
 
-  testIfRawTracker('private tracker uses 60s light sync and aio upload domain', () => {
+  testIfRawTracker('private tracker uses ~52s heartbeat (within 60s window) and aio upload domain', () => {
     const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
-    assert.match(lua, /lightSyncIntervalSeconds = 60/);
+    // Lua heartbeat cadence: 52s base + jitter (-2..+2) -> 50..54s; status lane
+    // bypasses the local throttle gate entirely so the dot has continuous attempts.
+    assert.match(lua, /lightSyncIntervalSeconds = 52/);
     assert.match(lua, new RegExp(AIO_UPLOAD_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(lua, /https:\/\/tool\.deng\.my\.id\/api\/fishit-tracker\/update-backpack/);
     assert.match(lua, /intervalSeconds = LiveSafe\.lightSyncIntervalSeconds or 60/);
-    assert.match(lua, /UPLOAD_HTML_530_GATEWAY_DIAG_2026_06_15/);
+    assert.match(lua, /STATUS_LANE_NEVER_THROTTLED_2026_06_19/);
     assert.match(lua, /DEBUG_UPLOAD_DISABLED_PRODUCTION/);
     assert.match(lua, /DENG_TRACKER_RUNNING/);
     assert.match(lua, /UPLOAD_SKIP_COOLDOWN/);
@@ -132,35 +134,35 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.match(source, /function liveSecondsSinceStatsSuccess/);
     assert.match(source, /function liveSecondsSinceInventorySuccess/);
     assert.match(source, /function formatStatsUploadDurationText/);
-    // Presence/Status sync text now follows the FRONTEND refresh time (visible
-    // UX timer); the backend status lane stays available via backendPresenceAgeSeconds.
-    assert.match(source, /formatPresenceStatusText[\s\S]*return formatFrontendRefreshAgeText\(entry\)/);
-    assert.match(source, /function backendPresenceAgeSeconds[\s\S]*liveSecondsSinceStatusSuccess/);
+    // Presence/Status sync text follows the real SERVER status lane timestamp
+    // (backendPresenceAgeSeconds -> _auth.lastRealStatusAt), not frontend receive time.
+    assert.match(source, /formatPresenceStatusText[\s\S]*return formatBackendAgeText\(backendPresenceAgeSeconds\(entry\)\)/);
+    assert.match(source, /function backendPresenceAgeSeconds[\s\S]*lastRealStatusAt/);
     assert.match(source, /formatCaughtActivitySub[\s\S]*formatStatsUploadDurationText/);
-    // Leaderstats + inventory visible timers now follow the FRONTEND refresh time
-    // too; the backend lanes stay available via backendStatsAgeSeconds /
-    // backendInventoryAgeSeconds for debug/proof.
-    assert.match(source, /formatStatsUploadDurationText[\s\S]*?return formatLeaderstatsRefreshAgeText\(entry\)/);
-    assert.match(source, /formatEntrySyncStatusText[\s\S]*?return formatInventoryRefreshAgeText\(entry\)/);
+    // Leaderstats + inventory visible timers follow the real SERVER lane upload
+    // timestamps (backendStatsAgeSeconds / backendInventoryAgeSeconds ->
+    // _auth.lastRealLeaderstatsAt / lastRealInventoryAt).
+    assert.match(source, /formatStatsUploadDurationText[\s\S]*?return formatBackendAgeText\(backendStatsAgeSeconds\(entry\)\)/);
+    assert.match(source, /formatEntrySyncStatusText[\s\S]*?return formatBackendAgeText\(backendInventoryAgeSeconds\(entry\)\)/);
     assert.match(source, /function backendStatsAgeSeconds[\s\S]*?liveSecondsSinceStatsSuccess/);
     assert.match(source, /function backendInventoryAgeSeconds[\s\S]*?liveSecondsSinceInventorySuccess/);
     assert.match(source, /patchAccountStatusDom[\s\S]*entryConnectionFreshness[\s\S]*formatPresenceStatusText/);
-    assert.match(source, /patchInventoryUploadIndicatorDom[\s\S]*isInventoryUploadFresh[\s\S]*formatEntrySyncStatusText/);
+    assert.match(source, /function patchInventoryUploadIndicatorDom[\s\S]*formatInventoryUploadLabel\(entry\)/);
+    assert.match(source, /function formatInventoryUploadLabel[\s\S]*formatCompactAgeAgoSeconds\(backendInventoryAgeSeconds\(entry\)\)/);
     assert.match(source, /DEFAULT_UPLOAD_INTERVAL_SEC = 60/);
     assert.match(source, /statusLastSuccessAt/);
     assert.match(source, /leaderstatsLastSuccessAt/);
     assert.match(source, /inventoryLastSuccessAt/);
   });
 
-  test('page refresh: status, leaderstats AND inventory timers all follow the per-section frontend refresh time', () => {
+  test('page refresh: status, leaderstats AND inventory timers all follow the real per-lane SERVER upload timestamp (never frontend receive time)', () => {
     const source = fs.readFileSync(SOURCE_PATH, 'utf8');
     const names = [
-      'getEntryFrontendRefreshAgeMs',
-      'formatFrontendRefreshAgeText',
-      'getEntryLeaderstatsRefreshAgeMs',
-      'formatLeaderstatsRefreshAgeText',
-      'getEntryInventoryRefreshAgeMs',
-      'formatInventoryRefreshAgeText',
+      'authAgeSecondsFromTs',
+      'backendPresenceAgeSeconds',
+      'backendStatsAgeSeconds',
+      'backendInventoryAgeSeconds',
+      'formatBackendAgeText',
       'formatPresenceStatusText',
       'formatStatsUploadDurationText',
       'formatEntrySyncStatusText',
@@ -168,12 +170,41 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     names.forEach((name) => assert.match(source, new RegExp(`function ${name}`)));
     const blocks = names.map((name) => source.match(new RegExp(`function ${name}\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n  \\}`)));
     const fns = new Function(`
-      function pad2(v) { return String(Math.max(0, Math.floor(Number(v) || 0))).padStart(2, '0'); }
-      function formatPresenceDurationLabel(secs) {
-        if (secs == null) return '';
-        if (secs < 60) return Math.max(1, secs) + 's';
-        return '1m ' + pad2(secs % 60) + 's';
+      let trackerServerClockOffsetMs = 0;
+      function parseServerTimeMs(value){
+        if (value == null || value === '') return null;
+        const ms = Date.parse(String(value));
+        return Number.isFinite(ms) ? ms : null;
       }
+      function correctedClientNowMs(){ return Date.now() + trackerServerClockOffsetMs; }
+      function formatAgeAgo(ms) {
+        const totalSecs = Math.max(0, Math.floor(Number(ms) / 1000));
+        if (totalSecs < 60) return Math.max(1, totalSecs) + 's ago';
+        if (totalSecs < 3600) {
+          const m = Math.floor(totalSecs / 60);
+          const s = totalSecs % 60;
+          return s > 0 ? (m + 'm ' + s + 's ago') : (m + 'm ago');
+        }
+        if (totalSecs < 86400) {
+          const h = Math.floor(totalSecs / 3600);
+          const m = Math.floor((totalSecs % 3600) / 60);
+          return m > 0 ? (h + 'h ' + m + 'm ago') : (h + 'h ago');
+        }
+        return Math.floor(totalSecs / 86400) + 'd ago';
+      }
+      function formatAgeAgoSeconds(secs) {
+        if (secs == null || secs === '') return '';
+        const n = Number(secs);
+        if (!Number.isFinite(n) || n < 0) return '';
+        return formatAgeAgo(n * 1000);
+      }
+      // Legacy fallbacks referenced by backend*AgeSeconds only when _auth.lastReal*
+      // is absent — never reached in this test because _auth is always present.
+      function liveSecondsSinceStatusSuccess() { return null; }
+      function entryStatusSuccessTimestamp() { return null; }
+      function syncAgeSeconds() { return null; }
+      function liveSecondsSinceStatsSuccess() { return null; }
+      function liveSecondsSinceInventorySuccess() { return null; }
       ${blocks.map((b) => b[0]).join('\n')}
       return {
         formatPresenceStatusText,
@@ -181,23 +212,24 @@ describe('tracker upload interval 60s + aio domain regression', () => {
         formatEntrySyncStatusText,
       };
     `)();
-    // Each section carries its OWN frontend-receive timestamp; the backend
-    // snapshot age (45s) must NOT leak into any visible timer.
+    // Freshness derives ONLY from the read API's identity-gated real lane upload
+    // timestamps (server time). The stale frontend-receive fields below (99s old)
+    // must NOT leak into any visible timer; the server lane timestamps win.
+    const now = Date.now();
     const entry = {
-      uploadStatus: {
-        secondsSinceLastStatusSuccess: 45,
-        secondsSinceLastLeaderstatsSuccess: 45,
-        secondsSinceLastInventorySuccess: 45,
+      _auth: {
+        lastRealStatusAt: new Date(now - 3000).toISOString(),
+        lastRealLeaderstatsAt: new Date(now - 2000).toISOString(),
+        lastRealInventoryAt: new Date(now - 4000).toISOString(),
       },
-      _uploadStatusFetchedAtMs: Date.now(),
-      _frontendRefreshAt: Date.now() - 3000,
-      _leaderstatsFrontendRefreshAt: Date.now() - 2000,
-      _inventoryFrontendRefreshAt: Date.now() - 4000,
+      _frontendRefreshAt: now - 99000,
+      _leaderstatsFrontendRefreshAt: now - 99000,
+      _inventoryFrontendRefreshAt: now - 99000,
       lastData: {},
     };
-    assert.equal(fns.formatPresenceStatusText(entry), '3s');
-    assert.equal(fns.formatStatsUploadDurationText(entry), '2s');
-    assert.equal(fns.formatEntrySyncStatusText(entry), '4s');
+    assert.equal(fns.formatPresenceStatusText(entry), '3s ago');
+    assert.equal(fns.formatStatsUploadDurationText(entry), '2s ago');
+    assert.equal(fns.formatEntrySyncStatusText(entry), '4s ago');
   });
 
   test('compiled bundle includes lane timer helpers', () => {

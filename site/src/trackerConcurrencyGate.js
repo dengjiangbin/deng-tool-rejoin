@@ -21,6 +21,18 @@ const LAG_WARN_MS = Number(process.env.TRACKER_EVENT_LOOP_LAG_WARN_MS || 250);
 // shouldShedWork() permanently true and starve all deferred enrichment. The three
 // fast-path lanes (status/leaderstats/inventory raw persist) always bypass this gate.
 const LAG_SHED_MS = Number(process.env.TRACKER_EVENT_LOOP_LAG_SHED_MS || 1000);
+// Hard pause: above this event-loop lag, start ZERO new enrichment jobs. The
+// ingest thread then drains inbound uploads and answers the Cloudflare tunnel
+// in time, which is what prevents edge 530 (origin unreachable) / 502 (bad
+// gateway). In-flight jobs finish; new jobs wait until lag recovers. Display
+// data (leaderstats/fish/stones/items) is already persisted synchronously on
+// the fast path BEFORE enrichment is scheduled, so pausing supplemental
+// enrichment never blanks an account — it only delays global catalog/catch
+// learning, which self-heals on the next upload once lag clears.
+// effectiveEnrichmentMax floored at 1 (the previous behaviour) meant a single
+// CPU-bound enrichment job ran back-to-back forever and the loop never
+// recovered — a stable bad equilibrium at ~5.8s lag. Allowing 0 breaks it.
+const LAG_PAUSE_MS = Number(process.env.TRACKER_EVENT_LOOP_LAG_PAUSE_MS || 2500);
 const HEAP_SHED_RATIO = Number(process.env.TRACKER_HEAP_SHED_RATIO || 0.92);
 
 /** @type {Map<string, { fn: Function, enqueuedAt: number }>} */
@@ -35,6 +47,8 @@ let deferredCompleted = 0;
 let droppedJobs = 0;
 let squashedJobs = 0;
 let shedEvents = 0;
+const BACKLOG_WARN_THROTTLE_MS = Number(process.env.TRACKER_BACKLOG_WARN_THROTTLE_MS || 5000);
+let _lastBacklogWarnAt = 0;
 
 function isStatusOnlyUpload(req) {
   const body = req && req.body;
@@ -62,6 +76,11 @@ function sessionKeyFromRequest(req) {
 function effectiveEnrichmentMax() {
   const lag = getLagMs();
   const heapRatio = process.memoryUsage().heapUsed / Math.max(1, process.memoryUsage().heapTotal);
+  // Extreme lag: fully pause new enrichment so the loop can recover and keep
+  // answering uploads (prevents Cloudflare origin-timeout 530/502).
+  if (lag >= LAG_PAUSE_MS) {
+    return 0;
+  }
   if (lag >= LAG_SHED_MS || heapRatio >= HEAP_SHED_RATIO) {
     return Math.max(1, Math.floor(ENRICHMENT_MAX / 2));
   }
@@ -208,6 +227,18 @@ function scheduleDeferredUploadWork(sessionKey, workFn) {
   tryStartDeferredWork();
 }
 
+// Self-healing drain: while enrichment is paused/shed under lag, inbound uploads
+// normally re-trigger tryStartDeferredWork, but if arrivals stall this timer
+// guarantees the backlog resumes the moment event-loop lag recovers. Unref'd so
+// it never keeps the process alive on shutdown.
+const DRAIN_TICK_MS = Number(process.env.TRACKER_GATE_DRAIN_TICK_MS || 250);
+const _drainTimer = setInterval(() => {
+  if (deferredWaitQueue.length === 0 && deferredPendingByKey.size === 0) return;
+  if (effectiveEnrichmentMax() <= 0) return;
+  tryStartDeferredWork();
+}, DRAIN_TICK_MS);
+if (typeof _drainTimer.unref === 'function') _drainTimer.unref();
+
 function getOldestQueueAgeMs() {
   const now = Date.now();
   let oldest = 0;
@@ -248,14 +279,24 @@ function wrapTrackerUpload(label, handler) {
       shedEvents += 1;
       req.trackerDeferEnrichment = true;
     }
+    // A deep backlog is EXPECTED while enrichment is intentionally paused/shed
+    // under lag — logging it per-upload floods stderr (synchronous writes) and
+    // worsens the very saturation we are recovering from. Throttle to at most
+    // one line per BACKLOG_WARN_THROTTLE_MS.
     if (pending >= ENRICHMENT_MAX * 4) {
-      console.warn(
-        '[tracker-gate] deep enrichment backlog label=%s sessionKey=%s pending=%d active=%d',
-        label,
-        key || '?',
-        pending,
-        deferredActive,
-      );
+      const nowTs = Date.now();
+      if (nowTs - _lastBacklogWarnAt >= BACKLOG_WARN_THROTTLE_MS) {
+        _lastBacklogWarnAt = nowTs;
+        console.warn(
+          '[tracker-gate] deep enrichment backlog label=%s sessionKey=%s pending=%d active=%d effectiveMax=%d (throttled 1/%dms)',
+          label,
+          key || '?',
+          pending,
+          deferredActive,
+          effectiveEnrichmentMax(),
+          BACKLOG_WARN_THROTTLE_MS,
+        );
+      }
     }
     return handler(req, res);
   };

@@ -45,6 +45,13 @@ describe('Layer 1 — server-lane timestamp visible timers', () => {
       + src.match(/function formatCompactAgeAgoSeconds\(secs\) \{[\s\S]*?\n  \}/)[0]
       + src.match(/function formatInventoryUploadLabel\(entry\) \{[\s\S]*?\n  \}/)[0];
     const api = vm.runInNewContext(`(function(){
+      let trackerServerClockOffsetMs = 0;
+      function parseServerTimeMs(value){
+        if (value == null || value === '') return null;
+        const ms = Date.parse(String(value));
+        return Number.isFinite(ms) ? ms : null;
+      }
+      function correctedClientNowMs(){ return Date.now() + trackerServerClockOffsetMs; }
       function liveSecondsSinceInventorySuccess(){return null;}
       ${block}
       return { formatInventoryUploadLabel };

@@ -236,6 +236,24 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
       lastReclaimAt = nowMs;
       Promise.resolve(_probeHealthy(port, host)).then((healthy) => {
         if (healthy) {
+          const currentHolders = new Set(findListenerPids(port).filter((p) => p !== process.pid));
+          const originalStillOwnsPort = currentHolders.size > 0
+            && Array.from(currentHolders).every((pid) => originalHolders && originalHolders.has(pid));
+          if (originalStillOwnsPort) {
+            // PM2 singleton convergence: after kill_timeout, the original
+            // holder is stale even when /health answers. Reclaim it so the
+            // PM2-tracked child becomes the one true listener.
+            reclaims += 1;
+            const r = reclaimPort(port, logPrefix, { onlyPids: originalHolders });
+            if (r.reclaimed) {
+              console.warn(`${logPrefix} reclaimed ${port} from STALE healthy original pid(s) %j — rebinding`, r.killedPids);
+              retryStartedAt = 0;
+              originalHolders = null;
+              warmSpare = false;
+            }
+            retrySoon(retryDelayMs);
+            return;
+          }
           // A good instance is serving. Do NOT kill it. Stand by and bind the
           // instant it frees (legit restart). This breaks the kill→PM2-restart
           // →kill loop that PM2 reported as a 16s SIGINT restart cycle.

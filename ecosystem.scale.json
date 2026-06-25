@@ -10,7 +10,7 @@
       "max_restarts": 15,
       "restart_delay": 3000,
       "kill_timeout": 8000,
-      "listen_timeout": 12000,
+      "listen_timeout": 30000,
       "max_memory_restart": "1024M",
       "env": {
         "NODE_ENV": "production",
@@ -30,12 +30,13 @@
       "script": "tracker-worker.js",
       "cwd": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site",
       "interpreter": "node",
+      "node_args": "--max-old-space-size=3072",
       "watch": false,
       "autorestart": true,
       "max_restarts": 15,
       "restart_delay": 3000,
       "kill_timeout": 8000,
-      "max_memory_restart": "2048M",
+      "max_memory_restart": "4096M",
       "env": {
         "NODE_ENV": "production",
         "TRACKER_WEB_MODE": "1",
@@ -52,8 +53,8 @@
         "TRACKER_WORKER_METRICS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\tracker_worker_metrics.json",
         "TRACKER_WORKER_TICK_MS": "500",
         "TRACKER_WORKER_REFRESH_MS": "120000",
-        "TRACKER_WORKER_MAX_PER_TICK": "80",
-        "TRACKER_WORKER_CONCURRENCY": "6"
+        "TRACKER_WORKER_MAX_PER_TICK": "40",
+        "TRACKER_WORKER_CONCURRENCY": "3"
       }
     }
   ]

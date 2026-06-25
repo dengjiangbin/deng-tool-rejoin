@@ -110,6 +110,14 @@ function shutdown(signal) {
   // Close the listening socket FIRST so a restarted PM2 instance can bind 8792
   // immediately instead of racing this process (the orphan-PID/EADDRINUSE cause).
   try { server.close(); } catch (_) { /* ignore */ }
+  // CRITICAL: force-destroy all keep-alive sockets. The ingest holds ~1000+
+  // long-lived Cloudflare/Roblox keep-alive connections; server.close() alone
+  // waits for every one of them to drain, so the dying process keeps port 8792
+  // bound for seconds. The PM2-restarted instance then loses the bind race and
+  // either retries forever or detaches as an orphan that permanently owns 8792
+  // (the restart loop + 530/502 we observed). The read + site servers already
+  // do this on shutdown; the ingest was missing it.
+  try { if (typeof server.closeAllConnections === 'function') server.closeAllConnections(); } catch (_) { /* ignore */ }
   const fishitTrackerRoutes = require('./src/fishitTrackerRoutes');
   Promise.resolve(fishitTrackerRoutes.flushAllLiveSessionsToDisk())
     .then((flushResult) => {

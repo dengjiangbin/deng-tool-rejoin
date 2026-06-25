@@ -244,6 +244,37 @@ function applyPresenceHeaders(res, c) {
   if (c.preservedDataReason) res.set('X-DENG-Preserved-Data-Reason', c.preservedDataReason);
 }
 
+function withReadContractJson(hit, contract, serverNow) {
+  let body = null;
+  try {
+    body = JSON.parse(hit && hit.json ? hit.json : '{}');
+  } catch (_) {
+    body = {};
+  }
+  const enriched = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  enriched.serverNow = serverNow;
+  // Exact public lane contract required by /tracker:
+  // timers reset only from these immutable real-upload timestamps/revisions,
+  // never from page refresh, login, DOM text, or cache/precompute freshness.
+  enriched.statusLastRealUploadAt = contract.lastRealStatusAt || null;
+  enriched.statusRevision = contract.statusRevision != null ? contract.statusRevision : null;
+  enriched.leaderstatsLastRealUploadAt = contract.lastRealLeaderstatsAt || null;
+  enriched.leaderstatsRevision = contract.leaderstatsRevision != null ? contract.leaderstatsRevision : null;
+  enriched.inventoryLastRealUploadAt = contract.lastRealInventoryAt || null;
+  enriched.inventoryRevision = contract.inventoryRevision != null ? contract.inventoryRevision : null;
+  // Legacy aliases retained for existing frontend readers and diagnostics.
+  enriched.lastRealStatusAt = contract.lastRealStatusAt || null;
+  enriched.lastRealUploadAt = contract.lastRealUploadAt || null;
+  enriched.lastRealLeaderstatsAt = contract.lastRealLeaderstatsAt || null;
+  enriched.lastRealInventoryAt = contract.lastRealInventoryAt || null;
+  enriched.statusAgeSeconds = contract.statusAgeSeconds != null ? contract.statusAgeSeconds : null;
+  enriched.leaderstatsAgeSeconds = contract.leaderstatsAgeSeconds != null ? contract.leaderstatsAgeSeconds : null;
+  enriched.inventoryAgeSeconds = contract.inventoryAgeSeconds != null ? contract.inventoryAgeSeconds : null;
+  enriched.presenceState = contract.presenceState;
+  enriched.isOnline = contract.isOnline === true;
+  return JSON.stringify(enriched);
+}
+
 function warmLoadCache() {
   const started = Date.now();
   let rows = [];
@@ -363,8 +394,10 @@ function wantsFallbackOnly(req) {
 }
 
 function setBaseHeaders(res) {
+  res.set('X-DENG-Server-Now', new Date().toISOString());
   res.set('X-DENG-Served-By', 'deng-tracker-read');
   res.set('X-DENG-Tracker-Read-Route', '8793');
+  res.set('X-DENG-Read-Route', '8793');
   res.set('Cache-Control', 'no-store');
 }
 
@@ -435,9 +468,11 @@ function servePrecomputed(req, res) {
     return proxyToFallback(req, res, 'not_precomputed_yet');
   }
   const now = Date.now();
+  const serverNow = new Date(now).toISOString();
   const ageMs = hit.lastPrecomputedAt ? (now - Date.parse(hit.lastPrecomputedAt)) : null;
   const contract = buildPresenceContract(hit, now);
   setBaseHeaders(res);
+  res.set('X-DENG-Server-Now', serverNow);
   res.set('X-DENG-Precomputed', '1');
   res.set('X-DENG-Read-Mode', 'precomputed');
   res.set('X-DENG-Read-Fallback', '0');
@@ -458,11 +493,12 @@ function servePrecomputed(req, res) {
     return res.status(200).send(JSON.stringify({
       unchanged: true,
       snapshotHash: hit.precomputedHash,
+      serverNow,
       presence: contract,
     }));
   }
   res.set('X-DENG-Unchanged', '0');
-  return res.status(200).send(hit.json);
+  return res.status(200).send(withReadContractJson(hit, contract, serverNow));
 }
 
 app.get('/health', (_req, res) => {

@@ -1,9 +1,9 @@
 ﻿<!DOCTYPE html>
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_SERVERNOW_TIMER_502_FIX_2026_06_25' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_SERVERNOW_TIMER_502_FIX_2026_06_25' %>">
   <link rel="icon" type="image/png" href="/public/img/deng-logo.png?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
   <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/tracker' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
@@ -361,10 +361,6 @@
           </svg>
           <input class="inventory-search__input" type="search" placeholder="Search fish or stones..." autocomplete="off" spellcheck="false" aria-label="Search fish or stones" data-bulk-search-input>
           <button class="inventory-search__clear" type="button" aria-label="Clear search" data-bulk-search-clear>Clear</button>
-        </div>
-        <div class="inventory-upload-indicator is-stale" data-inventory-upload-indicator aria-label="Fish and stone upload status">
-          <span class="status-dot dead" data-inventory-upload-dot aria-hidden="true"></span>
-          <span class="inventory-upload-indicator__text" data-inventory-upload-text></span>
         </div>
       </div>
       <div id="bulkInventoryBody"></div>

@@ -29,6 +29,9 @@ app.use((req, res, next) => {
   // writers so the header lands before the body is flushed (additive, no change
   // to the upload handler's own logic).
   const startedAt = Date.now();
+  const acceptedAt = new Date(startedAt).toISOString();
+  res.set('X-DENG-Server-Now', acceptedAt);
+  res.set('X-DENG-Upload-Accepted-At', acceptedAt);
   const stamp = () => { if (!res.headersSent) res.set('X-DENG-Ingest-Time-Ms', String(Date.now() - startedAt)); };
   const origJson = res.json.bind(res);
   const origSend = res.send.bind(res);

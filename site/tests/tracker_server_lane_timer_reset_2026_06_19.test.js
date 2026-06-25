@@ -31,6 +31,13 @@ function makeLaneAgeEnv(source) {
   ];
   const blocks = names.map((n) => extractFn(source, n));
   return new Function(`
+    let trackerServerClockOffsetMs = 0;
+    function parseServerTimeMs(value){
+      if (value == null || value === '') return null;
+      const ms = Date.parse(String(value));
+      return Number.isFinite(ms) ? ms : null;
+    }
+    function correctedClientNowMs(){ return Date.now() + trackerServerClockOffsetMs; }
     function liveSecondsSinceStatusSuccess(){return null;}
     function entryStatusSuccessTimestamp(){return null;}
     function syncAgeSeconds(){return null;}
@@ -107,11 +114,15 @@ describe('server lane timer reset — real upload timestamp is source of truth',
     assert.match(apply, /laneTimestampAdvanced/);
   });
 
-  test('8793 read API exposes lastReal* lane timestamps in headers', () => {
+  test('8793 read API exposes lastReal* lane timestamps in headers and JSON body', () => {
     const readSrc = fs.readFileSync(READ_APP, 'utf8');
     assert.match(readSrc, /X-DENG-Last-Real-Status-At/);
     assert.match(readSrc, /X-DENG-Last-Real-Inventory-At/);
     assert.match(readSrc, /X-DENG-Last-Real-Leaderstats-At/);
+    assert.match(readSrc, /statusLastRealUploadAt/);
+    assert.match(readSrc, /leaderstatsLastRealUploadAt/);
+    assert.match(readSrc, /inventoryLastRealUploadAt/);
+    assert.match(readSrc, /enriched\.serverNow = serverNow/);
     assert.match(readSrc, /unchanged: true/);
   });
 });

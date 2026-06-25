@@ -35,9 +35,20 @@ test('site entrypoint force-closes connections on shutdown', () => {
   assert.match(sd, /closeAllConnections/, 'site shutdown must force-close to avoid orphaning 8791');
 });
 
+test('ingest entrypoint force-closes connections on shutdown (prevents 8792 orphan loop)', () => {
+  // The ingest holds ~1000+ keep-alive sockets; without closeAllConnections the
+  // dying process keeps port 8792 bound, the PM2 restart loses the bind race and
+  // orphans, producing the restart loop + Cloudflare 530/502. This guard keeps
+  // the fix in place.
+  const src = read('tracker-ingest-server.js');
+  const sd = src.slice(src.indexOf('function shutdown'));
+  assert.match(sd, /closeAllConnections/, 'ingest shutdown must force-close keep-alive sockets to release 8792 instantly');
+  assert.match(sd, /server\.close\(\)/);
+});
+
 test('frontend carries the build marker (proves loaded bundle is not stale-cached)', () => {
   const src = read('src/inventory/fishit_tracker.source.ejs');
-  assert.match(src, /TRACKER_AUTH_UPLOAD_STALENESS_FIX_2026_06_18/);
+  assert.match(src, /TRACKER_SERVERNOW_TIMER_502_FIX_2026_06_25/);
   assert.match(src, /window\.__TRACKER_BUILD_MARKER\s*=/);
 });
 
@@ -46,6 +57,6 @@ test('built bundle in manifest is shipped and contains the marker + presence wir
   const jsPath = path.join(__dirname, '..', 'public', 'assets', manifest.js);
   assert.ok(fs.existsSync(jsPath), `manifest bundle ${manifest.js} must exist on disk`);
   const js = fs.readFileSync(jsPath, 'utf8');
-  assert.match(js, /TRACKER_AUTH_UPLOAD_STALENESS_FIX_2026_06_18/, 'shipped bundle must include the new marker');
+  assert.match(js, /TRACKER_SERVERNOW_TIMER_502_FIX_2026_06_25/, 'shipped bundle must include the new marker');
   assert.match(js, /X-DENG-Presence-State/, 'shipped bundle must include authoritative presence wiring');
 });

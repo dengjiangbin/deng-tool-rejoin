@@ -1,9 +1,9 @@
 'use strict';
 
-// STRICT FRONTEND FIX (2026-06-16):
-//  - The frontend-receive timer must apply to ALL visible freshness timers:
-//    main tracker/status, leaderstats, and inventory/fish sections, each with
-//    its OWN per-section frontend-receive timestamp.
+// STRICT FRONTEND FIX (2026-06-16), production hardening (2026-06-25):
+//  - Visible freshness timers must NOT use browser receive/page-load time.
+//    They derive from authoritative server lane timestamps plus serverNow clock
+//    correction, so refresh/login/new device cannot fake "1s ago".
 //  - The "Ruby Gemstone" top card must count Ruby using the SAME source the
 //    detail/list view uses (per-instance mutation), so it never stays 0 when the
 //    detail view shows Ruby.
@@ -29,108 +29,86 @@ function extractFn(source, name) {
 }
 
 // ---------------------------------------------------------------------------
-// TASK 1-3: per-section frontend-receive timers
+// TASK 1-3: server-lane timers only
 // ---------------------------------------------------------------------------
-function makeTimerEnv(source) {
-  const open = source.indexOf('  function formatPresenceDurationLabel(secs) {');
-  const close = source.indexOf('  function formatStatsUploadDurationText(entry) {');
-  assert.ok(open > 0 && close > open, 'per-section timer helper block missing');
-  const block = source.slice(open, close);
+function makeServerLaneTimerEnv(source) {
+  const names = [
+    'parseServerTimeMs',
+    'updateTrackerServerClock',
+    'correctedClientNowMs',
+    'formatAgeAgo',
+    'formatAgeAgoSeconds',
+    'authAgeSecondsFromTs',
+    'backendPresenceAgeSeconds',
+    'backendStatsAgeSeconds',
+    'backendInventoryAgeSeconds',
+    'formatBackendAgeText',
+    'formatPresenceStatusText',
+    'formatStatsUploadDurationText',
+    'formatEntrySyncStatusText',
+  ];
+  const block = names.map((name) => extractFn(source, name)).join('\n');
   const clock = { now: 0 };
-  const sandbox = { Math, Number, String, Date: { now: () => clock.now } };
-  // Restored 4394cfd model: the three frontend-receive formatters call
-  // formatAgeAgoSeconds. Shim it into the sandbox so the extracted block
-  // resolves correctly (the real formatAgeAgo helper lives in a different
-  // section of the source).
+  const sandbox = { Math, Number, String, Date: { now: () => clock.now, parse: Date.parse } };
   const script = `(function(){
-    const pad2 = (n) => String(n).padStart(2, '0');
-    function formatAgeAgo(ms) {
-      const totalSecs = Math.max(0, Math.floor(Number(ms) / 1000));
-      if (totalSecs < 60) return Math.max(1, totalSecs) + 's ago';
-      if (totalSecs < 3600) {
-        const m = Math.floor(totalSecs / 60);
-        const s = totalSecs % 60;
-        return s > 0 ? (m + 'm ' + s + 's ago') : (m + 'm ago');
-      }
-      if (totalSecs < 86400) {
-        const h = Math.floor(totalSecs / 3600);
-        const m = Math.floor((totalSecs % 3600) / 60);
-        return m > 0 ? (h + 'H ' + m + 'm ago') : (h + 'H ago');
-      }
-      return Math.floor(totalSecs / 86400) + 'D ago';
-    }
-    function formatAgeAgoSeconds(secs) {
-      if (secs == null || secs === '') return '';
-      const n = Number(secs);
-      if (!Number.isFinite(n) || n < 0) return '';
-      return formatAgeAgo(n * 1000);
-    }
+    let accountStatusServerNowMs = 0;
+    let trackerServerClockOffsetMs = 0;
+    function liveSecondsSinceStatusSuccess(){return null;}
+    function entryStatusSuccessTimestamp(){return null;}
+    function syncAgeSeconds(){return null;}
+    function liveSecondsSinceStatsSuccess(){return null;}
+    function liveSecondsSinceInventorySuccess(){return null;}
 ${block}
     return {
-      markEntryFrontendRefreshed, formatFrontendRefreshAgeText,
-      markEntryLeaderstatsRefreshed, formatLeaderstatsRefreshAgeText,
-      markEntryInventoryRefreshed, formatInventoryRefreshAgeText,
+      updateTrackerServerClock,
       formatPresenceStatusText,
+      formatStatsUploadDurationText,
+      formatEntrySyncStatusText,
     };
   })()`;
   const api = vm.runInNewContext(script, sandbox, { filename: 'section-timers.js' });
   return { api, setNow: (ms) => { clock.now = ms; } };
 }
 
-describe('per-section frontend-receive timers (2026-06-16)', () => {
-  test('all three section timers read ~1s ago right after a refresh, even with a 6m-old backend snapshot', () => {
-    const { api, setNow } = makeTimerEnv(readSource());
-    const entry = {};
-    setNow(6 * 60 * 1000); // backend snapshot is 6 minutes old; browser receives "now"
-    api.markEntryFrontendRefreshed(entry);
-    api.markEntryLeaderstatsRefreshed(entry);
-    api.markEntryInventoryRefreshed(entry);
-    // Restored 4394cfd format: "<n>s ago" / "<n>m ago" / etc.
-    assert.equal(api.formatFrontendRefreshAgeText(entry), '1s ago');
-    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '1s ago');
-    assert.equal(api.formatInventoryRefreshAgeText(entry), '1s ago');
-    // None of them leaked the 6m backend age.
-    assert.notEqual(api.formatFrontendRefreshAgeText(entry), '6m ago');
-    assert.notEqual(api.formatLeaderstatsRefreshAgeText(entry), '6m ago');
-    assert.notEqual(api.formatInventoryRefreshAgeText(entry), '6m ago');
+describe('server-lane timers (2026-06-25 production hardening)', () => {
+  test('legacy browser receive timer helpers are absent so page load cannot fake 1s ago', () => {
+    const source = readSource();
+    assert.doesNotMatch(source, /function markEntryFrontendRefreshed/);
+    assert.doesNotMatch(source, /function formatFrontendRefreshAgeText/);
+    assert.doesNotMatch(source, /function markEntryLeaderstatsRefreshed/);
+    assert.doesNotMatch(source, /function formatLeaderstatsRefreshAgeText/);
+    assert.doesNotMatch(source, /function markEntryInventoryRefreshed/);
+    assert.doesNotMatch(source, /function formatInventoryRefreshAgeText/);
   });
 
-  test('each section timer counts up independently from its own receive time', () => {
-    const { api, setNow } = makeTimerEnv(readSource());
-    const entry = {};
-    setNow(0);
-    api.markEntryFrontendRefreshed(entry);
-    setNow(2000); api.markEntryLeaderstatsRefreshed(entry);
-    setNow(4000); api.markEntryInventoryRefreshed(entry);
-    setNow(5000); // tracker +5s, leaderstats +3s, inventory +1s
-    assert.equal(api.formatFrontendRefreshAgeText(entry), '5s ago');
-    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '3s ago');
-    assert.equal(api.formatInventoryRefreshAgeText(entry), '1s ago');
+  test('serverNow offset makes all lane timers agree with server time, not local clock', () => {
+    const { api, setNow } = makeServerLaneTimerEnv(readSource());
+    const serverNow = Date.parse('2026-06-25T10:00:00.000Z');
+    setNow(serverNow + 120_000); // browser clock is 2 minutes fast
+    api.updateTrackerServerClock(new Date(serverNow).toISOString());
+    const entry = {
+      _auth: {
+        lastRealStatusAt: new Date(serverNow - 3000).toISOString(),
+        lastRealLeaderstatsAt: new Date(serverNow - 62_000).toISOString(),
+        lastRealInventoryAt: new Date(serverNow - 3720_000).toISOString(),
+      },
+    };
+    assert.equal(api.formatPresenceStatusText(entry), '3s ago');
+    assert.equal(api.formatStatsUploadDurationText(entry), '1m 2s ago');
+    assert.equal(api.formatEntrySyncStatusText(entry), '1H 2m ago');
   });
 
-  test('a failed poll (no mark) does not reset any section timer', () => {
-    const { api, setNow } = makeTimerEnv(readSource());
-    const entry = {};
-    setNow(0);
-    api.markEntryFrontendRefreshed(entry);
-    api.markEntryLeaderstatsRefreshed(entry);
-    api.markEntryInventoryRefreshed(entry);
-    setNow(9000); // failed poll -> nothing re-marked
-    assert.equal(api.formatFrontendRefreshAgeText(entry), '9s ago');
-    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '9s ago');
-    assert.equal(api.formatInventoryRefreshAgeText(entry), '9s ago');
-  });
-
-  test('a status-only poll resets leaderstats but leaves the inventory timer counting', () => {
-    const { api, setNow } = makeTimerEnv(readSource());
-    const entry = {};
-    setNow(0);
-    api.markEntryInventoryRefreshed(entry);
-    setNow(10000);
-    // Status-only poll: leaderstats arrives, inventory does NOT.
-    api.markEntryLeaderstatsRefreshed(entry);
-    assert.equal(api.formatLeaderstatsRefreshAgeText(entry), '1s ago');
-    assert.equal(api.formatInventoryRefreshAgeText(entry), '10s ago'); // not reset
+  test('same backend lane timestamp keeps aging instead of resetting on poll/reload', () => {
+    const { api, setNow } = makeServerLaneTimerEnv(readSource());
+    const serverNow = Date.parse('2026-06-25T10:00:00.000Z');
+    const ts = new Date(serverNow - 60_000).toISOString();
+    const entry = { _auth: { lastRealInventoryAt: ts } };
+    setNow(serverNow);
+    api.updateTrackerServerClock(new Date(serverNow).toISOString());
+    assert.equal(api.formatEntrySyncStatusText(entry), '1m ago');
+    setNow(serverNow + 20_000);
+    api.updateTrackerServerClock(new Date(serverNow + 20_000).toISOString());
+    assert.equal(api.formatEntrySyncStatusText(entry), '1m 20s ago');
   });
 
   test('the visible text uses the real SERVER lane upload age (server timestamps, no localStorage freshness)', () => {
