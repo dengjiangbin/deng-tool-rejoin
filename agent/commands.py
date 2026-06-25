@@ -3744,24 +3744,62 @@ def _auto_execute_choose_executor() -> str | None:
     return None
 
 
-def _print_auto_execute_results(action: str, results: list[dict[str, Any]]) -> None:
-    print()
-    print(action)
-    for row in results:
-        package = row.get("package") or "unknown"
-        path = row.get("path") or ""
-        filename = row.get("filename") or ""
-        if row.get("success"):
-            if "deleted_count" in row:
-                print(f"  OK {package}: deleted {row.get('deleted_count', 0)} DENG-managed file(s) at {path}")
-            elif row.get("deleted"):
-                print(f"  OK {package}: removed {filename} at {path}")
-            elif filename:
-                print(f"  OK {package}: wrote {filename} ({row.get('byte_count', 0)} bytes) at {path}")
-            else:
-                print(f"  OK {package}: {path}")
-        else:
-            print(f"  FAIL {package}: {path} — {row.get('error') or 'unknown error'}")
+def _auto_execute_failure_reason(row: dict[str, Any]) -> str:
+    reason = str(row.get("error") or "unknown error").strip()
+    if not reason:
+        reason = "unknown error"
+    return reason.split(":", 1)[0].strip() or reason
+
+
+def _print_auto_execute_failures(results: list[dict[str, Any]]) -> None:
+    failures = [row for row in results if not row.get("success")]
+    if not failures:
+        return
+    print("Failed:")
+    for row in failures:
+        print(f"- {row.get('package') or 'unknown'}: {_auto_execute_failure_reason(row)}")
+
+
+def _print_auto_execute_write_results(filename: str, results: list[dict[str, Any]]) -> None:
+    total = len(results)
+    ok = sum(1 for row in results if row.get("success"))
+    if ok == total:
+        print(f"Added {filename} to {total} package{'s' if total != 1 else ''}.")
+    else:
+        print(f"Added {filename} to {ok}/{total} packages.")
+    _print_auto_execute_failures(results)
+
+
+def _print_auto_execute_remove_results(filename: str, results: list[dict[str, Any]]) -> None:
+    total = len(results)
+    ok = sum(1 for row in results if row.get("success"))
+    if ok == total:
+        print(f"Removed {filename} from {total} package{'s' if total != 1 else ''}.")
+    else:
+        print(f"Removed {filename} from {ok}/{total} packages.")
+    _print_auto_execute_failures(results)
+
+
+def _print_auto_execute_remove_all_results(results: list[dict[str, Any]]) -> None:
+    total = len(results)
+    ok = sum(1 for row in results if row.get("success"))
+    deleted = sum(int(row.get("deleted_count") or 0) for row in results if row.get("success"))
+    if ok == total:
+        print(f"Removed {deleted} DENG-managed script file{'s' if deleted != 1 else ''} from {total} package{'s' if total != 1 else ''}.")
+    else:
+        print(f"Removed DENG-managed scripts from {ok}/{total} packages.")
+    _print_auto_execute_failures(results)
+
+
+def _print_auto_execute_inventory(draft: dict[str, Any], *, executor: str = "delta") -> None:
+    packages = _auto_execute_package_names(draft)
+    inventory = auto_execute.managed_filenames_by_package(packages, executor=executor) if packages else {}
+    filenames = sorted({name for names in inventory.values() for name in names})
+    print(f"Scripts set: {len(filenames)}")
+    for filename in filenames:
+        print(f"- {filename}")
+    if auto_execute.filenames_mismatch(inventory):
+        print("Warning: scripts differ across packages. Use Remove All Scripts to reset.")
 
 
 def _config_auto_execute_add(draft: dict[str, Any]) -> None:
@@ -3784,7 +3822,7 @@ def _config_auto_execute_add(draft: dict[str, Any]) -> None:
             return
         filename = auto_execute.next_managed_filename(packages, executor=executor)
         results = auto_execute.write_script_to_packages(packages, script, executor=executor, filename=filename)
-        _print_auto_execute_results("Auto Execute script write result:", results)
+        _print_auto_execute_write_results(filename, results)
         script_no += 1
 
 
@@ -3819,7 +3857,7 @@ def _config_auto_execute_remove(draft: dict[str, Any]) -> None:
         print("Please choose a listed script.")
         return
     results = auto_execute.remove_script_from_packages(packages, filenames[idx - 1], executor=executor)
-    _print_auto_execute_results("Auto Execute remove result:", results)
+    _print_auto_execute_remove_results(filenames[idx - 1], results)
 
 
 def _config_auto_execute_remove_all(draft: dict[str, Any]) -> None:
@@ -3833,7 +3871,7 @@ def _config_auto_execute_remove_all(draft: dict[str, Any]) -> None:
     if not _prompt_yes_no("Remove all DENG Auto Execute scripts from all configured packages?", False):
         return
     results = auto_execute.remove_all_scripts_from_packages(packages, executor=executor)
-    _print_auto_execute_results("Auto Execute remove all result:", results)
+    _print_auto_execute_remove_all_results(results)
 
 
 def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
@@ -3844,6 +3882,8 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
         print()
         print(termux_ui.separator("-"))
         print("Auto Execute")
+        _print_auto_execute_inventory(draft)
+        print()
         print(termux_ui.separator("-"))
         print("1. Add Script")
         print("2. Remove Script")

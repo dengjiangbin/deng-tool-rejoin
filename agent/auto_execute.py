@@ -111,6 +111,29 @@ def list_managed_filenames(
     return sorted(names)
 
 
+def managed_filenames_by_package(
+    packages: Iterable[str],
+    *,
+    executor: str = "delta",
+    storage_root: Path = DEFAULT_ANDROID_STORAGE_ROOT,
+) -> dict[str, list[str]]:
+    """Return DENG-managed script filenames per package, never file contents."""
+    spec = get_executor(executor)
+    out: dict[str, list[str]] = {}
+    for package in packages:
+        directory = spec.autoexecute_dir(package, storage_root=storage_root)
+        out[package] = [path.name for path in _existing_managed_files(directory)]
+    return out
+
+
+def filenames_mismatch(inventory: dict[str, list[str]]) -> bool:
+    """True when configured packages do not share the same managed filenames."""
+    if len(inventory) <= 1:
+        return False
+    sets = {tuple(names) for names in inventory.values()}
+    return len(sets) > 1
+
+
 def next_managed_filename(
     packages: Iterable[str],
     *,
