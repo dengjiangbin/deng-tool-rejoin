@@ -39,7 +39,7 @@ const DEFAULT_PROVIDER_CONFIG = {
   },
   lootlabs: {
     enabled: 'true',
-    monetizedUrl: 'https://lootdest.org/s?TqZQAW38',
+    monetizedUrl: 'https://lootdest.org/s?kb1mUj43',
     completeUrl: 'https://aio.deng.my.id/unlock/lootlabs/complete',
   },
 };
@@ -386,8 +386,8 @@ function lootlabsProviderUrl(returnToken) {
     return providerUrl;
   }
   // Fallback: safe string-based append — do NOT use the URL searchParams API
-  // because new URL('…s?TqZQAW38').searchParams.set(…) normalises the
-  // valueless key to "TqZQAW38=" which breaks the LootDest shortlink lookup.
+  // because new URL('…s?kb1mUj43').searchParams.set(…) normalises the
+  // valueless key to "kb1mUj43=" which breaks the LootDest shortlink lookup.
   // NOTE: this fallback is retained for backward-compat tests only.
   // In production, LOOTLABS_TEMPLATE_URL must be set (providerIsReady enforces this).
   const cfg = getProviderConfig('lootlabs');

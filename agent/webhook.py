@@ -497,6 +497,173 @@ def build_alert_embed_payload(
     }
 
 
+_PACKAGE_LIFECYCLE_STATE_PATH = DATA_DIR / "package-lifecycle-webhook-state.json"
+_PACKAGE_LIFECYCLE_PRELAUNCH = frozenset({
+    "Launching", "Pending", "Checking", "Waiting", "Reopening", "Relaunching",
+})
+
+
+def _load_package_lifecycle_state() -> dict[str, Any]:
+    try:
+        if _PACKAGE_LIFECYCLE_STATE_PATH.is_file():
+            parsed = json.loads(_PACKAGE_LIFECYCLE_STATE_PATH.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict):
+                packages = parsed.get("packages")
+                if isinstance(packages, dict):
+                    return {"packages": packages}
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return {"packages": {}}
+
+
+def _save_package_lifecycle_state(state: dict[str, Any]) -> None:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _PACKAGE_LIFECYCLE_STATE_PATH.write_text(
+            json.dumps({"packages": state.get("packages") or {}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def package_lifecycle_dead_already_notified(package: str) -> bool:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return True
+    row = _load_package_lifecycle_state().get("packages", {}).get(pkg, {})
+    return bool(row.get("dead_notified"))
+
+
+def mark_package_lifecycle_dead_notified(package: str) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    state = _load_package_lifecycle_state()
+    packages = state.setdefault("packages", {})
+    packages[pkg] = {
+        "dead_notified": True,
+        "dead_active": True,
+        "updated_at": time.time(),
+    }
+    _save_package_lifecycle_state(state)
+
+
+def package_lifecycle_recover_pending(package: str) -> bool:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return False
+    row = _load_package_lifecycle_state().get("packages", {}).get(pkg, {})
+    return bool(row.get("dead_active") and row.get("dead_notified"))
+
+
+def mark_package_lifecycle_recovered(package: str) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    state = _load_package_lifecycle_state()
+    packages = state.setdefault("packages", {})
+    packages[pkg] = {
+        "dead_notified": False,
+        "dead_active": False,
+        "updated_at": time.time(),
+    }
+    _save_package_lifecycle_state(state)
+
+
+def build_package_lifecycle_embed_payload(
+    config_data: dict[str, Any],
+    *,
+    event: str,
+    package: str,
+    username: str,
+) -> dict[str, Any]:
+    """Build a minimal Package Dead / Package Recovered embed."""
+    from .license import get_public_device_model
+
+    normalized = str(event or "").strip().lower()
+    if normalized == "package_dead":
+        title = "Package Dead"
+        color = EMBED_COLOR_RED
+    else:
+        title = "Package Recovered"
+        color = EMBED_COLOR_GREEN
+
+    device = _public_device_label(config_data, get_public_device_model()) or "Unknown"
+    pkg_value = str(package or "").strip() or "Unknown"
+    user_value = str(username or "").strip() or "Unknown"
+
+    return {
+        "username": WEBHOOK_USERNAME,
+        "avatar_url": WEBHOOK_AVATAR_URL,
+        "allowed_mentions": {"parse": []},
+        "embeds": [{
+            "title": title,
+            "color": color,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "fields": [
+                {"name": "Device", "value": device[:256], "inline": True},
+                {"name": "Package", "value": pkg_value[:256], "inline": True},
+                {"name": "Username", "value": user_value[:256], "inline": True},
+            ],
+        }],
+    }
+
+
+def send_package_lifecycle_alert(
+    config_data: dict[str, Any],
+    *,
+    event: str,
+    package: str,
+    username: str,
+) -> tuple[bool, str]:
+    """Send one Package Dead / Package Recovered embed without blocking relaunch."""
+    mode = str(config_data.get("webhook_mode") or "none")
+    if mode == "none" or not config_data.get("webhook_enabled", mode != "none"):
+        record_webhook_trace(
+            source="send_package_lifecycle_alert",
+            event=event,
+            send_attempted=False,
+            send_result="skipped",
+            skip_reason="webhook_disabled",
+        )
+        return False, "webhook disabled"
+    try:
+        url = validate_webhook_url(config_data.get("webhook_url"))
+    except WebhookError as exc:
+        record_webhook_trace(
+            source="send_package_lifecycle_alert",
+            event=event,
+            send_attempted=False,
+            send_result="failure",
+            last_exception_type=type(exc).__name__,
+        )
+        return False, f"webhook config error: {type(exc).__name__}"
+
+    payload = build_package_lifecycle_embed_payload(
+        config_data,
+        event=event,
+        package=package,
+        username=username,
+    )
+    post_url = url + ("&" if "?" in url else "?") + "wait=true"
+    record_webhook_trace(
+        source="send_package_lifecycle_alert",
+        event=event,
+        webhook_mode=mode,
+        send_attempted=True,
+        http_method="POST",
+    )
+    ok, message, _message_id = _discord_json_request(post_url, payload, "POST")
+    record_webhook_trace(
+        source="send_package_lifecycle_alert",
+        event=event,
+        send_result="success" if ok else "failure",
+        http_status=_http_status_from_message(message),
+    )
+    return ok, message
+
+
 def build_status_message(config_data: dict[str, Any], *, event: str = "status", error: str | None = None) -> str:
     from .license import get_public_device_model
 

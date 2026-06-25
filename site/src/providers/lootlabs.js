@@ -10,9 +10,9 @@
  *   →    200 { "type": "success", "message": "<encrypted_data>" }
  *
  * The encrypted value MUST be appended to the LootLabs shortlink as
- * `&data=<encrypted_data>`. The shortlink ID (e.g. `?TqZQAW38`) is a
+ * `&data=<encrypted_data>`. The shortlink ID (e.g. `?kb1mUj43`) is a
  * valueless query key so we MUST NOT use URLSearchParams (it would rewrite
- * `?TqZQAW38` into `?TqZQAW38=`, breaking the link).
+ * `?kb1mUj43` into `?kb1mUj43=`, breaking the link).
  *
  * SECURITY:
  *  - LOOTLABS_API_TOKEN is read from env only and sent in the Authorization
@@ -55,7 +55,7 @@ function envEnabled(name, fallback = 'false') {
 /**
  * Strip any pre-existing `&data=…` (or `?data=…`) suffix so we always start
  * from the canonical shortlink. The base link in the LootLabs dashboard is
- * just `https://lootdest.org/s?TqZQAW38`; older deployments may have left a
+ * just `https://lootdest.org/s?kb1mUj43`; older deployments may have left a
  * stale `&data=` from a previous encrypted redirect in the env value.
  */
 function stripDataParam(baseLink) {
@@ -115,7 +115,7 @@ function buildLootLabsCallbackUrl({ signedState, publicUrl }) {
 /**
  * Append the encrypted data to the LootLabs shortlink WITHOUT touching the
  * shortlink id. We cannot use URLSearchParams because it would normalise the
- * valueless query key `?TqZQAW38` into `?TqZQAW38=`.
+ * valueless query key `?kb1mUj43` into `?kb1mUj43=`.
  *
  * LootLabs returns the encrypted blob already URL-ready (per their docs the
  * value is meant to be appended as `&data=<message>` directly). It contains

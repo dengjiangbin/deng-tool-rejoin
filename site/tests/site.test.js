@@ -27,11 +27,11 @@ process.env.LINKVERTISE_CALLBACK_URL = 'http://localhost:8791/unlock/linkvertise
 process.env.LINKVERTISE_VERIFY_URL = 'https://publisher.linkvertise.com/api/v1/anti_bypassing';
 process.env.LINKVERTISE_ANTI_BYPASS_TOKEN = 'test-anti-bypass-token-very-long-do-not-log-1234567890abcdef';
 process.env.LOOTLABS_ENABLED = 'true';
-process.env.LOOTLABS_BASE_LINK = 'https://lootdest.org/s?TqZQAW38';
+process.env.LOOTLABS_BASE_LINK = 'https://lootdest.org/s?kb1mUj43';
 process.env.LOOTLABS_API_TOKEN = 'test-lootlabs-api-token-very-long-do-not-log-1234567890abcdef';
 process.env.LOOTLABS_ENCRYPT_URL = 'https://creators.lootlabs.gg/api/public/url_encryptor';
 // Legacy LootLabs vars kept for backward-compat regression cases in this suite.
-process.env.LOOTLABS_MONETIZED_URL = 'https://lootdest.org/s?TqZQAW38';
+process.env.LOOTLABS_MONETIZED_URL = 'https://lootdest.org/s?kb1mUj43';
 process.env.LOOTLABS_COMPLETE_URL = 'http://localhost:8791/unlock/lootlabs/complete';
 process.env.AD_MIN_COMPLETION_SECONDS = '30';
 process.env.AD_RETURN_SIGNING_SECRET = 'test-return-signing-secret-that-is-long-enough';
@@ -592,12 +592,12 @@ async function chooseProvider(agent, provider = 'lootlabs') {
   if (provider === 'lootlabs') {
     // LootLabs Redirect API / Anti-Bypass: server signs a state, calls the
     // mocked encrypt API, then redirects 303 to:
-    //   https://lootdest.org/s?TqZQAW38&data=<encrypted>
-    // The shortlink id (?TqZQAW38) is a valueless query key — assert that
+    //   https://lootdest.org/s?kb1mUj43&data=<encrypted>
+    // The shortlink id (?kb1mUj43) is a valueless query key — assert that
     // it was preserved exactly (no `=` appended).
-    const base = (process.env.LOOTLABS_BASE_LINK || 'https://lootdest.org/s?TqZQAW38').replace(/[?&]data=.*$/, '');
+    const base = (process.env.LOOTLABS_BASE_LINK || 'https://lootdest.org/s?kb1mUj43').replace(/[?&]data=.*$/, '');
     assert.ok(location.startsWith(`${base}&data=`), `expected ${base}&data=… , got: ${location}`);
-    assert.ok(!/\bTqZQAW38=/.test(location), 'LootLabs shortlink hash must not gain "=" suffix');
+    assert.ok(!/\bkb1mUj43=/.test(location), 'LootLabs shortlink hash must not gain "=" suffix');
     // Pull out the encrypted blob, look up the destination URL from the mock,
     // and extract `?s=<signed_state>` from that destination URL.
     const dataMatch = location.match(/[?&]data=([^&]+)$/);
@@ -2067,15 +2067,15 @@ describe('Luarmor-style key flow', () => {
     assert.ok(payload.provider_started_at);
   });
 
-  test('LootLabs Redirect API: provider POST encrypts the callback and 303s to lootdest.org/s?TqZQAW38&data=…', async () => {
+  test('LootLabs Redirect API: provider POST encrypts the callback and 303s to lootdest.org/s?kb1mUj43&data=…', async () => {
     const agent = request.agent(app);
     await login(agent);
     const { res, location, returnUrl, returnToken, lootlabsEncrypted } = await chooseProvider(agent, 'lootlabs');
     assert.equal(res.status, 303);
     // Final URL must keep the LootLabs shortlink id exactly as written.
-    assert.ok(location.startsWith('https://lootdest.org/s?TqZQAW38&data='), `expected lootdest.org/s?TqZQAW38&data=… , got: ${location}`);
+    assert.ok(location.startsWith('https://lootdest.org/s?kb1mUj43&data='), `expected lootdest.org/s?kb1mUj43&data=… , got: ${location}`);
     // The valueless shortlink key MUST NOT gain `=` (no URLSearchParams normalisation).
-    assert.ok(!/\bTqZQAW38=/.test(location), 'shortlink hash must not have "=" appended');
+    assert.ok(!/\bkb1mUj43=/.test(location), 'shortlink hash must not have "=" appended');
     // Exactly one encrypt API call was made.
     assert.equal(lootlabsApi.callCount, 1);
     // The encrypt call sent the API token via Authorization header — NOT in the URL or body.
@@ -2135,8 +2135,8 @@ describe('Luarmor-style key flow', () => {
         provider: 'lootlabs',
       });
     assert.equal(res.status, 303);
-    assert.ok(res.headers.location.startsWith('https://lootdest.org/s?TqZQAW38&data='), `expected lootdest.org/s?TqZQAW38&data=… , got: ${res.headers.location}`);
-    assert.ok(!/\bTqZQAW38=/.test(res.headers.location), 'shortlink hash must not have "=" appended');
+    assert.ok(res.headers.location.startsWith('https://lootdest.org/s?kb1mUj43&data='), `expected lootdest.org/s?kb1mUj43&data=… , got: ${res.headers.location}`);
+    assert.ok(!/\bkb1mUj43=/.test(res.headers.location), 'shortlink hash must not have "=" appended');
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
   });
 
@@ -2487,17 +2487,17 @@ describe('Luarmor-style key flow', () => {
   });
 
   test('LootLabs provider URL builder does NOT use URLSearchParams (regression: shortlink id corruption)', async () => {
-    // The shortlink id `?TqZQAW38` is a valueless query key. URLSearchParams
-    // would normalise it to `?TqZQAW38=`. This regression test directly
+    // The shortlink id `?kb1mUj43` is a valueless query key. URLSearchParams
+    // would normalise it to `?kb1mUj43=`. This regression test directly
     // checks the URL builder output for the exact byte sequence.
     const ll = require('../src/providers/lootlabs');
     const url = ll.buildLootLabsStartUrl({
-      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      baseLink: 'https://lootdest.org/s?kb1mUj43',
       encryptedData: 'opaque',
     });
-    assert.equal(url, 'https://lootdest.org/s?TqZQAW38&data=opaque');
-    // Reject any byte sequence "TqZQAW38=" anywhere in the URL.
-    assert.ok(!/\bTqZQAW38=/.test(url), 'shortlink id must not gain "=" suffix');
+    assert.equal(url, 'https://lootdest.org/s?kb1mUj43&data=opaque');
+    // Reject any byte sequence "kb1mUj43=" anywhere in the URL.
+    assert.ok(!/\bkb1mUj43=/.test(url), 'shortlink id must not gain "=" suffix');
   });
 
   test('wrong provider complete route is blocked for a Linkvertise challenge', async () => {
@@ -3519,18 +3519,18 @@ describe('provider UI and security gate', () => {
     // Direct check of the URL builder: this is the only piece responsible for
     // not corrupting the shortlink key. URLSearchParams MUST NOT be used here.
     const out1 = ll.buildLootLabsStartUrl({
-      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      baseLink: 'https://lootdest.org/s?kb1mUj43',
       encryptedData: 'opaque-blob-no-specials',
     });
-    assert.equal(out1, 'https://lootdest.org/s?TqZQAW38&data=opaque-blob-no-specials');
-    assert.ok(!/\bTqZQAW38=/.test(out1), 'shortlink hash must not have = appended');
+    assert.equal(out1, 'https://lootdest.org/s?kb1mUj43&data=opaque-blob-no-specials');
+    assert.ok(!/\bkb1mUj43=/.test(out1), 'shortlink hash must not have = appended');
 
     // Stale `&data=…` on the base link must be stripped before appending again.
     const out2 = ll.buildLootLabsStartUrl({
-      baseLink: 'https://lootdest.org/s?TqZQAW38&data=stale',
+      baseLink: 'https://lootdest.org/s?kb1mUj43&data=stale',
       encryptedData: 'fresh',
     });
-    assert.equal(out2, 'https://lootdest.org/s?TqZQAW38&data=fresh');
+    assert.equal(out2, 'https://lootdest.org/s?kb1mUj43&data=fresh');
 
     // Empty inputs return empty string.
     assert.equal(ll.buildLootLabsStartUrl({ baseLink: '', encryptedData: 'x' }), '');
@@ -3788,10 +3788,10 @@ describe('LootLabs provider helper (Redirect API / Anti-Bypass)', () => {
 
   test('stripDataParam removes a stale &data=… suffix from the base link', () => {
     assert.equal(
-      ll.stripDataParam('https://lootdest.org/s?TqZQAW38&data=stale-blob/with+symbols'),
-      'https://lootdest.org/s?TqZQAW38',
+      ll.stripDataParam('https://lootdest.org/s?kb1mUj43&data=stale-blob/with+symbols'),
+      'https://lootdest.org/s?kb1mUj43',
     );
-    assert.equal(ll.stripDataParam('https://lootdest.org/s?TqZQAW38'), 'https://lootdest.org/s?TqZQAW38');
+    assert.equal(ll.stripDataParam('https://lootdest.org/s?kb1mUj43'), 'https://lootdest.org/s?kb1mUj43');
     assert.equal(ll.stripDataParam(''), '');
   });
 
@@ -3829,38 +3829,38 @@ describe('LootLabs provider helper (Redirect API / Anti-Bypass)', () => {
   test('buildLootLabsStartUrl appends &data=<encrypted> without corrupting the shortlink id', () => {
     // Plain (no specials) message is appended verbatim.
     const out1 = ll.buildLootLabsStartUrl({
-      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      baseLink: 'https://lootdest.org/s?kb1mUj43',
       encryptedData: 'opaqueBlobNoSpecials',
     });
-    assert.equal(out1, 'https://lootdest.org/s?TqZQAW38&data=opaqueBlobNoSpecials');
-    assert.ok(!/\bTqZQAW38=/.test(out1));
+    assert.equal(out1, 'https://lootdest.org/s?kb1mUj43&data=opaqueBlobNoSpecials');
+    assert.ok(!/\bkb1mUj43=/.test(out1));
 
     // LootLabs's `message` is pre-URL-encoded (`%2B`, `%2F`, `%3D`).
     // We MUST NOT double-encode it. The result keeps the original
     // percent-encoding intact (no `%252B`, `%252F`, `%253D`).
     const preEncoded = 'abc%2BDEF%2Fghi%3D';
     const out2 = ll.buildLootLabsStartUrl({
-      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      baseLink: 'https://lootdest.org/s?kb1mUj43',
       encryptedData: preEncoded,
     });
-    assert.equal(out2, `https://lootdest.org/s?TqZQAW38&data=${preEncoded}`);
+    assert.equal(out2, `https://lootdest.org/s?kb1mUj43&data=${preEncoded}`);
     assert.ok(!/%25(2B|2F|3D)/i.test(out2), 'must NOT double-encode the response message');
 
     // Raw base64 chars (`+`, `/`, `=`) are also appended unchanged — they are
     // legal in a URL query value and any further "safety" encoding would
     // corrupt a non-pre-encoded LootLabs response.
     const out3 = ll.buildLootLabsStartUrl({
-      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      baseLink: 'https://lootdest.org/s?kb1mUj43',
       encryptedData: 'A+B/C=',
     });
-    assert.equal(out3, 'https://lootdest.org/s?TqZQAW38&data=A+B/C=');
+    assert.equal(out3, 'https://lootdest.org/s?kb1mUj43&data=A+B/C=');
 
     // Defensive: characters that would actively break the URL are escaped.
     const out4 = ll.buildLootLabsStartUrl({
-      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      baseLink: 'https://lootdest.org/s?kb1mUj43',
       encryptedData: 'a b&c?d#e',
     });
-    assert.equal(out4, 'https://lootdest.org/s?TqZQAW38&data=a%20b%26c%3Fd%23e');
+    assert.equal(out4, 'https://lootdest.org/s?kb1mUj43&data=a%20b%26c%3Fd%23e');
   });
 
   test('buildLootLabsStartUrl handles a mixed pre-encoded message exactly like the live API returns it', () => {
@@ -3869,10 +3869,10 @@ describe('LootLabs provider helper (Redirect API / Anti-Bypass)', () => {
     const liveLikeMessage =
       'ihPHMxenze2KBPS%2F6kNLTgtYd7efUtHFUuU6wRsyO1OoAHP8ip4YW9kwvmzcbvsNBk8FVOHlhHTYaIddz67bwq1pE%2FkhYeFsesYckOSBZnUdwZdIH6ZH9gDGXjbG%2Fl1U05eQFtkH29k99HPMvdakMxsL%2B99N2JztPUMCVUgIfje510QeA641Ju4d';
     const out = ll.buildLootLabsStartUrl({
-      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      baseLink: 'https://lootdest.org/s?kb1mUj43',
       encryptedData: liveLikeMessage,
     });
-    assert.equal(out, `https://lootdest.org/s?TqZQAW38&data=${liveLikeMessage}`);
+    assert.equal(out, `https://lootdest.org/s?kb1mUj43&data=${liveLikeMessage}`);
     assert.ok(!/%252B|%252F|%253D/i.test(out), 'must not double-encode percent escapes');
   });
 
