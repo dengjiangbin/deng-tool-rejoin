@@ -777,7 +777,7 @@ class TestPublicMenuItems(unittest.TestCase):
             self.assertNotIn("Webhook", label)
             self.assertNotIn("Captcha", label)
 
-    def test_edit_config_menu_has_packages_private_url_and_back_only(self) -> None:
+    def test_edit_config_menu_has_packages_private_url_webhook_auto_execute_and_back(self) -> None:
         import agent.commands as cmd
         import agent.termux_ui as tui
         src = inspect.getsource(cmd._run_edit_config_menu)
@@ -785,12 +785,12 @@ class TestPublicMenuItems(unittest.TestCase):
         self.assertIn("print_config_menu", src)
         self.assertIn('menu_number("1", "Packages")', ui_src)
         self.assertIn('menu_number("2", "Private URL")', ui_src)
+        self.assertIn('menu_number("3", "Webhook")', ui_src)
+        self.assertIn('menu_number("4", "Auto Execute")', ui_src)
         self.assertNotIn("Screen Mode", ui_src)
         self.assertNotIn("Portrait", ui_src)
-        self.assertNotIn("Auto Execute", ui_src)
         self.assertNotIn('"4. Key"', ui_src)
         self.assertIn('menu_number("0", "Back")', ui_src)
-        self.assertNotIn('"3. Webhook"', ui_src)
         self.assertNotIn('"4. YesCaptcha"', ui_src)
 
 

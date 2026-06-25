@@ -103,15 +103,11 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         text = self._get_menu_text()
         self.assertIn("Private URL", text)
 
-    def test_menu_does_not_contain_webhook(self):
-        # Webhook is hidden from public Edit Config menu in this version.
+    def test_menu_contains_webhook(self):
+        # Webhook is a public setup option; webhook internals stay in its submenu.
         text = self._get_menu_text()
-        import re
-        # Check numbered menu lines only (not summary section below)
-        menu_block = self._menu_block(text) if hasattr(self, '_menu_block') else text
-        webhook_options = re.findall(r'^\s*[0-9]+\.\s+.*[Ww]ebhook', menu_block, re.MULTILINE)
-        self.assertEqual(webhook_options, [],
-                         "Webhook must not appear as a numbered public menu option")
+        menu_block = self._menu_block(text)
+        self.assertIn("3. Webhook", menu_block)
 
     def test_menu_does_not_contain_yescaptcha(self):
         # YesCaptcha is hidden from public Edit Config menu in this version.
@@ -144,7 +140,7 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         return parts[1] if len(parts) > 1 else plain
 
     def test_menu_has_expected_numbered_items(self):
-        # Webhook, YesCaptcha, Screen Mode, and Key stay hidden.
+        # YesCaptcha, Screen Mode, and Key stay hidden.
         # "Back" navigation items (e.g. "5. Back") are excluded from this check.
         text = self._get_menu_text()
         block = self._menu_block(text)
@@ -158,10 +154,9 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         ]
         self.assertEqual(
             numbered,
-            ["1. Packages", "2. Private URL"],
+            ["1. Packages", "2. Private URL", "3. Webhook", "4. Auto Execute"],
             f"Unexpected Edit Config items: {numbered}",
         )
-        self.assertNotIn("Auto Execute", block)
         self.assertNotIn("Screen Mode", block)
         self.assertNotIn("Portrait", block)
 

@@ -161,16 +161,17 @@ class TestTopMenuPlacement(unittest.TestCase):
         self.assertNotIn("Auto Execute", labels)
         self.assertNotIn("Package Key", labels)
 
-    def test_setup_config_does_not_have_auto_execute(self):
+    def test_setup_config_has_auto_execute(self):
         src = inspect.getsource(commands._run_edit_config_menu)
         ui_src = inspect.getsource(termux_ui.print_config_menu)
         self.assertIn("print_config_menu", src)
-        self.assertNotIn("Auto Execute", ui_src)
+        self.assertIn("Auto Execute", ui_src)
+        self.assertIn('menu_number("4", "Auto Execute")', ui_src)
         self.assertNotIn('"4. Key"', ui_src)
 
-    def test_first_time_setup_does_not_mention_auto_execute(self):
+    def test_first_time_setup_mentions_auto_execute(self):
         src = inspect.getsource(commands._run_first_time_setup_wizard)
-        self.assertNotIn("Auto Execute", src)
+        self.assertIn("Auto Execute", src)
         self.assertNotIn("Add Script", src)
 
     def test_handlers_include_package_key_not_in_top_menu(self):

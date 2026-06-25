@@ -835,10 +835,9 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         if is_valid_package_name(str(k))
     }
 
-    # Auto Execute is temporarily disabled.  Old configs may still contain
-    # saved script fields; validate/load must ignore them and never execute or
-    # expose them in public UI.
-    for disabled_key in (
+    # Auto Execute scripts are filesystem-managed only.  Drop legacy hidden
+    # config fields so stale scripts are never executed, displayed, or reused.
+    for legacy_auto_execute_key in (
         "auto_execute_scripts",
         "auto_execute",
         "autoExecute",
@@ -851,7 +850,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         "run_script",
         "lua_script",
     ):
-        merged.pop(disabled_key, None)
+        merged.pop(legacy_auto_execute_key, None)
 
     # ── Package keys (per-package internal license, NOT DENG Tool license) ──
     raw_pkg_keys = merged.get("package_keys")

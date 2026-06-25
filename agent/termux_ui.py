@@ -192,6 +192,7 @@ def print_config_menu() -> None:
     _emit(menu_number("1", "Packages"))
     _emit(menu_number("2", "Private URL"))
     _emit(menu_number("3", "Webhook"))
+    _emit(menu_number("4", "Auto Execute"))
     _emit(menu_number("0", "Back"))
     _emit(separator("-"))
 

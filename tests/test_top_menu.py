@@ -64,8 +64,6 @@ class TestTopMenuOutput(unittest.TestCase):
         self.assertIn("Setup / Edit Config", text)
         self.assertIn("Start", text)
         self.assertIn("Exit", text)
-        self.assertNotIn("4. Auto Execute", text)
-        self.assertNotIn("Auto Execute", text)
         self.assertNotIn("4. Key", text)
         self.assertNotIn("Package Key", text)
 
@@ -138,23 +136,23 @@ class TestAutoExecutePlacement(unittest.TestCase):
         self.assertNotIn("Auto Execute", labels)
         self.assertNotIn("auto-execute", commands_map)
 
-    def test_setup_config_does_not_contain_auto_execute(self):
+    def test_setup_config_contains_auto_execute(self):
         out = io.StringIO()
         with redirect_stdout(out):
             termux_ui.print_config_menu()
         text = out.getvalue()
-        self.assertNotIn("Auto Execute", text)
+        self.assertIn("Auto Execute", text)
         self.assertNotIn("4. Key", text)
 
-    def test_first_time_setup_does_not_contain_auto_execute(self):
+    def test_first_time_setup_contains_auto_execute(self):
         src = inspect.getsource(commands._run_first_time_setup_wizard)
-        self.assertNotIn("Auto Execute", src)
-        self.assertNotIn("Add Script", src)
+        self.assertIn("4. Auto Execute", src)
+        self.assertIn("_config_menu_auto_execute(draft)", src)
 
-    def test_setup_config_option_4_is_invalid(self):
+    def test_setup_config_option_4_opens_auto_execute(self):
         src = inspect.getsource(commands._run_edit_config_menu)
-        self.assertNotIn("_config_menu_auto_execute", src)
-        self.assertNotIn('choice == "4"', src)
+        self.assertIn("_config_menu_auto_execute", src)
+        self.assertIn('choice == "4"', src)
 
 
 class TestPackageKeyNotInTopMenu(unittest.TestCase):

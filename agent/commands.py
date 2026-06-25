@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import account_detect, android, db, package_username, root_access, safe_io, termux_ui
+from . import account_detect, android, auto_execute, db, package_username, root_access, safe_io, termux_ui
 from .banner import banner_text, print_banner
 from .config import (
     ConfigError,
@@ -3711,6 +3711,162 @@ def _test_webhook_now(draft: dict[str, Any]) -> None:
         print(f"Webhook test failed: {type(exc).__name__}")
 
 
+def _auto_execute_package_names(draft: dict[str, Any]) -> list[str]:
+    if not draft.get("roblox_packages"):
+        return []
+    try:
+        return [entry["package"] for entry in enabled_package_entries(draft)]
+    except ConfigError:
+        return []
+
+
+def _auto_execute_choose_executor() -> str | None:
+    print()
+    print("Executor")
+    choices = auto_execute.executor_choices()
+    for idx, spec in enumerate(choices, start=1):
+        print(f"{idx}. {spec.label}")
+    print("0. Back")
+    choice = safe_io.safe_prompt("Choose [0]: ", default="0")
+    if choice is None:
+        return None
+    choice = choice.strip() or "0"
+    if choice == "0":
+        return None
+    try:
+        idx = int(choice)
+    except ValueError:
+        print("Please choose a listed executor.")
+        return None
+    if 1 <= idx <= len(choices):
+        return choices[idx - 1].key
+    print("Please choose a listed executor.")
+    return None
+
+
+def _print_auto_execute_results(action: str, results: list[dict[str, Any]]) -> None:
+    print()
+    print(action)
+    for row in results:
+        package = row.get("package") or "unknown"
+        path = row.get("path") or ""
+        filename = row.get("filename") or ""
+        if row.get("success"):
+            if "deleted_count" in row:
+                print(f"  OK {package}: deleted {row.get('deleted_count', 0)} DENG-managed file(s) at {path}")
+            elif row.get("deleted"):
+                print(f"  OK {package}: removed {filename} at {path}")
+            elif filename:
+                print(f"  OK {package}: wrote {filename} ({row.get('byte_count', 0)} bytes) at {path}")
+            else:
+                print(f"  OK {package}: {path}")
+        else:
+            print(f"  FAIL {package}: {path} — {row.get('error') or 'unknown error'}")
+
+
+def _config_auto_execute_add(draft: dict[str, Any]) -> None:
+    packages = _auto_execute_package_names(draft)
+    if not packages:
+        print("No Roblox packages configured. Configure packages first.")
+        return
+    executor = _auto_execute_choose_executor()
+    if not executor:
+        return
+    script_no = 1
+    while True:
+        answer = safe_io.safe_prompt(f"Add script #{script_no}? Y/N: ", default="N")
+        if answer is None:
+            return
+        if answer.strip().lower() not in {"y", "yes"}:
+            return
+        script = safe_io.safe_prompt("Paste/type script content: ", allow_blank=True)
+        if script is None:
+            return
+        filename = auto_execute.next_managed_filename(packages, executor=executor)
+        results = auto_execute.write_script_to_packages(packages, script, executor=executor, filename=filename)
+        _print_auto_execute_results("Auto Execute script write result:", results)
+        script_no += 1
+
+
+def _config_auto_execute_remove(draft: dict[str, Any]) -> None:
+    packages = _auto_execute_package_names(draft)
+    if not packages:
+        print("No Roblox packages configured. Configure packages first.")
+        return
+    executor = _auto_execute_choose_executor()
+    if not executor:
+        return
+    filenames = auto_execute.list_managed_filenames(packages, executor=executor)
+    if not filenames:
+        print("No DENG Auto Execute scripts found.")
+        return
+    print()
+    print("DENG Auto Execute Scripts")
+    for idx, filename in enumerate(filenames, start=1):
+        print(f"{idx}. {filename}")
+    print("0. Back")
+    choice = safe_io.safe_prompt("Choose [0]: ", default="0")
+    if choice is None:
+        return
+    try:
+        idx = int((choice or "0").strip() or "0")
+    except ValueError:
+        print("Please choose a listed script.")
+        return
+    if idx == 0:
+        return
+    if not 1 <= idx <= len(filenames):
+        print("Please choose a listed script.")
+        return
+    results = auto_execute.remove_script_from_packages(packages, filenames[idx - 1], executor=executor)
+    _print_auto_execute_results("Auto Execute remove result:", results)
+
+
+def _config_auto_execute_remove_all(draft: dict[str, Any]) -> None:
+    packages = _auto_execute_package_names(draft)
+    if not packages:
+        print("No Roblox packages configured. Configure packages first.")
+        return
+    executor = _auto_execute_choose_executor()
+    if not executor:
+        return
+    if not _prompt_yes_no("Remove all DENG Auto Execute scripts from all configured packages?", False):
+        return
+    results = auto_execute.remove_all_scripts_from_packages(packages, executor=executor)
+    _print_auto_execute_results("Auto Execute remove all result:", results)
+
+
+def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
+    """Auto Execute submenu: file management only; never executes scripts."""
+    if not _is_interactive():
+        return draft
+    while True:
+        print()
+        print(termux_ui.separator("-"))
+        print("Auto Execute")
+        print(termux_ui.separator("-"))
+        print("1. Add Script")
+        print("2. Remove Script")
+        print("3. Remove All Scripts")
+        print("0. Back")
+        print(termux_ui.separator("-"))
+        choice = safe_io.safe_prompt("Choose [0]: ", default="0")
+        if choice is None:
+            break
+        choice = choice.strip() or "0"
+        if choice == "0":
+            break
+        if choice == "1":
+            _config_auto_execute_add(draft)
+        elif choice == "2":
+            _config_auto_execute_remove(draft)
+        elif choice == "3":
+            _config_auto_execute_remove_all(draft)
+        else:
+            print("Please choose 1-3 or 0.")
+    return draft
+
+
 def _test_webhook(draft: dict[str, Any]) -> None:
     """Send a test message to the configured webhook. URL is masked in all output."""
     from . import safe_http as _safe_http  # noqa: PLC0415
@@ -3836,6 +3992,7 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print("  1. Roblox package / clone app (pick from detection, or manual fallback)")
     print("  2. Private URL")
     print("  3. Webhook (optional)")
+    print("  4. Auto Execute (optional)")
     print()
     print("Package detection:")
     print("  The tool scans installed Roblox apps against safe hints. Pick from the table.")
@@ -3857,6 +4014,8 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     _setup_launch_link(draft, allow_back=False)
     print("\nWebhook (optional)")
     _setup_webhook(draft)
+    print("\nAuto Execute (optional)")
+    _config_menu_auto_execute(draft)
     draft["first_setup_completed"] = True
     try:
         saved = save_config(draft)
@@ -3900,6 +4059,8 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
                 draft = _config_menu_launch_link(draft)
             elif choice == "3":
                 draft = _config_menu_webhook(draft)
+            elif choice == "4":
+                draft = _config_menu_auto_execute(draft)
             else:
                 termux_ui.print_invalid_option()
                 safe_io.press_enter()
@@ -4563,25 +4724,24 @@ def _cap_plain_cell(raw: str, max_w: int) -> str:
 
 
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
-    """Build the live start/runtime table: #, Package, Username, State, Runtime, Usage.
+    """Build the live Start table: #, Package, Username, State.
 
     Rows may be 4-tuples (idx, pkg, username, state) for backward compatibility,
     5-tuples (idx, pkg, username, state, runtime), or
     6-tuples (idx, pkg, username, state, runtime, usage).
-    Missing trailing columns are shown as empty cells.
+    Runtime/usage telemetry may still be supplied by callers but is not shown
+    in the user-visible Start table.
 
     Every line is hard-clamped via ``termux_ui.fit_line()`` for narrow screens.
     Static package management lists use separate simplified renderers.
     """
-    headers = ("#", "Package", "Username", "State", "Runtime", "Usage")
+    headers = ("#", "Package", "Username", "State")
     str_rows = [
         (
             str(r[0]),
             _short_package_display(r[1]),
             str(r[2]) if len(r) > 2 else "",
             str(r[3]) if len(r) > 3 else "",
-            str(r[4]) if len(r) > 4 else "",
-            str(r[5]) if len(r) > 5 else "",
         )
         for r in rows
     ]
@@ -4589,19 +4749,19 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     term_cols = safe_io.terminal_columns()
     border_budget = 2 + (len(headers) * 3)
     data_budget = max(24, term_cols - border_budget)
-    col_caps = [4, 12, 14, 22, 8, 8]
+    col_caps = [4, 12, 14, 22]
     capped_total = sum(col_caps)
     if capped_total > data_budget:
         scale = data_budget / capped_total
         col_caps = [max(3, int(c * scale)) for c in col_caps]
     str_rows = [
-        tuple(_cap_plain_cell(str_rows[i][j], col_caps[j]) for j in range(6))
+        tuple(_cap_plain_cell(str_rows[i][j], col_caps[j]) for j in range(len(headers)))
         for i in range(len(str_rows))
     ]
 
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
-        for i in range(6)
+        for i in range(len(headers))
     ]
 
     def _bold(text: str) -> str:
@@ -4615,8 +4775,6 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
             _bold(r[1]),
             _bold(r[2]),
             _colorize_status(r[3], use_color=use_color),
-            _bold(r[4]),
-            _bold(r[5]),
         )
         for r in str_rows
     ]
