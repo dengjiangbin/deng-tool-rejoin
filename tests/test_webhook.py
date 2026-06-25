@@ -1,7 +1,14 @@
+import json
 import unittest
 import unittest.mock
 
-from agent.webhook import mask_webhook_url, validate_webhook_interval, validate_webhook_url, WebhookError, build_status_embed_payload
+from agent.webhook import (
+    WebhookError,
+    build_status_embed_payload,
+    mask_webhook_url,
+    validate_webhook_interval,
+    validate_webhook_url,
+)
 
 
 class WebhookTests(unittest.TestCase):
@@ -25,74 +32,80 @@ class WebhookTests(unittest.TestCase):
 
 
 class WebhookStatusEmbedTests(unittest.TestCase):
-    """Tests for the full 7-category status overview in build_status_embed_payload."""
+    """Tests for the simplified Discord status embed."""
 
     def _base_cfg(self):
         return {
-            "device_name": "test-device",
+            "device_name": "localhost",
             "agent_version": "1.0.0",
             "roblox_packages": [
                 {"package": "com.roblox.client", "account_username": "Main"},
             ],
-            "license_key": "",
-            "webhook_tags": [],
+            "license_key": "DENG-E1320000000096A7",
+            "webhook_tags": ["old-noise"],
+            "_mem_info": {"free_mb": "4617 MB", "percent_free": "60"},
+            "_cpu_pct": "304%",
+            "_temp_c": "45.7",
         }
 
-    def test_status_overview_uses_supervisor_snapshot(self):
-        """Webhook embed status overview uses supervisor_snapshot for full counts."""
+    def test_status_overview_uses_only_online_offline_total(self):
         snapshot = [
             {"package": "com.roblox.client", "username": "Main", "status": "Online"},
-            {"package": "com.moons.alt1",    "username": "Alt",  "status": "Offline"},
-            {"package": "com.moons.alt2",    "username": "Alt2", "status": "Reviving"},
+            {"package": "com.moons.alt1", "username": "Alt", "status": "Offline"},
+            {"package": "com.moons.alt2", "username": "Alt2", "status": "Reviving"},
         ]
         payload = build_status_embed_payload(self._base_cfg(), supervisor_snapshot=snapshot)
         embed = payload["embeds"][0]
-        overview_field = next(f for f in embed["fields"] if "Status Overview" in f["name"])
-        overview = overview_field["value"]
+        overview = next(f["value"] for f in embed["fields"] if f["name"] == "Status Overview")
         self.assertIn("Online: 1", overview)
-        self.assertIn("Offline: 1", overview)
-        self.assertIn("Warning: 1", overview)
+        self.assertIn("Offline: 2", overview)
+        self.assertIn("Total: 3", overview)
+        for label in ("Ready:", "Preparing:", "Warning:", "Failed:"):
+            self.assertNotIn(label, overview)
 
-    def test_status_overview_has_all_seven_categories(self):
-        """Status overview always includes all 7 category lines."""
+    def test_embed_contract_removes_old_noise(self):
         payload = build_status_embed_payload(self._base_cfg())
         embed = payload["embeds"][0]
-        overview_field = next(f for f in embed["fields"] if "Status Overview" in f["name"])
-        overview = overview_field["value"]
-        for label in ("Online:", "Ready:", "Preparing:", "Warning:", "Offline:", "Failed:", "Total:"):
-            self.assertIn(label, overview, msg=f"Missing '{label}' in overview")
+        self.assertEqual(embed["title"], "📊 DENG Tool: Rejoin Status Monitor")
+        self.assertEqual(embed["url"], "https://aio.deng.my.id")
+        self.assertEqual(embed["footer"]["text"], "DENG Tool: Rejoin")
+        self.assertNotIn("v1.0.0", embed["footer"]["text"])
+        self.assertNotIn("Event: monitor", json.dumps(embed))
+        self.assertNotIn("localhost", json.dumps(embed))
+        self.assertNotIn("Type:", json.dumps(embed))
+        self.assertNotIn("Tags", json.dumps(embed))
+        overview = next(f["value"] for f in embed["fields"] if f["name"] == "Status Overview")
+        for label in ("Online:", "Offline:", "Total:"):
+            self.assertIn(label, overview)
+        for label in ("Ready:", "Preparing:", "Warning:", "Failed:"):
+            self.assertNotIn(label, overview)
 
     def test_license_key_not_exposed_in_embed(self):
-        """The full license key is never included in the webhook embed."""
-        cfg = self._base_cfg()
-        cfg["license_key"] = "DENG-38AB1234CD56EF78"
-        payload = build_status_embed_payload(cfg)
-        import json
+        payload = build_status_embed_payload(self._base_cfg())
         serialized = json.dumps(payload)
-        self.assertNotIn("38AB1234CD56EF78", serialized)
+        self.assertNotIn("E1320000000096A7", serialized)
+        self.assertIn("DENG-E132", serialized)
 
     def test_build_does_not_raise_without_app_stats(self):
-        """build_status_embed_payload does not raise when app_stats is omitted."""
         try:
             build_status_embed_payload(self._base_cfg())
         except Exception as exc:
             self.fail(f"build_status_embed_payload raised unexpectedly: {exc}")
 
-    def test_application_details_reflect_account_username(self):
+    def test_application_details_spoiler_wrap_account_username(self):
         cfg = self._base_cfg()
         cfg["roblox_packages"] = [{"package": "com.roblox.client", "account_username": "TraderJoe"}]
         payload = build_status_embed_payload(cfg)
-        fields = payload["embeds"][0]["fields"]
-        detail = next(f["value"] for f in fields if f["name"] == "Application Details")
-        self.assertIn("TraderJoe", detail)
+        detail = next(f["value"] for f in payload["embeds"][0]["fields"] if f["name"] == "Application Details")
+        self.assertIn("||TraderJoe||", detail)
 
-    def test_device_field_includes_phone_type_when_available(self):
-        cfg = self._base_cfg()
-        with unittest.mock.patch("agent.license.get_public_device_model", return_value="SM-TEST"):
-            payload = build_status_embed_payload(cfg)
+    def test_device_field_uses_phone_model_without_localhost_or_type(self):
+        with unittest.mock.patch("agent.license.get_public_device_model", return_value="Pixel 7 Pro"):
+            payload = build_status_embed_payload(self._base_cfg())
         dev = next(f["value"] for f in payload["embeds"][0]["fields"] if f["name"] == "📱 Device")
-        self.assertIn("SM-TEST", dev)
-        self.assertIn("test-device", dev)
+        self.assertEqual("Pixel 7 Pro", dev)
+        self.assertNotIn("localhost", dev)
+        self.assertNotIn("Type:", dev)
 
 
 if __name__ == "__main__":

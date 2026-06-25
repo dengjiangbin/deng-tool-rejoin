@@ -7,6 +7,7 @@ they may be displayed.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import time
 import threading
@@ -35,6 +36,9 @@ EMBED_COLOR_ORANGE = 0xE67E22  # starting / preparing
 EMBED_COLOR_GREY   = 0x36393F  # neutral / unknown
 WEBHOOK_USERNAME = "DENG Tool Rejoin"
 WEBHOOK_AVATAR_URL = "https://aio.deng.my.id/public/img/deng-logo.png"
+EMBED_TITLE = "📊 DENG Tool: Rejoin Status Monitor"
+EMBED_URL = "https://aio.deng.my.id"
+EMBED_FOOTER_TEXT = "DENG Tool: Rejoin"
 
 
 def record_webhook_trace(**fields: Any) -> None:
@@ -78,6 +82,62 @@ def mask_webhook_url(url: str | None) -> str:
         visible_id = webhook_id[:4] + "..." if len(webhook_id) > 4 else webhook_id
         return urllib.parse.urlunparse((parsed.scheme or "https", host, f"/api/webhooks/{visible_id}/{MASK}", "", "", ""))
     return f"{parsed.scheme or 'https'}://{host}/api/webhooks/{MASK}"
+
+
+def _webhook_url_fingerprint(url: str | None) -> str:
+    cleaned = str(url or "").strip()
+    if not cleaned:
+        return ""
+    return hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:16]
+
+
+def _redact_message_id(message_id: Any) -> str:
+    text = str(message_id or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 8:
+        return "***"
+    return f"{text[:4]}...{text[-4:]}"
+
+
+def _sync_edit_state_for_url(config_data: dict[str, Any], url: str) -> None:
+    fingerprint = _webhook_url_fingerprint(url)
+    old = str(config_data.get("webhook_url_fingerprint") or "")
+    if old and old != fingerprint:
+        config_data["webhook_last_message_id"] = ""
+        config_data["webhook_message_id"] = ""
+    config_data["webhook_url_fingerprint"] = fingerprint
+
+
+def _persist_webhook_edit_state(config_data: dict[str, Any], *, url: str, message_id: str | None = None) -> bool:
+    """Persist edit-mode message state to the installed config file."""
+    _sync_edit_state_for_url(config_data, url)
+    if message_id:
+        config_data["webhook_last_message_id"] = str(message_id)
+        config_data["webhook_message_id"] = str(message_id)
+    record_webhook_trace(source="send_periodic_status", state_write_path=str(CONFIG_PATH))
+    try:
+        from .config import save_config
+
+        saved = save_config(config_data, CONFIG_PATH)
+        config_data.update(saved)
+        ok = True
+    except Exception as exc:  # noqa: BLE001 - tracing must explain persistence failures
+        ok = False
+        record_webhook_trace(
+            source="send_periodic_status",
+            state_write_ok=False,
+            last_exception_type=type(exc).__name__,
+            last_exception_message_redacted=_redact_exception(exc),
+        )
+    else:
+        record_webhook_trace(
+            source="send_periodic_status",
+            state_write_ok=True,
+            state_message_id_present=bool(config_data.get("webhook_last_message_id")),
+            state_message_id_redacted=_redact_message_id(config_data.get("webhook_last_message_id")),
+        )
+    return ok
 
 
 def validate_webhook_interval(minutes: int) -> int:
@@ -196,6 +256,23 @@ def _format_system_ram(mem_info: Any) -> str | None:
 
 def _redact_exception(exc: BaseException) -> str:
     return str(exc).replace("\n", " ")[:200]
+
+
+def _spoiler(value: Any) -> str:
+    text = str(value or "").strip() or "unknown"
+    if text.startswith("||") and text.endswith("||"):
+        return text
+    return f"||{text.replace('||', '')}||"
+
+
+def _public_device_label(config_data: dict[str, Any], phone_type: str | None) -> str:
+    model = str(phone_type or "").strip()
+    if model and model.lower() != "unknown":
+        return model
+    fallback = str(config_data.get("device_model") or config_data.get("android_model") or config_data.get("device_name") or "").strip()
+    if fallback.lower() in {"localhost", "unknown", ""}:
+        return "Unknown device"
+    return fallback
 
 
 # Status category mapping (supervisor STATUS_* → display bucket)
@@ -451,6 +528,122 @@ def build_status_message(config_data: dict[str, Any], *, event: str = "status", 
     return "\n".join(lines)
 
 
+def build_status_embed_payload(
+    config_data: dict[str, Any],
+    *,
+    event: str = "status",
+    error: str | None = None,
+    app_stats: dict[str, Any] | None = None,
+    supervisor_snapshot: list[dict] | None = None,
+) -> dict[str, Any]:
+    """Build the simplified mobile Discord status embed."""
+    from .config import mask_license_key
+    from .license import get_public_device_model
+
+    raw_packages = config_data.get("roblox_packages") or [config_data.get("roblox_package", "unknown")]
+    entries: list[dict[str, str]] = []
+    for item in raw_packages:
+        if isinstance(item, dict):
+            entries.append({
+                "package": str(item.get("package") or "unknown"),
+                "username": str(item.get("account_username") or item.get("label") or "").strip(),
+            })
+        else:
+            entries.append({"package": str(item), "username": ""})
+
+    app_stats = app_stats or {}
+    snapshot = supervisor_snapshot or []
+    if snapshot:
+        total = len(snapshot)
+        online_count = sum(1 for row in snapshot if str(row.get("status") or "") == "Online")
+    else:
+        total = len(entries)
+        online_count = sum(1 for row in entries if app_stats.get(row["package"], {}).get("online"))
+    offline_count = max(0, total - online_count)
+
+    if error:
+        color = EMBED_COLOR_YELLOW
+    elif online_count > 0:
+        color = EMBED_COLOR_GREEN
+    else:
+        color = EMBED_COLOR_RED
+
+    mem_info = config_data.get("_mem_info") or {}
+    sys_lines: list[str] = []
+    if isinstance(mem_info, dict):
+        free_mb = _memory_mb_value(mem_info.get("free_mb") or mem_info.get("available_mb"))
+        pct = _coerce_float(mem_info.get("percent_free"))
+        if free_mb is not None:
+            pct_text = f" ({pct:.0f}%)" if pct is not None else ""
+            sys_lines.append(f"💾 RAM: {int(round(max(0.0, free_mb)))}MB free{pct_text}")
+    cpu_pct = _coerce_float(config_data.get("_cpu_pct"))
+    if cpu_pct is not None:
+        sys_lines.append(f"⚙️ CPU: {cpu_pct:.0f}%")
+    temp_c = _coerce_float(config_data.get("_temp_c"))
+    if temp_c is not None:
+        sys_lines.append(f"🌡️ Temp: {temp_c:g}°C")
+    sys_value = "\n".join(sys_lines) or "Telemetry unavailable"
+
+    overview = "\n".join([
+        f"🟢 Online: {online_count}",
+        f"🔴 Offline: {offline_count}",
+        f"🤖 Total: {total}",
+    ])
+
+    snapshot_by_package = {str(row.get("package") or ""): row for row in snapshot}
+    detail_lines: list[str] = []
+    for entry in entries:
+        pkg = entry["package"]
+        stats = app_stats.get(pkg, {})
+        snap = snapshot_by_package.get(pkg, {})
+        online = bool(stats.get("online")) or str(snap.get("status") or "") == "Online"
+        indicator = "🟢" if online else "🔴"
+        detail_lines.append(f"{indicator} {_spoiler(snap.get('username') or entry['username'] or pkg)}")
+        sub: list[str] = []
+        if snap.get("online_since") and online:
+            try:
+                sub.append("⏱️ " + format_runtime_compact(time.time() - float(snap["online_since"])))
+            except (TypeError, ValueError):
+                pass
+        uptime = _format_uptime(stats.get("uptime_start"))
+        if uptime:
+            sub.append(f"⏱️ {uptime}")
+        memory = _format_memory_mb(stats.get("memory_mb") if "memory_mb" in stats else snap.get("ram_mb"))
+        if memory:
+            sub.append(f"💾 {memory}")
+        cpu = _format_cpu_pct(stats.get("cpu_pct"))
+        if cpu:
+            sub.append(f"⚡ {cpu}")
+        if sub:
+            detail_lines.append("└ " + " | ".join(sub))
+    detail_value = "\n".join(detail_lines) or "No accounts configured"
+
+    fields: list[dict[str, Any]] = [
+        {"name": "📱 Device", "value": _public_device_label(config_data, get_public_device_model()), "inline": True},
+        {"name": "🔑 License", "value": mask_license_key(config_data.get("license_key", "")), "inline": True},
+        {"name": "🖥️ System Stats", "value": sys_value, "inline": False},
+        {"name": "Status Overview", "value": overview, "inline": False},
+        {"name": "Application Details", "value": detail_value, "inline": False},
+    ]
+    if error:
+        fields.append({"name": "⚠️ Last Error", "value": error[:512], "inline": False})
+
+    return {
+        "username": WEBHOOK_USERNAME,
+        "avatar_url": WEBHOOK_AVATAR_URL,
+        "allowed_mentions": {"parse": []},
+        "embeds": [{
+            "title": EMBED_TITLE,
+            "url": EMBED_URL,
+            "description": "",
+            "color": color,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "fields": fields,
+            "footer": {"text": EMBED_FOOTER_TEXT},
+        }],
+    }
+
+
 def send_webhook_update(
     config_data: dict[str, Any],
     *,
@@ -599,6 +792,30 @@ def _minimal_status_payload(config_data: dict[str, Any], *, event: str, error: s
     }
 
 
+def _minimal_status_payload(config_data: dict[str, Any], *, event: str, error: str | None = None) -> dict[str, Any]:
+    """Fallback Discord payload used when optional telemetry formatting fails."""
+    fields = [
+        {"name": "📱 Device", "value": str(config_data.get("device_name") or "Unknown device"), "inline": True},
+        {"name": "Telemetry", "value": "telemetry_unavailable", "inline": False},
+    ]
+    if error:
+        fields.append({"name": "⚠️ Payload warning", "value": error[:512], "inline": False})
+    return {
+        "username": WEBHOOK_USERNAME,
+        "avatar_url": WEBHOOK_AVATAR_URL,
+        "allowed_mentions": {"parse": []},
+        "embeds": [{
+            "title": EMBED_TITLE,
+            "url": EMBED_URL,
+            "description": "",
+            "color": EMBED_COLOR_YELLOW,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "fields": fields,
+            "footer": {"text": EMBED_FOOTER_TEXT},
+        }],
+    }
+
+
 def send_periodic_status(
     config_data: dict[str, Any], *, supervisor_snapshot: list[dict[str, Any]], app_stats: dict[str, Any]
 ) -> tuple[bool, str]:
@@ -608,6 +825,8 @@ def send_periodic_status(
         send_periodic_status_entered=True,
         webhook_mode=str(config_data.get("webhook_mode") or "none"),
         config_path_read=str(CONFIG_PATH),
+        config_read_path=str(CONFIG_PATH),
+        state_read_path=str(CONFIG_PATH),
         edit_message_id_present=bool(config_data.get("webhook_last_message_id")),
     )
     mode = str(config_data.get("webhook_mode") or "none")
@@ -617,8 +836,16 @@ def send_periodic_status(
     try:
         url = validate_webhook_url(config_data.get("webhook_url"))
     except Exception as exc:
-        record_webhook_trace(source="send_periodic_status", send_attempted=False, send_result="failure", exception_type=type(exc).__name__, exception_message_redacted=_redact_exception(exc))
+        record_webhook_trace(source="send_periodic_status", send_attempted=False, send_result="failure", last_exception_type=type(exc).__name__, last_exception_message_redacted=_redact_exception(exc))
         return False, f"webhook config error: {type(exc).__name__}"
+    _sync_edit_state_for_url(config_data, url)
+    record_webhook_trace(
+        source="send_periodic_status",
+        edit_mode_selected=(mode == "edit"),
+        webhook_url_present_redacted=bool(url),
+        state_message_id_present=bool(config_data.get("webhook_last_message_id")),
+        state_message_id_redacted=_redact_message_id(config_data.get("webhook_last_message_id")),
+    )
     record_webhook_trace(source="send_periodic_status", payload_build_started=True)
     try:
         payload = build_status_embed_payload(config_data, event="monitor", app_stats=app_stats, supervisor_snapshot=supervisor_snapshot)
@@ -628,25 +855,47 @@ def send_periodic_status(
         record_webhook_trace(
             source="send_periodic_status",
             payload_build_result="failure",
-            exception_type=type(exc).__name__,
-            exception_message_redacted=_redact_exception(exc),
+            last_exception_type=type(exc).__name__,
+            last_exception_message_redacted=_redact_exception(exc),
         )
     if mode == "edit" and config_data.get("webhook_last_message_id"):
         edit_url = f"{url.rstrip('/')}/messages/{config_data['webhook_last_message_id']}?wait=true"
-        record_webhook_trace(source="send_periodic_status", webhook_message_id_present=True, webhook_send_attempted=True, send_attempted=True, http_method="PATCH", message_id_saved_or_used=True)
+        used_id = str(config_data.get("webhook_last_message_id") or "")
+        record_webhook_trace(
+            source="send_periodic_status",
+            edit_patch_started=True,
+            edit_patch_message_id_used=_redact_message_id(used_id),
+            webhook_message_id_present=True,
+            webhook_send_attempted=True,
+            send_attempted=True,
+            http_method="PATCH",
+            last_http_method="PATCH",
+            last_http_url_kind="PATCH_EDIT",
+            message_id_saved_or_used=True,
+        )
         ok, message, _message_id = _discord_json_request(edit_url, payload, "PATCH")
-        record_webhook_trace(source="send_periodic_status", http_method="PATCH", http_status=_http_status_from_message(message) or message, discord_response_body_redacted=message[:200], edit_rebootstrap_required=not ok, send_result="success" if ok else "failure")
+        patch_status = _http_status_from_message(message)
+        record_webhook_trace(source="send_periodic_status", edit_patch_http_status=patch_status or message, http_method="PATCH", http_status=patch_status or message, last_http_method="PATCH", last_http_status=patch_status or message, discord_response_body_redacted=message[:200], edit_rebootstrap_required=(not ok and patch_status == 404), send_result="success" if ok else "failure")
         if ok:
             config_data["webhook_last_sent_at"] = time.time()
+            if not _persist_webhook_edit_state(config_data, url=url):
+                return False, "webhook state save failed"
             return True, "edited monitor message"
+        if patch_status != 404:
+            return False, message
+        record_webhook_trace(source="send_periodic_status", edit_rebootstrap_started=True, edit_rebootstrap_reason="discord_404")
     post_url = url + ("&" if "?" in url else "?") + "wait=true"
-    record_webhook_trace(source="send_periodic_status", webhook_message_id_present=False, edit_bootstrap_required=(mode == "edit"), webhook_wait=True, webhook_send_attempted=True, send_attempted=True, http_method="POST", message_id_saved_or_used=False)
+    record_webhook_trace(source="send_periodic_status", edit_bootstrap_post_started=(mode == "edit"), webhook_message_id_present=False, edit_bootstrap_required=(mode == "edit"), webhook_wait=True, webhook_send_attempted=True, send_attempted=True, http_method="POST", last_http_method="POST", last_http_url_kind="POST_BOOTSTRAP" if mode == "edit" else "POST_NEW", message_id_saved_or_used=False)
     ok, message, message_id = _discord_json_request(post_url, payload, "POST")
-    record_webhook_trace(source="send_periodic_status", http_method="POST", http_status=_http_status_from_message(message) or message, discord_response_body_redacted=message[:200], returned_message_id_present=bool(message_id), saved_message_id=bool(mode == "edit" and message_id), message_id_saved_or_used=bool(mode == "edit" and message_id), send_result="success" if ok else "failure")
+    post_status = _http_status_from_message(message)
+    record_webhook_trace(source="send_periodic_status", edit_bootstrap_post_http_status=post_status or message if mode == "edit" else "", http_method="POST", http_status=post_status or message, last_http_method="POST", last_http_status=post_status or message, discord_response_body_redacted=message[:200], returned_message_id_present=bool(message_id), last_discord_message_id_redacted=_redact_message_id(message_id), saved_message_id=bool(mode == "edit" and message_id), message_id_saved_or_used=bool(mode == "edit" and message_id), send_result="success" if ok else "failure")
     if ok:
         config_data["webhook_last_sent_at"] = time.time()
         if mode == "edit" and message_id:
-            config_data["webhook_last_message_id"] = message_id
+            persisted = _persist_webhook_edit_state(config_data, url=url, message_id=message_id)
+            record_webhook_trace(source="send_periodic_status", edit_bootstrap_message_id_saved=persisted)
+            if not persisted:
+                return False, "webhook state save failed"
     return ok, message
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 from datetime import datetime, timezone
@@ -122,6 +123,7 @@ def default_config() -> dict[str, Any]:
         "webhook_url": "",
         "webhook_mode": "none",
         "webhook_message_id": "",
+        "webhook_url_fingerprint": "",
         "webhook_interval_minutes": 5,
         "webhook_interval_seconds": 300,
         "webhook_last_sent_at": 0,
@@ -709,6 +711,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc
     merged["webhook_message_id"] = str(merged.get("webhook_message_id") or "").strip()
+    merged["webhook_url_fingerprint"] = str(merged.get("webhook_url_fingerprint") or "").strip()
     merged["webhook_last_message_id"] = str(merged.get("webhook_last_message_id") or "").strip()
     merged["webhook_last_sent_at"] = merged.get("webhook_last_sent_at") or 0
     raw_minutes = merged.get("webhook_interval_minutes")
@@ -942,7 +945,10 @@ def save_config(config_data: dict[str, Any], config_path: Path = CONFIG_PATH) ->
     ensure_app_dirs()
     validated = validate_config(config_data)
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(json.dumps(validated, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    raw = json.dumps(validated, indent=2, sort_keys=True) + "\n"
+    tmp_path = config_path.with_name(f".{config_path.name}.tmp-{os.getpid()}")
+    tmp_path.write_text(raw, encoding="utf-8")
+    tmp_path.replace(config_path)
     db.upsert_config(validated)
     return validated
 

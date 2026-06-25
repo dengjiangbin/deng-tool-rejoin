@@ -628,23 +628,52 @@ def _capture_webhook_debug() -> dict[str, Any]:
         trace = []
     path = DATA_DIR / "webhook-debug.json"
     try:
+        from .config import load_config
+        cfg = load_config()
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    latest = trace[-1] if trace else {}
+    trace_merged: dict[str, Any] = {}
+    for row in trace:
+        if isinstance(row, dict):
+            trace_merged.update(row)
+    state_message_id = str(cfg.get("webhook_last_message_id") or cfg.get("webhook_message_id") or "")
+    probe_fields = {
+        "webhook_mode": str(cfg.get("webhook_mode") or "none"),
+        "webhook_url_present_redacted": bool(cfg.get("webhook_url")),
+        "state_path": str(CONFIG_PATH),
+        "state_message_id_present": bool(state_message_id),
+        "state_message_id_redacted": mask(state_message_id) if state_message_id else "",
+        "last_send_started_at": trace_merged.get("timestamp", ""),
+        "last_payload_build_ok": trace_merged.get("payload_build_result") == "success",
+        "last_payload_fallback_used": trace_merged.get("payload_build_result") == "failure",
+        "last_http_method": trace_merged.get("last_http_method") or trace_merged.get("http_method") or "",
+        "last_http_status": trace_merged.get("last_http_status") or trace_merged.get("http_status") or "",
+        "last_http_url_kind": trace_merged.get("last_http_url_kind") or "",
+        "last_discord_message_id_redacted": trace_merged.get("last_discord_message_id_redacted") or "",
+        "last_exception_type": trace_merged.get("last_exception_type") or "",
+        "last_exception_message_redacted": trace_merged.get("last_exception_message_redacted") or "",
+        "edit_bootstrap_post_started": bool(trace_merged.get("edit_bootstrap_post_started")),
+        "edit_bootstrap_message_id_saved": bool(trace_merged.get("edit_bootstrap_message_id_saved")),
+        "edit_patch_started": bool(trace_merged.get("edit_patch_started")),
+        "edit_patch_message_id_used": trace_merged.get("edit_patch_message_id_used") or "",
+        "discord_duplicate_messages_created": "unknown",
+    }
+    try:
         data = json.loads(path.read_text(encoding="utf-8"))
         result = sanitize_probe(data) if isinstance(data, dict) else {"available": False}
+        result.update(probe_fields)
         result["trace_file_missing"] = not bool(trace)
         result["trace"] = trace
         result["trace_path"] = str(trace_path)
-        result["latest_trace"] = trace[-1] if trace else {}
+        result["latest_trace"] = latest
         result["missing_markers"] = _missing_webhook_trace_markers(trace)
         return result
     except (OSError, ValueError, TypeError):
-        try:
-            from .config import load_config
-            cfg = load_config()
-        except Exception:  # noqa: BLE001
-            cfg = {}
         mode = str(cfg.get("webhook_mode") or "none")
         url = str(cfg.get("webhook_url") or "")
         return {
+            **probe_fields,
             "available": True,
             "mode": mode,
             "interval_minutes": cfg.get("webhook_interval_minutes", 5),
@@ -678,7 +707,9 @@ def _missing_webhook_trace_markers(trace: list[dict[str, Any]]) -> list[str]:
         "reporter_tick_started", "telemetry_result", "send_periodic_status_entered",
         "telemetry_build_started", "telemetry_build_result", "payload_build_started",
         "payload_build_result", "send_attempted", "http_method", "http_status",
-        "send_result", "reporter_tick_completed",
+        "send_result", "last_http_method", "last_http_status", "last_http_url_kind",
+        "edit_mode_selected", "state_read_path", "state_write_path", "state_write_ok",
+        "config_read_path", "webhook_url_present_redacted", "reporter_tick_completed",
     )
     return [marker for marker in required if not any(marker in row for row in trace)]
 

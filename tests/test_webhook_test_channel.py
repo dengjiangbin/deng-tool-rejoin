@@ -49,19 +49,35 @@ class WebhookTestChannelTests(unittest.TestCase):
 
     def test_edit_mode_edits_existing_message(self) -> None:
         cfg = self._cfg("edit")
-        with patch("agent.webhook._discord_json_request", return_value=(True, "ok", None)) as request:
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", None)) as request, \
+             patch("agent.config.save_config", side_effect=lambda data, *args, **kwargs: data) as save:
             ok, _ = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
         self.assertTrue(ok)
         self.assertEqual(request.call_args.args[2], "PATCH")
+        self.assertIn("/messages/old-message", request.call_args.args[0])
+        save.assert_called()
 
     def test_edit_mode_falls_back_to_new_post_and_stores_id(self) -> None:
         cfg = self._cfg("edit")
-        with patch("agent.webhook._discord_json_request", side_effect=[(False, "webhook HTTP 404", None), (True, "ok", "new-message")]) as request:
+        with patch("agent.webhook._discord_json_request", side_effect=[(False, "webhook HTTP 404", None), (True, "webhook HTTP 200", "new-message")]) as request, \
+             patch("agent.config.save_config", side_effect=lambda data, *args, **kwargs: data) as save:
             ok, _ = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
         self.assertTrue(ok)
         self.assertEqual(request.call_count, 2)
         self.assertEqual(request.call_args.args[2], "POST")
+        self.assertIn("wait=true", request.call_args.args[0])
         self.assertEqual(cfg["webhook_last_message_id"], "new-message")
+        save.assert_called()
+
+    def test_edit_mode_patch_failure_other_than_404_does_not_post_duplicate(self) -> None:
+        cfg = self._cfg("edit")
+        with patch("agent.webhook._discord_json_request", return_value=(False, "webhook HTTP 500", None)) as request, \
+             patch("agent.config.save_config", side_effect=lambda data, *args, **kwargs: data):
+            ok, message = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
+        self.assertFalse(ok)
+        self.assertIn("500", message)
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[2], "PATCH")
 
     def test_new_post_always_posts(self) -> None:
         cfg = self._cfg("new_post")
@@ -96,7 +112,8 @@ class WebhookTestChannelTests(unittest.TestCase):
     def test_edit_mode_without_message_id_bootstraps_even_with_display_ram(self) -> None:
         cfg = self._cfg("edit")
         cfg.pop("webhook_last_message_id", None)
-        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "new-message")) as request:
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "new-message")) as request, \
+             patch("agent.config.save_config", side_effect=lambda data, *args, **kwargs: data) as save:
             ok, _ = webhook.send_periodic_status(
                 cfg,
                 supervisor_snapshot=[{"package": "com.example.clone", "username": "Main", "status": "Online"}],
@@ -104,21 +121,48 @@ class WebhookTestChannelTests(unittest.TestCase):
             )
         self.assertTrue(ok)
         self.assertEqual(request.call_args.args[2], "POST")
+        self.assertIn("wait=true", request.call_args.args[0])
         self.assertEqual(cfg["webhook_last_message_id"], "new-message")
+        save.assert_called()
 
     def test_edit_mode_second_send_patches_saved_message_id(self) -> None:
         cfg = self._cfg("edit")
         cfg["webhook_last_message_id"] = "saved-message"
-        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", None)) as request:
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", None)) as request, \
+             patch("agent.config.save_config", side_effect=lambda data, *args, **kwargs: data):
             ok, _ = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
         self.assertTrue(ok)
         self.assertEqual(request.call_args.args[2], "PATCH")
+        self.assertIn("/messages/saved-message", request.call_args.args[0])
+
+    def test_edit_mode_state_persistence_survives_restart_simulation(self) -> None:
+        cfg = self._cfg("edit")
+        cfg.pop("webhook_last_message_id", None)
+        saved_state = {}
+
+        def fake_save(data, *args, **kwargs):
+            saved_state.update(data)
+            return dict(data)
+
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "persisted-message")) as request, \
+             patch("agent.config.save_config", side_effect=fake_save):
+            ok, _ = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
+        self.assertTrue(ok)
+        self.assertEqual(request.call_args.args[2], "POST")
+        restarted_cfg = dict(saved_state)
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", None)) as request2, \
+             patch("agent.config.save_config", side_effect=fake_save):
+            ok, _ = webhook.send_periodic_status(restarted_cfg, supervisor_snapshot=[], app_stats={})
+        self.assertTrue(ok)
+        self.assertEqual(request2.call_args.args[2], "PATCH")
+        self.assertIn("/messages/persisted-message", request2.call_args.args[0])
 
     def test_payload_builder_failure_falls_back_and_still_sends(self) -> None:
         cfg = self._cfg("edit")
         cfg.pop("webhook_last_message_id", None)
         with patch("agent.webhook.build_status_embed_payload", side_effect=ValueError("bad telemetry")), \
-             patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "new-message")) as request:
+             patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "new-message")) as request, \
+             patch("agent.config.save_config", side_effect=lambda data, *args, **kwargs: data):
             ok, message = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
         self.assertTrue(ok, message)
         self.assertEqual(request.call_args.args[2], "POST")
@@ -136,6 +180,7 @@ class WebhookTestChannelTests(unittest.TestCase):
         reporter.stop_event.wait = lambda interval: True  # type: ignore[method-assign]
         with patch("agent.webhook.record_webhook_trace", side_effect=lambda **fields: traces.append(fields)), \
              patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "new-message")), \
+             patch("agent.config.save_config", side_effect=lambda data, *args, **kwargs: data), \
              patch("agent.android.get_memory_info", return_value={"free_mb": "700 MB", "percent_free": "15"}), \
              patch("agent.android.get_cpu_usage", return_value="44.0%"), \
              patch("agent.android.get_temperature", return_value="31.6"):
@@ -145,6 +190,25 @@ class WebhookTestChannelTests(unittest.TestCase):
         self.assertTrue(any(row.get("http_method") == "POST" for row in traces))
         self.assertTrue(any(row.get("http_status") == 200 for row in traces))
         self.assertTrue(any(row.get("reporter_tick_completed") for row in traces))
+
+    def test_reporter_path_patches_saved_edit_message_id(self) -> None:
+        class Supervisor:
+            def get_status_snapshot(self, entries):
+                return [{"package": "com.example.clone", "username": "Main", "status": "Online", "ram_mb": "700 MB"}]
+
+        cfg = self._cfg("edit")
+        cfg["webhook_last_message_id"] = "saved-message"
+        reporter = webhook.WebhookStatusReporter(cfg, Supervisor(), [{"package": "com.example.clone"}], lambda data: data)
+        reporter.stop_event.wait = lambda interval: True  # type: ignore[method-assign]
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", None)) as request, \
+             patch("agent.config.save_config", side_effect=lambda data, *args, **kwargs: data), \
+             patch("agent.android.get_memory_info", return_value={"free_mb": "700 MB", "percent_free": "15"}), \
+             patch("agent.android.get_cpu_usage", return_value="44.0%"), \
+             patch("agent.android.get_temperature", return_value="31.6"):
+            reporter._run()
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[2], "PATCH")
+        self.assertIn("/messages/saved-message", request.call_args.args[0])
 
     def test_reporter_is_started_only_in_start_monitoring_path(self) -> None:
         source = inspect.getsource(commands.cmd_start)
