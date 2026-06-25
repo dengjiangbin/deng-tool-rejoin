@@ -728,28 +728,64 @@ def send_webhook_update(
 def _discord_json_request(url: str, payload: dict[str, Any], method: str) -> tuple[bool, str, str | None]:
     """Issue one bounded Discord request; HTTP failures are returned, never raised."""
     body = json.dumps(payload).encode("utf-8")
+    status: int | str = ""
+    response: Any = b""
     try:
         if method == "POST":
+            record_webhook_trace(source="discord_request", exception_stage="post_with_response_started", response_body_type="")
             status, _headers, response = safe_http.post_with_response(url, body, timeout=10)
         elif safe_http._http_backend() == "curl":  # curl keeps Termux TLS outside Python.
             headers = safe_http._build_curl_header_args({"Content-Type": "application/json"})
+            record_webhook_trace(source="discord_request", exception_stage="curl_patch_started", response_body_type="")
             status, _headers, response = safe_http._run_curl_with_headers(
                 ["-X", method, "--data-binary", "@-"] + headers + [url], stdin_bytes=body, timeout=10,
             )
         else:
             request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method=method)
+            record_webhook_trace(source="discord_request", exception_stage="urllib_patch_started", response_body_type="")
             try:
                 with urllib.request.urlopen(request, timeout=10) as result:  # noqa: S310 - validated webhook URL
                     status, response = int(result.status), result.read()
             except urllib.error.HTTPError as exc:
                 status, response = int(exc.code), exc.read()
     except Exception as exc:  # network errors must not affect the watchdog
+        record_webhook_trace(
+            source="discord_request",
+            exception_type=type(exc).__name__,
+            exception_message_redacted=_redact_exception(exc),
+            exception_stage="http_request",
+            response_type=type(response).__name__,
+            response_status_raw=str(status),
+            response_body_type=type(response).__name__,
+            response_body_redacted=_redacted_body_preview(response),
+            last_exception_type=type(exc).__name__,
+            last_exception_message_redacted=_redact_exception(exc),
+        )
         return False, f"webhook request failed: {type(exc).__name__}", None
+    record_webhook_trace(
+        source="discord_request",
+        response_type=type(response).__name__,
+        response_status_raw=str(status),
+        response_body_type=type(response).__name__,
+        response_body_redacted=_redacted_body_preview(response),
+    )
     if not 200 <= status < 300:
         return False, f"webhook HTTP {status}", None
     try:
-        message_id = str(json.loads(response.decode("utf-8", errors="replace")).get("id") or "") or None
-    except (ValueError, TypeError):
+        message_id = _parse_discord_message_id(response)
+    except Exception as exc:  # noqa: BLE001
+        record_webhook_trace(
+            source="discord_request",
+            exception_type=type(exc).__name__,
+            exception_message_redacted=_redact_exception(exc),
+            exception_stage="parse_discord_message_id",
+            response_type=type(response).__name__,
+            response_status_raw=str(status),
+            response_body_type=type(response).__name__,
+            response_body_redacted=_redacted_body_preview(response),
+            last_exception_type=type(exc).__name__,
+            last_exception_message_redacted=_redact_exception(exc),
+        )
         message_id = None
     return True, f"webhook HTTP {status}", message_id
 
@@ -762,6 +798,33 @@ def _http_status_from_message(message: str | None) -> int | None:
             value = int(token)
             if 100 <= value <= 599:
                 return value
+    return None
+
+
+def _redacted_body_preview(value: Any, *, limit: int = 500) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    else:
+        text = str(value)
+    return text.replace("\n", " ")[:limit]
+
+
+def _parse_discord_message_id(response: Any) -> str | None:
+    if not response:
+        return None
+    if isinstance(response, dict):
+        return str(response.get("id") or "") or None
+    if isinstance(response, bytes):
+        text = response.decode("utf-8", errors="replace")
+    else:
+        text = str(response)
+    if not text.strip():
+        return None
+    parsed = json.loads(text)
+    if isinstance(parsed, dict):
+        return str(parsed.get("id") or "") or None
     return None
 
 
@@ -891,6 +954,15 @@ def send_periodic_status(
     record_webhook_trace(source="send_periodic_status", edit_bootstrap_post_http_status=post_status or message if mode == "edit" else "", http_method="POST", http_status=post_status or message, last_http_method="POST", last_http_status=post_status or message, discord_response_body_redacted=message[:200], returned_message_id_present=bool(message_id), last_discord_message_id_redacted=_redact_message_id(message_id), saved_message_id=bool(mode == "edit" and message_id), message_id_saved_or_used=bool(mode == "edit" and message_id), send_result="success" if ok else "failure")
     if ok:
         config_data["webhook_last_sent_at"] = time.time()
+        if mode == "edit" and not message_id:
+            record_webhook_trace(
+                source="send_periodic_status",
+                edit_bootstrap_post_succeeded_but_id_missing=True,
+                send_result="failure",
+                last_exception_type="MissingDiscordMessageId",
+                last_exception_message_redacted="Discord webhook POST succeeded but no message id was returned or parsed",
+            )
+            return False, "webhook edit bootstrap failed: missing Discord message id"
         if mode == "edit" and message_id:
             persisted = _persist_webhook_edit_state(config_data, url=url, message_id=message_id)
             record_webhook_trace(source="send_periodic_status", edit_bootstrap_message_id_saved=persisted)

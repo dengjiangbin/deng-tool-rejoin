@@ -369,9 +369,13 @@ def _run_curl_with_headers(
         return 0, headers, body_bytes
 
     payload = raw[:marker_idx]
+    if payload.endswith(b"\n"):
+        payload = payload[:-1]
+    if payload.endswith(b"\r"):
+        payload = payload[:-1]
     status_part = raw[marker_idx + len(marker):]
     try:
-        http_status = int(status_part.strip().strip("_"))
+        http_status = int(status_part.strip().strip(b"_"))
     except ValueError:
         http_status = 0
     headers, body_bytes = _split_curl_headers_and_body(payload)

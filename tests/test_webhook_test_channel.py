@@ -6,7 +6,7 @@ import inspect
 import unittest
 from unittest.mock import patch
 
-from agent import commands, webhook
+from agent import commands, safe_http, webhook
 
 
 URL = "https://discord.com/api/webhooks/1234567890/secret-token"
@@ -124,6 +124,51 @@ class WebhookTestChannelTests(unittest.TestCase):
         self.assertIn("wait=true", request.call_args.args[0])
         self.assertEqual(cfg["webhook_last_message_id"], "new-message")
         save.assert_called()
+
+    def test_termux_curl_header_status_parser_does_not_typeerror(self) -> None:
+        raw = (
+            b"HTTP/2 200\r\ncontent-type: application/json\r\n\r\n"
+            b'{"id":"discord-message"}'
+            b"\n__DENG_HTTP_CODE__200__\n"
+        )
+        with patch("agent.safe_http._curl_available", return_value=True), \
+             patch("agent.subprocess_isolated.run_isolated_bytes", return_value=(0, raw, b"", False)):
+            status, headers, body = safe_http._run_curl_with_headers(["https://example.test"], stdin_bytes=b"{}")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json")
+        self.assertEqual(body, b'{"id":"discord-message"}')
+
+    def test_edit_bootstrap_parses_real_http_body_bytes_and_patches_next_send(self) -> None:
+        cfg = self._cfg("edit")
+        cfg.pop("webhook_last_message_id", None)
+        saved_state = {}
+
+        def fake_save(data, *args, **kwargs):
+            saved_state.update(data)
+            return dict(data)
+
+        with patch("agent.safe_http.post_with_response", return_value=(200, {"content-type": "application/json"}, b'{"id":"discord-message"}')), \
+             patch("agent.config.save_config", side_effect=fake_save):
+            ok, message = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
+        self.assertTrue(ok, message)
+        self.assertEqual(saved_state["webhook_last_message_id"], "discord-message")
+        restarted_cfg = dict(saved_state)
+        with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", None)) as request, \
+             patch("agent.config.save_config", side_effect=fake_save):
+            ok, message = webhook.send_periodic_status(restarted_cfg, supervisor_snapshot=[], app_stats={})
+        self.assertTrue(ok, message)
+        self.assertEqual(request.call_args.args[2], "PATCH")
+        self.assertIn("/messages/discord-message", request.call_args.args[0])
+
+    def test_edit_bootstrap_http_success_without_message_id_is_hard_failure(self) -> None:
+        cfg = self._cfg("edit")
+        cfg.pop("webhook_last_message_id", None)
+        with patch("agent.safe_http.post_with_response", return_value=(204, {}, b"")), \
+             patch("agent.config.save_config") as save:
+            ok, message = webhook.send_periodic_status(cfg, supervisor_snapshot=[], app_stats={})
+        self.assertFalse(ok)
+        self.assertIn("missing Discord message id", message)
+        save.assert_not_called()
 
     def test_edit_mode_second_send_patches_saved_message_id(self) -> None:
         cfg = self._cfg("edit")
