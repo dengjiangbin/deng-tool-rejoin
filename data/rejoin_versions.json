@@ -1,6 +1,6 @@
 [
   {
-    "stable_latest": "v1.1.0",
+    "stable_latest": "v1.2.0",
     "test_latest": "main-dev",
     "kind": "channel_pointers"
   },
@@ -82,16 +82,34 @@
     "channel": "stable",
     "title": "Version 1.1.0",
     "label": "v1.1.0",
-    "recommended": true,
+    "recommended": false,
     "visibility": "public",
     "install_ref": "refs/tags/v1.1.0",
     "git_ref": "refs/tags/v1.1.0",
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.1.0/deng-tool-rejoin-v1.1.0.tar.gz",
-    "artifact_sha256": "6de8b8d4079ee8e3f365340a8064287e355d592a2dfd4c5f103dd7969fa05db2",
+    "artifact_sha256": "1c4e9f358b15d874a65aa26702b4b650c75db76dd07a43fb1b98ac1c99a29050",
     "installer_endpoint": "/install/v1.1.0",
     "notes": "Frozen public stable release for Discord webhook Edit Mode persistence and status embed cleanup.",
+    "enabled": true
+  },
+  {
+    "version": "v1.2.0",
+    "id": "v1.2.0",
+    "channel": "stable",
+    "title": "Version 1.2.0",
+    "label": "v1.2.0",
+    "recommended": true,
+    "visibility": "public",
+    "install_ref": "refs/tags/v1.2.0",
+    "git_ref": "refs/tags/v1.2.0",
+    "release_stage": "stable",
+    "frozen": true,
+    "artifact_path": "releases/v1.2.0/deng-tool-rejoin-v1.2.0.tar.gz",
+    "artifact_sha256": "8bbfe4744e746cbed399d37b2e8cb255f12950b3cd53112e4a3c92dbb8cfd7f6",
+    "installer_endpoint": "/install/v1.2.0",
+    "notes": "Frozen public stable release for Delta Auto Execute file management and runtime version display fixes.",
     "enabled": true
   },
   {
