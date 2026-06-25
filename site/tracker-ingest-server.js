@@ -95,6 +95,7 @@ if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 // a child either binds during a normal restart race or exits for one clean respawn.
 const { listenWithReclaim } = require('./src/reclaimPort');
 listenWithReclaim(server, PORT, HOST, '[deng-tracker-ingest]', {
+  pm2AppName: 'deng-tracker-ingest',
   // reclaimAfterMs > PM2 kill_timeout (8000ms): never reclaim a sibling that is
   // still gracefully flushing on restart — that mutual kill was the 8792 loop.
   reclaimAfterMs: parseInt(process.env.TRACKER_INGEST_RECLAIM_AFTER_MS || '9000', 10),

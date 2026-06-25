@@ -101,6 +101,21 @@ function killPid(pid) {
   }
 }
 
+/** PM2-tracked pid for `appName` (null if unknown / not under PM2). */
+function getPm2AppPid(appName, opts = {}) {
+  if (!appName) return null;
+  if (opts._getPm2AppPid) return opts._getPm2AppPid(appName);
+  try {
+    const cmd = process.platform === 'win32' ? 'npx pm2 jlist' : 'pm2 jlist';
+    const out = execSync(cmd, { encoding: 'utf8', timeout: 8000, windowsHide: true });
+    const list = JSON.parse(out);
+    const app = list.find((a) => a && a.name === appName);
+    return app && app.pid ? app.pid : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /**
  * Attempt to reclaim `port` from a stale orphan fork.
  *
@@ -187,6 +202,8 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
   // reclaim attempt actually gets a chance before we exit for a clean restart.
   const maxMs = opts.maxMs != null ? opts.maxMs : 22000;
   const maxReclaims = opts.maxReclaims != null ? opts.maxReclaims : 3;
+  const pm2AppName = opts.pm2AppName || process.env.name || '';
+  const _getPm2AppPid = (name) => getPm2AppPid(name, opts);
 
   // Health gate is injectable for tests; production probes the real /health.
   const _probeHealthy = opts._probeHealthy || probeHealthy;
@@ -213,6 +230,9 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
     originalHolders = null;
     warmSpare = false;
     console.log(`${logPrefix} Listening on http://${host}:${port}`);
+    if (typeof process.send === 'function') {
+      try { process.send('ready'); } catch (_) { /* not under PM2 */ }
+    }
   });
 
   server.on('error', (err) => {
@@ -235,18 +255,25 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
     if (waitedMs >= reclaimAfterMs && reclaims < maxReclaims && (nowMs - lastReclaimAt) >= 1000) {
       lastReclaimAt = nowMs;
       Promise.resolve(_probeHealthy(port, host)).then((healthy) => {
+        const holderPids = findListenerPids(port).filter((p) => p !== process.pid);
+        const pm2Pid = _getPm2AppPid(pm2AppName);
+
+        // PM2 duplicate spawn: if another fork is the tracked pid, stand down.
+        if (pm2Pid && pm2Pid !== process.pid && pm2Pid !== holderPids[0]) {
+          console.warn(`${logPrefix} duplicate PM2 fork (tracked pid ${pm2Pid}) — exiting so singleton can bind ${port}`);
+          process.exit(0);
+          return;
+        }
+
         if (healthy) {
-          const currentHolders = new Set(findListenerPids(port).filter((p) => p !== process.pid));
-          const originalStillOwnsPort = currentHolders.size > 0
-            && Array.from(currentHolders).every((pid) => originalHolders && originalHolders.has(pid));
-          if (originalStillOwnsPort) {
-            // PM2 singleton convergence: after kill_timeout, the original
-            // holder is stale even when /health answers. Reclaim it so the
-            // PM2-tracked child becomes the one true listener.
+          // PM2-authoritative child: a healthy holder that is NOT us is an orphan
+          // (PM2 only tracks one pid). Reclaim after the graceful-release window.
+          if (pm2Pid === process.pid && holderPids.length > 0 && waitedMs >= reclaimAfterMs) {
             reclaims += 1;
-            const r = reclaimPort(port, logPrefix, { onlyPids: originalHolders });
+            const orphanSet = new Set(holderPids);
+            const r = reclaimPort(port, logPrefix, { onlyPids: orphanSet });
             if (r.reclaimed) {
-              console.warn(`${logPrefix} reclaimed ${port} from STALE healthy original pid(s) %j — rebinding`, r.killedPids);
+              console.warn(`${logPrefix} reclaimed ${port} from PM2 orphan pid(s) %j (healthy but untracked) — rebinding`, r.killedPids);
               retryStartedAt = 0;
               originalHolders = null;
               warmSpare = false;
@@ -254,14 +281,15 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
             retrySoon(retryDelayMs);
             return;
           }
-          // A good instance is serving. Do NOT kill it. Stand by and bind the
-          // instant it frees (legit restart). This breaks the kill→PM2-restart
-          // →kill loop that PM2 reported as a 16s SIGINT restart cycle.
+          // Graceful restart hand-off: sibling still shutting down — warm spare.
           if (!warmSpare) {
             warmSpare = true;
             console.warn(`${logPrefix} ${port} is held by a HEALTHY instance — standing by as warm spare (will NOT kill it; binds the instant it frees)`);
+            if (typeof process.send === 'function') {
+              try { process.send('ready'); } catch (_) { /* not under PM2 */ }
+            }
           }
-          retryStartedAt = nowMs;   // reset window so we re-probe periodically
+          retryStartedAt = nowMs;
           originalHolders = null;
           retrySoon(Math.max(retryDelayMs, 1000));
           return;
@@ -295,4 +323,4 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
   start();
 }
 
-module.exports = { findListenerPids, describeProcess, killPid, reclaimPort, listenWithReclaim, probeHealthy };
+module.exports = { findListenerPids, describeProcess, killPid, reclaimPort, listenWithReclaim, probeHealthy, getPm2AppPid };

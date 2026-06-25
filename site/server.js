@@ -102,6 +102,7 @@ if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 // binds, instead of exiting and leaving an orphan PID holding 8791.
 const { listenWithReclaim } = require('./src/reclaimPort');
 listenWithReclaim(server, PORT, HOST, '[deng-tool-site]', {
+  pm2AppName: 'deng-tool-site',
   // reclaimAfterMs > PM2 kill_timeout (8000ms): never reclaim a sibling that is
   // still gracefully shutting down on restart (avoids the mutual-kill loop).
   reclaimAfterMs: parseInt(process.env.TOOL_SITE_RECLAIM_AFTER_MS || '9000', 10),

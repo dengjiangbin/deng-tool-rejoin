@@ -1,0 +1,31 @@
+{
+  "base": "https://aio.deng.my.id/api/fishit-tracker/update-backpack",
+  "users": 2000,
+  "attempts": 6000,
+  "codes": {
+    "202": 202,
+    "403": 430,
+    "502": 5177,
+    "NETERR": 191,
+    "TIMEOUT": 140
+  },
+  "routeHeaders": {
+    "direct-ingest": 632,
+    "(none)": 5177
+  },
+  "networkErrors": 331,
+  "ok": 202,
+  "bad502": 5177,
+  "bad503": 0,
+  "bad530": 0,
+  "bad429": 0,
+  "latencyMs": {
+    "p50": 2368,
+    "p95": 22895,
+    "p99": 25142,
+    "max": 25954
+  },
+  "wallMs": 33015,
+  "pass": false,
+  "at": "2026-06-25T16:42:02.313Z"
+}

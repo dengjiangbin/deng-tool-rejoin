@@ -11,6 +11,7 @@
       "restart_delay": 3000,
       "kill_timeout": 8000,
       "listen_timeout": 30000,
+      "wait_ready": true,
       "max_memory_restart": "1536M",
       "env": {
         "NODE_ENV": "production",
@@ -54,6 +55,7 @@
       "restart_delay": 3000,
       "kill_timeout": 8000,
       "listen_timeout": 30000,
+      "wait_ready": true,
       "max_memory_restart": "4096M",
       "env": {
         "NODE_ENV": "production",

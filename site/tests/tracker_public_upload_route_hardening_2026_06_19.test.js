@@ -158,13 +158,14 @@ test('probeHealthy resolves true for a live 200 /health server, false for a dead
   assert.equal(await reclaim.probeHealthy(port, '127.0.0.1', 600), false, 'closed port => unhealthy');
 });
 
-test('listenWithReclaim health-gates the reclaim (warm spare instead of killing a healthy holder)', () => {
+test('listenWithReclaim health-gates the reclaim (warm spare + PM2 orphan reclaim)', () => {
   const src = SRC('src/reclaimPort.js');
   assert.match(src, /warmSpare/);
   assert.match(src, /_probeHealthy/);
-  // The reclaim (killPid path) only runs on the NOT-healthy branch.
   assert.match(src, /standing by as warm spare/);
+  assert.match(src, /PM2 orphan pid/);
   assert.match(src, /reclaimed \$\{port\} from DEAD orphan/);
+  assert.match(src, /getPm2AppPid/);
 });
 
 // ── Proxy never emits an HTML gateway body (test req: HTML gateway = hard fail) ─

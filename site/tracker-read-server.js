@@ -26,6 +26,7 @@ if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 
 const { listenWithReclaim } = require('./src/reclaimPort');
 listenWithReclaim(server, PORT, HOST, '[deng-tracker-read]', {
+  pm2AppName: 'deng-tracker-read',
   // reclaimAfterMs > PM2 kill_timeout (8000ms): never reclaim a sibling that is
   // still gracefully shutting down on restart (avoids the mutual-kill loop).
   reclaimAfterMs: parseInt(process.env.TRACKER_READ_RECLAIM_AFTER_MS || '9000', 10),
