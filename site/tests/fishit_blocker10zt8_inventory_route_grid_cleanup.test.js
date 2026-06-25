@@ -45,7 +45,8 @@ describe('BLOCKER10ZT8 inventory route and grid cleanup', () => {
     assert.match(res.text, /href="\/inventory"/);
     assert.match(res.text, /header__lead-icon[\s\S]*Track Your Fish It Accounts/);
     assert.doesNotMatch(res.text, /Track unlimited players simultaneously\./);
-    assert.equal(res.headers['x-tracker-ui-deploy'], BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER);
+    // Deploy header now mirrors the live asset manifest marker (proves serving bundle).
+    assert.equal(res.headers['x-tracker-ui-deploy'], require('../src/inventoryAssets').inventoryDeployMarker(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER));
   });
 
   test('/tracker and /fishit-tracker redirect to /inventory without public links', async () => {

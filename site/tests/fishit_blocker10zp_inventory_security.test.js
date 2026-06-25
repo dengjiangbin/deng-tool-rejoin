@@ -116,7 +116,9 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
     assert.equal(locals.canonicalInventoryPath, '/inventory');
     assert.equal(locals.initialUsername, 'TestUser1');
     assert.equal(locals.trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
-    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER);
+    // Deploy marker is now derived from the live asset manifest (proves the actual
+    // serving bundle), not a hardcoded constant that lagged every rebuild.
+    assert.equal(locals.trackerUiDeployMarker, require('../src/inventoryAssets').inventoryDeployMarker(BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER));
   });
 
   test('tracker template documents username validation feedback', () => {

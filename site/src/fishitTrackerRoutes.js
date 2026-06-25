@@ -3122,6 +3122,11 @@ function buildTrackerPageLocals(req) {
   const sessionUser = session && session.user ? session.user : null;
   const viewer = buildInventoryViewer(sessionUser);
   const assetUrls = inventoryAssets.inventoryAssetUrls();
+  // Deploy marker MUST reflect the bundle actually shipped (manifest marker), so a
+  // grep/curl of the live /tracker HTML proves which build is serving. Previously
+  // this was a hardcoded constant that lagged behind every new bundle, making a
+  // real deploy look un-deployed (and the timer/502 fix impossible to verify).
+  const liveDeployMarker = inventoryAssets.inventoryDeployMarker(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER);
   // Top summary card icons resolved from REAL DB assets only (no fallbacks).
   let topSummaryIcons = { online: trackerTopSummaryIcons.ONLINE_AVATAR_URL, secret: null, forgotten: null, ruby: null, evolved: null, runic: null };
   try {
@@ -3139,7 +3144,7 @@ function buildTrackerPageLocals(req) {
     title: 'Live Tracker — DENG All In One',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+    trackerUiDeployMarker: liveDeployMarker,
     trackerTopSummaryIcons: topSummaryIcons,
     inventoryAssetCssUrl: assetUrls.cssUrl,
     inventoryAssetJsUrl: assetUrls.jsUrl,
@@ -3149,7 +3154,7 @@ function buildTrackerPageLocals(req) {
       initialUsername: resolveInitialUsername(req),
       csrfToken: session && session.csrfToken ? session.csrfToken : '',
       inventoryAssetMarker: assetUrls.marker || '',
-      trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+      trackerUiDeployMarker: liveDeployMarker,
       ...(debugInventory ? {
         trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
         debugTrackerLoadstring: DEBUG_TRACKER_LOADSTRING,
@@ -3228,7 +3233,9 @@ function renderTrackerPage(req, res, next) {
   try {
     const locals = buildTrackerPageLocals(req);
     res.set(NO_STORE_HEADERS);
-    res.set('X-Tracker-Ui-Deploy', BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER);
+    // Header mirrors the HTML deploy marker (manifest-derived) so the live build is
+    // provable from response headers too, not a stale hardcoded constant.
+    res.set('X-Tracker-Ui-Deploy', locals.trackerUiDeployMarker || BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER);
     res.set('X-Tracker-Template-Version', trackerTemplateVersion());
     return res.render('fishit_tracker', locals);
   } catch (err) {
