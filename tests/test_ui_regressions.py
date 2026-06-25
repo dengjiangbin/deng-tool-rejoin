@@ -55,10 +55,10 @@ class LogoColorRegressionTests(unittest.TestCase):
         self.assertNotIn("\033[1;95m", first_line)
 
     def test_banner_contains_bold_mons_on_tool_line(self):
-        text = banner.banner_text(use_color=False, terminal_width=80)
+        text = banner.banner_text(use_color=False, terminal_width=80, version="v1.2.0")
         lines = text.splitlines()
-        tool_lines = [line for line in lines if "Tool: Rejoin v1.0.0" in line]
-        self.assertEqual(tool_lines, ["MONS        Tool: Rejoin v1.0.0"])
+        tool_lines = [line for line in lines if "Tool: Rejoin v1.2.0" in line]
+        self.assertEqual(tool_lines, ["MONS        Tool: Rejoin v1.2.0"])
         self.assertEqual(self._mons_block(text), [])
 
     def test_colored_banner_mons_uses_bold_text(self):
@@ -92,15 +92,20 @@ class LogoColorRegressionTests(unittest.TestCase):
         self.assertNotIn("MM OO NN SS", text)
         self.assertNotIn("M O N S", text)
 
-    def test_deng_logo_and_version_line_remain_unchanged(self):
-        text = banner.banner_text(use_color=False, terminal_width=80)
+    def test_deng_logo_and_version_line_uses_runtime_version(self):
+        text = banner.banner_text(use_color=False, terminal_width=80, version="v1.1.0")
         lines = text.splitlines()
         deng_lines = banner.ASCII_DENG.splitlines()
         self.assertEqual(lines[:len(deng_lines)], deng_lines)
         self.assertEqual(
             lines[len(deng_lines)],
-            "MONS        Tool: Rejoin v1.0.0",
+            "MONS        Tool: Rejoin v1.1.0",
         )
+
+    def test_banner_display_version_is_not_hardcoded_to_v1_0_0(self):
+        self.assertIn("Tool: Rejoin v1.2.0", banner.banner_text(use_color=False, version="1.2.0"))
+        self.assertIn("Tool: Rejoin main-dev", banner.banner_text(use_color=False, version="main-dev"))
+        self.assertNotIn("Tool: Rejoin v1.0.0", banner.banner_text(use_color=False, version="1.2.0"))
 
     def test_top_menu_still_renders_after_banner(self):
         import io
