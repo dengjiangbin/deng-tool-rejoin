@@ -15,7 +15,6 @@ if str(PROJECT) not in sys.path:
 
 from agent.key_stats_format import (
     build_license_admin_stats_description,
-    build_reset_hwid_log_description,
     filter_active_visible_license_rows,
     format_authorized_active_key_line,
     is_active_visible_license_row,
@@ -61,41 +60,6 @@ def _insert_key(
         }
     store._save(db)
     return raw, key_hash
-
-
-class TestResetHwidLogFormat(unittest.TestCase):
-    def test_reset_hwid_log_description_format(self) -> None:
-        stats = {
-            "key_generated_count": 2,
-            "key_redeemed_count": 0,
-            "unbound_key_count": 2,
-            "bound_key_count": 0,
-            "reset_hwid_count": 7,
-        }
-        description = build_reset_hwid_log_description(
-            user_mention="@DENG",
-            reset_key="DENG-68C9-0BA2-F745-E506",
-            stats=stats,
-        )
-        self.assertIn("**User:** @DENG", description)
-        self.assertIn("**Reset Key:** DENG-68C9-0BA2-F745-E506", description)
-        self.assertIn("**Current Key Generated:** 2", description)
-        self.assertIn("**Current Key Redeemed:** 0", description)
-        self.assertIn("**Current Unbound Key:** 2", description)
-        self.assertIn("**Current Bound Key:** 0", description)
-        self.assertIn("**Current Reset HWID:** 7 times", description)
-        self.assertNotIn("DENG-68C9...E506", description)
-        self.assertNotIn("\nUser\n", description)
-        self.assertNotIn("\nReset Key\n", description)
-
-    def test_post_license_log_source_uses_description_not_fields(self) -> None:
-        source = (PROJECT / "bot" / "cog_license_panel.py").read_text(encoding="utf-8")
-        fn_start = source.index("async def _post_license_log")
-        fn_end = source.index("# ── Redeem modal", fn_start)
-        fn_body = source[fn_start:fn_end]
-        self.assertIn("description=description", fn_body)
-        self.assertIn("build_reset_hwid_log_description", fn_body)
-        self.assertNotIn("embed.add_field", fn_body)
 
 
 class TestLicenseAdminStatsFormat(unittest.TestCase):

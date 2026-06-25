@@ -652,139 +652,25 @@ async function ensureLicenseUser(discordUserId) {
   return { discord_user_id: owner, max_keys: 999999, is_blocked: false };
 }
 
-async function redeemLicenseKey(discordUserId, rawKey) {
-  const owner = String(discordUserId || '').trim();
-  if (!owner) throw serviceError('auth_required', 'Please login with Discord first.', 401);
-  let normalized;
-  let keyId;
-  try {
-    normalized = normalizeLicenseKey(rawKey);
-    keyId = hashLicenseKey(normalized);
-  } catch {
-    throw serviceError('invalid_key_format', 'Invalid license key format.');
-  }
-
-  const record = await getRawLicenseById(keyId);
-  if (!record) throw serviceError('key_not_found', 'Key not found.');
-  const status = licenseStatus(record);
-  if (status === 'revoked' || status === 'deleted' || status === 'disabled') {
-    throw serviceError('key_not_redeemable', 'This key is revoked or disabled.');
-  }
-  if (status === 'expired' || isoExpired(record.expires_at)) {
-    throw serviceError('key_expired', 'This key has expired.');
-  }
-
-  if (record.owner_discord_id === owner) {
-    const encrypted = encryptLicenseKeyPlaintext(normalized);
-    if (encrypted && !decryptLicenseKeyCiphertext(record.key_ciphertext || '')) {
-      await supabase.from('license_keys').update({
-        key_ciphertext: encrypted,
-        key_export_available: true,
-      }).eq('id', keyId);
-    }
-    return { status: 'already_owned', key: normalized, message: 'This key is already redeemed by you.' };
-  }
-  if (record.owner_discord_id && record.owner_discord_id !== owner) {
-    throw serviceError('key_owned_by_another_user', 'This key belongs to another user.', 403);
-  }
-
-  const user = await ensureLicenseUser(owner);
-  if (user.is_blocked) throw serviceError('user_blocked', 'This Discord account cannot redeem keys.', 403);
-  const limitCheck = await canUserReceiveNewKey(owner, null);
-  if (!limitCheck.allowed) {
-    throw serviceError(
-      'key_limit_reached',
-      KEY_SLOT_LIMIT_MESSAGE,
-      403,
-      { activeCount: limitCheck.activeCount, maxKeys: limitCheck.maxKeys },
-    );
-  }
-
-  const encrypted = encryptLicenseKeyPlaintext(normalized);
-  const recheck = await canUserReceiveNewKey(owner, null);
-  if (!recheck.allowed) {
-    throw serviceError(
-      'key_limit_reached',
-      KEY_SLOT_LIMIT_MESSAGE,
-      403,
-      { activeCount: recheck.activeCount, maxKeys: recheck.maxKeys },
-    );
-  }
-  const payload = {
-    owner_discord_id: owner,
-    expires_at: null,
-    redeemed_at: new Date().toISOString(),
-    ...(encrypted ? { key_ciphertext: encrypted, key_export_available: true } : {}),
-  };
-  const { error } = await supabase.from('license_keys').update(payload).eq('id', keyId);
-  if (error) throw serviceError('database_error', 'Could not redeem key. Please try again.', 500);
-  return { status: 'redeemed', key: normalized, message: 'Key Redeemed Successfully.' };
+// Redeem has been removed. Ad-generated keys are directly usable in DENG Tool
+// Rejoin with no redeem step. This stub never mutates state; it exists only so
+// any legacy caller fails closed with a clear 410 instead of touching the DB.
+async function redeemLicenseKey() {
+  throw serviceError(
+    'feature_removed',
+    'Redeem has been removed. Your generated key works directly in DENG Tool Rejoin.',
+    410,
+  );
 }
 
-async function resetLicenseHwid(discordUserId, keyIdOrKey) {
-  const owner = String(discordUserId || '').trim();
-  if (!owner) throw serviceError('auth_required', 'Please login with Discord first.', 401);
-  const raw = String(keyIdOrKey || '').trim();
-  const keyId = raw.startsWith('DENG-') ? hashLicenseKey(raw) : raw;
-  if (!/^[a-f0-9]{64}$/i.test(keyId)) throw serviceError('key_not_found', 'Key not found.');
-
-  const panelCheck = await canUserResetPanelToday(owner);
-  if (!panelCheck.allowed) {
-    throw serviceError(
-      'panel_reset_limit_reached',
-      HWID_RESET_LIMIT_MESSAGE,
-      403,
-      { usedCount: panelCheck.usedCount, maxPanel: panelCheck.maxPanel },
-    );
-  }
-
-  const record = await getRawLicenseById(keyId);
-  if (!record) throw serviceError('key_not_found', 'Key not found.');
-  if (record.owner_discord_id !== owner) {
-    throw serviceError('key_not_owned', 'You do not own this key.', 403);
-  }
-  if (!isActiveLicense(record)) {
-    throw serviceError('key_not_resettable', 'This key is revoked, expired, or inactive.');
-  }
-
-  const binding = await getBindingByKeyId(keyId);
-  if (!binding || !binding.is_active) {
-    throw serviceError('no_device_linked', 'No device is currently linked to this key.');
-  }
-
-  const { error: updateError } = await supabase
-    .from('device_bindings')
-    .update({ is_active: false })
-    .eq('key_id', keyId);
-  if (updateError) throw serviceError('database_error', 'Could not reset HWID. Please try again.', 500);
-
-  const { error: logError } = await supabase.from('hwid_reset_logs').insert({
-    key_id: keyId,
-    owner_discord_id: owner,
-    old_install_id_hash: binding.install_id_hash || null,
-    reason: 'user_requested',
-  });
-  if (logError) {
-    await supabase
-      .from('device_bindings')
-      .update({ is_active: true })
-      .eq('key_id', keyId);
-    throw serviceError('database_error', 'HWID reset could not be completed safely.', 500);
-  }
-
-  try {
-    await recordSuccessfulPanelReset(owner, 1);
-  } catch (err) {
-    await supabase
-      .from('device_bindings')
-      .update({ is_active: true })
-      .eq('key_id', keyId);
-    await supabase.from('hwid_reset_logs').delete().eq('key_id', keyId).eq('owner_discord_id', owner);
-    if (err && err.code === 'panel_reset_limit_reached') throw err;
-    throw serviceError('database_error', 'HWID reset could not be completed safely.', 500);
-  }
-
-  return { status: 'reset', message: 'HWID Reset Successful. You Can Bind This Key On A New Device.' };
+// Reset HWID has been removed. One key binds to one device for its 48h lifetime;
+// to use a new device, generate a new key. This stub never mutates state.
+async function resetLicenseHwid() {
+  throw serviceError(
+    'feature_removed',
+    'Reset HWID has been removed. Generate a new key for a new device.',
+    410,
+  );
 }
 
 function downloadUserKeys(discordUserId, rows, username = '') {
@@ -899,11 +785,15 @@ async function countActiveKeysForLimit(discordUserId, siteUserId) {
 }
 
 async function canUserReceiveNewKey(discordUserId, siteUserId) {
-  const [activeCount, maxKeys] = await Promise.all([
-    countActiveKeysForLimit(discordUserId, siteUserId),
-    getEffectiveMaxKeys(discordUserId),
-  ]);
-  return { allowed: activeCount < maxKeys, activeCount, maxKeys };
+  // Max user/key-slot limit removed: generation is never blocked by how many
+  // keys already exist (HWID binding + 48h expiry protect ad revenue instead).
+  let activeCount = 0;
+  try {
+    activeCount = await countActiveKeysForLimit(discordUserId, siteUserId);
+  } catch {
+    activeCount = 0;
+  }
+  return { allowed: true, activeCount, maxKeys: Infinity };
 }
 
 function getWibDay(date = new Date()) {

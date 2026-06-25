@@ -15,8 +15,6 @@ Panel life-cycle
 
 Button custom IDs (use these as constants in your button handler):
     Generate Key is a URL button and has no custom_id.
-    BUTTON_RESET_HWID = "license_panel:reset_hwid"
-    BUTTON_REDEEM     = "license_panel:redeem"
     BUTTON_KEY_STATS  = "license_panel:key_stats"
     BUTTON_SELECT_VERSION = "license_panel:select_version"
 
@@ -52,10 +50,14 @@ def format_copy_license_keys_lines(keys: list[str]) -> str:
 # ── Button custom ID constants ─────────────────────────────────────────────────
 
 BUTTON_GENERATE   = "license_panel:generate"
-BUTTON_RESET_HWID = "license_panel:reset_hwid"
-BUTTON_REDEEM     = "license_panel:redeem"
 BUTTON_KEY_STATS  = "license_panel:key_stats"
 BUTTON_SELECT_VERSION = "license_panel:select_version"
+
+# Legacy custom_ids for features removed during the license-system rebuild.
+# Old already-posted panel messages may still carry these; the bot registers a
+# RemovedFeatureView so clicks respond gracefully instead of "interaction failed".
+REMOVED_BUTTON_RESET_HWID = "license_panel:reset_hwid"
+REMOVED_BUTTON_REDEEM     = "license_panel:redeem"
 
 PANEL_LOGO_URL = "https://aio.deng.my.id/public/img/deng-logo.png"
 
@@ -99,10 +101,6 @@ def build_panel_embed() -> dict[str, Any]:
             "Select an option below to get started:\n\n"
             "> \U0001f511 Generate Key\n"
             "> Take you to our portal to generate the keys.\n\n"
-            "> \u267b\ufe0f Reset HWID\n"
-            "> Unbind your keys from the current device, 5-minute cooldown.\n\n"
-            "> \U0001f39f\ufe0f Redeem Key\n"
-            "> Make an existing key your own.\n\n"
             "> \U0001f4ca Key Stats\n"
             "> View status and export keys.\n\n"
             "> \U0001f4e6 Select Version\n"
@@ -114,7 +112,7 @@ def build_panel_embed() -> dict[str, Any]:
 
 
 def build_panel_buttons() -> list[dict[str, Any]]:
-    """Return an action-row payload with the 4 panel buttons.
+    """Return an action-row payload with the panel buttons.
 
     Structure mirrors the Discord components v2 JSON shape::
 
@@ -141,22 +139,6 @@ def build_panel_buttons() -> list[dict[str, Any]]:
                     "label": "Generate Key",
                     "url": "https://aio.deng.my.id/license",
                     "emoji": {"name": "\U0001f511"},
-                },
-                {
-                    "type": 2,
-                    "style": 4,
-                    "label": "Reset HWID",
-                    "custom_id": BUTTON_RESET_HWID,
-                    "emoji": {"name": "\u267b\ufe0f"},
-                    "disabled": False,
-                },
-                {
-                    "type": 2,
-                    "style": 3,
-                    "label": "Redeem Key",
-                    "custom_id": BUTTON_REDEEM,
-                    "emoji": {"name": "\U0001f39f\ufe0f"},
-                    "disabled": False,
                 },
                 {
                     "type": 2,
@@ -203,46 +185,6 @@ def build_generate_success_response(full_key: str) -> dict[str, Any]:
     }
 
 
-def build_generate_limit_response(
-    max_keys: int, *, active_count: int | None = None
-) -> dict[str, Any]:
-    """Ephemeral embed when a user has reached their key limit."""
-    from agent.license_store import KEY_SLOT_LIMIT_MESSAGE
-
-    if active_count is not None:
-        count_line = f"Active Keys: **{active_count} / {max_keys}**\n\n"
-    else:
-        count_line = ""
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u274c Key Limit Reached",
-            "color": 0xE74C3C,
-            "description": count_line + KEY_SLOT_LIMIT_MESSAGE,
-        },
-    }
-
-
-def build_redeem_limit_response(
-    max_keys: int, *, active_count: int | None = None
-) -> dict[str, Any]:
-    """Ephemeral embed when a user tries to redeem a key but is at their limit."""
-    from agent.license_store import KEY_SLOT_LIMIT_MESSAGE
-
-    if active_count is not None:
-        count_line = f"Active Keys: **{active_count} / {max_keys}**\n\n"
-    else:
-        count_line = ""
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u274c Key Limit Reached",
-            "color": 0xE74C3C,
-            "description": count_line + KEY_SLOT_LIMIT_MESSAGE,
-        },
-    }
-
-
 def build_generate_cooldown_response(remaining_seconds: int) -> dict[str, Any]:
     """Ephemeral embed when a user tries to generate a key too soon."""
     return {
@@ -255,74 +197,6 @@ def build_generate_cooldown_response(remaining_seconds: int) -> dict[str, Any]:
                 "Key generation has a 1-minute cooldown after the first key."
             ),
             "footer": {"text": "DENG Tool: Rejoin"},
-        },
-    }
-
-
-def build_reset_success_response() -> dict[str, Any]:
-    """Ephemeral embed after a successful HWID reset."""
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u267b\ufe0f HWID Reset",
-            "color": 0x27AE60,
-            "description": (
-                "Your device binding has been cleared.\n"
-                "You can now start the tool on a different device.\n\n"
-                "The new device will be bound automatically on first use."
-            ),
-        },
-    }
-
-
-def build_reset_limit_response(resets_used: int, max_resets: int) -> dict[str, Any]:
-    """Legacy helper — daily reset limits are no longer enforced."""
-    return build_reset_active_warning_response(300)
-
-
-def build_reset_active_warning_response(elapsed_seconds: int) -> dict[str, Any]:
-    """Ephemeral embed when the key was recently active."""
-    minutes = elapsed_seconds // 60
-    seconds = elapsed_seconds % 60
-    elapsed_str = f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u26a0\ufe0f Key Recently Active",
-            "color": 0xF39C12,
-            "description": (
-                f"Your key was last seen **{elapsed_str} ago**.\n"
-                "Stop the tool first and wait at least **5 minutes** before resetting HWID to avoid data loss."
-            ),
-        },
-    }
-
-
-def build_redeem_success_response(display_key: str) -> dict[str, Any]:
-    """Ephemeral response after successfully redeeming an existing key."""
-    return {
-        "ephemeral": True,
-        "content": format_copy_license_key_content(display_key),
-        "embed": {
-            "title": "\U0001f39f\ufe0f Key Redeemed",
-            "color": 0x27AE60,
-            "description": (
-                "This key is now linked to your Discord account.\n"
-                "Paste it into **DENG Tool: Rejoin**.\n"
-                "Run the tool once to bind this device — that happens on first successful verification."
-            ),
-        },
-    }
-
-
-def build_redeem_error_response(reason: str) -> dict[str, Any]:
-    """Ephemeral embed when key redemption fails."""
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u274c Redemption Failed",
-            "color": 0xE74C3C,
-            "description": reason,
         },
     }
 
@@ -359,8 +233,7 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
                 key_block = (
                     "**Full key is not recoverable for copying from the server.** "
                     "If this is an older key, export storage may not have been enabled when it was created. "
-                    f"Reference only (not a complete key): **{ref}**\n"
-                    "Redeem the same key again if you still have the full key text."
+                    f"Reference only (not a complete key): **{ref}**"
                 )
             lines.append(
                 f"{status_icon} {key_block}\n"
@@ -374,58 +247,11 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
             "title": "\U0001f4cb Your License Keys",
             "color": 0x2F80ED,
             "description": description,
-            "footer": {"text": "Use Reset HWID to unbind a device when needed."},
+            "footer": {"text": "DENG Tool: Rejoin"},
         },
     }
     if content:
         out["content"] = content
-    return out
-
-
-def build_reset_no_binding_response() -> dict[str, Any]:
-    """Ephemeral embed when Reset HWID is attempted but no device is bound."""
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u26a0\ufe0f No Device Bound",
-            "color": 0xF39C12,
-            "description": (
-                "No device is currently bound to your key.\n"
-                "Start the tool once on your device to activate the binding, "
-                "then you can reset it here if needed."
-            ),
-        },
-    }
-
-
-def build_redeem_already_owned_response(
-    message: str | None = None,
-    *,
-    export_backfilled: bool = False,
-    copyable_key: str | None = None,
-) -> dict[str, Any]:
-    """Ephemeral embed when a user tries to redeem their own already-attached key."""
-    if copyable_key:
-        desc = "This key is already attached to your account."
-        if export_backfilled:
-            desc += "\n\n**Full key export has been enabled** for this key in the database."
-    elif export_backfilled:
-        desc = (
-            (message or "This key is already attached to your account.")
-            + "\n\n**Full key export has been enabled** for this key."
-        )
-    else:
-        desc = message or "This key is already attached to your account."
-    out: dict[str, Any] = {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u2139\ufe0f Key Already Attached",
-            "color": 0x2F80ED,
-            "description": desc,
-        },
-    }
-    if copyable_key:
-        out["content"] = format_copy_license_key_content(copyable_key)
     return out
 
 
@@ -437,128 +263,6 @@ def build_not_owner_response() -> dict[str, Any]:
             "title": "\u274c Owner Only",
             "color": 0xE74C3C,
             "description": "\u274c This command is owner-only.",
-        },
-    }
-
-
-def build_reset_selector_embed(keys_with_state: list[dict]) -> dict[str, Any]:
-    """Ephemeral embed shown when the user opens the HWID reset key selector.
-
-    keys_with_state: list of dicts from store.list_user_keys_with_binding_state().
-    Legend (above the list): 🟢 no device linked, 🟡 bound to a device.
-    Each row is numbered; full key in backticks when recoverable, else masked reference.
-    """
-    legend = "\U0001f7e2 No device linked\n\U0001f7e1 Bound to a device"
-    lines: list[str] = []
-    for i, k in enumerate(keys_with_state, start=1):
-        bound = bool(k.get("active_binding"))
-        # 🟢 = no device linked, 🟡 = bound to a device
-        icon = "\U0001f7e1" if bound else "\U0001f7e2"
-        fk = k.get("full_key_plaintext")
-        mk = k.get("masked_key", "???")
-        if fk:
-            key_disp = f"`{fk}`"
-        else:
-            key_disp = f"**{mk}** (reference only)"
-        if bound:
-            device_name = (k.get("device_model") or k.get("device_label") or "").strip()
-            suffix = f"Bound to {device_name}" if device_name else "Bound to a device"
-        else:
-            suffix = "No device linked"
-        lines.append(f"{i}. {icon} {key_disp} — {suffix}")
-    key_list = "\n".join(lines)
-    description = (
-        "Select which key to reset from the dropdown below, "
-        "then click **Confirm Reset**.\n\n"
-        f"{legend}\n\n"
-        f"{key_list}"
-    )
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u267b\ufe0f Reset HWID \u2014 Select Key",
-            "color": 0x2F80ED,
-            "description": description,
-            "footer": {"text": "DENG Tool \u2022 Wait 5 minutes after last session before resetting"},
-        },
-    }
-
-
-def build_reset_no_keys_response() -> dict[str, Any]:
-    """Ephemeral embed when the user has no (non-revoked) license keys to reset."""
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u274c No Keys Found",
-            "color": 0xE74C3C,
-            "description": (
-                "You have no license keys to reset.\n"
-                "Use **Generate Key** to create one."
-            ),
-        },
-    }
-
-
-def build_reset_mixed_summary_embed(
-    results: list[dict],
-    *,
-    reset_uses_today: int | None = None,
-    max_panel: int | None = None,
-) -> dict[str, Any]:
-    """Ephemeral embed listing per-key HWID reset outcomes.
-
-    Each result dict: {display_key (str), success (bool), message (str)}.
-    Optionally shows today's panel usage when reset_uses_today and max_panel are provided.
-    """
-    lines: list[str] = []
-    for r in results:
-        icon = "\u2705" if r.get("success") else "\u274c"  # ✅ / ❌
-        dk = r.get("display_key") or r.get("masked_key", "???")
-        lines.append(f"{icon} `{dk}` \u2014 {r.get('message', '')}")
-    description = "\n".join(lines) if lines else "No keys were processed."
-    if reset_uses_today is not None and max_panel is not None:
-        description += (
-            f"\n\n**Reset Uses Today:** {reset_uses_today} / {max_panel}\n"
-            "**Resets again at:** 12:00 AM WIB"
-        )
-    all_ok = bool(results) and all(r.get("success") for r in results)
-    none_ok = bool(results) and not any(r.get("success") for r in results)
-    color = 0x27AE60 if all_ok else (0xE74C3C if none_ok else 0xF39C12)
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u267b\ufe0f HWID Reset Results",
-            "color": color,
-            "description": description,
-        },
-    }
-
-
-def build_panel_limit_blocked_response(
-    max_panel: int, *, used_count: int | None = None
-) -> dict[str, Any]:
-    """Ephemeral embed when the user has reached their daily Reset HWID panel limit."""
-    from agent.license_store import HWID_RESET_LIMIT_MESSAGE
-
-    if max_panel == 0:
-        title = "\u26d4 Reset HWID Disabled"
-        description = (
-            "Your Reset HWID limit is **0 / day**.\n"
-            "Ask an admin if you need access."
-        )
-    else:
-        title = "\U0001f6ab Daily Reset Limit Reached"
-        count = used_count if used_count is not None else max_panel
-        description = (
-            f"Reset Uses: **{count} / {max_panel}**\n\n"
-            + HWID_RESET_LIMIT_MESSAGE
-        )
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": title,
-            "color": 0xE74C3C,
-            "description": description,
         },
     }
 

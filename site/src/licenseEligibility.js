@@ -7,9 +7,8 @@ const challenge = require('./challenge');
 const licenseService = require('./licenseService');
 
 const BLOCK_MESSAGES = {
-  active_unredeemed_key: 'You already have an unused key. Copy or redeem it before generating another, or wait until it expires.',
+  active_unredeemed_key: 'You already have an active key. Copy it and use it in DENG Tool Rejoin, or wait until it expires.',
   cooldown_active: 'Please wait before generating another key.',
-  max_key_limit: licenseService.KEY_SLOT_LIMIT_MESSAGE,
   auth_required: 'Please login with Discord first.',
   ad_completion_required: 'Complete the ad step before a key can be generated.',
   provider_attempt_invalid: 'Please start key generation again.',
@@ -100,10 +99,6 @@ async function getLicenseGenerationEligibility({
         remainingSeconds = Math.max(0, Math.ceil((expMs - Date.now()) / 1000));
       }
     }
-  } else if (!limitCheck.allowed) {
-    canGenerate = false;
-    blockReason = 'max_key_limit';
-    message = BLOCK_MESSAGES.max_key_limit;
   } else if (!cooldown.allowed) {
     canGenerate = false;
     blockReason = 'cooldown_active';

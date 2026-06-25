@@ -8,7 +8,7 @@
     <h1 class="key-result-title"><%= recoveredExisting ? 'Your Unused Key' : 'Your Key Is Ready' %></h1>
     <p class="key-result-desc">
       <% if (recoveredExisting) { %>
-        You already have an unused key. Copy or redeem this key before generating another one.
+        You already have an unused key. Copy this key before generating another one.
       <% } else { %>
         Copy the key below. The key is server-rendered for your authorized session and is not stored in the URL.
       <% } %>
@@ -22,9 +22,11 @@
     </div>
 
     <div class="instruction-card">
-      <p>Redeem this key inside the Rejoin module to activate your license.</p>
-      <p>This key expires if not redeemed within 24 hours.</p>
-      <p>Open Rejoin, paste this license key, then continue setup.</p>
+      <p>This key works directly in DENG Tool Rejoin. It binds to one device and expires 48 hours after generation.</p>
+      <% if (typeof expires_at_formatted !== 'undefined' && expires_at_formatted && expires_at_formatted !== 'None') { %>
+        <p>Expires: <%= expires_at_formatted %></p>
+      <% } %>
+      <p>Open DENG Tool Rejoin, paste this license key, then continue setup.</p>
     </div>
 
     <div class="key-actions">

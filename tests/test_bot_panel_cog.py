@@ -4,8 +4,8 @@ Uses unittest + mocked discord.py interactions so no live token is required.
 Tests cover:
   - _is_owner / _owner_ids parsing
   - _tester_ids / _internal_version_pick_enabled (Select Version)
-  - PanelView button handler logic (generate, reset_hwid, redeem, select_version)
-  - RedeemModal submission
+  - PanelView button handler logic (generate, key_stats, select_version)
+  - RemovedFeatureView graceful handling of legacy reset_hwid/redeem custom_ids
   - LicensePanelCog command helpers (owner denied, panel config persistence)
   - Duplicate panel post prevention
   - restore_persistent_views
@@ -31,20 +31,13 @@ from agent import rejoin_versions as rv
 from agent.rejoin_versions import NO_PUBLIC_VERSIONS_MESSAGE, RejoinVersionInfo
 from agent.license_store import (
     LocalJsonLicenseStore,
-    MAX_HWID_RESETS_PER_24H,
-    ActiveKeyWarning,
-    ResetLimitError,
-    UserLimitError,
 )
 from bot.cog_license_panel import (
-    ConfirmResetButton,
     KeyStatsDownloadButton,
     KeyStatsNextButton,
     LicensePanelCog,
     PanelView,
-    RedeemModal,
-    ResetHwidSelect,
-    ResetHwidSelectView,
+    RemovedFeatureView,
     VersionPickSelect,
     VersionPickView,
     _build_key_stats_ephemeral_parts,
@@ -141,34 +134,41 @@ class TestOwnerIds(unittest.TestCase):
             self.assertFalse(_is_owner(user))
 
 
-class TestPanelViewFiveButtons(unittest.TestCase):
-    """Panel exposes five persistent controls."""
+class TestPanelViewThreeButtons(unittest.TestCase):
+    """Panel exposes three persistent controls (Reset HWID + Redeem removed)."""
 
-    def test_panel_view_has_five_children(self) -> None:
+    def test_panel_view_has_three_children(self) -> None:
         with TemporaryDirectory() as tmp:
             store = _make_store(tmp)
             view = PanelView(store)
-            self.assertEqual(len(view.children), 5)
+            self.assertEqual(len(view.children), 3)
             self.assertEqual(
                 [getattr(child, "label", "") for child in view.children],
-                ["Generate Key", "Reset HWID", "Redeem Key", "Key Stats", "Select Version"],
+                ["Generate Key", "Key Stats", "Select Version"],
             )
+
+    def test_panel_view_has_no_reset_or_redeem_buttons(self) -> None:
+        with TemporaryDirectory() as tmp:
+            view = PanelView(_make_store(tmp))
+            custom_ids = {getattr(c, "custom_id", None) for c in view.children}
+            self.assertNotIn("license_panel:reset_hwid", custom_ids)
+            self.assertNotIn("license_panel:redeem", custom_ids)
 
     def test_button_payload_custom_ids_are_unchanged(self) -> None:
         buttons = build_panel_buttons()[0]["components"]
         self.assertEqual([btn["label"] for btn in buttons], [
             "Generate Key",
-            "Reset HWID",
-            "Redeem Key",
             "Key Stats",
             "Select Version",
         ])
-        self.assertEqual([buttons[i]["custom_id"] for i in range(1, 5)], [
-            "license_panel:reset_hwid",
-            "license_panel:redeem",
+        self.assertEqual([buttons[i]["custom_id"] for i in range(1, 3)], [
             "license_panel:key_stats",
             "license_panel:select_version",
         ])
+        # Removed features must not appear in newly posted/refreshed panels.
+        all_ids = {btn.get("custom_id") for btn in buttons}
+        self.assertNotIn("license_panel:reset_hwid", all_ids)
+        self.assertNotIn("license_panel:redeem", all_ids)
 
     def test_panel_view_button_order_style_and_callbacks(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -176,18 +176,13 @@ class TestPanelViewFiveButtons(unittest.TestCase):
             buttons = view.children
             self.assertEqual([getattr(btn, "label", "") for btn in buttons], [
                 "Generate Key",
-                "Reset HWID",
-                "Redeem Key",
                 "Key Stats",
                 "Select Version",
             ])
             self.assertEqual(getattr(buttons[0], "url", None), "https://tool.deng.my.id")
             self.assertIsNone(getattr(buttons[0], "custom_id", None))
-            self.assertEqual(str(getattr(buttons[1], "style", "")), "ButtonStyle.danger")
-            self.assertEqual(getattr(buttons[1], "custom_id", None), "license_panel:reset_hwid")
-            self.assertEqual(getattr(buttons[2], "custom_id", None), "license_panel:redeem")
-            self.assertEqual(getattr(buttons[3], "custom_id", None), "license_panel:key_stats")
-            self.assertEqual(getattr(buttons[4], "custom_id", None), "license_panel:select_version")
+            self.assertEqual(getattr(buttons[1], "custom_id", None), "license_panel:key_stats")
+            self.assertEqual(getattr(buttons[2], "custom_id", None), "license_panel:select_version")
 
     def test_public_panel_has_no_timestamp_and_website_logo(self) -> None:
         embed = build_panel_embed()
@@ -226,156 +221,43 @@ class TestPanelViewGenerate(unittest.TestCase):
             self.assertEqual(getattr(generate, "url", None), "https://tool.deng.my.id")
 
 
-# ── PanelView — Reset HWID ────────────────────────────────────────────────────
+# ── PanelView — removed features (Reset HWID / Redeem) ─────────────────────────
 
-class TestPanelViewResetHWID(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self._tmp = TemporaryDirectory()
-        self.store = _make_store(self._tmp.name)
+class TestRemovedFeatureView(unittest.IsolatedAsyncioTestCase):
+    """Old panel buttons (Reset HWID, Redeem) are gone from new panels, and the
+    legacy custom_ids respond gracefully via RemovedFeatureView."""
 
-    async def asyncTearDown(self) -> None:
-        self._tmp.cleanup()
+    def test_panel_view_has_no_reset_or_redeem_handlers(self) -> None:
+        with TemporaryDirectory() as tmp:
+            view = PanelView(_make_store(tmp))
+            self.assertFalse(hasattr(view, "btn_reset_hwid"))
+            self.assertFalse(hasattr(view, "btn_redeem"))
 
-    async def test_reset_no_keys_gives_not_found(self) -> None:
-        """No keys → send_message (ephemeral, not followup) with 'No Keys' embed."""
-        inter = _fake_interaction(user=_fake_user(uid=77))
-        view = PanelView(self.store)
-        await view.btn_reset_hwid.callback(inter)
-        inter.response.send_message.assert_called_once()
-        _, kwargs = inter.response.send_message.call_args
-        self.assertIn("No Keys", kwargs["embed"].title)
-        self.assertTrue(kwargs.get("ephemeral"))
+    def test_removed_feature_view_registers_legacy_custom_ids(self) -> None:
+        view = RemovedFeatureView()
+        custom_ids = {getattr(c, "custom_id", None) for c in view.children}
+        self.assertIn("license_panel:reset_hwid", custom_ids)
+        self.assertIn("license_panel:redeem", custom_ids)
 
-    async def test_reset_opens_selector_when_key_exists(self) -> None:
-        """Having an unbound key → selector view is opened via send_message."""
-        uid = 88
-        inter_reset = _fake_interaction(user=_fake_user(uid=uid))
-        view = PanelView(self.store)
-        self.store.get_or_create_user(str(uid))
-        self.store.create_key_for_user(str(uid))
-        await view.btn_reset_hwid.callback(inter_reset)
-        inter_reset.response.send_message.assert_called_once()
-        _, kwargs = inter_reset.response.send_message.call_args
-        # Must send a ResetHwidSelectView, not a plain embed
-        self.assertIsInstance(kwargs.get("view"), ResetHwidSelectView)
-        self.assertTrue(kwargs.get("ephemeral"))
-
-    async def test_confirm_reset_success_with_bound_device(self) -> None:
-        """ConfirmResetButton with a resettable key emits 'HWID Reset Results' embed."""
-        uid_str = "880"
-        self.store.get_or_create_user(uid_str, "TestUser")
-        raw_key = self.store.create_key_for_user(uid_str)
-        from agent.license import hash_license_key, normalize_license_key
-        key_id = hash_license_key(normalize_license_key(raw_key))
-        # Use a key state dict that says can_reset=True (binding exists, old heartbeat)
-        key_state = {
-            "key_id": key_id,
-            "masked_key": "DENG-????...????",
-            "status": "active",
-            "active_binding": True,
-            "device_model": "Test Device",
-            "device_label": "",
-            "last_seen_at": "2000-01-01T00:00:00+00:00",
-            "reset_count_24h": 0,
-            "can_reset": True,
-            "reason_if_not_resettable": None,
-        }
-        keys_with_state = [key_state]
-        sel_view = ResetHwidSelectView(self.store, uid_str, keys_with_state)
-        select = next(c for c in sel_view.children if isinstance(c, ResetHwidSelect))
-        select._values = [key_id]  # values is a read-only property backed by _values
-        confirm_btn = next(c for c in sel_view.children if isinstance(c, ConfirmResetButton))
-        inter = _fake_interaction(user=_fake_user(uid=880))
-        # Patch reset_hwid to succeed without needing a real binding in the store
-        with patch.object(self.store, "reset_hwid", return_value=None):
-            await confirm_btn.callback(inter)
-        inter.response.edit_message.assert_called_once()
-        _, kwargs = inter.response.edit_message.call_args
-        self.assertIn("HWID", kwargs["embed"].title)
-
-    async def test_confirm_reset_active_warning(self) -> None:
-        """ConfirmResetButton with can_reset=False (recently active) shows reason."""
-        uid_str = "99"
-        self.store.get_or_create_user(uid_str, "TestUser")
-        raw_key = self.store.create_key_for_user(uid_str)
-        from agent.license import hash_license_key, normalize_license_key
-        key_id = hash_license_key(normalize_license_key(raw_key))
-        key_state = {
-            "key_id": key_id,
-            "masked_key": "DENG-????...????",
-            "status": "active",
-            "active_binding": True,
-            "device_model": "Phone",
-            "device_label": "",
-            "last_seen_at": None,
-            "reset_count_24h": 0,
-            "can_reset": False,
-            "reason_if_not_resettable": "Key active 1m 0s ago — wait 5 min",
-        }
-        sel_view = ResetHwidSelectView(self.store, uid_str, [key_state])
-        select = next(c for c in sel_view.children if isinstance(c, ResetHwidSelect))
-        select._values = [key_id]  # values is a read-only property backed by _values
-        confirm_btn = next(c for c in sel_view.children if isinstance(c, ConfirmResetButton))
-        inter = _fake_interaction(user=_fake_user(uid=99))
-        await confirm_btn.callback(inter)
-        inter.response.edit_message.assert_called_once()
-        _, kwargs = inter.response.edit_message.call_args
-        embed = kwargs["embed"]
-        self.assertIn("HWID", embed.title)
-        # Reason text should appear in description
-        self.assertIn("wait 5 min", embed.description)
-
-    async def test_confirm_reset_shows_blocking_reason(self) -> None:
-        """ConfirmResetButton with can_reset=False shows the provided reason."""
-        uid_str = "101"
-        self.store.get_or_create_user(uid_str, "TestUser")
-        raw_key = self.store.create_key_for_user(uid_str)
-        from agent.license import hash_license_key, normalize_license_key
-        key_id = hash_license_key(normalize_license_key(raw_key))
-        reason = "No device bound — start the tool first"
-        key_state = {
-            "key_id": key_id,
-            "masked_key": "DENG-????...????",
-            "status": "active",
-            "active_binding": False,
-            "device_model": "",
-            "device_label": "",
-            "last_seen_at": None,
-            "reset_count_24h": 0,
-            "can_reset": False,
-            "reason_if_not_resettable": reason,
-        }
-        sel_view = ResetHwidSelectView(self.store, uid_str, [key_state])
-        select = next(c for c in sel_view.children if isinstance(c, ResetHwidSelect))
-        select._values = [key_id]
-        confirm_btn = next(c for c in sel_view.children if isinstance(c, ConfirmResetButton))
-        inter = _fake_interaction(user=_fake_user(uid=101))
-        await confirm_btn.callback(inter)
-        inter.response.edit_message.assert_called_once()
-        _, kwargs = inter.response.edit_message.call_args
-        embed = kwargs["embed"]
-        self.assertIn("HWID", embed.title)
-        self.assertIn("start the tool first", embed.description)
-        self.assertNotIn("Reset limit", embed.description)
-
-
-# ── PanelView — Redeem Key ────────────────────────────────────────────────────
-
-class TestPanelViewRedeem(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self._tmp = TemporaryDirectory()
-        self.store = _make_store(self._tmp.name)
-
-    async def asyncTearDown(self) -> None:
-        self._tmp.cleanup()
-
-    async def test_redeem_opens_modal(self) -> None:
+    async def test_removed_reset_hwid_replies_feature_removed(self) -> None:
+        view = RemovedFeatureView()
         inter = _fake_interaction()
-        view = PanelView(self.store)
-        await view.btn_redeem.callback(inter)
-        inter.response.send_modal.assert_called_once()
-        modal_arg = inter.response.send_modal.call_args[0][0]
-        self.assertIsInstance(modal_arg, RedeemModal)
+        await view.removed_reset_hwid.callback(inter)
+        inter.response.send_message.assert_called_once()
+        call = inter.response.send_message.call_args
+        msg = (call.args[0] if call.args else "") or call.kwargs.get("content") or ""
+        self.assertIn("has been removed", msg)
+        self.assertTrue(call.kwargs.get("ephemeral"))
+
+    async def test_removed_redeem_replies_feature_removed(self) -> None:
+        view = RemovedFeatureView()
+        inter = _fake_interaction()
+        await view.removed_redeem.callback(inter)
+        inter.response.send_message.assert_called_once()
+        call = inter.response.send_message.call_args
+        msg = (call.args[0] if call.args else "") or call.kwargs.get("content") or ""
+        self.assertIn("has been removed", msg)
+        self.assertTrue(call.kwargs.get("ephemeral"))
 
 
 class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
@@ -496,70 +378,6 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(f"my_keys_{uid}", dk["file"].filename)
 
 
-# ── RedeemModal ───────────────────────────────────────────────────────────────
-
-class TestRedeemModal(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self._tmp = TemporaryDirectory()
-        self.store = _make_store(self._tmp.name)
-
-    async def asyncTearDown(self) -> None:
-        self._tmp.cleanup()
-
-    async def test_redeem_unowned_key_succeeds(self) -> None:
-        # Create a key owned by user A
-        uid_a = "111"
-        self.store.get_or_create_user(uid_a)
-        full_key = self.store.create_key_for_user(uid_a)
-        # Revoke ownership so it's unowned
-        db_path = Path(self._tmp.name) / "license_store.json"
-        import json
-        raw = json.loads(db_path.read_text())
-        for k in raw["keys"].values():
-            k["owner_discord_id"] = None
-        db_path.write_text(json.dumps(raw, indent=2))
-
-        # Redeem as user B
-        uid_b = "222"
-        modal = RedeemModal(self.store)
-        modal.key_input._value = full_key  # type: ignore[attr-defined]  # inject value
-
-        inter = _fake_interaction(user=_fake_user(uid=int(uid_b)))
-        await modal.on_submit(inter)
-        inter.response.defer.assert_called_once()
-        _, kwargs = inter.followup.send.call_args
-        embed = kwargs["embed"]
-        self.assertIn("Redeemed", embed.title)
-        nk = normalize_license_key(full_key)
-        self.assertIn(nk, kwargs.get("content") or "")
-        self.assertNotIn("...", kwargs.get("content") or "")
-
-    async def test_redeem_invalid_key_shows_error(self) -> None:
-        modal = RedeemModal(self.store)
-        modal.key_input._value = "DENG-FAKE-FAKE-NOPE-NOPE"  # type: ignore[attr-defined]
-
-        inter = _fake_interaction(user=_fake_user(uid=333))
-        await modal.on_submit(inter)
-        _, kwargs = inter.followup.send.call_args
-        embed = kwargs["embed"]
-        self.assertIn("Failed", embed.title)
-
-    async def test_redeem_already_owned_key_shows_ownership_error(self) -> None:
-        uid_a = "444"
-        self.store.get_or_create_user(uid_a)
-        full_key = self.store.create_key_for_user(uid_a)
-
-        uid_b = "555"
-        modal = RedeemModal(self.store)
-        modal.key_input._value = full_key  # type: ignore[attr-defined]
-
-        inter = _fake_interaction(user=_fake_user(uid=int(uid_b)))
-        await modal.on_submit(inter)
-        _, kwargs = inter.followup.send.call_args
-        embed = kwargs["embed"]
-        self.assertIn("Failed", embed.title)
-
-
 # ── LicensePanelCog helpers ───────────────────────────────────────────────────
 
 class TestCogOwnerDenied(unittest.IsolatedAsyncioTestCase):
@@ -636,7 +454,11 @@ class TestRestorePersistentViews(unittest.IsolatedAsyncioTestCase):
         cog = LicensePanelCog(self.bot, self.store)
         await cog.restore_persistent_views()
 
-        self.assertEqual(self.bot.add_view.call_count, call_count_before)
+        # restore registers exactly one global RemovedFeatureView (legacy custom_ids)
+        # and nothing per-guild because this guild has no panel config.
+        self.assertEqual(self.bot.add_view.call_count, call_count_before + 1)
+        registered = [c.args[0] for c in self.bot.add_view.call_args_list]
+        self.assertTrue(any(isinstance(v, RemovedFeatureView) for v in registered))
 
 
 # ── Security: sensitive data not in responses ────────────────────────────────
@@ -648,29 +470,6 @@ class TestSecurity(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self) -> None:
         self._tmp.cleanup()
-
-    async def test_redeem_success_embed_contains_full_key(self) -> None:
-        uid = "660"
-        self.store.get_or_create_user(uid)
-        full_key = self.store.create_key_for_user(uid)
-
-        # Reset ownership so another user can redeem
-        import json
-        db_path = Path(self._tmp.name) / "license_store.json"
-        raw = json.loads(db_path.read_text())
-        for k in raw["keys"].values():
-            k["owner_discord_id"] = None
-        db_path.write_text(json.dumps(raw, indent=2))
-
-        modal = RedeemModal(self.store)
-        modal.key_input._value = full_key  # type: ignore[attr-defined]
-        inter = _fake_interaction(user=_fake_user(uid=661))
-        await modal.on_submit(inter)
-
-        _, kwargs = inter.followup.send.call_args
-        content = kwargs.get("content") or ""
-        self.assertIn(normalize_license_key(full_key), content)
-        self.assertNotIn("...", content)
 
     async def test_generate_key_is_not_returned_by_discord_button(self) -> None:
         view = PanelView(self.store)

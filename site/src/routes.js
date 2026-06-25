@@ -48,8 +48,8 @@ const SAFE_MESSAGES = {
   NO_PROVIDER_CONFIGURED: 'No ad provider is configured yet.',
   AUTH_REQUIRED: 'Please login with Discord first.',
   COOLDOWN_ACTIVE: 'Please wait before generating another key.',
-  KEY_LIMIT_REACHED: 'Key limit reached for your account. Ask an admin if you need a higher limit.',
-  EXISTING_UNUSED_KEY: 'You already have an unused key. Copy or redeem this key before generating another.',
+  KEY_LIMIT_REACHED: 'Key generation is temporarily unavailable. Please try again.',
+  EXISTING_UNUSED_KEY: 'You already have an active key. Copy this key and use it in DENG Tool Rejoin before generating another.',
   TOO_MANY_ATTEMPTS: 'Too many key generation attempts. Please wait before trying again.',
   CHALLENGE_TABLE_MISSING: 'Key generation database is not ready yet.',
   DB_FOREIGN_KEY_FAILED: 'Could not prepare your license account. Please try again.',
@@ -1739,61 +1739,22 @@ router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res
   }
 });
 
-router.get('/api/license/resettable', requireLicenseApiLogin, repairSiteUser, licenseActionLimiter, async (req, res) => {
-  try {
-    const owner = discordOwnerId(req);
-    if (!owner) return res.status(401).json({ error: 'auth_required', message: messageFor('AUTH_REQUIRED') });
-    const rows = await licenseService.getActiveUserLicenses(owner, { limit: 200 });
-    res.json({
-      keys: rows.map((row) => ({
-        id: row.id,
-        key: fullKeyRow(row),
-        status: friendlyStatus(row),
-        lifecycle_status: row.lifecycle_status,
-        display_status: row.display_status,
-        is_unredeemed: row.is_unredeemed,
-        is_redeemed: row.is_redeemed,
-        is_unbound: row.is_unbound,
-        is_bound: row.is_bound,
-        is_expired: row.is_expired,
-        is_revoked: row.is_revoked,
-        blocks_generation: row.blocks_generation,
-        device_status: row.active_binding ? 'Bound To A Device' : 'No Device Linked',
-        device_label: row.device_display || null,
-        can_reset: Boolean(row.active_binding),
-        reason: row.active_binding ? null : 'No Resettable Keys Found.',
-      })),
-    });
-  } catch (err) {
-    handleLicenseApiError(res, err);
-  }
+// Reset HWID and Redeem have been removed from the product. The endpoints are
+// retained ONLY to answer 410 Gone so old clients/links do not 404 — they must
+// never mutate license/binding state.
+const REMOVED_FEATURE_GONE = Object.freeze({
+  error: 'feature_removed',
+  message: 'This feature has been removed. Generate a new key from ads; each key works on one device and expires after 48 hours.',
 });
 
-router.post('/api/license/reset-hwid', requireLicenseApiLogin, repairSiteUser, licenseActionLimiter, async (req, res) => {
-  if (!verifyCsrf(req)) return res.status(403).json({ error: 'invalid_csrf', message: 'Invalid request token.' });
-  try {
-    const owner = discordOwnerId(req);
-    if (!owner) return res.status(401).json({ error: 'auth_required', message: messageFor('AUTH_REQUIRED') });
-    const result = await licenseService.resetLicenseHwid(owner, req.body?.key_id || req.body?.key || '');
-    const history = await licenseService.getActiveUserLicenses(owner, { limit: 200 });
-    res.json({ ...result, history_count: history.length });
-  } catch (err) {
-    handleLicenseApiError(res, err, 'reset_hwid_failed');
-  }
-});
+function removedFeatureHandler(_req, res) {
+  res.set('Cache-Control', 'no-store');
+  return res.status(410).json(REMOVED_FEATURE_GONE);
+}
 
-router.post('/api/license/redeem', requireLicenseApiLogin, repairSiteUser, licenseActionLimiter, async (req, res) => {
-  if (!verifyCsrf(req)) return res.status(403).json({ error: 'invalid_csrf', message: 'Invalid request token.' });
-  try {
-    const owner = discordOwnerId(req);
-    if (!owner) return res.status(401).json({ error: 'auth_required', message: messageFor('AUTH_REQUIRED') });
-    const result = await licenseService.redeemLicenseKey(owner, req.body?.key || '');
-    const history = await licenseService.getActiveUserLicenses(owner, { limit: 200 });
-    res.json({ ...result, history_count: history.length });
-  } catch (err) {
-    handleLicenseApiError(res, err, 'redeem_key_failed');
-  }
-});
+router.get('/api/license/resettable', removedFeatureHandler);
+router.post('/api/license/reset-hwid', removedFeatureHandler);
+router.post('/api/license/redeem', removedFeatureHandler);
 
 router.get('/api/license/download', requireLicenseDownloadLogin, repairSiteUser, licenseActionLimiter, async (req, res) => {
   try {

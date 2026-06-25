@@ -22,7 +22,7 @@ from agent.license import (
     check_remote_license_status,
 )
 from agent.key_stats_format import build_key_stats_embed_dict
-from agent.license_panel import build_generate_success_response, build_redeem_success_response
+from agent.license_panel import build_generate_success_response
 from agent.license_store import (
     RESULT_ACTIVE,
     RESULT_KEY_NOT_REDEEMED,
@@ -193,7 +193,6 @@ class TestRejoinLicenseLifecycle(unittest.TestCase):
         k = "DENG-AAAA-BBBB-CCCC-DDDD"
         for payload in (
             build_generate_success_response(k),
-            build_redeem_success_response(k),
         ):
             content = payload.get("content") or ""
             self.assertIn(k, content)

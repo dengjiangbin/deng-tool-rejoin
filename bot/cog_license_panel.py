@@ -12,9 +12,11 @@ Slash commands
 Button handlers
 ---------------
   Generate Key   (Discord link button -> https://aio.deng.my.id/license)
-  Reset HWID     (custom_id = "license_panel:reset_hwid")
-  Redeem Key     (custom_id = "license_panel:redeem")
+  Key Stats      (custom_id = "license_panel:key_stats")
   Select Version (custom_id = "license_panel:select_version")
+
+Removed features (Reset HWID, Redeem Key) are handled gracefully on old,
+already-posted panel messages via RemovedFeatureView.
 
 All button flows are EPHEMERAL.  The panel embed itself is public (pinned-style).
 """
@@ -36,33 +38,18 @@ from agent.license_owner_recovery import visible_license_rows_for_panel
 from agent.key_stats_format import (
     build_license_admin_stats_description,
     build_license_event_log_description,
-    build_reset_hwid_log_description,
     filter_active_visible_license_rows,
 )
 from agent.license_panel import (
     BUTTON_GENERATE,
     BUTTON_KEY_STATS,
-    BUTTON_REDEEM,
-    BUTTON_RESET_HWID,
     BUTTON_SELECT_VERSION,
+    REMOVED_BUTTON_REDEEM,
+    REMOVED_BUTTON_RESET_HWID,
     SLASH_GROUP,
-    build_generate_cooldown_response,
-    build_generate_limit_response,
-    build_generate_success_response,
     build_key_list_response,
     build_not_owner_response,
     build_panel_embed,
-    build_panel_limit_blocked_response,
-    build_redeem_already_owned_response,
-    build_redeem_error_response,
-    build_redeem_limit_response,
-    build_redeem_success_response,
-    build_reset_active_warning_response,
-    build_reset_mixed_summary_embed,
-    build_reset_no_binding_response,
-    build_reset_no_keys_response,
-    build_reset_selector_embed,
-    build_reset_success_response,
 )
 from agent.rejoin_versions import (
     NO_PUBLIC_VERSIONS_MESSAGE,
@@ -71,19 +58,7 @@ from agent.rejoin_versions import (
     list_public_rejoin_versions,
 )
 from agent.license_store import (
-    ActiveKeyWarning,
     BaseLicenseStore,
-    DEFAULT_GLOBAL_MAX_KEYS,
-    DEFAULT_GLOBAL_MAX_PANEL,
-    ExpiredKeyError,
-    GenerationCooldownError,
-    KeyAlreadySelfOwned,
-    KeyNotFoundError,
-    KeyOwnershipError,
-    NoActiveBindingError,
-    PanelLimitError,
-    StoreError,
-    UserLimitError,
     get_license_stats_for_discord_user,
 )
 
@@ -185,8 +160,6 @@ async def _post_license_log(
     user: discord.User | discord.Member,
     key_serial: str,
     event_type: str,
-    reset_uses_today: int | None = None,
-    max_panel: int | None = None,
 ) -> None:
     """Post a license event log embed to the configured license log channel.
 
@@ -207,25 +180,14 @@ async def _post_license_log(
 
         key_field_name = {
             "generated": "Generated Key",
-            "redeemed": "Redeemed Key",
-            "reset_hwid": "Reset Key",
         }.get(event_type, "Key")
 
-        if event_type == "reset_hwid":
-            description = build_reset_hwid_log_description(
-                user_mention=f"<@{uid}>",
-                reset_key=key_serial,
-                stats=stats,
-                reset_uses_today=reset_uses_today,
-                max_panel=max_panel,
-            )
-        else:
-            description = build_license_event_log_description(
-                user_mention=f"<@{uid}>",
-                key_field_label=key_field_name,
-                key_value=key_serial,
-                stats=stats,
-            )
+        description = build_license_event_log_description(
+            user_mention=f"<@{uid}>",
+            key_field_label=key_field_name,
+            key_value=key_serial,
+            stats=stats,
+        )
 
         embed = discord.Embed(
             title=title,
@@ -238,402 +200,48 @@ async def _post_license_log(
         log.debug("_post_license_log error: %s", exc)
 
 
-async def _post_max_key_log(
-    guild: discord.Guild,
-    store: "BaseLicenseStore",
-    admin: discord.User | discord.Member,
-    scope: str,
-    target_user: discord.User | discord.Member | None,
-    old_limit: int | str,
-    new_limit: int,
-) -> None:
-    """Post a Key Limit Updated embed to the configured license log channel."""
-    try:
-        cfg = store.get_license_log_config(str(guild.id))
-        if not cfg:
-            return
-        channel_id = int(cfg.get("channel_id", 0))
-        channel = guild.get_channel(channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return
+# ── Removed-feature graceful fallback view ─────────────────────────────────────
 
-        lines = [
-            f"**Admin:** <@{admin.id}>",
-            f"**Scope:** {scope}",
-        ]
-        if target_user is not None:
-            lines.append(f"**User:** <@{target_user.id}>")
-        lines += [
-            f"**Old Limit:** {old_limit}",
-            f"**New Limit:** {new_limit}",
-        ]
-        embed = discord.Embed(
-            title="Key Limit Updated",
-            description="\n".join(lines),
-            color=discord.Color.from_rgb(0, 100, 200),
-        )
-        embed.set_footer(text="DENG Tool: Rejoin")
-        await channel.send(embed=embed)
-    except Exception as exc:  # noqa: BLE001
-        log.debug("_post_max_key_log error: %s", exc)
+class RemovedFeatureView(discord.ui.View):
+    """Persistent catch-view for buttons removed during the license rebuild.
 
-
-async def _post_max_panel_log(
-    guild: discord.Guild,
-    store: "BaseLicenseStore",
-    admin: discord.User | discord.Member,
-    scope: str,
-    target_user: discord.User | discord.Member | None,
-    old_limit: int | str,
-    new_limit: int,
-) -> None:
-    """Post a Panel Reset Limit Updated embed to the configured license log channel."""
-    try:
-        cfg = store.get_license_log_config(str(guild.id))
-        if not cfg:
-            return
-        channel_id = int(cfg.get("channel_id", 0))
-        channel = guild.get_channel(channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return
-
-        lines = [
-            f"**Admin:** <@{admin.id}>",
-            f"**Scope:** {scope}",
-        ]
-        if target_user is not None:
-            lines.append(f"**User:** <@{target_user.id}>")
-        lines += [
-            f"**Old Limit:** {old_limit}",
-            f"**New Limit:** {new_limit}",
-            "**Reset Window:** Daily at 12:00 AM WIB",
-        ]
-        embed = discord.Embed(
-            title="Panel Reset Limit Updated",
-            description="\n".join(lines),
-            color=discord.Color.from_rgb(0, 100, 200),
-        )
-        embed.set_footer(text="DENG Tool: Rejoin")
-        await channel.send(embed=embed)
-    except Exception as exc:  # noqa: BLE001
-        log.debug("_post_max_panel_log error: %s", exc)
-
-
-# ── Redeem modal ──────────────────────────────────────────────────────────────
-
-class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
-    """Text-input modal that collects the raw DENG-XXXX-XXXX-XXXX-XXXX key."""
-
-    key_input: discord.ui.TextInput = discord.ui.TextInput(
-        label="License Key",
-        placeholder="DENG-XXXX-XXXX-XXXX-XXXX",
-        min_length=19,
-        max_length=24,
-        style=discord.TextStyle.short,
-    )
-
-    def __init__(self, store: BaseLicenseStore) -> None:
-        super().__init__()
-        self._store = store
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        raw_key = self.key_input.value.strip()
-        uid = str(interaction.user.id)
-        username = str(interaction.user)
-
-        from agent.license import normalize_license_key
-
-        await interaction.response.defer(ephemeral=True)
-
-        try:
-            self._store.get_or_create_user(uid, username)
-            self._store.redeem_key_for_user(uid, raw_key)
-            display_key = normalize_license_key(raw_key)
-            payload = build_redeem_success_response(display_key)
-            if interaction.guild:
-                await _post_license_log(
-                    interaction.guild, self._store,
-                    title="Key Redeemed Log",
-                    user=interaction.user,
-                    key_serial=display_key,
-                    event_type="redeemed",
-                )
-        except KeyAlreadySelfOwned as exc:
-            display_key = normalize_license_key(raw_key)
-            payload = build_redeem_already_owned_response(
-                export_backfilled=exc.export_backfilled,
-                copyable_key=display_key,
-            )
-        except ExpiredKeyError as exc:
-            payload = build_redeem_error_response(str(exc))
-        except UserLimitError as exc:
-            msg = str(exc)
-            import re as _re
-            m = _re.search(r"(\d+)\s*/\s*(\d+)", msg)
-            if m:
-                payload = build_redeem_limit_response(
-                    int(m.group(2)), active_count=int(m.group(1))
-                )
-            else:
-                payload = build_redeem_error_response(msg)
-        except (KeyNotFoundError, KeyOwnershipError) as exc:
-            payload = build_redeem_error_response(str(exc))
-
-        await _respond_ephemeral_payload(interaction, payload, followup=True)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        log.exception("RedeemModal error for user %s: %s", interaction.user.id, error)
-        try:
-            await interaction.followup.send(
-                "❌ An unexpected error occurred. Please try again.", ephemeral=True
-            )
-        except discord.HTTPException:
-            pass
-
-
-# ── HWID reset selector views ─────────────────────────────────────────────────
-
-class ResetHwidSelect(discord.ui.Select):
-    """Dropdown listing the user's keys with 🟢/🟡 binding state indicators."""
-
-    def __init__(self, keys_with_state: list[dict]) -> None:
-        options: list[discord.SelectOption] = []
-        for k in keys_with_state:
-            # 🟢 no device linked, 🟡 bound to a device (matches selector embed legend)
-            bound = bool(k.get("active_binding"))
-            icon = "🟡" if bound else "🟢"
-            fk = k.get("full_key_plaintext")
-            mk = k.get("masked_key", "???")
-            key_str = fk or mk
-            # Label: key + device name for bound keys (show actual device, not generic text)
-            if bound:
-                _dev = (k.get("device_model") or k.get("device_label") or "").strip()
-                status_suffix = f" — Bound to {_dev}" if _dev else " — Bound to a device"
-            else:
-                status_suffix = " — No device linked"
-            label = f"{key_str}{status_suffix}"[:100]
-            # Description: device model for bound keys; friendly text for unbound
-            if bound:
-                model = k.get("device_model") or "Unknown device"
-                desc = f"Device: {model}"
-            else:
-                desc = k.get("reason_if_not_resettable") or "No device linked"
-            options.append(
-                discord.SelectOption(
-                    label=label[:100],
-                    value=k["key_id"],
-                    description=desc[:100],
-                    emoji=icon,
-                )
-            )
-        super().__init__(
-            placeholder="Select a key to reset...",
-            min_values=1,
-            max_values=min(25, len(options)),
-            options=options,
-            custom_id="reset_hwid:select",
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        # Silently acknowledge; selection is read by ConfirmResetButton
-        await interaction.response.defer()
-
-
-class ConfirmResetButton(discord.ui.Button):
-    """Processes the selected key(s) from the dropdown and runs HWID reset."""
-
-    def __init__(
-        self,
-        store: BaseLicenseStore,
-        uid: str,
-        keys_with_state: list[dict],
-    ) -> None:
-        super().__init__(
-            label="Confirm Reset",
-            style=discord.ButtonStyle.danger,
-            custom_id="reset_hwid:confirm",
-            emoji="♻️",
-        )
-        self._store = store
-        self._uid = uid
-        self._key_map: dict[str, dict] = {k["key_id"]: k for k in keys_with_state}
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        select: ResetHwidSelect | None = next(
-            (c for c in self.view.children if isinstance(c, ResetHwidSelect)), None
-        )
-        selected_ids: list[str] = select.values if select and select.values else []
-
-        if not selected_ids:
-            await interaction.response.send_message(
-                "⚠️ Please choose at least one key from the dropdown first.",
-                ephemeral=True,
-            )
-            return
-
-        # Pre-flight: check daily panel limit before touching any keys
-        allowed, used_today, max_panel_val = self._store.can_user_reset_panel_today(self._uid)
-        if not allowed:
-            for child in self.view.children:
-                child.disabled = True
-            embed = _embed_from_payload(
-                build_panel_limit_blocked_response(max_panel_val, used_count=used_today)
-            )
-            try:
-                await interaction.response.edit_message(embed=embed, view=self.view)
-            except discord.HTTPException:
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
-        results: list[dict] = []
-        keys_to_log: list[str] = []
-        for key_id in selected_ids:
-            state = self._key_map.get(key_id, {})
-            fk = state.get("full_key_plaintext")
-            mk = state.get("masked_key", "???")
-            display_key = fk if fk else f"{mk} (reference only)"
-            masked = mk
-            if not state.get("can_reset"):
-                results.append({
-                    "display_key": display_key,
-                    "masked_key": masked,
-                    "success": False,
-                    "message": state.get("reason_if_not_resettable") or "Cannot reset this key.",
-                })
-                continue
-            try:
-                self._store.reset_hwid(self._uid, key_id, consume_daily_quota=False)
-                results.append({
-                    "display_key": display_key,
-                    "masked_key": masked,
-                    "success": True,
-                    "message": "Device binding cleared.",
-                })
-                if interaction.guild and fk:
-                    keys_to_log.append(fk)
-            except NoActiveBindingError:
-                results.append({
-                    "display_key": display_key,
-                    "masked_key": masked,
-                    "success": False,
-                    "message": "No device binding to clear.",
-                })
-            except ActiveKeyWarning as exc:
-                # ActiveKeyWarning is no longer raised (cooldown is based on reset history only),
-                # but kept for safety in case of legacy store implementations.
-                results.append({
-                    "display_key": display_key,
-                    "masked_key": masked,
-                    "success": False,
-                    "message": str(exc),
-                })
-
-        # Record one panel use if at least one key was successfully unbound
-        successful_count = sum(1 for r in results if r.get("success"))
-        new_usage_count: int | None = None
-        if successful_count > 0:
-            try:
-                new_usage_count = self._store.record_successful_panel_reset(
-                    self._uid, successful_count
-                )
-            except PanelLimitError:
-                for child in self.view.children:
-                    child.disabled = True
-                embed = _embed_from_payload(
-                    build_panel_limit_blocked_response(max_panel_val, used_count=used_today)
-                )
-                try:
-                    await interaction.response.edit_message(embed=embed, view=self.view)
-                except discord.HTTPException:
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-            except StoreError as exc:
-                for child in self.view.children:
-                    child.disabled = True
-                await interaction.response.send_message(
-                    f"⚠️ Reset succeeded but quota could not be recorded: {exc}",
-                    ephemeral=True,
-                )
-                return
-
-        # Post log for each successfully reset key (with updated usage)
-        if interaction.guild and keys_to_log:
-            import asyncio
-            for fk in keys_to_log:
-                asyncio.ensure_future(
-                    _post_license_log(
-                        interaction.guild, self._store,
-                        title="Reset HWID Log",
-                        user=interaction.user,
-                        key_serial=fk,
-                        event_type="reset_hwid",
-                        reset_uses_today=new_usage_count,
-                        max_panel=max_panel_val,
-                    )
-                )
-
-        for child in self.view.children:
-            child.disabled = True
-
-        embed = _embed_from_payload(
-            build_reset_mixed_summary_embed(
-                results,
-                reset_uses_today=new_usage_count,
-                max_panel=max_panel_val if new_usage_count is not None else None,
-            )
-        )
-        try:
-            await interaction.response.edit_message(embed=embed, view=self.view)
-        except discord.HTTPException:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-class CancelResetButton(discord.ui.Button):
-    """Cancels the HWID reset flow and disables all selector components."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            label="Cancel",
-            style=discord.ButtonStyle.secondary,
-            custom_id="reset_hwid:cancel",
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        for child in self.view.children:
-            child.disabled = True
-        embed_dict = {
-            "title": "\u2716 Reset Cancelled",
-            "description": "HWID reset was cancelled. No changes were made.",
-            "color": 0x95A5A6,
-        }
-        embed = discord.Embed.from_dict(embed_dict)
-        try:
-            await interaction.response.edit_message(embed=embed, view=self.view)
-        except discord.HTTPException:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-class ResetHwidSelectView(discord.ui.View):
-    """Ephemeral, non-persistent view shown when a user clicks Reset HWID.
-
-    Contains: dropdown key selector, Confirm Reset button, Cancel button.
-    Times out after 120 seconds; components are disabled on timeout.
+    Old, already-posted panel messages may still carry the legacy
+    ``license_panel:reset_hwid`` and ``license_panel:redeem`` custom_ids. Without
+    a registered handler those clicks fail with "interaction failed". Registering
+    this view (timeout=None) with the same custom_ids makes them respond with a
+    clean ephemeral notice instead. Newly posted panels never include these.
     """
 
-    def __init__(
-        self,
-        store: BaseLicenseStore,
-        uid: str,
-        keys_with_state: list[dict],
-    ) -> None:
-        super().__init__(timeout=120)
-        self.add_item(ResetHwidSelect(keys_with_state))
-        self.add_item(ConfirmResetButton(store, uid, keys_with_state))
-        self.add_item(CancelResetButton())
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
 
-    async def on_timeout(self) -> None:
-        for child in self.children:
-            child.disabled = True
+    @discord.ui.button(
+        label="Reset HWID",
+        style=discord.ButtonStyle.danger,
+        custom_id=REMOVED_BUTTON_RESET_HWID,
+    )
+    async def removed_reset_hwid(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.send_message(
+            "This feature has been removed.", ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Redeem Key",
+        style=discord.ButtonStyle.success,
+        custom_id=REMOVED_BUTTON_REDEEM,
+    )
+    async def removed_redeem(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.send_message(
+            "This feature has been removed.", ephemeral=True
+        )
 
 
 KEY_STATS_PAGE_SIZE = 5
@@ -889,59 +497,6 @@ class PanelView(discord.ui.View):
         self.add_item(generate)
         for child in existing:
             self.add_item(child)
-
-    # ── Reset HWID ────────────────────────────────────────────────────────────
-
-    @discord.ui.button(
-        label="Reset HWID",
-        style=discord.ButtonStyle.danger,
-        custom_id=BUTTON_RESET_HWID,
-        emoji="♻️",
-    )
-    async def btn_reset_hwid(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button,
-    ) -> None:
-        uid = str(interaction.user.id)
-        username = str(interaction.user)
-
-        self._store.get_or_create_user(uid, username)
-
-        # Check daily panel limit before showing the selector
-        allowed, used_today, max_panel_val = self._store.can_user_reset_panel_today(uid)
-        if not allowed:
-            embed = _embed_from_payload(
-                build_panel_limit_blocked_response(max_panel_val, used_count=used_today)
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
-        keys_with_state = self._store.list_user_keys_with_binding_state(uid)
-
-        if not keys_with_state:
-            embed = _embed_from_payload(build_reset_no_keys_response())
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
-        embed = _embed_from_payload(build_reset_selector_embed(keys_with_state))
-        view = ResetHwidSelectView(self._store, uid, keys_with_state)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    # ── Redeem Key ────────────────────────────────────────────────────────────
-
-    @discord.ui.button(
-        label="Redeem Key",
-        style=discord.ButtonStyle.success,
-        custom_id=BUTTON_REDEEM,
-        emoji="🎟️",
-    )
-    async def btn_redeem(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button,
-    ) -> None:
-        await interaction.response.send_modal(RedeemModal(self._store))
 
     # ── Key Stats ─────────────────────────────────────────────────────────────
 
@@ -1313,20 +868,6 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             else:
                 panel_lines = "*(no panel configured — run `/license_panel set_channel`)*"
 
-            # ── Global config section ──
-            try:
-                global_max_keys = store.get_global_max_keys()
-            except Exception:
-                global_max_keys = DEFAULT_GLOBAL_MAX_KEYS
-            try:
-                global_max_panel = store.get_global_max_panel()
-            except Exception:
-                global_max_panel = DEFAULT_GLOBAL_MAX_PANEL
-            global_lines = (
-                f"**Max Key Slot:** {global_max_keys}\n"
-                f"**Max Reset:** {global_max_panel}"
-            )
-
             # ── Store status section ──
             store_info = store.get_store_status()
             status_icon = "✅ Ready" if store_info["status"] == "ready" else "⚠️ Error"
@@ -1368,7 +909,6 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             embed.add_field(name="Database Scope", value=db_scope_lines, inline=False)
             embed.add_field(name="Guild", value=guild_lines, inline=False)
             embed.add_field(name="Panel Config", value=panel_lines, inline=False)
-            embed.add_field(name="Global Config", value=global_lines, inline=False)
             embed.add_field(name="License Store", value=store_lines, inline=False)
             embed.set_footer(text="DENG Tool: Rejoin")
 
@@ -1384,7 +924,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
         @_log_group.command(
             name="set",
-            description="Set the channel for license event logs (generate/redeem/reset).",
+            description="Set the channel for license event logs.",
         )
         @app_commands.describe(channel="Target text channel for license logs")
         async def cmd_log_set(
@@ -1442,241 +982,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 msg = "❌ No license log channel configured. Use `/license_log_channel set`."
             await interaction.response.send_message(msg, ephemeral=True)
 
-        # /license max_key ────────────────────────────────────────────────────
-
-        @self._panel_group.command(
-            name="max_key",
-            description="Set the maximum active keys a user can have (owner/admin only).",
-        )
-        @app_commands.describe(
-            scope="global = change the default for all users; user = set a specific user's limit",
-            max_keys="Maximum number of active keys (0 = block all key generation/redemption)",
-            user="Target Discord user (only required when scope = user)",
-        )
-        @app_commands.rename(max_keys="max")
-        @app_commands.choices(scope=[
-            app_commands.Choice(name="global", value="global"),
-            app_commands.Choice(name="user", value="user"),
-        ])
-        async def cmd_max_key(
-            interaction: discord.Interaction,
-            scope: str,
-            max_keys: int,
-            user: Optional[discord.User] = None,
-        ) -> None:
-            if not _is_owner(interaction.user):
-                await interaction.response.send_message(
-                    embed=self._owner_denied(), ephemeral=True
-                )
-                return
-
-            if max_keys < 0:
-                await interaction.response.send_message(
-                    embed=discord.Embed(
-                        title="\u274c Invalid Value",
-                        description="`max` must be 0 or higher.",
-                        color=discord.Color.red(),
-                    ),
-                    ephemeral=True,
-                )
-                return
-
-            await interaction.response.defer(ephemeral=True)
-            actor = str(interaction.user.id)
-
-            try:
-                if scope == "global":
-                    old_max = store.get_global_max_keys()
-                    store.set_global_max_keys(max_keys, updated_by=actor)
-                    if interaction.guild:
-                        await _post_max_key_log(
-                            interaction.guild, store,
-                            interaction.user, "Global", None,
-                            old_max, max_keys,
-                        )
-                    store.audit_admin_action(
-                        actor, "set_global_max_keys",
-                        metadata={"old": old_max, "new": max_keys},
-                    )
-                    embed = discord.Embed(
-                        title="\u2705 Global Key Limit Updated",
-                        description=(
-                            f"Global default max active keys:\n"
-                            f"**{old_max}** \u2192 **{max_keys}**"
-                        ),
-                        color=discord.Color.green(),
-                    )
-                    embed.set_footer(text="DENG Tool: Rejoin")
-                    await interaction.followup.send(embed=embed, ephemeral=True)
-
-                elif scope == "user":
-                    if user is None:
-                        await interaction.followup.send(
-                            embed=discord.Embed(
-                                title="\u274c Missing User",
-                                description="Scope `user` requires specifying a Discord user.",
-                                color=discord.Color.red(),
-                            ),
-                            ephemeral=True,
-                        )
-                        return
-                    uid = str(user.id)
-                    global_max = store.get_global_max_keys()
-                    old_limit = store.get_user_key_limit(uid)
-                    old_display: str | int = (
-                        f"Global {global_max}" if old_limit is None else old_limit
-                    )
-                    store.set_user_key_limit(uid, max_keys, updated_by=actor)
-                    if interaction.guild:
-                        await _post_max_key_log(
-                            interaction.guild, store,
-                            interaction.user, "User", user,
-                            old_display, max_keys,
-                        )
-                    store.audit_admin_action(
-                        actor, "set_user_key_limit",
-                        target_type="user", target_id=uid,
-                        metadata={"old": str(old_display), "new": max_keys},
-                    )
-                    embed = discord.Embed(
-                        title="\u2705 Per-User Key Limit Updated",
-                        description=(
-                            f"User: <@{uid}>\n"
-                            f"Limit: **{old_display}** \u2192 **{max_keys}**"
-                        ),
-                        color=discord.Color.green(),
-                    )
-                    embed.set_footer(text="DENG Tool: Rejoin")
-                    await interaction.followup.send(embed=embed, ephemeral=True)
-
-            except Exception as exc:  # noqa: BLE001
-                log.error("cmd_max_key error: %s", exc)
-                await interaction.followup.send(
-                    embed=discord.Embed(
-                        title="\u274c Error",
-                        description=f"Failed to update key limit: {exc}",
-                        color=discord.Color.red(),
-                    ),
-                    ephemeral=True,
-                )
-
-        # /license max_panel ──────────────────────────────────────────────────
-
-        @self._panel_group.command(
-            name="max_panel",
-            description="Set the daily Reset HWID panel limit per user (owner/admin only).",
-        )
-        @app_commands.describe(
-            scope="global = change the default for all users; user = set a specific user's limit",
-            max_panel="Maximum Reset HWID panel uses per WIB day (0 = disable for that user)",
-            user="Target Discord user (only required when scope = user)",
-        )
-        @app_commands.rename(max_panel="max")
-        @app_commands.choices(scope=[
-            app_commands.Choice(name="global", value="global"),
-            app_commands.Choice(name="user", value="user"),
-        ])
-        async def cmd_max_panel(
-            interaction: discord.Interaction,
-            scope: str,
-            max_panel: int,
-            user: Optional[discord.User] = None,
-        ) -> None:
-            if not _is_owner(interaction.user):
-                await interaction.response.send_message(
-                    embed=self._owner_denied(), ephemeral=True
-                )
-                return
-
-            if max_panel < 0:
-                await interaction.response.send_message(
-                    embed=discord.Embed(
-                        title="\u274c Invalid Value",
-                        description="`max` must be 0 or higher.",
-                        color=discord.Color.red(),
-                    ),
-                    ephemeral=True,
-                )
-                return
-
-            await interaction.response.defer(ephemeral=True)
-            actor = str(interaction.user.id)
-
-            try:
-                if scope == "global":
-                    old_max = store.get_global_max_panel()
-                    store.set_global_max_panel(max_panel, updated_by=actor)
-                    if interaction.guild:
-                        await _post_max_panel_log(
-                            interaction.guild, store,
-                            interaction.user, "Global", None,
-                            old_max, max_panel,
-                        )
-                    store.audit_admin_action(
-                        actor, "set_global_max_panel",
-                        metadata={"old": old_max, "new": max_panel},
-                    )
-                    embed = discord.Embed(
-                        title="\u2705 Global Panel Reset Limit Updated",
-                        description=(
-                            f"Global default max Reset HWID panel uses per WIB day:\n"
-                            f"**{old_max}** \u2192 **{max_panel}**"
-                        ),
-                        color=discord.Color.green(),
-                    )
-                    embed.set_footer(text="DENG Tool: Rejoin")
-                    await interaction.followup.send(embed=embed, ephemeral=True)
-
-                elif scope == "user":
-                    if user is None:
-                        await interaction.followup.send(
-                            embed=discord.Embed(
-                                title="\u274c Missing User",
-                                description="Scope `user` requires specifying a Discord user.",
-                                color=discord.Color.red(),
-                            ),
-                            ephemeral=True,
-                        )
-                        return
-                    uid = str(user.id)
-                    global_max = store.get_global_max_panel()
-                    old_limit = store.get_user_panel_limit(uid)
-                    old_display: str | int = (
-                        f"Global {global_max}" if old_limit is None else old_limit
-                    )
-                    store.set_user_panel_limit(uid, max_panel, updated_by=actor)
-                    if interaction.guild:
-                        await _post_max_panel_log(
-                            interaction.guild, store,
-                            interaction.user, "User", user,
-                            old_display, max_panel,
-                        )
-                    store.audit_admin_action(
-                        actor, "set_user_panel_limit",
-                        target_type="user", target_id=uid,
-                        metadata={"old": str(old_display), "new": max_panel},
-                    )
-                    embed = discord.Embed(
-                        title="\u2705 Per-User Panel Reset Limit Updated",
-                        description=(
-                            f"User: <@{uid}>\n"
-                            f"Limit: **{old_display}** \u2192 **{max_panel}**"
-                        ),
-                        color=discord.Color.green(),
-                    )
-                    embed.set_footer(text="DENG Tool: Rejoin")
-                    await interaction.followup.send(embed=embed, ephemeral=True)
-
-            except Exception as exc:  # noqa: BLE001
-                log.error("cmd_max_panel error: %s", exc)
-                await interaction.followup.send(
-                    embed=discord.Embed(
-                        title="\u274c Error",
-                        description=f"Failed to update panel reset limit: {exc}",
-                        color=discord.Color.red(),
-                    ),
-                    ephemeral=True,
-                )
+        # /license <user> ──────────────────────────────────────────────────────
 
         @bot.tree.command(
             name="license",
@@ -1700,33 +1006,10 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             active_rows = filter_active_visible_license_rows(
                 store.list_user_keys_for_stats(uid)
             )
-            # Resolve key limit info for admin display
-            try:
-                effective_max = store.get_effective_max_keys(uid)
-                user_override = store.get_user_key_limit(uid)
-                max_keys_source = "user" if user_override is not None else "global"
-            except Exception:
-                effective_max = None
-                max_keys_source = None
-            # Resolve panel limit info for admin display
-            try:
-                effective_max_panel = store.get_effective_max_panel(uid)
-                panel_override = store.get_user_panel_limit(uid)
-                max_panel_source = "user" if panel_override is not None else "global"
-                panel_resets_today = store.get_panel_reset_usage_today(uid)
-            except Exception:
-                effective_max_panel = None
-                max_panel_source = None
-                panel_resets_today = None
             description = build_license_admin_stats_description(
                 user_label=f"<@{uid}> ({uid})",
                 stats=stats,
                 active_rows=active_rows,
-                effective_max_keys=effective_max,
-                max_keys_source=max_keys_source,
-                effective_max_panel=effective_max_panel,
-                max_panel_source=max_panel_source,
-                panel_resets_today=panel_resets_today,
             )
 
             embed = discord.Embed(
@@ -1744,7 +1027,16 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
     # ── Persistent view restoration ───────────────────────────────────────────
 
     async def restore_persistent_views(self) -> None:
-        """Re-attach PanelView for every guild so buttons survive restarts."""
+        """Re-attach PanelView for every guild so buttons survive restarts.
+
+        Also registers a global :class:`RemovedFeatureView` so that clicks on the
+        legacy Reset HWID / Redeem Key buttons of OLD already-posted panels respond
+        with a clean "This feature has been removed." notice instead of failing.
+        """
+        # Global catch-view for removed buttons on old panel messages (no message_id
+        # → matches the legacy custom_ids on any message that still carries them).
+        self.bot.add_view(RemovedFeatureView())
+
         for guild in self.bot.guilds:
             try:
                 cfg = self._store.get_panel_config(str(guild.id))

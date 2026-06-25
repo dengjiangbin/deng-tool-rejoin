@@ -66,7 +66,9 @@ DEFAULT_MAX_KEYS            = 1
 DEFAULT_GLOBAL_MAX_KEYS     = 2           # default global max active keys per user
 DEFAULT_GLOBAL_MAX_PANEL    = 1           # default max Reset HWID panel uses per user per WIB day
 GENERATION_COOLDOWN_SECONDS = 60          # minimum seconds between key generations
-UNREDEEMED_KEY_EXPIRY_SECONDS = 86400    # 24 hours — unredeemed keys expire
+# Every key (generated or legacy) lives 48 hours, enforced server-side.
+KEY_LIFETIME_SECONDS = 48 * 60 * 60       # 48 hours — hard expiry for ALL keys
+UNREDEEMED_KEY_EXPIRY_SECONDS = KEY_LIFETIME_SECONDS  # back-compat alias
 
 KEY_SLOT_LIMIT_MESSAGE = (
     "You already reached the maximum of 2 key slots. "
@@ -179,6 +181,22 @@ def _iso_expired(iso_str: str | None) -> bool:
         return datetime.now(timezone.utc) > exp_dt
     except (ValueError, TypeError):
         return False
+
+
+def _iso_plus_seconds(iso_str: str | None, seconds: int) -> str | None:
+    """Return ``iso_str`` advanced by ``seconds`` (UTC ISO), or None if unparsable."""
+    if not iso_str:
+        return None
+    try:
+        normalized = str(iso_str).replace("Z", "+00:00")
+        base = datetime.fromisoformat(normalized)
+        if base.tzinfo is None:
+            base = base.replace(tzinfo=timezone.utc)
+        from datetime import timedelta
+
+        return (base + timedelta(seconds=seconds)).replace(microsecond=0).isoformat()
+    except (ValueError, TypeError):
+        return None
 
 
 # ── Base interface ─────────────────────────────────────────────────────────────
@@ -429,12 +447,14 @@ class BaseLicenseStore(ABC):
         device_model: str = "",
         app_version: str = "",
         device_label: str = "",
+        details: dict[str, Any] | None = None,
     ) -> str:
         """Read-only validation for ``/api/license/check``.
 
         Must never create, update, or reactivate device bindings.
         Returns ``active`` only when an active binding matches *install_id_hash*.
         Returns ``requires_manual_rebind`` when unbound or inactive (HWID reset).
+        ``details`` (optional) is populated with expires_at/hwid_* for the API.
         """
 
     @abstractmethod
@@ -445,6 +465,7 @@ class BaseLicenseStore(ABC):
         device_model: str,
         app_version: str,
         device_label: str = "",
+        details: dict[str, Any] | None = None,
     ) -> str:
         """Bind or rebind a device to a key (``/api/license/bind`` only).
 
@@ -1225,6 +1246,22 @@ class LocalJsonLicenseStore(BaseLicenseStore):
 
     # ── Device binding ────────────────────────────────────────────────────────
 
+    def _local_effective_expiry(self, db: dict, key_hash: str, record: dict[str, Any]) -> str | None:
+        """Apply the one-time, non-resetting 48h legacy migration window locally."""
+        existing = record.get("expires_at")
+        if existing:
+            return existing
+        now_dt = datetime.now(timezone.utc).replace(microsecond=0)
+        new_expiry = _iso_plus_seconds(now_dt.isoformat(), KEY_LIFETIME_SECONDS)
+        record["expires_at"] = new_expiry
+        record.setdefault("migration_started_at", now_dt.isoformat())
+        try:
+            db["keys"][key_hash] = record
+            self._save(db)
+        except Exception:  # noqa: BLE001
+            pass
+        return new_expiry
+
     def validate_existing_binding(
         self,
         raw_key: str,
@@ -1232,8 +1269,11 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         device_model: str = "",
         app_version: str = "",
         device_label: str = "",
+        details: dict[str, Any] | None = None,
     ) -> str:
-        """Validate-only: never writes bindings or key rows."""
+        """Validate-only: never writes bindings (may stamp one-time legacy expiry)."""
+        if details is not None:
+            details.setdefault("server_now", _utc_now())
         try:
             normalized = normalize_license_key(raw_key)
         except LicenseKeyError:
@@ -1245,23 +1285,27 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             return RESULT_NOT_FOUND
         if record.get("status") == "revoked":
             return RESULT_REVOKED
-        expires = record.get("expires_at")
-        if expires:
-            try:
-                exp_dt = datetime.fromisoformat(expires)
-                if datetime.now(timezone.utc) > exp_dt:
-                    return RESULT_EXPIRED
-            except (ValueError, TypeError):
-                pass
+        effective_expiry = self._local_effective_expiry(db, key_hash, record)
+        if details is not None:
+            details["expires_at"] = effective_expiry
+        if _iso_expired(effective_expiry):
+            if details is not None:
+                details["expired"] = True
+            return RESULT_EXPIRED
         owner_id = record.get("owner_discord_id")
         if owner_id is None or str(owner_id).strip() == "":
             return RESULT_KEY_NOT_REDEEMED
         binding = db.get("bindings", {}).get(key_hash)
         if binding and binding.get("is_active"):
             bound_hash = binding.get("install_id_hash")
+            if details is not None:
+                details["hwid_bound"] = True
+                details["hwid_match"] = bool(bound_hash and bound_hash == install_id_hash)
             if bound_hash and bound_hash != install_id_hash:
                 return RESULT_WRONG_DEVICE
             return RESULT_ACTIVE
+        if details is not None:
+            details["hwid_bound"] = False
         return RESULT_REQUIRES_MANUAL_REBIND
 
     def get_binding_snapshot(self, raw_key: str) -> dict[str, Any]:
@@ -1292,7 +1336,10 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         device_model: str,
         app_version: str,
         device_label: str = "",
+        details: dict[str, Any] | None = None,
     ) -> str:
+        if details is not None:
+            details.setdefault("server_now", _utc_now())
         lbl = (device_label or "").strip()[:80]
         try:
             normalized = normalize_license_key(raw_key)
@@ -1313,18 +1360,17 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 result=RESULT_REVOKED, device_model=device_model, app_version=app_version,
             )
             return RESULT_REVOKED
-        expires = record.get("expires_at")
-        if expires:
-            try:
-                exp_dt = datetime.fromisoformat(expires)
-                if datetime.now(timezone.utc) > exp_dt:
-                    self.log_license_check(
-                        key_id=key_hash, install_id_hash=install_id_hash,
-                        result=RESULT_EXPIRED, device_model=device_model, app_version=app_version,
-                    )
-                    return RESULT_EXPIRED
-            except (ValueError, TypeError):
-                pass
+        effective_expiry = self._local_effective_expiry(db, key_hash, record)
+        if details is not None:
+            details["expires_at"] = effective_expiry
+        if _iso_expired(effective_expiry):
+            if details is not None:
+                details["expired"] = True
+            self.log_license_check(
+                key_id=key_hash, install_id_hash=install_id_hash,
+                result=RESULT_EXPIRED, device_model=device_model, app_version=app_version,
+            )
+            return RESULT_EXPIRED
         owner_id = record.get("owner_discord_id")
         if owner_id is None or str(owner_id).strip() == "":
             self.log_license_check(
@@ -1384,6 +1430,9 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             key_id=key_hash, install_id_hash=install_id_hash,
             result=RESULT_ACTIVE, device_model=device_model, app_version=app_version,
         )
+        if details is not None:
+            details["hwid_bound"] = True
+            details["hwid_match"] = True
         return RESULT_ACTIVE
 
     def check_install_download_access(self, raw_key: str, install_id_hash: str) -> str:
@@ -2656,6 +2705,40 @@ class SupabaseLicenseStore(BaseLicenseStore):
 
     # ── Device binding ────────────────────────────────────────────────────────
 
+    def _effective_expiry(self, key_hash: str, record: dict[str, Any]) -> str | None:
+        """Return the authoritative ``expires_at`` for a key, applying the
+        one-time, non-resetting 48-hour legacy migration window.
+
+        - New keys always carry ``expires_at`` (created_at + 48h) — returned as-is.
+        - Legacy keys whose ``expires_at`` was cleared (older bind behavior) get a
+          single ``expires_at = now + 48h`` stamp on first validation after this
+          release. Once stamped it is authoritative and never reset/extended.
+        Revoked keys must be rejected by the caller BEFORE calling this so a
+        revoked key is never revived by migration.
+        """
+        existing = record.get("expires_at")
+        if existing:
+            return existing
+        now_dt = datetime.now(timezone.utc).replace(microsecond=0)
+        new_expiry = _iso_plus_seconds(now_dt.isoformat(), KEY_LIFETIME_SECONDS)
+        update_payload: dict[str, Any] = {"expires_at": new_expiry}
+        # Audit marker (best-effort; tolerate schema without the column).
+        try:
+            self._client.table("license_keys").update(
+                {**update_payload, "migration_started_at": now_dt.isoformat()}
+            ).eq("id", key_hash).is_("expires_at", "null").execute()
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc).lower()
+            if "migration_started_at" in err or "column" in err or "pgrst204" in err:
+                try:
+                    self._client.table("license_keys").update(update_payload).eq(
+                        "id", key_hash
+                    ).is_("expires_at", "null").execute()
+                except Exception:  # noqa: BLE001
+                    pass
+        record["expires_at"] = new_expiry
+        return new_expiry
+
     def validate_existing_binding(
         self,
         raw_key: str,
@@ -2663,7 +2746,10 @@ class SupabaseLicenseStore(BaseLicenseStore):
         device_model: str = "",
         app_version: str = "",
         device_label: str = "",
+        details: dict[str, Any] | None = None,
     ) -> str:
+        if details is not None:
+            details.setdefault("server_now", _utc_now())
         try:
             normalized = normalize_license_key(raw_key)
         except LicenseKeyError:
@@ -2671,7 +2757,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
         key_hash = hash_license_key(normalized)
         key_res = (
             self._client.table("license_keys")
-            .select("status, expires_at, owner_discord_id, site_user_id")
+            .select("status, expires_at, owner_discord_id, site_user_id, created_at")
             .eq("id", key_hash)
             .execute()
         )
@@ -2680,7 +2766,12 @@ class SupabaseLicenseStore(BaseLicenseStore):
         record = key_res.data[0]
         if record.get("status") == "revoked":
             return RESULT_REVOKED
-        if _iso_expired(record.get("expires_at")):
+        effective_expiry = self._effective_expiry(key_hash, record)
+        if details is not None:
+            details["expires_at"] = effective_expiry
+        if _iso_expired(effective_expiry):
+            if details is not None:
+                details["expired"] = True
             return RESULT_EXPIRED
         if not _license_record_has_owner(record):
             return RESULT_KEY_NOT_REDEEMED
@@ -2694,9 +2785,14 @@ class SupabaseLicenseStore(BaseLicenseStore):
             binding = b_res.data[0]
             if binding.get("is_active"):
                 bound_hash = binding.get("install_id_hash")
+                if details is not None:
+                    details["hwid_bound"] = True
+                    details["hwid_match"] = bool(bound_hash and bound_hash == install_id_hash)
                 if bound_hash and bound_hash != install_id_hash:
                     return RESULT_WRONG_DEVICE
                 return RESULT_ACTIVE
+        if details is not None:
+            details["hwid_bound"] = False
         return RESULT_REQUIRES_MANUAL_REBIND
 
     def bind_or_check_device(
@@ -2706,7 +2802,10 @@ class SupabaseLicenseStore(BaseLicenseStore):
         device_model: str,
         app_version: str,
         device_label: str = "",
+        details: dict[str, Any] | None = None,
     ) -> str:
+        if details is not None:
+            details.setdefault("server_now", _utc_now())
         lbl = (device_label or "").strip()[:80]
         try:
             normalized = normalize_license_key(raw_key)
@@ -2715,7 +2814,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
         key_hash = hash_license_key(normalized)
         key_res = (
             self._client.table("license_keys")
-            .select("status, expires_at, owner_discord_id, site_user_id")
+            .select("status, expires_at, owner_discord_id, site_user_id, created_at, redeemed_at")
             .eq("id", key_hash)
             .execute()
         )
@@ -2732,7 +2831,12 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 result=RESULT_REVOKED, device_model=device_model, app_version=app_version,
             )
             return RESULT_REVOKED
-        if _iso_expired(record.get("expires_at")):
+        effective_expiry = self._effective_expiry(key_hash, record)
+        if details is not None:
+            details["expires_at"] = effective_expiry
+        if _iso_expired(effective_expiry):
+            if details is not None:
+                details["expired"] = True
             self.log_license_check(
                 key_id=key_hash, install_id_hash=install_id_hash,
                 result=RESULT_EXPIRED, device_model=device_model, app_version=app_version,
@@ -2800,21 +2904,19 @@ class SupabaseLicenseStore(BaseLicenseStore):
             key_id=key_hash, install_id_hash=install_id_hash,
             result=RESULT_ACTIVE, device_model=device_model, app_version=app_version,
         )
-        if record.get("expires_at") or not record.get("redeemed_at"):
+        if details is not None:
+            details["hwid_bound"] = True
+            details["hwid_match"] = True
+        # NOTE: 48-hour expiry is authoritative and must NOT be cleared or extended
+        # by binding. Record redeemed_at for audit only, preserving expires_at.
+        if not record.get("redeemed_at"):
             try:
                 self._client.table("license_keys").update(
-                    {"expires_at": None, "redeemed_at": record.get("redeemed_at") or now_ts}
+                    {"redeemed_at": now_ts}
                 ).eq("id", key_hash).execute()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 err = str(exc).lower()
-                if "redeemed_at" in err or "column" in err or "pgrst204" in err:
-                    try:
-                        self._client.table("license_keys").update(
-                            {"expires_at": None}
-                        ).eq("id", key_hash).execute()
-                    except Exception:
-                        pass
-                else:
+                if not ("redeemed_at" in err or "column" in err or "pgrst204" in err):
                     pass
         return RESULT_ACTIVE
 

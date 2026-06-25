@@ -413,14 +413,30 @@ def _hash_install_id(raw_id: str) -> str:
     return hashlib.sha256(raw_id.encode("utf-8")).hexdigest()
 
 
-def _build_response(result: str, status: int = 200) -> tuple[bytes, int]:
+def _build_response(
+    result: str, status: int = 200, details: dict | None = None
+) -> tuple[bytes, int]:
     if result == "wrong_device":
         message = _wrong_device_api_message()
     elif result == "key_not_redeemed":
         message = _key_not_redeemed_api_message()
     else:
         message = _RESULT_MESSAGES.get(result, result)
-    payload = json.dumps({"result": result, "message": message}).encode("utf-8")
+    body: dict = {
+        "result": result,
+        "message": message,
+        # Explicit booleans + server clock so the client can never be fooled by
+        # a tampered device clock; the server is the single source of truth.
+        "valid": result == "active",
+        "expired": result == "expired",
+        "reason": result,
+        "server_now": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    }
+    if details:
+        for field in ("expires_at", "expired", "hwid_bound", "hwid_match", "server_now"):
+            if field in details and details[field] is not None:
+                body[field] = details[field]
+    payload = json.dumps(body, sort_keys=True).encode("utf-8")
     return payload, status
 
 
@@ -1407,20 +1423,28 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             client_protocol,
         )
 
+        details: dict = {}
         try:
             from agent.license_store import get_default_store
             store = get_default_store()
             # SECURITY: validate-only — bind_allowed/manual_entry are ignored.
-            result = store.validate_existing_binding(
-                raw_key, install_id_hash, device_model, app_version, device_label,
-            )
+            try:
+                result = store.validate_existing_binding(
+                    raw_key, install_id_hash, device_model, app_version, device_label,
+                    details=details,
+                )
+            except TypeError:
+                # Older store signature without details out-param.
+                result = store.validate_existing_binding(
+                    raw_key, install_id_hash, device_model, app_version, device_label,
+                )
         except Exception as exc:  # noqa: BLE001
             log.error("License check error: %s", exc)
             payload, status = _build_response("server_unavailable", 500)
             return respond(payload, status)
 
         log.info("License result: %s for key %s", result, _mask_key(raw_key))
-        payload, status = _build_response(result)
+        payload, status = _build_response(result, details=details)
         if result == "active":
             data = json.loads(payload.decode("utf-8"))
             data["session"] = _issue_capability_session(
@@ -1484,19 +1508,26 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             client_protocol,
         )
 
+        details = {}
         try:
             from agent.license_store import get_default_store
             store = get_default_store()
-            result = store.bind_or_check_device(
-                raw_key, install_id_hash, device_model, app_version, device_label,
-            )
+            try:
+                result = store.bind_or_check_device(
+                    raw_key, install_id_hash, device_model, app_version, device_label,
+                    details=details,
+                )
+            except TypeError:
+                result = store.bind_or_check_device(
+                    raw_key, install_id_hash, device_model, app_version, device_label,
+                )
         except Exception as exc:  # noqa: BLE001
             log.error("License bind error: %s", exc)
             payload, status = _build_response("server_unavailable", 500)
             return respond(payload, status)
 
         log.info("License bind result: %s for key %s", result, _mask_key(raw_key))
-        payload, status = _build_response(result)
+        payload, status = _build_response(result, details=details)
         if result == "active":
             data = json.loads(payload.decode("utf-8"))
             data["session"] = _issue_capability_session(

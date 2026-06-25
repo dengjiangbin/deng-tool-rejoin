@@ -5,22 +5,14 @@ import unittest
 from agent.license_panel import (
     BUTTON_GENERATE,
     BUTTON_KEY_STATS,
-    BUTTON_REDEEM,
-    BUTTON_RESET_HWID,
     BUTTON_SELECT_VERSION,
     PANEL_LOGO_URL,
     SLASH_GROUP,
-    build_generate_limit_response,
     build_generate_success_response,
     build_key_list_response,
     build_not_owner_response,
     build_panel_buttons,
     build_panel_embed,
-    build_redeem_error_response,
-    build_redeem_success_response,
-    build_reset_active_warning_response,
-    build_reset_limit_response,
-    build_reset_success_response,
     get_slash_command_specs,
 )
 
@@ -31,10 +23,6 @@ class PanelEmbedTests(unittest.TestCase):
     _PANEL_LINES = (
         "> \U0001f511 Generate Key",
         "> Take you to our portal to generate the keys.",
-        "> \u267b\ufe0f Reset HWID",
-        "> Unbind your keys from the current device, 5-minute cooldown.",
-        "> \U0001f39f\ufe0f Redeem Key",
-        "> Make an existing key your own.",
         "> \U0001f4ca Key Stats",
         "> View status and export keys.",
         "> \U0001f4e6 Select Version",
@@ -71,10 +59,6 @@ class PanelEmbedTests(unittest.TestCase):
                 "Select an option below to get started:\n\n"
                 "> \U0001f511 Generate Key\n"
                 "> Take you to our portal to generate the keys.\n\n"
-                "> \u267b\ufe0f Reset HWID\n"
-                "> Unbind your keys from the current device, 5-minute cooldown.\n\n"
-                "> \U0001f39f\ufe0f Redeem Key\n"
-                "> Make an existing key your own.\n\n"
                 "> \U0001f4ca Key Stats\n"
                 "> View status and export keys.\n\n"
                 "> \U0001f4e6 Select Version\n"
@@ -128,16 +112,16 @@ class PanelEmbedTests(unittest.TestCase):
 class PanelButtonTests(unittest.TestCase):
     """Test 34-36: panel buttons structure."""
 
-    def test_panel_has_five_buttons(self):
-        """Test 34 – action row contains five buttons (incl. Select Version)."""
+    def test_panel_has_three_buttons(self):
+        """Test 34 – action row contains three buttons (Reset HWID + Redeem removed)."""
         components = build_panel_buttons()
         self.assertEqual(len(components), 1)
         row = components[0]
         self.assertEqual(row["type"], 1)
-        self.assertEqual(len(row["components"]), 5)
+        self.assertEqual(len(row["components"]), 3)
 
     def test_button_custom_ids(self):
-        """Test 35 – button custom_ids match constants."""
+        """Test 35 – button custom_ids match constants; no reset/redeem buttons."""
         components = build_panel_buttons()
         buttons = components[0]["components"]
         generate = buttons[0]
@@ -149,26 +133,24 @@ class PanelButtonTests(unittest.TestCase):
         self.assertEqual(
             ids,
             [
-                BUTTON_RESET_HWID,
-                BUTTON_REDEEM,
                 BUTTON_KEY_STATS,
                 BUTTON_SELECT_VERSION,
             ],
         )
+        self.assertNotIn("license_panel:reset_hwid", ids)
+        self.assertNotIn("license_panel:redeem", ids)
 
     def test_button_order_and_styles(self):
         components = build_panel_buttons()
         buttons = components[0]["components"]
         self.assertEqual(
             [btn["label"] for btn in buttons],
-            ["Generate Key", "Reset HWID", "Redeem Key", "Key Stats", "Select Version"],
+            ["Generate Key", "Key Stats", "Select Version"],
         )
         self.assertEqual(buttons[0]["style"], 5)
-        self.assertEqual(buttons[1]["style"], 4)
-        self.assertEqual(buttons[2]["style"], 3)
-        self.assertEqual(buttons[3]["style"], 2)
-        self.assertEqual(buttons[4]["style"], 1)
-        self.assertNotEqual(buttons[3]["label"], "Generate Key")
+        self.assertEqual(buttons[1]["style"], 2)
+        self.assertEqual(buttons[2]["style"], 1)
+        self.assertNotEqual(buttons[1]["label"], "Generate Key")
 
     def test_buttons_not_disabled_by_default(self):
         """Test 36 – all buttons are enabled (not disabled) by default."""
@@ -192,35 +174,9 @@ class PanelResponseTests(unittest.TestCase):
         self.assertIn(full_key, resp.get("content", ""))
         self.assertNotIn(full_key, resp["embed"]["description"])
 
-    def test_generate_limit_response_is_ephemeral(self):
-        """Test 39 – generate limit response is ephemeral."""
-        resp = build_generate_limit_response(max_keys=1)
-        self.assertTrue(resp.get("ephemeral"))
-
-    def test_reset_success_is_ephemeral(self):
-        """Test 40 – reset success response is ephemeral."""
-        resp = build_reset_success_response()
-        self.assertTrue(resp.get("ephemeral"))
-
-    def test_redeem_success_contains_full_key_not_ellipsis(self):
-        """Test 41 – redeem success shows full key for copy (no … mask)."""
-        full_key = "DENG-8F3A-B3C4-D5E6-44F0"
-        resp = build_redeem_success_response(full_key)
-        content = resp.get("content", "")
-        self.assertIn(full_key, content)
-        self.assertNotIn("...", content)
-        self.assertNotIn(full_key, resp["embed"]["description"])
-
 
 class PanelResponseSecurityTests(unittest.TestCase):
     """Test 42-44: copy views show full key when export/plaintext exists."""
-
-    def test_redeem_success_includes_full_key_for_copy(self):
-        """Test 42 – redeem success includes the full key string in content."""
-        full = "DENG-8F3A-B3C4-D5E6-44F0"
-        resp = build_redeem_success_response(full)
-        self.assertIn(full, resp.get("content", ""))
-        self.assertNotIn("...", resp.get("content", ""))
 
     def test_key_list_response_shows_full_key_when_plaintext_available(self):
         """Test 43 – key list puts full key in content when full_key_plaintext is set."""

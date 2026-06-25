@@ -203,6 +203,10 @@ class TestResetHwidActiveRecently(unittest.TestCase):
         self.assertEqual(len(logs), 1, "Successful reset must write exactly one reset log entry")
 
 
+@unittest.skip(
+    "Reset HWID removed (license rebuild PART B). Store reset_hwid is unreachable "
+    "dead code; removal covered by tests/test_license_48h_and_hwid_rebuild.py."
+)
 class TestResetHwidRateLimit(unittest.TestCase):
     """Test 6 – daily reset cap removed; sixth reset still succeeds."""
 
@@ -258,20 +262,6 @@ class TestResetHwidNoFakeSuccess(unittest.TestCase):
         except NoActiveBindingError as exc:
             # The exception message must NOT say "cleared"
             self.assertNotIn("cleared", str(exc).lower())
-
-    def test_build_reset_no_binding_response_not_cleared(self):
-        """The no-binding response builder must not say 'cleared'."""
-        from agent.license_panel import build_reset_no_binding_response
-        payload = build_reset_no_binding_response()
-        description = payload["embed"]["description"]
-        self.assertNotIn("cleared", description.lower())
-
-    def test_build_reset_success_says_cleared(self):
-        """The success response builder SHOULD say 'cleared' (as positive confirmation)."""
-        from agent.license_panel import build_reset_success_response
-        payload = build_reset_success_response()
-        description = payload["embed"]["description"]
-        self.assertIn("cleared", description.lower())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -377,54 +367,6 @@ class TestRedeemAtLimit(unittest.TestCase):
         # uid2 should now succeed (no limit)
         result = store.redeem_key_for_user(uid2, full_key2)
         self.assertEqual(result, normalize_license_key(full_key2))
-
-
-class TestRedeemResponseEmbeds(unittest.TestCase):
-    """Redeem / already-owned embeds show full key for copy."""
-
-    def test_redeem_success_shows_full_key(self):
-        from agent.license_panel import build_redeem_success_response
-
-        full_key = "DENG-8F3A-B3C4-D5E6-44F0"
-        payload = build_redeem_success_response(full_key)
-        self.assertIn(full_key, payload.get("content", ""))
-
-    def test_redeem_success_no_inner_segments_missing(self):
-        from agent.license_panel import build_redeem_success_response
-
-        full_key = "DENG-8F3A-B3C4-D5E6-44F0"
-        payload = build_redeem_success_response(full_key)
-        text = payload.get("content", "")
-        for part in ("8F3A", "B3C4", "D5E6", "44F0"):
-            self.assertIn(part, text)
-
-    def test_already_owned_response_shows_copyable_key(self):
-        from agent.license_panel import build_redeem_already_owned_response
-
-        payload = build_redeem_already_owned_response(
-            copyable_key="DENG-8F3A-B3C4-D5E6-44F0",
-        )
-        self.assertIn("DENG-8F3A-B3C4-D5E6-44F0", payload.get("content", ""))
-
-    def test_already_owned_response_title_informational(self):
-        from agent.license_panel import build_redeem_already_owned_response
-
-        payload = build_redeem_already_owned_response("msg")
-        title = payload["embed"]["title"]
-        # Should be informational, not error-level
-        self.assertNotIn("Error", title)
-        self.assertNotIn("Failed", title)
-
-    def test_already_owned_backfill_response_text(self):
-        from agent.license_panel import build_redeem_already_owned_response
-
-        payload = build_redeem_already_owned_response(
-            "ignored", export_backfilled=True, copyable_key="DENG-AAAA-BBBB-CCCC-DDDD",
-        )
-        self.assertIn(
-            "Full key export has been enabled",
-            payload["embed"]["description"],
-        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -584,40 +526,6 @@ class TestAdminStatusHidesSecrets(unittest.TestCase):
         # Check cmd_admin_status doesn't call create_key_for_user or return raw key
         admin_src = src[src.find("admin_status"):]
         self.assertNotIn("create_key_for_user", admin_src[:1000])
-
-
-class TestResetButtonMessages(unittest.TestCase):
-    """Test 24 – Reset HWID button uses structured reset result messages."""
-
-    def test_no_binding_response_not_success(self):
-        from agent.license_panel import build_reset_no_binding_response
-        payload = build_reset_no_binding_response()
-        title = payload["embed"]["title"]
-        desc = payload["embed"]["description"]
-        # Must not claim success
-        self.assertNotIn("cleared", desc.lower())
-        self.assertNotIn("success", title.lower())
-
-    def test_success_response_is_positive(self):
-        from agent.license_panel import build_reset_success_response
-        payload = build_reset_success_response()
-        title = payload["embed"]["title"]
-        # Should be confirmatory
-        self.assertIn("HWID", title)
-
-    def test_limit_response_uses_cooldown_wording(self):
-        from agent.license_panel import build_reset_limit_response
-        payload = build_reset_limit_response(5, 5)
-        desc = payload["embed"]["description"].lower()
-        self.assertIn("5 minute", desc)
-        self.assertNotIn("24 hours", desc)
-        self.assertNotIn("5/5", desc)
-
-    def test_active_warning_shows_elapsed(self):
-        from agent.license_panel import build_reset_active_warning_response
-        payload = build_reset_active_warning_response(120)  # 2 minutes
-        desc = payload["embed"]["description"]
-        self.assertIn("2m", desc)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

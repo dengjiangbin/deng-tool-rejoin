@@ -14,7 +14,8 @@ const crypto = require('crypto');
 
 const COOLDOWN_SECONDS = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS || '60', 10);
 const CHALLENGE_TTL_MS = 30 * 60 * 1000;
-const KEY_EXPIRY_HOURS = parseInt(process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '24', 10);
+// Every generated key lives exactly 48 hours from creation (server-side truth).
+const KEY_EXPIRY_HOURS = parseInt(process.env.KEY_EXPIRY_HOURS || process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '48', 10);
 const AD_MIN_COMPLETION_SECONDS = parseInt(process.env.AD_MIN_COMPLETION_SECONDS || '30', 10);
 const RETURN_TOKEN_TTL_MS = 30 * 60 * 1000;
 
@@ -1050,29 +1051,13 @@ async function completeAdAndGenerateKey(challengeRow) {
       return recoverExistingResult(existingAfterConsume);
     }
 
-    // Check max active key limit before inserting key
-    const limitCheck = await licenseService.canUserReceiveNewKey(discord_user_id, site_user_id);
-    if (!limitCheck.allowed) {
-      await supabase
-        .from('license_ad_challenges')
-        .update({ status: 'failed', failure_reason: 'key_limit_reached' })
-        .eq('id', challengeId);
-      throw safeError('KEY_LIMIT_REACHED', licenseService.KEY_SLOT_LIMIT_MESSAGE);
-    }
-
+    // No max user/key-slot limit: any eligible user may generate a key even when
+    // many other users already hold keys. The only generation guard is the
+    // single-active-unredeemed-key check above (anti-abuse, not a slot cap).
     const { raw, id: keyId, prefix, suffix, displayPrefix, displaySuffix } = generateDengKey();
     const now = new Date().toISOString();
     const expiresAt = keyExpiresAt();
     const keyCiphertext = encryptLicenseKeyPlaintext(raw);
-
-    const recheck = await licenseService.canUserReceiveNewKey(discord_user_id, site_user_id);
-    if (!recheck.allowed) {
-      await supabase
-        .from('license_ad_challenges')
-        .update({ status: 'failed', failure_reason: 'key_limit_reached' })
-        .eq('id', challengeId);
-      throw safeError('KEY_LIMIT_REACHED', licenseService.KEY_SLOT_LIMIT_MESSAGE);
-    }
 
     try {
       await insertLicenseKey({

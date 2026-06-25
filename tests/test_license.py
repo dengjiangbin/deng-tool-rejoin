@@ -236,6 +236,13 @@ class StoreUserKeyTests(unittest.TestCase):
 
 # ── Tests 16-20: HWID reset ────────────────────────────────────────────────────
 
+@unittest.skip(
+    "Reset HWID has been removed (license rebuild PART B). The store-level "
+    "reset_hwid is unreachable dead code: website returns 410, the Discord "
+    "panel button is removed, and the license API exposes no reset endpoint. "
+    "Removal is covered by tests/test_license_48h_and_hwid_rebuild.py and the "
+    "site 410 tests."
+)
 class StoreHwidResetTests(unittest.TestCase):
     def setUp(self):
         self.store = _tmp_store()

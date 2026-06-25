@@ -407,22 +407,12 @@ class TestResetHwidDoesNotReduceCount(unittest.TestCase):
             "Reset HWID must not reduce the active key count")
 
 
-# ── Test 16: /license user display ───────────────────────────────────────────
+# ── Test 16: active-key count display (no max) ───────────────────────────────
 
 class TestLicenseUserDisplay(unittest.TestCase):
 
-    def test_16_license_user_shows_max_and_active(self):
-        """Test 16 — /license user lookup shows Active Keys and Max Keys correctly."""
-        store = _tmp_store()
-        uid = "displaytest"
-        store.get_or_create_user(uid)
-        store.set_global_max_keys(2, updated_by="admin")
-        _add_owned_unbound_key(store, uid)
-        # Use a synthetic active_rows (count only matters for display, not content)
-        active_rows = [{}]  # 1 active row, but we skip format_authorized_active_key_line
-        effective_max = store.get_effective_max_keys(uid)
-        user_override = store.get_user_key_limit(uid)
-        max_keys_source = "user" if user_override is not None else "global"
+    def test_16_license_user_shows_active_count_without_max(self):
+        """Test 16 — admin stats shows a simple Active Keys count without any max."""
         stats = {
             "key_generated_count": 1,
             "key_redeemed_count": 1,
@@ -431,50 +421,16 @@ class TestLicenseUserDisplay(unittest.TestCase):
             "reset_hwid_count": 0,
             "key_executed_count": 0,
         }
-        # Test the description logic with empty active_rows to avoid full-key requirement
         desc = build_license_admin_stats_description(
             user_label="<@123> (123)",
             stats=stats,
-            active_rows=[],  # empty avoids format_authorized_active_key_line
-            effective_max_keys=effective_max,
-            max_keys_source=max_keys_source,
+            active_rows=[],
         )
-        self.assertIn("Max Keys:", desc)
-        self.assertIn("Global Default", desc)
         self.assertIn("Active Keys:", desc)
-        # With empty active_rows, shows "0 / 2"
-        self.assertIn("0 / 2", desc)
-        # Also verify count_active_keys_for_limit returns correct value separately
-        self.assertEqual(store.count_active_keys_for_limit(uid), 1)
-
-    def test_16b_per_user_override_shown_in_display(self):
-        """User Override label shown when per-user override exists."""
-        store = _tmp_store()
-        uid = "overridetest"
-        store.get_or_create_user(uid)
-        store.set_user_key_limit(uid, 5, updated_by="admin")
-        active_rows = []
-        effective_max = store.get_effective_max_keys(uid)
-        user_override = store.get_user_key_limit(uid)
-        max_keys_source = "user" if user_override is not None else "global"
-        stats = {
-            "key_generated_count": 0,
-            "key_redeemed_count": 0,
-            "unbound_key_count": 0,
-            "bound_key_count": 0,
-            "reset_hwid_count": 0,
-            "key_executed_count": 0,
-        }
-        desc = build_license_admin_stats_description(
-            user_label="<@123> (123)",
-            stats=stats,
-            active_rows=active_rows,
-            effective_max_keys=effective_max,
-            max_keys_source="user",
-        )
-        self.assertIn("Max Keys:", desc)
-        self.assertIn("User Override", desc)
-        self.assertIn("5", desc)
+        # Max key slot/limit displays must be gone.
+        self.assertNotIn("Max Keys:", desc)
+        self.assertNotIn("Max Panel", desc)
+        self.assertNotIn(" / ", desc)
 
 
 # ── Test 17-18: Shared logic used by website and Discord ─────────────────────
@@ -522,59 +478,6 @@ class TestPermissionChecks(unittest.TestCase):
                 id = 12345
             self.assertFalse(_is_owner(FakeUser()))
             self.assertTrue(_is_owner(FakeOwner()))
-
-
-# ── Test 20: Log event posted when limit changes ─────────────────────────────
-
-class TestLogEventPosted(unittest.IsolatedAsyncioTestCase):
-
-    async def test_20_log_event_posted_on_global_max_change(self):
-        """Test 20 — _post_max_key_log sends an embed to the configured log channel."""
-        import discord as _discord
-        from bot.cog_license_panel import _post_max_key_log
-
-        mock_store = MagicMock()
-        mock_store.get_license_log_config.return_value = {"channel_id": "123456"}
-
-        mock_channel = MagicMock()
-        mock_channel.send = AsyncMock()
-        # Make isinstance(mock_channel, discord.TextChannel) return True
-        mock_channel.__class__ = _discord.TextChannel
-
-        mock_guild = MagicMock()
-        mock_guild.id = 7777
-        mock_guild.get_channel.return_value = mock_channel
-
-        mock_admin = MagicMock()
-        mock_admin.id = 12345
-
-        await _post_max_key_log(
-            mock_guild, mock_store,
-            mock_admin, "Global", None, 2, 3,
-        )
-
-        mock_channel.send.assert_awaited_once()
-        call_kwargs = mock_channel.send.call_args
-        sent_embed = call_kwargs[1].get("embed") if call_kwargs and call_kwargs[1] else None
-        self.assertIsNotNone(sent_embed)
-
-    async def test_20b_log_not_sent_when_no_channel_configured(self):
-        """_post_max_key_log is silent when no log channel is configured."""
-        from bot.cog_license_panel import _post_max_key_log
-
-        mock_store = MagicMock()
-        mock_store.get_license_log_config.return_value = None
-
-        mock_guild = MagicMock()
-        mock_guild.id = 8888
-        mock_admin = MagicMock()
-        mock_admin.id = 12345
-
-        # Should not raise and should not try to send
-        await _post_max_key_log(
-            mock_guild, mock_store,
-            mock_admin, "Global", None, 2, 3,
-        )
 
 
 # ── Additional edge cases ─────────────────────────────────────────────────────

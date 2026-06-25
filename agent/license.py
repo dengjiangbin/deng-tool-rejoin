@@ -159,6 +159,71 @@ def hash_install_id(install_id: str) -> str:
     return hashlib.sha256(install_id.encode("utf-8")).hexdigest()
 
 
+# ── Test-license bypass (test/latest / main-dev channel ONLY) ──────────────────
+# This bypass lets the OWNER run the tool with no key on test builds. It is
+# gated on the installed build channel so copying the marker onto a stable build
+# can NEVER unlock production: stable builds always require a real key.
+TEST_BYPASS_MARKER_PATH = APP_HOME / ".test-license-bypass"
+_DEV_CHANNELS = frozenset(
+    {"main-dev", "dev", "internal", "test", "beta", "test-latest"}
+)
+
+
+def installed_channel() -> str:
+    """Return the installed build channel (lowercased) or '' if unknown."""
+    try:
+        from .build_info import collect_version_info
+
+        info = collect_version_info() or {}
+        return str(info.get("channel") or "").strip().lower()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def is_dev_channel() -> bool:
+    """True only for test/main-dev style channels (never stable/public)."""
+    return installed_channel() in _DEV_CHANNELS
+
+
+def is_test_license_bypass_active() -> bool:
+    """True only when the local bypass marker exists AND this is a test build.
+
+    Stable/public builds ignore the marker entirely, so a copied marker can
+    never grant a key-free bypass in production.
+    """
+    try:
+        if not TEST_BYPASS_MARKER_PATH.exists():
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    return is_dev_channel()
+
+
+def enable_test_license_bypass() -> bool:
+    """Persist the bypass marker. No-op (returns False) on stable builds."""
+    if not is_dev_channel():
+        return False
+    try:
+        APP_HOME.mkdir(parents=True, exist_ok=True)
+        TEST_BYPASS_MARKER_PATH.write_text(
+            json.dumps({"channel": installed_channel(), "enabled": True}) + "\n",
+            encoding="utf-8",
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def disable_test_license_bypass() -> bool:
+    """Remove the bypass marker so the tool requires a real key again."""
+    try:
+        if TEST_BYPASS_MARKER_PATH.exists():
+            TEST_BYPASS_MARKER_PATH.unlink()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ── Device summary (public / safe properties only) ────────────────────────────
 
 def get_device_summary() -> dict[str, str]:

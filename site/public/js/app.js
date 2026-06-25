@@ -203,7 +203,7 @@
         serverNotice.textContent = text;
         serverNotice.hidden = !text;
         if (notice) notice.hidden = true;
-        if (btn && (body.blockReason === 'cooldown_active' || body.blockReason === 'max_key_limit')) btn.disabled = true;
+        if (btn && body.blockReason === 'cooldown_active') btn.disabled = true;
         return;
       }
       if (document.querySelector('.unused-key-recovery') && body.blockReason === 'active_unredeemed_key') {
@@ -217,7 +217,6 @@
         notice.hidden = false;
       }
       if (btn && body.blockReason === 'cooldown_active') btn.disabled = true;
-      if (btn && body.blockReason === 'max_key_limit') btn.disabled = true;
     })
     .catch(function() {
       // Backend remains authoritative; ignore refresh failures.
@@ -354,16 +353,7 @@
   var root = document.querySelector('[data-license-actions]');
   if (!root) return;
 
-  var csrf = root.dataset.csrf || '';
   var pageMessage = document.querySelector('[data-license-message]');
-  var resetModal = document.querySelector('[data-license-modal="reset"]');
-  var redeemModal = document.querySelector('[data-license-modal="redeem"]');
-  var resetList = document.querySelector('[data-reset-key-list]');
-  var resetMessage = document.querySelector('[data-reset-message]');
-  var redeemMessage = document.querySelector('[data-redeem-message]');
-  var redeemInput = document.querySelector('[data-redeem-key-input]');
-  var resetButton = document.querySelector('[data-confirm-reset]');
-  var redeemButton = document.querySelector('[data-confirm-redeem]');
   var downloadButton = document.querySelector('[data-download-keys]');
 
   function showMessage(el, text, type) {
@@ -385,57 +375,6 @@
     }
   }
 
-  function openModal(modal) {
-    if (!modal) return;
-    modal.hidden = false;
-    showMessage(pageMessage, '', 'success');
-  }
-
-  function closeModals() {
-    [resetModal, redeemModal].forEach(function(modal) {
-      if (modal) modal.hidden = true;
-    });
-  }
-
-  function selectedResetKeyId() {
-    var selected = resetList ? resetList.querySelector('input[name="reset_key_id"]:checked') : null;
-    return selected ? selected.value : '';
-  }
-
-  function escapeHtml(value) {
-    return String(value || '').replace(/[&<>"']/g, function(ch) {
-      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
-    });
-  }
-
-  function loadResetKeys() {
-    if (!resetList) return;
-    resetList.innerHTML = '<p class="empty-text">Loading keys...</p>';
-    showMessage(resetMessage, '', 'success');
-    fetch('/api/license/resettable', { headers: { Accept: 'application/json' } })
-      .then(function(res) { return res.json().then(function(body) { return { ok: res.ok, body: body }; }); })
-      .then(function(result) {
-        if (!result.ok) throw new Error(result.body.message || 'Could not load keys.');
-        var resettable = (result.body.keys || []).filter(function(row) { return row.can_reset; });
-        if (!resettable.length) {
-          resetList.innerHTML = '<p class="empty-title">No Resettable Keys Found.</p>';
-          return;
-        }
-        resetList.innerHTML = resettable.map(function(row, idx) {
-          var device = row.device_label || 'Bound To A Device';
-          var checked = idx === 0 ? ' checked' : '';
-          return '<label class="license-key-option">' +
-            '<input type="radio" name="reset_key_id" value="' + escapeHtml(row.id) + '"' + checked + '>' +
-            '<span><strong>' + escapeHtml(row.key) + '</strong><small>' + escapeHtml(row.device_status) + ' · ' + escapeHtml(device) + '</small></span>' +
-            '</label>';
-        }).join('');
-      })
-      .catch(function(err) {
-        resetList.innerHTML = '<p class="empty-title">No Resettable Keys Found.</p>';
-        showMessage(resetMessage, err.message || 'Could not load keys.', 'error');
-      });
-  }
-
   var generateForm = root.querySelector('.license-action-form');
   if (generateForm) {
     generateForm.addEventListener('submit', function() {
@@ -443,82 +382,6 @@
       // generation flow. Any current block will be rendered exactly once by
       // the destination page.
       if (pageMessage) showMessage(pageMessage, '', 'success');
-    });
-  }
-
-  document.querySelectorAll('[data-open-license-modal]').forEach(function(button) {
-    button.addEventListener('click', function() {
-      var target = button.dataset.openLicenseModal;
-      if (target === 'reset') {
-        openModal(resetModal);
-        loadResetKeys();
-      } else if (target === 'redeem') {
-        openModal(redeemModal);
-        if (redeemInput) redeemInput.focus();
-      }
-    });
-  });
-
-  document.querySelectorAll('[data-close-license-modal]').forEach(function(button) {
-    button.addEventListener('click', closeModals);
-  });
-
-  [resetModal, redeemModal].forEach(function(modal) {
-    if (!modal) return;
-    modal.addEventListener('click', function(event) {
-      if (event.target === modal) closeModals();
-    });
-  });
-
-  if (resetButton) {
-    resetButton.addEventListener('click', function() {
-      var keyId = selectedResetKeyId();
-      if (!keyId) {
-        showMessage(resetMessage, 'No Resettable Keys Found.', 'error');
-        return;
-      }
-      setBusy(resetButton, true, 'Resetting...');
-      fetch('/api/license/reset-hwid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, Accept: 'application/json' },
-        body: JSON.stringify({ key_id: keyId })
-      })
-        .then(function(res) { return res.json().then(function(body) { return { ok: res.ok, body: body }; }); })
-        .then(function(result) {
-          if (!result.ok) throw new Error(result.body.message || 'Could not reset HWID.');
-          showMessage(resetMessage, result.body.message || 'HWID Reset Successful. You Can Bind This Key On A New Device.', 'success');
-          setTimeout(function() { window.location.reload(); }, 900);
-        })
-        .catch(function(err) {
-          showMessage(resetMessage, err.message || 'Could not reset HWID.', 'error');
-        })
-        .finally(function() { setBusy(resetButton, false); });
-    });
-  }
-
-  if (redeemButton) {
-    redeemButton.addEventListener('click', function() {
-      var key = redeemInput ? redeemInput.value.trim() : '';
-      if (!key) {
-        showMessage(redeemMessage, 'Enter License Key.', 'error');
-        return;
-      }
-      setBusy(redeemButton, true, 'Redeeming...');
-      fetch('/api/license/redeem', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, Accept: 'application/json' },
-        body: JSON.stringify({ key: key })
-      })
-        .then(function(res) { return res.json().then(function(body) { return { ok: res.ok, body: body }; }); })
-        .then(function(result) {
-          if (!result.ok) throw new Error(result.body.message || 'Could not redeem key.');
-          showMessage(redeemMessage, result.body.message || 'Key Redeemed Successfully.', 'success');
-          setTimeout(function() { window.location.reload(); }, 900);
-        })
-        .catch(function(err) {
-          showMessage(redeemMessage, err.message || 'Could not redeem key.', 'error');
-        })
-        .finally(function() { setBusy(redeemButton, false); });
     });
   }
 

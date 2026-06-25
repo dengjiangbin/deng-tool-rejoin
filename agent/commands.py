@@ -90,10 +90,14 @@ from .license import (
     WRONG_DEVICE_USER_MESSAGE,
     bind_remote_license_key,
     check_remote_license_status,
+    disable_test_license_bypass,
+    enable_test_license_bypass,
     get_device_summary,
     get_or_create_install_id,
     get_public_device_model,
     hash_install_id,
+    is_dev_channel,
+    is_test_license_bypass_active,
     normalize_license_key,
     sync_install_id_with_config,
 )
@@ -160,6 +164,17 @@ def _print_dev_license_skipped(use_color: bool) -> None:
         print(f"{_ANSI_YELLOW}{msg}{_ANSI_RESET}")
     else:
         print(msg)
+
+
+def _print_test_license_bypass_active(use_color: bool) -> None:
+    msg = "TEST LICENSE BYPASS ACTIVE"
+    sub = "Test build only — run: deng-rejoin --disable-test-license-bypass to require a key again."
+    if use_color:
+        print(f"{_ANSI_YELLOW}{msg}{_ANSI_RESET}")
+        print(sub)
+    else:
+        print(msg)
+        print(sub)
 
 
 def _print_license_ok(use_color: bool) -> None:
@@ -5719,8 +5734,16 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 pass
 
-        # ── License gate ─────────────────────────────────────────────────────
-        if not keystore.DEV_MODE:
+        # ── License gate (re-validated on every Start, BEFORE any launch) ──────
+        # This runs before package detection, watchdog/supervisor, webhook
+        # reporter, private-server URL launch and any Android VIEW intent, so an
+        # expired / wrong-device / invalid key can never reach a package launch
+        # even if the menu was left open. Server time is authoritative (the
+        # remote check returns server_now/expires_at), so changing the device
+        # clock cannot bypass the 48-hour expiry.
+        if is_test_license_bypass_active():
+            _print_test_license_bypass_active(use_color)
+        elif not keystore.DEV_MODE:
             license_cfg = cfg.get("license") or {}
             if not license_cfg.get("disabled_by_user") and license_cfg.get("enabled", True):
                 if str(license_cfg.get("mode") or "remote").strip().lower() == "local":
@@ -8073,6 +8096,18 @@ def _run_top_menu_with_clean_exit(args: argparse.Namespace) -> int:
     return rc
 
 
+def cmd_disable_test_license_bypass(args: argparse.Namespace) -> int:
+    """Remove the test-build key-free bypass; restores the normal key gate."""
+    use_color = not getattr(args, "no_color", False)
+    disable_test_license_bypass()
+    msg = "Test license bypass disabled. This build now requires a valid key."
+    if use_color:
+        print(termux_ui.success_line(msg))
+    else:
+        print(msg)
+    return 0
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
     """Open the main menu, gated by a license check on first run."""
     global _license_manual_verification_success
@@ -8108,6 +8143,13 @@ def cmd_menu(args: argparse.Namespace) -> int:
 
     # Skip gate when license checking is disabled in config
     if lic.get("disabled_by_user") or not lic.get("enabled", True):
+        safe_io.safe_clear_screen()
+        return _run_top_menu_with_clean_exit(args)
+
+    # Test-only key-free bypass (test/latest / main-dev builds ONLY).
+    if is_test_license_bypass_active():
+        _print_test_license_bypass_active(use_color)
+        _try_autostart_monitor_bridge(cfg)
         safe_io.safe_clear_screen()
         return _run_top_menu_with_clean_exit(args)
 
@@ -8148,6 +8190,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--menu", action="store_true")
     parser.add_argument("--license", action="store_true", help="enter or update your license key")
+    parser.add_argument(
+        "--disable-test-license-bypass",
+        dest="disable_test_bypass",
+        action="store_true",
+        help="remove the test-build key-free bypass (test/main-dev builds only)",
+    )
     parser.add_argument("--new-user-help", dest="new_user_help", action="store_true", help="print the built-in tutorial for beginners")
     parser.add_argument("--enable-boot", action="store_true")
     parser.add_argument("--update", action="store_true")
@@ -8290,7 +8338,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("choose only one command")
 
     # Hidden diagnostics: route to internal commands without showing in public menu.
-    if getattr(ns, "discover_layout_keys", False):
+    if getattr(ns, "disable_test_bypass", False):
+        ns.resolved_command = "disable-test-license-bypass"
+    elif getattr(ns, "discover_layout_keys", False):
         ns.resolved_command = "discover-layout-keys"
     elif getattr(ns, "support_bundle", False):
         ns.resolved_command = "support-bundle"
@@ -8396,6 +8446,7 @@ def _handlers() -> dict[str, Any]:
         "menu": cmd_menu,
         "package-key": cmd_package_key,
         "license": cmd_license,
+        "disable-test-license-bypass": cmd_disable_test_license_bypass,
         "monitor": cmd_monitor,
         "new-user-help": cmd_new_user_help,
         "enable-boot": cmd_enable_boot,

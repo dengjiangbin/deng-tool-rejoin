@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent.license_panel import build_panel_embed, build_reset_selector_embed
+from agent.license_panel import build_panel_embed
 from agent.license_store import LocalJsonLicenseStore
 from bot.cog_license_panel import KeyStatsDownloadButton, KeyStatsView, PanelView
 
@@ -26,30 +26,9 @@ class TestPanelMobileCopy(unittest.TestCase):
         self.assertEqual(embed["footer"]["text"], "DENG Tool • https://tool.deng.my.id • Secure & Automated")
         self.assertNotIn("fields", embed)
         self.assertNotIn("timestamp", embed)
-        self.assertIn("> ♻️ Reset HWID\n> Unbind your keys from the current device, 5-minute cooldown.", embed["description"])
-        self.assertNotIn("Move key to new device, 5 mins cooldown.", embed["description"])
-
-
-class TestResetHwidWording(unittest.TestCase):
-    def test_reset_selector_has_no_daily_limit_footer(self) -> None:
-        payload = build_reset_selector_embed([{
-            "key_id": "k1",
-            "masked_key": "DENG-AB12...CD34",
-            "full_key_plaintext": "DENG-AB12-CD34-EF56-7890",
-            "active_binding": True,
-            "device_model": "Pixel",
-            "device_label": "",
-        }])
-        footer = payload["embed"].get("footer", {}).get("text", "")
-        blob = (payload["embed"].get("description") or "") + footer
-        for forbidden in (
-            "Limited to 5 resets",
-            "5 resets every 24 hours",
-            "5/day",
-            "per 24 hours",
-        ):
-            self.assertNotIn(forbidden, blob)
-        self.assertIn("5 minute", footer.lower())
+        # Reset HWID was removed from the panel; it must not appear in the embed.
+        self.assertNotIn("Reset HWID", embed["description"])
+        self.assertNotIn("Redeem Key", embed["description"])
 
 
 class TestKeyStatsRecoverRemoval(unittest.TestCase):
@@ -95,13 +74,13 @@ class TestKeyStatsExportPreserved(unittest.IsolatedAsyncioTestCase):
 
 
 class TestPanelButtonsPreserved(unittest.TestCase):
-    def test_panel_view_still_has_five_buttons(self) -> None:
+    def test_panel_view_has_three_buttons(self) -> None:
         with TemporaryDirectory() as tmp:
             view = PanelView(_make_store(tmp))
-            self.assertEqual(len(view.children), 5)
+            self.assertEqual(len(view.children), 3)
             self.assertEqual(
                 [getattr(c, "label", "") for c in view.children],
-                ["Generate Key", "Reset HWID", "Redeem Key", "Key Stats", "Select Version"],
+                ["Generate Key", "Key Stats", "Select Version"],
             )
 
 

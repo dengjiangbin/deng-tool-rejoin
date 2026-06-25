@@ -4,7 +4,7 @@
   <div>
     <p class="eyebrow">License Center</p>
     <h1 class="page-title">My License</h1>
-    <p class="page-subtitle">Complete one ad step, then redeem the key inside the Rejoin module.</p>
+    <p class="page-subtitle">Complete one ad step, then use the key inside DENG Tool Rejoin.</p>
   </div>
 </div>
 
@@ -12,9 +12,11 @@
   <div class="generate-header">
     <div>
       <h2 class="section-title">Generate Rejoin Key</h2>
-      <p class="section-desc">Complete one ad step, then redeem the key inside the Rejoin module.</p>
+      <p class="section-desc">Complete one ad step, then use the key inside DENG Tool Rejoin.</p>
     </div>
   </div>
+
+  <p class="section-desc license-expiry-hint">Each key works on one device and expires 48 hours after it is generated.</p>
 
   <%
     var flashError = flash && flash.error ? flash.error : '';
@@ -32,10 +34,6 @@
     <div class="cooldown-notice block-notice" data-server-license-notice data-block-reason="cooldown_active" data-seconds="<%= cooldown.secondsLeft %>" role="status">
       Cooldown active: <span class="countdown"></span>
     </div>
-  <% } else if (eligibility && !eligibility.canGenerate && eligibility.blockReason === 'max_key_limit') { %>
-    <div class="block-notice license-block-notice" data-server-license-notice data-block-reason="max_key_limit" role="status">
-      <%= eligibility.message || 'Key limit reached for your account.' %>
-    </div>
   <% } %>
 
   <div class="eligibility-notice block-notice license-block-notice" data-eligibility-notice hidden></div>
@@ -43,7 +41,7 @@
   <% if (existingUnusedKey) { %>
     <div class="unused-key-recovery">
       <p class="empty-title">You already have an unused key.</p>
-      <p class="empty-text">Copy or redeem this key before generating another one.</p>
+      <p class="empty-text">Copy this key before generating another one.</p>
       <div class="key-display-wrap">
         <code class="key-display" id="existing-key-value"><%= existingUnusedKey.key %></code>
         <button class="btn-copy" type="button" data-copy-key data-key="<%= existingUnusedKey.key %>" aria-label="Copy key">Copy</button>
@@ -51,6 +49,7 @@
       <% if (existingUnusedKey.expires_at_formatted && existingUnusedKey.expires_at_formatted !== 'None') { %>
         <p class="empty-text">Expires: <%= existingUnusedKey.expires_at_formatted %></p>
       <% } %>
+      <p class="empty-text">Each key works on one device and expires 48 hours after it is generated.</p>
     </div>
   <% } %>
 
@@ -61,8 +60,6 @@
         Generate Key
       </button>
     </form>
-    <button type="button" class="btn btn-primary" data-open-license-modal="reset">Reset HWID</button>
-    <button type="button" class="btn btn-primary" data-open-license-modal="redeem">Redeem Key</button>
     <button type="button" class="btn btn-primary" data-download-keys>Download Key</button>
   </div>
 
@@ -85,6 +82,7 @@
             <th>Provider</th>
             <th>Status</th>
             <th>Generated</th>
+            <th>Expires</th>
           </tr>
         </thead>
         <tbody>
@@ -94,57 +92,16 @@
             <td><span class="badge badge-provider"><%= providerLabel(row.provider) %></span></td>
             <td><span class="badge <%= friendlyStatus(row) === 'Unredeemed' ? 'badge-green' : (friendlyStatus(row) === 'Expired' || friendlyStatus(row) === 'Revoked' ? 'badge-red' : 'badge-gray') %>"><%= friendlyStatus(row) %></span></td>
             <td class="muted-cell"><%= formatWibTimestamp(row.created_at) %></td>
+            <td class="muted-cell"><%= formatWibTimestamp(row.expires_at || row.key_expires_at) %></td>
           </tr>
           <% }) %>
         </tbody>
       </table>
     </div>
+    <p class="empty-text">Each key works on one device and expires 48 hours after it is generated.</p>
   <% } else { %>
     <div class="empty-state">
       <p class="empty-title">No keys generated yet.</p>
     </div>
   <% } %>
 </section>
-
-<div class="modal-backdrop" data-license-modal="reset" hidden>
-  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="reset-hwid-title">
-    <div class="modal-header">
-      <div>
-        <h2 class="section-title" id="reset-hwid-title">Reset HWID</h2>
-        <p class="section-desc">Move A Key To A New Device.</p>
-      </div>
-      <button type="button" class="modal-close" data-close-license-modal aria-label="Close">X</button>
-    </div>
-    <div class="license-modal-body">
-      <div class="license-key-list" data-reset-key-list>
-        <p class="empty-text">Loading keys...</p>
-      </div>
-      <div class="license-message" data-reset-message hidden></div>
-    </div>
-    <div class="modal-actions">
-      <button type="button" class="btn btn-outline" data-close-license-modal>Cancel</button>
-      <button type="button" class="btn btn-primary" data-confirm-reset>Confirm Reset</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-backdrop" data-license-modal="redeem" hidden>
-  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="redeem-key-title">
-    <div class="modal-header">
-      <div>
-        <h2 class="section-title" id="redeem-key-title">Redeem Key</h2>
-        <p class="section-desc">Claim an existing Rejoin license key.</p>
-      </div>
-      <button type="button" class="modal-close" data-close-license-modal aria-label="Close">X</button>
-    </div>
-    <div class="license-modal-body">
-      <label class="form-label" for="redeem-license-key">Enter License Key</label>
-      <input id="redeem-license-key" class="form-input" type="text" autocomplete="off" placeholder="DENG-XXXX-XXXX-XXXX-XXXX" data-redeem-key-input>
-      <div class="license-message" data-redeem-message hidden></div>
-    </div>
-    <div class="modal-actions">
-      <button type="button" class="btn btn-outline" data-close-license-modal>Cancel</button>
-      <button type="button" class="btn btn-primary" data-confirm-redeem>Redeem Key</button>
-    </div>
-  </div>
-</div>

@@ -1538,24 +1538,45 @@ describe('theme and dashboard UI', () => {
     assert.match(res.text, /Generate Rejoin Key/);
   });
 
-  test('My License action row renders only requested license buttons', async () => {
+  test('My License action row renders only Generate and Download (no reset/redeem)', async () => {
     const agent = request.agent(app);
     await login(agent);
     const res = await agent.get('/license');
     assert.equal(res.status, 200);
     assert.match(res.text, /Generate Key/);
-    assert.match(res.text, /Reset HWID/);
-    assert.match(res.text, /Redeem Key/);
     assert.match(res.text, /Download Key/);
     assert.match(res.text, /class="license-actions"/);
     assert.match(res.text, /class="btn btn-primary btn-generate"[^>]*>\s*Generate Key/);
-    assert.match(res.text, /class="btn btn-primary"[^>]*data-open-license-modal="reset"[^>]*>Reset HWID/);
-    assert.match(res.text, /class="btn btn-primary"[^>]*data-open-license-modal="redeem"[^>]*>Redeem Key/);
     assert.match(res.text, /class="btn btn-primary"[^>]*data-download-keys[^>]*>Download Key/);
+    // Reset HWID and Redeem Key UI is fully removed from the website.
+    assert.doesNotMatch(res.text, /Reset HWID/);
+    assert.doesNotMatch(res.text, /Redeem Key/);
+    assert.doesNotMatch(res.text, /data-open-license-modal/);
+    assert.doesNotMatch(res.text, /data-license-modal/);
+    // Clear 48-hour expiry messaging is present.
+    assert.match(res.text, /expires 48 hours after it is generated/);
     assert.doesNotMatch(res.text, /Key Stats/);
     assert.doesNotMatch(res.text, /Select Package/);
     assert.doesNotMatch(res.text, /Select Version/);
     assert.doesNotMatch(res.text, /Package Version/);
+  });
+
+  test('My License and Dashboard pages no longer contain removed feature strings', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const license = await agent.get('/license');
+    const dashboard = await agent.get('/dashboard');
+    assert.equal(license.status, 200);
+    assert.equal(dashboard.status, 200);
+    for (const text of [license.text, dashboard.text]) {
+      assert.doesNotMatch(text, /Reset HWID/);
+      assert.doesNotMatch(text, /Redeem Key/);
+      assert.doesNotMatch(text, /Key limit reached/i);
+      assert.doesNotMatch(text, /max slots/i);
+      assert.doesNotMatch(text, /user limit reached/i);
+      assert.doesNotMatch(text, /increase slots/i);
+      assert.doesNotMatch(text, /does not free a slot/i);
+    }
   });
 
   test('license action CSS keeps buttons responsive and mobile-wrapping', () => {
@@ -2515,7 +2536,7 @@ describe('Luarmor-style key flow', () => {
     assert.match(rendered.text, /Invalid or expired key generation session\. Please start again\./);
   });
 
-  test('valid Linkvertise unlock generates one key, keeps it out of the URL, and shows redeem instructions', async () => {
+  test('valid Linkvertise unlock generates one key, keeps it out of the URL, and shows 48-hour usage instructions', async () => {
     const agent = request.agent(app);
     await login(agent);
     const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
@@ -2525,6 +2546,11 @@ describe('Luarmor-style key flow', () => {
     assert.equal(unlock.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
     assert.equal(memoryDb.license_keys[0].owner_discord_id, 'discord-user-1');
+    // A freshly generated key must carry an expires_at ~48h in the future.
+    const generatedExpiresAt = memoryDb.license_keys[0].expires_at;
+    assert.ok(generatedExpiresAt, 'generated key should have expires_at set');
+    const aheadHours = (Date.parse(generatedExpiresAt) - Date.now()) / (3600 * 1000);
+    assert.ok(aheadHours > 47 && aheadHours < 49, `expected ~48h ahead, got ${aheadHours}`);
     assert.equal(memoryDb.license_keys[0].prefix.split('-').length, 2);
     assert.match(memoryDb.license_keys[0].suffix, /^[0-9A-F]{4}$/);
     assert.equal(memoryDb.license_keys[0].plan, 'standard');
@@ -2536,9 +2562,10 @@ describe('Luarmor-style key flow', () => {
     const result = await agent.get('/key/result');
     assert.equal(result.status, 200);
     assert.match(result.text, /DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}/);
-    assert.match(result.text, /Redeem this key inside the Rejoin module to activate your license\./);
-    assert.match(result.text, /This key expires if not redeemed within 24 hours\./);
-    assert.match(result.text, /Open Rejoin, paste this license key, then continue setup\./);
+    assert.match(result.text, /This key works directly in DENG Tool Rejoin\. It binds to one device and expires 48 hours after generation\./);
+    assert.match(result.text, /Open DENG Tool Rejoin, paste this license key, then continue setup\./);
+    assert.doesNotMatch(result.text, /Redeem this key inside the Rejoin module/i);
+    assert.doesNotMatch(result.text, /within 24 hours/);
     assert.doesNotMatch(result.req.path, /DENG-/);
   });
 
@@ -2818,146 +2845,73 @@ describe('canonical license service', () => {
 });
 
 describe('My License action APIs', () => {
-  test('new license action endpoints reject unauthenticated requests', async () => {
-    const getResettable = await request(app).get('/api/license/resettable');
-    const reset = await request(app).post('/api/license/reset-hwid').send({ key_id: 'x' });
-    const redeem = await request(app).post('/api/license/redeem').send({ key: 'x' });
+  test('download endpoint rejects unauthenticated requests', async () => {
     const download = await request(app).get('/api/license/download');
-    assert.equal(getResettable.status, 401);
-    assert.equal(reset.status, 401);
-    assert.equal(redeem.status, 401);
     assert.equal(download.status, 401);
   });
 
-  test('Reset HWID lists only logged-in user active resettable keys and resets canonical binding', async () => {
-    const agent = request.agent(app);
-    await login(agent);
-    const page = await agent.get('/license');
-    const csrf = csrfFrom(page.text);
+  test('removed reset/redeem endpoints answer 410 Gone (even unauthenticated)', async () => {
+    const getResettable = await request(app).get('/api/license/resettable');
+    const reset = await request(app).post('/api/license/reset-hwid').send({ key_id: 'x' });
+    const redeem = await request(app).post('/api/license/redeem').send({ key: 'x' });
+    assert.equal(getResettable.status, 410);
+    assert.equal(reset.status, 410);
+    assert.equal(redeem.status, 410);
+    assert.equal(getResettable.body.error, 'feature_removed');
+    assert.equal(reset.body.error, 'feature_removed');
+    assert.equal(redeem.body.error, 'feature_removed');
+  });
+
+  test('Reset HWID endpoints are removed: 410 Gone and no binding mutation', async () => {
+    // The 410 handler is mounted with no auth/CSRF middleware: it must answer
+    // Gone immediately and never touch license/binding state.
     const now = new Date().toISOString();
     const ownedKey = 'DENG-1111-2222-3333-4444';
     const ownedId = licenseKeyId(ownedKey);
-    const otherKey = 'DENG-9999-9999-9999-0000';
-    const otherId = licenseKeyId(otherKey);
-    const revokedKey = 'DENG-8888-8888-8888-0000';
-    const revokedId = licenseKeyId(revokedKey);
-    memoryDb.license_keys.push(
-      {
-        id: ownedId,
-        prefix: 'DENG-1111',
-        suffix: '4444',
-        owner_discord_id: 'discord-user-1',
-        status: 'active',
-        plan: 'standard',
-        created_at: now,
-        redeemed_at: now,
-        expires_at: null,
-      },
-      {
-        id: otherId,
-        prefix: 'DENG-9999',
-        suffix: '0000',
-        owner_discord_id: 'discord-user-2',
-        status: 'active',
-        plan: 'standard',
-        created_at: now,
-        redeemed_at: now,
-        expires_at: null,
-      },
-      {
-        id: revokedId,
-        prefix: 'DENG-8888',
-        suffix: '0000',
-        owner_discord_id: 'discord-user-1',
-        status: 'revoked',
-        plan: 'standard',
-        created_at: now,
-        redeemed_at: now,
-        expires_at: null,
-      },
-    );
+    memoryDb.license_keys.push({
+      id: ownedId,
+      prefix: 'DENG-1111',
+      suffix: '4444',
+      owner_discord_id: 'discord-user-1',
+      status: 'active',
+      plan: 'standard',
+      created_at: now,
+      redeemed_at: now,
+      expires_at: null,
+    });
     memoryDb.device_bindings.push(
       { key_id: ownedId, install_id_hash: 'old-hwid', device_model: 'SM-S901B', device_label: 'Phone', last_seen_at: now, is_active: true },
-      { key_id: otherId, install_id_hash: 'other-hwid', device_model: 'Other', last_seen_at: now, is_active: true },
-      { key_id: revokedId, install_id_hash: 'dead-hwid', device_model: 'Dead', last_seen_at: now, is_active: true },
     );
 
-    const list = await agent.get('/api/license/resettable');
-    assert.equal(list.status, 200);
-    assert.equal(list.body.keys.length, 1);
-    assert.equal(list.body.keys[0].id, ownedId);
-    assert.equal(list.body.keys[0].device_status, 'Bound To A Device');
+    const list = await request(app).get('/api/license/resettable');
+    assert.equal(list.status, 410);
+    assert.equal(list.body.error, 'feature_removed');
 
-    const wrongOwner = await agent.post('/api/license/reset-hwid')
-      .set('X-CSRF-Token', csrf)
-      .send({ key_id: otherId });
-    assert.equal(wrongOwner.status, 403);
+    const reset = await request(app).post('/api/license/reset-hwid').send({ key_id: ownedId });
+    assert.equal(reset.status, 410);
+    assert.equal(reset.body.error, 'feature_removed');
 
-    const revoked = await agent.post('/api/license/reset-hwid')
-      .set('X-CSRF-Token', csrf)
-      .send({ key_id: revokedId });
-    assert.equal(revoked.status, 400);
-
-    const reset = await agent.post('/api/license/reset-hwid')
-      .set('X-CSRF-Token', csrf)
-      .send({ key_id: ownedId });
-    assert.equal(reset.status, 200);
-    assert.equal(reset.body.message, 'HWID Reset Successful. You Can Bind This Key On A New Device.');
-    assert.equal(memoryDb.device_bindings.find((row) => row.key_id === ownedId).is_active, false);
-    assert.equal(memoryDb.hwid_reset_logs.length, 1);
-    assert.equal(memoryDb.hwid_reset_logs[0].owner_discord_id, 'discord-user-1');
-    assert.equal(memoryDb.hwid_reset_logs[0].old_install_id_hash, 'old-hwid');
-
-    memoryDb.license_panel_reset_usage.splice(0);
-    const noDevice = await agent.post('/api/license/reset-hwid')
-      .set('X-CSRF-Token', csrf)
-      .send({ key_id: ownedId });
-    assert.equal(noDevice.status, 400);
-    assert.equal(noDevice.body.error, 'no_device_linked');
+    // The binding must remain untouched: the removed endpoint never mutates state.
+    assert.equal(memoryDb.device_bindings.find((row) => row.key_id === ownedId).is_active, true);
+    assert.equal(memoryDb.hwid_reset_logs.length, 0);
   });
 
-  test('Redeem Key validates format and ownership, handles self-owned, and claims unowned keys', async () => {
-    const agent = request.agent(app);
-    await login(agent);
-    const page = await agent.get('/license');
-    const csrf = csrfFrom(page.text);
+  test('Redeem Key endpoint is removed: 410 Gone and no ownership mutation', async () => {
     const now = new Date().toISOString();
     const redeemable = 'DENG-AAAA-BBBB-CCCC-DDDD';
-    const selfOwned = 'DENG-1111-AAAA-2222-BBBB';
-    const otherOwned = 'DENG-9999-AAAA-2222-BBBB';
-    const expired = 'DENG-EEEE-FFFF-AAAA-BBBB';
-    memoryDb.license_users.push({ discord_user_id: 'discord-user-1', max_keys: 999999, is_blocked: false });
+    const redeemableId = licenseKeyId(redeemable);
     memoryDb.license_keys.push(
-      { id: licenseKeyId(redeemable), prefix: 'DENG-AAAA', suffix: 'DDDD', owner_discord_id: null, status: 'active', plan: 'standard', created_at: now, expires_at: new Date(Date.now() + 3600 * 1000).toISOString(), redeemed_at: null },
-      { id: licenseKeyId(selfOwned), prefix: 'DENG-1111', suffix: 'BBBB', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, expires_at: null, redeemed_at: now },
-      { id: licenseKeyId(otherOwned), prefix: 'DENG-9999', suffix: 'BBBB', owner_discord_id: 'discord-user-2', status: 'active', plan: 'standard', created_at: now, expires_at: null, redeemed_at: now },
-      { id: licenseKeyId(expired), prefix: 'DENG-EEEE', suffix: 'BBBB', owner_discord_id: null, status: 'active', plan: 'standard', created_at: now, expires_at: new Date(Date.now() - 1000).toISOString(), redeemed_at: null },
+      { id: redeemableId, prefix: 'DENG-AAAA', suffix: 'DDDD', owner_discord_id: null, status: 'active', plan: 'standard', created_at: now, expires_at: new Date(Date.now() + 3600 * 1000).toISOString(), redeemed_at: null },
     );
 
-    const invalid = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: 'bad-key' });
-    assert.equal(invalid.status, 400);
-    assert.equal(invalid.body.error, 'invalid_key_format');
+    const redeemed = await request(app).post('/api/license/redeem').send({ key: redeemable });
+    assert.equal(redeemed.status, 410);
+    assert.equal(redeemed.body.error, 'feature_removed');
 
-    const expiredRes = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: expired });
-    assert.equal(expiredRes.status, 400);
-    assert.equal(expiredRes.body.error, 'key_expired');
-
-    const other = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: otherOwned });
-    assert.equal(other.status, 403);
-    assert.equal(other.body.error, 'key_owned_by_another_user');
-
-    const self = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: selfOwned });
-    assert.equal(self.status, 200);
-    assert.equal(self.body.status, 'already_owned');
-    assert.match(self.body.message, /already redeemed by you/i);
-
-    const redeemed = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: redeemable });
-    assert.equal(redeemed.status, 200);
-    assert.equal(redeemed.body.status, 'redeemed');
-    const row = memoryDb.license_keys.find((item) => item.id === licenseKeyId(redeemable));
-    assert.equal(row.owner_discord_id, 'discord-user-1');
-    assert.equal(row.expires_at, null);
-    assert.ok(row.redeemed_at);
+    // Ownership and redemption state must be unchanged by the removed endpoint.
+    const row = memoryDb.license_keys.find((item) => item.id === redeemableId);
+    assert.equal(row.owner_discord_id, null);
+    assert.equal(row.redeemed_at, null);
   });
 
   test('Download Key exports only logged-in user active keys with safe full-key fallback', async () => {
@@ -3362,9 +3316,12 @@ describe('provider UI and security gate', () => {
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('max key limit returns quota error not missing attempt message', async () => {
+  test('license generation is NOT blocked when the user already owns many keys', async () => {
     const agent = request.agent(app);
     await login(agent);
+    // A legacy per-user limit row plus several owned keys must no longer block:
+    // canUserReceiveNewKey now always allows (HWID binding + 48h expiry protect
+    // ad revenue instead of a key-slot quota).
     memoryDb.license_key_limits.push({
       id: randomUUID(),
       scope: 'user',
@@ -3375,22 +3332,21 @@ describe('provider UI and security gate', () => {
       updated_at: new Date().toISOString(),
     });
     const redeemedAt = new Date().toISOString();
-    insertLicenseFixture('DENG-MAX-A-1111-2222-3333', {
-      redeemed_at: redeemedAt,
-      expires_at: null,
-    });
-    insertLicenseFixture('DENG-MAX-B-1111-2222-3333', {
-      redeemed_at: redeemedAt,
-      expires_at: null,
-    });
-    const page = await agent.get('/license');
-    const csrf = csrfFrom(page.text);
-    const res = await agent.post('/api/key/start').type('form').send({ _csrf: csrf });
-    assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/license');
+    for (const k of ['DENG-MAX-A-1111-2222-3333', 'DENG-MAX-B-1111-2222-3333', 'DENG-MAX-E-1111-2222-3333']) {
+      insertLicenseFixture(k, { redeemed_at: redeemedAt, expires_at: null });
+    }
+    // Age the generation cooldown so the only thing that could block here is a
+    // key-slot quota — which has been removed (canUserReceiveNewKey allows).
+    ageGenerationCooldowns();
+
+    const eligibility = await agent.get('/api/license/eligibility');
+    assert.equal(eligibility.status, 200);
+    assert.equal(eligibility.body.canGenerate, true);
+    assert.equal(eligibility.body.blockReason, null);
+
     const rendered = await agent.get('/license');
-    assert.match(rendered.text, /maximum of 2 key slots|Key limit reached/i);
-    assert.doesNotMatch(rendered.text, /No active key generation attempt was found/);
+    assert.doesNotMatch(rendered.text, /maximum of 2 key slots|Key limit reached/i);
+    assert.doesNotMatch(rendered.text, /data-block-reason="max_key_limit"/);
   });
 
   test('license browser generation enters the provider page instead of exposing API JSON', async () => {
@@ -3412,33 +3368,13 @@ describe('provider UI and security gate', () => {
     assert.equal(directApiNavigation.headers.location, '/license');
   });
 
-  test('max key limit is rendered once on the license page', async () => {
-    const agent = request.agent(app);
-    await login(agent);
-    memoryDb.license_key_limits.push({
-      id: randomUUID(),
-      scope: 'user',
-      max_keys: 2,
-      discord_user_id: 'discord-user-1',
-      updated_by_discord_id: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-    const redeemedAt = new Date().toISOString();
-    insertLicenseFixture('DENG-MAX-C-1111-2222-3333', { redeemed_at: redeemedAt, expires_at: null });
-    insertLicenseFixture('DENG-MAX-D-1111-2222-3333', { redeemed_at: redeemedAt, expires_at: null });
-
-    const blockedPage = await agent.get('/license');
-    const csrf = csrfFrom(blockedPage.text);
-    const blocked = await agent.post('/license/generate').type('form').send({ _csrf: csrf });
-    assert.equal(blocked.status, 302);
-    assert.equal(blocked.headers.location, '/license');
-
-    const rendered = await agent.get('/license');
-    const message = 'You have reached the 2 active-key limit.';
-    assert.equal(rendered.text.split(message).length - 1, 1);
-    assert.match(rendered.text, /data-server-license-notice/);
-    assert.doesNotMatch(rendered.text, /<main class="main-content">[\s\S]*alert-error[\s\S]*You have reached the 2 active-key limit/);
+  test('challenge KEY_EXPIRY_HOURS is 48 (key lifetime is 48 hours)', () => {
+    const ch = require('../src/challenge');
+    assert.equal(ch.KEY_EXPIRY_HOURS, 48);
+    // The generated-key expiry is now + KEY_EXPIRY_HOURS hours (see challenge.js
+    // keyExpiresAt); confirm that window is 48h, not the old 24h.
+    const windowHours = (ch.KEY_EXPIRY_HOURS * 3600 * 1000) / (3600 * 1000);
+    assert.equal(windowHours, 48);
   });
 
   test('findOrCreateResumableChallenge resumes open attempt instead of duplicating', async () => {
