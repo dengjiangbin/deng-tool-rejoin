@@ -1,6 +1,6 @@
 [
   {
-    "stable_latest": "v1.0.0",
+    "stable_latest": "v1.1.0",
     "test_latest": "main-dev",
     "kind": "channel_pointers"
   },
@@ -10,7 +10,7 @@
     "channel": "stable",
     "title": "Version 1.0.0",
     "label": "v1.0.0",
-    "recommended": true,
+    "recommended": false,
     "visibility": "public",
     "install_ref": "refs/tags/v1.0.0",
     "git_ref": "refs/tags/v1.0.0",
@@ -75,6 +75,24 @@
     "installer_endpoint": "/install/v1.0.3",
     "notes": "Frozen public stable release. Immutable artifact built for v1.0.3.",
     "enabled": false
+  },
+  {
+    "version": "v1.1.0",
+    "id": "v1.1.0",
+    "channel": "stable",
+    "title": "Version 1.1.0",
+    "label": "v1.1.0",
+    "recommended": true,
+    "visibility": "public",
+    "install_ref": "refs/tags/v1.1.0",
+    "git_ref": "refs/tags/v1.1.0",
+    "release_stage": "stable",
+    "frozen": true,
+    "artifact_path": "releases/v1.1.0/deng-tool-rejoin-v1.1.0.tar.gz",
+    "artifact_sha256": "6de8b8d4079ee8e3f365340a8064287e355d592a2dfd4c5f103dd7969fa05db2",
+    "installer_endpoint": "/install/v1.1.0",
+    "notes": "Frozen public stable release for Discord webhook Edit Mode persistence and status embed cleanup.",
+    "enabled": true
   },
   {
     "version": "main-dev",
