@@ -1280,7 +1280,11 @@ class WatchdogSupervisor:
         # ── Per-package mutable tracking ──────────────────────────────────────
         self._prev_state: dict[str, str] = {}
         self._last_online_ts: dict[str, float] = {}   # last time confirmed Online
-        self._online_start_ts: dict[str, float] = {}  # when package first became Online (for Runtime display)
+        self._online_start_ts: dict[str, float] = {}  # relaunch Online session start (unchanged)
+        from .status_monitor_runtime import load_package_launch_started_at
+
+        self._package_launch_started_at: dict[str, float] = load_package_launch_started_at()
+        self._relaunch_runtime_active: dict[str, bool] = {}
         self._last_launched_at: dict[str, float] = {}  # monotonic ts of last open/reopen
         self._grace_until: dict[str, float] = {}      # no relaunch until this ts
         self._nhb_offline_count: dict[str, int] = {}  # consecutive offline hits
@@ -1364,6 +1368,54 @@ class WatchdogSupervisor:
 
     # ─── Internal helpers ─────────────────────────────────────────────────────
 
+    def _maybe_record_package_launch_started(self, pkg: str, previous_status: str | None) -> None:
+        """Persist first Launching timestamp for Status Monitor first-launch runtime."""
+        prev = str(previous_status or "").strip()
+        if prev in {STATUS_RELAUNCHING, STATUS_REOPENING, STATUS_LAUNCHING}:
+            return
+        if pkg in self._package_launch_started_at:
+            return
+        from .status_monitor_runtime import persist_package_launch_started
+
+        ts = persist_package_launch_started(pkg)
+        self._package_launch_started_at[pkg] = ts
+
+    def _clear_status_monitor_runtime_state(self, pkg: str) -> None:
+        self._package_launch_started_at.pop(pkg, None)
+        self._relaunch_runtime_active.pop(pkg, None)
+        from .status_monitor_runtime import clear_package_launch_started
+
+        clear_package_launch_started(pkg)
+
+    def _status_monitor_runtime_started_at(self, pkg: str, status: str) -> tuple[float | None, str]:
+        """Return wall-clock runtime anchor and source label for Status Monitor only."""
+        from .status_monitor_runtime import fallback_monitor_started_at
+
+        if status == STATUS_ONLINE:
+            if self._relaunch_runtime_active.get(pkg) and pkg in self._online_start_ts:
+                return self._online_start_ts[pkg], "relaunch_online_started_at"
+            launch_at = self._package_launch_started_at.get(pkg)
+            if launch_at:
+                return launch_at, "package_launch_started_at"
+            fallback_at, source = fallback_monitor_started_at(self.cfg, pkg)
+            if fallback_at is not None:
+                return fallback_at, source
+            if pkg in self._online_start_ts:
+                return self._online_start_ts[pkg], "package_online_started_at"
+        launch_at = self._package_launch_started_at.get(pkg)
+        if launch_at and status in {
+            STATUS_LAUNCHING,
+            STATUS_RELAUNCHING,
+            STATUS_REOPENING,
+            STATUS_PREPARING,
+            STATUS_CLEAR_CACHE,
+        }:
+            return launch_at, "package_launch_started_at"
+        fallback_at, source = fallback_monitor_started_at(self.cfg, pkg)
+        if fallback_at is not None:
+            return fallback_at, source
+        return None, "missing"
+
     def _record_runtime_session_state(
         self, pkg: str, previous_state: str, state: str, now: float
     ) -> None:
@@ -1372,6 +1424,8 @@ class WatchdogSupervisor:
             self._last_online_ts[pkg] = now
             if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
                 self._online_start_ts[pkg] = now
+                if previous_state == STATUS_RELAUNCHING:
+                    self._relaunch_runtime_active[pkg] = True
                 try:
                     from . import webhook as lifecycle_webhook
 
@@ -1388,6 +1442,7 @@ class WatchdogSupervisor:
 
         if state == STATUS_DEAD:
             self._last_online_ts.pop(pkg, None)
+            self._clear_status_monitor_runtime_state(pkg)
 
     def _handle_stop(self, signum: Any, frame: Any) -> None:
         source = "sigterm" if signum == signal.SIGTERM else ("sigint" if signum == signal.SIGINT else f"signal_{signum}")
@@ -1422,8 +1477,11 @@ class WatchdogSupervisor:
         with self._state_lock:
             old = self.status_map.get(pkg)
             self.status_map[pkg] = status
-        if old != status and callable(self.on_status_change):
-            self.on_status_change(pkg, status)
+        if old != status:
+            if status == STATUS_LAUNCHING and old != STATUS_LAUNCHING:
+                self._maybe_record_package_launch_started(pkg, old)
+            if callable(self.on_status_change):
+                self.on_status_change(pkg, status)
 
     def watchdog_thread_alive(self) -> bool:
         thread = self._watchdog_thread
@@ -3367,6 +3425,7 @@ class WatchdogSupervisor:
                     ram_mb = None
                     pss_mb = 0
             pres = self._presence_last_detail.get(pkg, {})
+            runtime_started_at, runtime_source = self._status_monitor_runtime_started_at(pkg, status)
             snapshot.append(
                 {
                     "package":      pkg,
@@ -3376,7 +3435,10 @@ class WatchdogSupervisor:
                     "revive_count": self._revive_count.get(pkg, 0),
                     "failure_count": self._failure_count.get(pkg, 0),
                     "last_error":   None,
-                    "online_since": self._online_start_ts.get(pkg) or self._last_online_ts.get(pkg),
+                    "online_since": runtime_started_at or self._online_start_ts.get(pkg) or self._last_online_ts.get(pkg),
+                    "status_monitor_runtime_started_at": runtime_started_at,
+                    "package_launch_started_at": self._package_launch_started_at.get(pkg),
+                    "runtime_source": runtime_source,
                     "last_seen_at": self._last_online_ts.get(pkg),
                     "ram_mb":       ram_mb,
                     "pss_mb":       pss_mb,

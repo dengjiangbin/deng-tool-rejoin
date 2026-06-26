@@ -876,9 +876,10 @@ def build_status_embed_payload(
         indicator = "🟢" if online else "🔴"
         detail_lines.append(f"{indicator} {_spoiler(snap.get('username') or entry['username'] or pkg)}")
         sub: list[str] = []
-        if snap.get("online_since") and online:
+        runtime_ts = snap.get("status_monitor_runtime_started_at") or snap.get("online_since")
+        if runtime_ts and online:
             try:
-                sub.append("⏱️ " + format_runtime_compact(time.time() - float(snap["online_since"])))
+                sub.append("⏱️ " + format_runtime_compact(time.time() - float(runtime_ts)))
             except (TypeError, ValueError):
                 pass
         uptime = _format_uptime(stats.get("uptime_start"))
@@ -1155,6 +1156,43 @@ def _minimal_status_payload(config_data: dict[str, Any], *, event: str, error: s
     }
 
 
+def _status_monitor_runtime_trace(
+    config_data: dict[str, Any],
+    supervisor_snapshot: list[dict[str, Any]],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    from .status_monitor_runtime import monitor_started_at_from_config
+
+    row = next(
+        (r for r in supervisor_snapshot if isinstance(r, dict) and r.get("status") == "Online"),
+        supervisor_snapshot[0] if supervisor_snapshot else {},
+    )
+    if not isinstance(row, dict):
+        row = {}
+    runtime_started_at = row.get("status_monitor_runtime_started_at") or row.get("online_since")
+    runtime_source = str(row.get("runtime_source") or "")
+    runtime_value = ""
+    detail = ""
+    embeds = payload.get("embeds") or []
+    if embeds:
+        fields = embeds[0].get("fields") or []
+        for field in fields:
+            if isinstance(field, dict) and field.get("name") == "Application Details":
+                detail = str(field.get("value") or "")
+                break
+    if "⏱️" in detail:
+        runtime_value = detail.split("⏱️", 1)[1].split("|", 1)[0].strip()
+    return {
+        "monitor_started_at": monitor_started_at_from_config(config_data),
+        "package_launch_started_at": row.get("package_launch_started_at"),
+        "status_monitor_runtime_started_at": runtime_started_at,
+        "runtime_source": runtime_source,
+        "runtime_value": runtime_value,
+        "current_state": row.get("status"),
+        "last_lifecycle_event": "status_monitor",
+    }
+
+
 def send_periodic_status(
     config_data: dict[str, Any], *, supervisor_snapshot: list[dict[str, Any]], app_stats: dict[str, Any]
 ) -> tuple[bool, str]:
@@ -1188,7 +1226,11 @@ def send_periodic_status(
     record_webhook_trace(source="send_periodic_status", payload_build_started=True)
     try:
         payload = build_status_embed_payload(config_data, event="monitor", app_stats=app_stats, supervisor_snapshot=supervisor_snapshot)
-        record_webhook_trace(source="send_periodic_status", payload_build_result="success")
+        record_webhook_trace(
+            source="send_periodic_status",
+            payload_build_result="success",
+            ** _status_monitor_runtime_trace(config_data, supervisor_snapshot, payload),
+        )
     except Exception as exc:  # optional telemetry must never block Discord delivery
         payload = _minimal_status_payload(config_data, event="monitor", error="telemetry_unavailable")
         record_webhook_trace(

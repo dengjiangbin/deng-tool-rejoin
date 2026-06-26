@@ -6274,6 +6274,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         for entry in entries:
             start_times[entry["package"]] = now_iso
         cfg["package_start_times"] = start_times
+        cfg["monitor_started_at"] = time.time()
 
         # ── Launch URL confirmation (safe — never expose the raw URL) ────────
         _any_url = any(
@@ -6296,6 +6297,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         _live_cfg_boot = dict(runtime_cfg)
         _live_cfg_boot["package_start_times"] = dict(start_times)
+        _live_cfg_boot["monitor_started_at"] = cfg.get("monitor_started_at")
         _sup_sub_boot = dict(sup)
         _hci_boot = int(_sup_sub_boot.get("health_check_interval_seconds", 10))
         _sup_sub_boot["health_check_interval_seconds"] = max(10, _hci_boot)
@@ -6576,6 +6578,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         # ── Supervisor dashboard — watchdog already running on daemon thread ─
         _live_cfg = dict(runtime_cfg)
         _live_cfg["package_start_times"] = start_times
+        _live_cfg["monitor_started_at"] = cfg.get("monitor_started_at")
         _sup_sub = dict(
             cfg.get("supervisor") if isinstance(cfg.get("supervisor"), dict) else {}
         )
