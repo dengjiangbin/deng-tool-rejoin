@@ -10,9 +10,9 @@
       "max_restarts": 15,
       "restart_delay": 3000,
       "kill_timeout": 8000,
-      "listen_timeout": 30000,
+      "listen_timeout": 90000,
       "wait_ready": true,
-      "max_memory_restart": "1024M",
+      "max_memory_restart": "2048M",
       "env": {
         "NODE_ENV": "production",
         "TRACKER_READ_HOST": "127.0.0.1",
@@ -22,6 +22,7 @@
         "TRACKER_READ_FALLBACK_TIMEOUT_MS": "2500",
         "TOOL_SITE_HOST": "127.0.0.1",
         "TOOL_SITE_PORT": "8791",
+        "TOOL_SITE_SESSION_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
         "FISHIT_PRECOMPUTE_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_precompute.db",
         "TRACKER_WORKER_METRICS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\tracker_worker_metrics.json"
       }
@@ -52,10 +53,10 @@
         "TRACKER_PRECOMPUTE_BASE_URL": "https://aio.deng.my.id",
         "FISHIT_PRECOMPUTE_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_precompute.db",
         "TRACKER_WORKER_METRICS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\tracker_worker_metrics.json",
-        "TRACKER_WORKER_TICK_MS": "500",
-        "TRACKER_WORKER_REFRESH_MS": "120000",
-        "TRACKER_WORKER_MAX_PER_TICK": "40",
-        "TRACKER_WORKER_CONCURRENCY": "3"
+        "TRACKER_WORKER_TICK_MS": "400",
+        "TRACKER_WORKER_REFRESH_MS": "45000",
+        "TRACKER_WORKER_MAX_PER_TICK": "120",
+        "TRACKER_WORKER_CONCURRENCY": "6"
       }
     }
   ]
