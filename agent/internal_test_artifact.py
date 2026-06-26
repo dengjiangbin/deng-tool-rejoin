@@ -214,6 +214,8 @@ _FORBIDDEN_STRING_MARKERS = (
 _LICENSE_GATE_REQUIRED_STRINGS = (
     "already bound to another device",
     "Enter license key:",
+    "1. Enter Different Key",
+    "License check timed out",
 )
 
 _USER_FACING_FORBIDDEN_STRINGS = (
