@@ -665,7 +665,7 @@ class TestLicenseGateStability(unittest.TestCase):
              unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
              unittest.mock.patch("agent.commands.load_config", side_effect=lambda: dict(cfg)), \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda x: x), \
-             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt), \
+             unittest.mock.patch("agent.commands.safe_io.read_interactive_line", side_effect=fake_prompt), \
              redirect_stdout(buf):
             result = _ensure_remote_license_menu_loop(cfg, args, False)
         return result, buf.getvalue()
@@ -715,7 +715,7 @@ class TestLicenseGateStability(unittest.TestCase):
              unittest.mock.patch("agent.commands.load_config", side_effect=lambda: dict(cfg)), \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda x: x), \
              unittest.mock.patch("agent.commands.validate_license_key", side_effect=lambda k: k.strip()), \
-             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=_input_seq(*(["1", "DENG-RETRY-KEY"] * 20))), \
+             unittest.mock.patch("agent.commands.safe_io.read_interactive_line", side_effect=_input_seq(*(["1", "DENG-RETRY-KEY"] * 20))), \
              redirect_stdout(io.StringIO()):
             result = _ensure_remote_license_menu_loop(cfg, args, False)
         self.assertFalse(result)

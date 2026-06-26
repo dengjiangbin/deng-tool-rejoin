@@ -727,7 +727,7 @@ class TestLicenseRetryFlowSafety(unittest.TestCase):
                             with patch("agent.commands.validate_license_key", side_effect=lambda k: k):
                                 with patch("agent.commands._is_interactive", return_value=True):
                                     with patch("agent.commands._persist_license_status", side_effect=lambda c, s: c):
-                                        with patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt):
+                                        with patch("agent.commands.safe_io.read_interactive_line", side_effect=fake_prompt):
                                             buf = io.StringIO()
                                             sys.stdout = buf
                                             try:

@@ -69,7 +69,7 @@ class LicensePromptTextTests(unittest.TestCase):
         out = io.StringIO()
         with mock.patch("agent.commands.load_config", return_value=cfg), \
              mock.patch("agent.commands._is_interactive", return_value=True), \
-             mock.patch("agent.commands.safe_io.safe_prompt", return_value=None) as prompt, \
+             mock.patch("agent.commands.safe_io.read_interactive_line", return_value=None) as prompt, \
              redirect_stdout(out):
             ok = commands._ensure_remote_license_menu_loop(cfg, argparse.Namespace(), use_color=False)
         self.assertFalse(ok)

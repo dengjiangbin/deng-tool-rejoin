@@ -515,7 +515,7 @@ class TestLicenseGateNetworkResilience(unittest.TestCase):
                    return_value=("server_unavailable", "timeout")), \
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands.print_beginner_menu_license_prompt"), \
-             patch("agent.safe_io.safe_prompt", side_effect=["2"]):  # choose Exit
+             patch("agent.commands.safe_io.read_interactive_line", side_effect=["2"]):  # choose Exit
             result = _ensure_remote_license_menu_loop(cfg, self._make_args(), False)
 
         self.assertFalse(result)  # chose Exit cleanly, no crash
@@ -542,7 +542,7 @@ class TestLicenseGateNetworkResilience(unittest.TestCase):
              patch("agent.commands._persist_license_status", side_effect=lambda c, r: c), \
              patch("agent.commands.print_beginner_menu_license_prompt"), \
              patch("agent.commands.validate_license_key", side_effect=lambda k: k.strip()), \
-             patch("agent.safe_io.safe_prompt", side_effect=["1", new_key]):
+             patch("agent.safe_io.read_interactive_line", side_effect=["1", new_key]):
             result = _ensure_remote_license_menu_loop(cfg, self._make_args(), False)
 
         self.assertTrue(result)
@@ -570,7 +570,7 @@ class TestLicenseGateNetworkResilience(unittest.TestCase):
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._persist_license_status", return_value=cfg), \
              patch("agent.commands.print_beginner_menu_license_prompt"), \
-             patch("agent.safe_io.safe_prompt", side_effect=["1", new_key]):
+             patch("agent.safe_io.read_interactive_line", side_effect=["1", new_key]):
             result = _ensure_remote_license_menu_loop(cfg, self._make_args(), False)
 
         self.assertTrue(result)
@@ -612,7 +612,7 @@ class TestBannerNotSpammedOnRetry(unittest.TestCase):
              patch("agent.commands.print_banner") as mock_banner, \
              patch("agent.commands.print_beginner_menu_license_prompt"), \
              patch("agent.commands.validate_license_key", side_effect=lambda k: k.strip()), \
-             patch("agent.safe_io.safe_prompt", side_effect=[
+             patch("agent.safe_io.read_interactive_line", side_effect=[
                  "1", base_cfg["license"]["key"],
                  "1", base_cfg["license"]["key"],
              ]):

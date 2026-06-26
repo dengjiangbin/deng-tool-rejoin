@@ -75,7 +75,7 @@ class LicenseGateRetryFlowTests(unittest.TestCase):
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._persist_license_status", side_effect=lambda c, _s: c), \
              patch("agent.commands._license_gate_user_exit", return_value=False), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt):
+             patch("agent.commands.safe_io.read_interactive_line", side_effect=fake_prompt):
             sys.stdout = buf
             try:
                 ok = _ensure_remote_license_menu_loop({}, _args(), False)
@@ -175,12 +175,13 @@ class LicenseGateRetryFlowTests(unittest.TestCase):
                 self.assertNotIn("Segmentation fault", out)
                 self.assertNotIn("Traceback", out)
 
-    def test_invalid_menu_choice_reprompts(self):
+    def test_invalid_menu_choice_reprompts_until_valid(self):
         _ok, out, _keys = self._run_remote_loop(
             inputs=["9", "0"],
             remote_results=[("wrong_device", "w")],
         )
-        self.assertGreaterEqual(out.count("1. Enter Different Key"), 2)
+        self.assertIn("1. Enter Different Key", out)
+        self.assertIn("0. Exit", out)
 
     def test_saved_config_cleared_after_failure(self):
         cfg = self._make_cfg("DENG-CACHE-KEY-AAAA-BBBB-CCCC")

@@ -756,18 +756,36 @@ def _license_gate_user_exit() -> bool:
 
 
 def _print_license_gate_retry_menu() -> None:
-    print("\n1. Enter Different Key\n0. Exit")
+    print("\n1. Enter Different Key\n0. Exit", flush=True)
 
 
-def _prompt_license_gate_choice(*, default: str = "0") -> str | None:
-    choice_raw = safe_io.safe_prompt(f"Choose [{default}]: ", default=default)
-    if choice_raw is None:
-        return None
-    return (choice_raw.strip() or default)
+def _print_license_gate_input_unavailable(use_color: bool) -> None:
+    _print_license_err(safe_io.LICENSE_GATE_INPUT_UNAVAILABLE_MSG, use_color)
+
+
+def _prompt_license_gate_choice() -> str | None:
+    """Read menu choice; block until user types 0/1. None = Ctrl-C only."""
+    safe_io.restore_terminal()
+    while True:
+        try:
+            choice_raw = safe_io.read_interactive_line("Choose [1/0]: ", allow_blank=True)
+        except safe_io.InteractiveInputUnavailable:
+            raise
+        if choice_raw is None:
+            return None
+        choice = choice_raw.strip()
+        if not choice:
+            continue
+        if choice in ("0", "1", "2"):
+            return choice
 
 
 def _prompt_fresh_license_key() -> str | None:
-    raw = safe_io.safe_prompt("Enter license key: ")
+    safe_io.restore_terminal()
+    try:
+        raw = safe_io.read_interactive_line("Enter license key: ", allow_blank=True)
+    except safe_io.InteractiveInputUnavailable:
+        raise
     if raw is None:
         return None
     return raw.strip()
@@ -778,21 +796,28 @@ def _handle_license_gate_failure(
     result: str,
     msg: str,
     use_color: bool,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[dict[str, Any], str]:
     """Clear rejected key/session, show failure + numbered menu.
 
-    Returns ``(cfg, retry_with_fresh_key)``.  ``retry_with_fresh_key`` is
-    False when the user chose Exit.
+    Returns ``(cfg, action)`` where *action* is one of:
+    ``"retry"`` (enter different key), ``"exit"`` (user chose 0),
+    ``"unavailable"`` (no TTY), ``"cancel"`` (Ctrl-C).
     """
     cfg = _clear_cached_license_key(cfg)
     _print_license_err(_license_failure_user_message(result, msg), use_color)
     while True:
         _print_license_gate_retry_menu()
-        choice = _prompt_license_gate_choice(default="0")
-        if choice is None or choice in ("0", "2"):
-            return cfg, False
+        try:
+            choice = _prompt_license_gate_choice()
+        except safe_io.InteractiveInputUnavailable:
+            _print_license_gate_input_unavailable(use_color)
+            return cfg, "unavailable"
+        if choice is None:
+            return cfg, "cancel"
+        if choice in ("0", "2"):
+            return cfg, "exit"
         if choice == "1":
-            return cfg, True
+            return cfg, "retry"
 
 
 def _run_license_isolated_subprocess(
@@ -1083,6 +1108,23 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
     return False
 
 
+def _license_gate_after_prompt(raw: str | None) -> str:
+    """Classify a fresh-key prompt result for the license gate loop."""
+    if raw is None:
+        return "cancel"
+    if not raw:
+        return "blank"
+    return "ok"
+
+
+def _license_gate_finish_action(action: str) -> bool:
+    """Apply terminal action from the license gate; return loop success flag."""
+    if action == "exit":
+        _license_gate_user_exit()
+        return False
+    return False
+
+
 def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
     force_fresh_prompt = False
     while True:
@@ -1096,10 +1138,15 @@ def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespac
         if force_fresh_prompt:
             force_fresh_prompt = False
             cfg = _clear_cached_license_key(cfg)
-            raw = _prompt_fresh_license_key()
-            if raw is None:
-                return _license_gate_user_exit()
-            if not raw:
+            try:
+                raw = _prompt_fresh_license_key()
+            except safe_io.InteractiveInputUnavailable:
+                _print_license_gate_input_unavailable(use_color)
+                return False
+            prompt_action = _license_gate_after_prompt(raw)
+            if prompt_action == "cancel":
+                return _license_gate_finish_action("exit")
+            if prompt_action == "blank":
                 continue
             try:
                 key = validate_license_key(raw)
@@ -1128,10 +1175,11 @@ def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespac
         if not _is_interactive():
             _print_license_err(msg, use_color)
             return False
-        cfg, retry_fresh = _handle_license_gate_failure(cfg, "invalid", msg, use_color)
-        if not retry_fresh:
-            return _license_gate_user_exit()
-        force_fresh_prompt = True
+        cfg, gate_action = _handle_license_gate_failure(cfg, "invalid", msg, use_color)
+        if gate_action == "retry":
+            force_fresh_prompt = True
+            continue
+        return _license_gate_finish_action(gate_action)
 
 
 def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
@@ -1159,10 +1207,15 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
         if force_fresh_prompt:
             force_fresh_prompt = False
             cfg = _clear_cached_license_key(cfg)
-            raw = _prompt_fresh_license_key()
-            if raw is None:
-                return _license_gate_user_exit()
-            if not raw:
+            try:
+                raw = _prompt_fresh_license_key()
+            except safe_io.InteractiveInputUnavailable:
+                _print_license_gate_input_unavailable(use_color)
+                return False
+            prompt_action = _license_gate_after_prompt(raw)
+            if prompt_action == "cancel":
+                return _license_gate_finish_action("exit")
+            if prompt_action == "blank":
                 continue
             try:
                 norm = validate_license_key(raw)
@@ -1178,10 +1231,15 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 print_beginner_license_gate_help()
                 return False
             _print_missing_license_prompt(use_color)
-            raw = _prompt_fresh_license_key()
-            if raw is None:
-                return _license_gate_user_exit()
-            if not raw:
+            try:
+                raw = _prompt_fresh_license_key()
+            except safe_io.InteractiveInputUnavailable:
+                _print_license_gate_input_unavailable(use_color)
+                return False
+            prompt_action = _license_gate_after_prompt(raw)
+            if prompt_action == "cancel":
+                return _license_gate_finish_action("exit")
+            if prompt_action == "blank":
                 continue
             try:
                 norm = validate_license_key(raw)
@@ -1233,11 +1291,11 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             _print_license_err(_license_failure_user_message(result, msg), use_color)
             return False
 
-        cfg, retry_fresh = _handle_license_gate_failure(cfg, result, msg, use_color)
-        if not retry_fresh:
-            return _license_gate_user_exit()
-        force_fresh_prompt = True
-        continue
+        cfg, gate_action = _handle_license_gate_failure(cfg, result, msg, use_color)
+        if gate_action == "retry":
+            force_fresh_prompt = True
+            continue
+        return _license_gate_finish_action(gate_action)
     return False
 
 

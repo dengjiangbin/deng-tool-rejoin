@@ -31,6 +31,13 @@ Return value contract
     • ``default`` when the user pressed Enter with no input, if provided.
     • ``None`` on EOF, KeyboardInterrupt, or any unrecoverable I/O error.
       Callers MUST treat None as "cancel / go back to previous menu."
+
+  read_interactive_line() returns:
+    • A stripped string (possibly empty when allow_blank=True).
+    • ``default`` only when the user pressed Enter on an empty line.
+    • ``None`` on KeyboardInterrupt only.
+    • Raises :exc:`InteractiveInputUnavailable` when neither stdin nor
+      ``/dev/tty`` can supply input (never silently substitutes a default).
 """
 
 from __future__ import annotations
@@ -41,6 +48,15 @@ import sys
 import time
 from contextlib import contextmanager
 from typing import Any, Iterator
+
+LICENSE_GATE_INPUT_UNAVAILABLE_MSG = (
+    "Cannot read input from terminal. Re-run deng-rejoin in an interactive Termux session."
+)
+
+
+class InteractiveInputUnavailable(Exception):
+    """Neither stdin nor /dev/tty could supply interactive input."""
+
 
 # ── Platform detection ────────────────────────────────────────────────────────
 
@@ -117,6 +133,94 @@ def restore_terminal() -> None:
 
 
 # ── Public helpers ────────────────────────────────────────────────────────────
+
+
+def read_interactive_line(
+    prompt: str = "",
+    *,
+    default: str | None = None,
+    allow_blank: bool = False,
+) -> str | None:
+    """Block on a real TTY for license-gate and other must-not-exit prompts.
+
+    On Termux, ``sys.stdin.readline()`` can return EOF immediately while the
+    user still sees the prompt (stdin detached from the controlling TTY).
+    This helper falls back to ``/dev/tty`` before giving up.
+
+    Raises :exc:`InteractiveInputUnavailable` when no input source works.
+    Returns ``None`` only for KeyboardInterrupt (Ctrl-C).
+    """
+    if not _on_termux():
+        return safe_prompt(prompt, default=default, allow_blank=allow_blank)
+
+    _write_prompt(prompt)
+    line = _read_line_from_stream(sys.stdin)
+    if line is not None:
+        return _finalize_prompt_line(line, default=default, allow_blank=allow_blank)
+
+    tty_line = _read_line_from_dev_tty()
+    if tty_line is not None:
+        return _finalize_prompt_line(tty_line, default=default, allow_blank=allow_blank)
+
+    raise InteractiveInputUnavailable(LICENSE_GATE_INPUT_UNAVAILABLE_MSG)
+
+
+def _write_prompt(prompt: str) -> None:
+    try:
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+    except Exception:  # noqa: BLE001
+        pass
+    if os.name != "nt":
+        try:
+            with open("/dev/tty", "w", encoding="utf-8", errors="replace") as tty_out:
+                tty_out.write(prompt)
+                tty_out.flush()
+        except OSError:
+            pass
+
+
+def _read_line_from_stream(stream: Any) -> str | None:
+    """Return a raw line, or ``None`` when the stream hits EOF."""
+    try:
+        line = stream.readline()
+    except KeyboardInterrupt:
+        try:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+    except Exception:  # noqa: BLE001
+        return None
+    if not line:
+        return None
+    return line
+
+
+def _read_line_from_dev_tty() -> str | None:
+    if os.name == "nt":
+        return None
+    try:
+        with open("/dev/tty", "r", encoding="utf-8", errors="replace") as tty_in:
+            line = tty_in.readline()
+    except OSError:
+        return None
+    if not line:
+        return None
+    return line
+
+
+def _finalize_prompt_line(
+    line: str,
+    *,
+    default: str | None,
+    allow_blank: bool,
+) -> str:
+    result = line.rstrip("\n\r")
+    if not result and not allow_blank and default is not None:
+        return default
+    return result
 
 
 def safe_prompt(

@@ -333,7 +333,7 @@ class TestStartupClientGate(unittest.TestCase):
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda x: x), \
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._remote_license_run_check", return_value=(RESULT_REQUIRES_MANUAL_REBIND, HWID_RESET_REENTRY_MESSAGE)), \
-             patch("agent.commands.safe_io.safe_prompt", return_value=None), \
+             patch("agent.commands.safe_io.read_interactive_line", return_value=None), \
              redirect_stdout(out):
             ok = commands._ensure_remote_license_menu_loop(cfg, _args(), False)
 
@@ -370,7 +370,7 @@ class TestStartupClientGate(unittest.TestCase):
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._remote_license_run_check", side_effect=lambda _c: calls.append("check") or ("active", "ok")), \
              patch("agent.commands._remote_license_run_bind", side_effect=lambda _c: calls.append("bind") or ("active", "ok")), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *a, **k: next(prompts)):
+             patch("agent.commands.safe_io.read_interactive_line", side_effect=lambda *a, **k: next(prompts)):
             ok = commands._ensure_remote_license_menu_loop(cfg, _args(), False)
         self.assertTrue(ok)
         self.assertEqual(calls, ["bind"])
