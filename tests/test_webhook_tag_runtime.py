@@ -1,10 +1,11 @@
-"""Package Dead runtime formatting and Tag Discord webhook behavior."""
+"""Account Dead runtime formatting and Discord Mention webhook behavior."""
 
 from __future__ import annotations
 
 import io
 import json
 import sys
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -52,10 +53,13 @@ class WebhookTagDiscordTests(unittest.TestCase):
             "webhook_enabled": True,
             "webhook_url": URL,
             "device_name": "TestPhone",
+            "roblox_packages": [{"package": PKG, "account_username": USER}],
             "webhook_tag_enabled": tag_enabled,
         }
         if tag_enabled:
             cfg["webhook_tag_user_id"] = TAG_ID
+        else:
+            cfg["webhook_tag_user_id"] = ""
         return cfg
 
     def test_validate_discord_tag_user_id(self) -> None:
@@ -66,40 +70,70 @@ class WebhookTagDiscordTests(unittest.TestCase):
             webhook.validate_discord_tag_user_id("123")
 
     def test_package_dead_with_tag_enabled(self) -> None:
-        payload = webhook.build_package_lifecycle_embed_payload(
-            self._cfg(True),
-            event="package_dead",
-            package=PKG,
-            username=USER,
-            runtime_seconds=45.0,
-        )
-        send_payload = dict(payload)
-        send_payload["allowed_mentions"] = webhook._lifecycle_allowed_mentions(
-            self._cfg(True), "package_dead"
-        )
-        content = webhook._lifecycle_content(self._cfg(True), "package_dead")
-        if content:
-            send_payload["content"] = content
+        cfg = self._cfg(True)
+        with patch("agent.config.load_config", return_value=dict(cfg)):
+            payload = webhook.build_package_lifecycle_embed_payload(
+                cfg,
+                event="package_dead",
+                package=PKG,
+                username=USER,
+                runtime_seconds=45.0,
+            )
+            send_payload = dict(payload)
+            send_payload["allowed_mentions"] = webhook._lifecycle_allowed_mentions(cfg, "package_dead")
+            content = webhook._lifecycle_content(cfg, "package_dead")
+            if content:
+                send_payload["content"] = content
         self.assertEqual(send_payload["content"], f"<@{TAG_ID}>")
         self.assertEqual(send_payload["allowed_mentions"], {"parse": [], "users": [TAG_ID]})
+        self.assertEqual(send_payload["embeds"][0]["title"], "Account Dead")
         names = [f["name"] for f in send_payload["embeds"][0]["fields"]]
         self.assertIn("Runtime", names)
         username_field = next(f for f in send_payload["embeds"][0]["fields"] if f["name"] == "Username")
         self.assertEqual(username_field["value"], "||denghub2||")
 
     def test_package_dead_with_tag_disabled_no_mention(self) -> None:
-        payload = webhook.build_package_lifecycle_embed_payload(
-            self._cfg(False),
-            event="package_dead",
-            package=PKG,
-            username=USER,
-            runtime_seconds=192.0,
-        )
-        mentions = webhook._lifecycle_allowed_mentions(self._cfg(False), "package_dead")
-        content = webhook._lifecycle_content(self._cfg(False), "package_dead")
+        cfg = self._cfg(False)
+        with patch("agent.config.load_config", return_value=dict(cfg)):
+            payload = webhook.build_package_lifecycle_embed_payload(
+                cfg,
+                event="package_dead",
+                package=PKG,
+                username=USER,
+                runtime_seconds=192.0,
+            )
+            embed = payload["embeds"][0]
+            mentions = webhook._lifecycle_allowed_mentions(cfg, "package_dead")
+            content = webhook._lifecycle_content(cfg, "package_dead")
         self.assertIsNone(content)
         self.assertEqual(mentions, {"parse": []})
         self.assertNotIn("content", payload)
+        names = [f["name"] for f in embed["fields"]]
+        self.assertIn("Runtime", names)
+        runtime_field = next(f for f in embed["fields"] if f["name"] == "Runtime")
+        self.assertEqual(runtime_field["value"], "3m 12s")
+        blob = json.dumps(payload)
+        self.assertNotIn("Package Dead", blob)
+
+    def test_status_monitor_runtime_independent_of_discord_mention(self) -> None:
+        online_since = time.time() - 125.0
+        snapshot = [{
+            "package": PKG,
+            "username": USER,
+            "status": "Online",
+            "online_since": online_since,
+        }]
+        for tag_enabled in (True, False):
+            cfg = self._cfg(tag_enabled)
+            payload = webhook.build_status_embed_payload(
+                cfg,
+                supervisor_snapshot=snapshot,
+                app_stats={PKG: {"online": True}},
+            )
+            detail = next(f["value"] for f in payload["embeds"][0]["fields"] if f["name"] == "Application Details")
+            self.assertIn("⏱️", detail)
+            self.assertNotIn("0s", detail.split("⏱️")[1][:6])
+            self.assertNotIn("Package Dead", json.dumps(payload))
 
     def test_package_recovered_never_tags_or_runtime(self) -> None:
         cfg = self._cfg(True)
@@ -191,11 +225,22 @@ class LifecycleTagHttpPayloadTests(unittest.TestCase):
             "webhook_enabled": True,
             "webhook_url": URL,
             "device_name": "TestPhone",
+            "roblox_packages": [{"package": PKG, "account_username": USER}],
             "webhook_tag_enabled": tag_enabled,
+            "webhook_tag_user_id": TAG_ID if tag_enabled else "",
         })
-        if tag_enabled:
-            cfg["webhook_tag_user_id"] = TAG_ID
         return validate_config(cfg)
+
+    def _send_dead(self, cfg: dict, post) -> dict:
+        with patch("agent.config.load_config", return_value=dict(cfg)):
+            webhook.send_package_lifecycle_alert(
+                cfg,
+                event="package_dead",
+                package=PKG,
+                username=USER,
+                runtime_seconds=45.0,
+            )
+        return post.call_args.args[1]
 
     def test_save_config_persists_webhook_tag_user_id(self) -> None:
         import tempfile
@@ -213,15 +258,7 @@ class LifecycleTagHttpPayloadTests(unittest.TestCase):
     def test_package_dead_sender_http_payload_includes_tag(self) -> None:
         cfg = self._cfg(True)
         with patch.object(webhook, "_discord_json_request", return_value=(True, "ok", "m1")) as post:
-            ok, _ = webhook.send_package_lifecycle_alert(
-                cfg,
-                event="package_dead",
-                package=PKG,
-                username=USER,
-                runtime_seconds=45.0,
-            )
-        self.assertTrue(ok)
-        payload = post.call_args.args[1]
+            payload = self._send_dead(cfg, post)
         self.assertEqual(payload["content"], f"<@{TAG_ID}>")
         self.assertEqual(payload["allowed_mentions"], {"parse": [], "users": [TAG_ID]})
         username_field = next(f for f in payload["embeds"][0]["fields"] if f["name"] == "Username")
@@ -232,16 +269,13 @@ class LifecycleTagHttpPayloadTests(unittest.TestCase):
     def test_package_dead_sender_no_tag_when_disabled(self) -> None:
         cfg = self._cfg(False)
         with patch.object(webhook, "_discord_json_request", return_value=(True, "ok", "m1")) as post:
-            webhook.send_package_lifecycle_alert(
-                cfg,
-                event="package_dead",
-                package=PKG,
-                username=USER,
-                runtime_seconds=45.0,
-            )
-        payload = post.call_args.args[1]
+            payload = self._send_dead(cfg, post)
         self.assertNotIn("content", payload)
         self.assertEqual(payload["allowed_mentions"], {"parse": []})
+        self.assertEqual(payload["embeds"][0]["title"], "Account Dead")
+        runtime_field = next(f for f in payload["embeds"][0]["fields"] if f["name"] == "Runtime")
+        self.assertEqual(runtime_field["value"], "45s")
+        self.assertNotIn("Package Dead", json.dumps(payload))
 
     def test_package_recovered_sender_never_tags(self) -> None:
         cfg = self._cfg(True)
@@ -255,8 +289,10 @@ class LifecycleTagHttpPayloadTests(unittest.TestCase):
         payload = post.call_args.args[1]
         self.assertNotIn("content", payload)
         self.assertEqual(payload["allowed_mentions"], {"parse": []})
+        self.assertEqual(payload["embeds"][0]["title"], "Account Recovered")
         names = [f["name"] for f in payload["embeds"][0]["fields"]]
         self.assertNotIn("Runtime", names)
+        self.assertNotIn("Package Recovered", json.dumps(payload))
 
     def test_stats_sender_never_tags_when_tag_enabled(self) -> None:
         cfg = self._cfg(True)
@@ -318,7 +354,7 @@ class WebhookMenuDisplayTests(unittest.TestCase):
         self.assertIn("Mode: Edit", text)
         self.assertIn("Interval: 5m", text)
         self.assertIn("URL: configured", text)
-        self.assertIn("Tag Discord: Disabled", text)
+        self.assertIn("Discord Mention: Disabled", text)
         self.assertNotIn("Webhook: Edit every 5m", text)
         self.assertNotIn(URL, text)
         self.assertNotIn(TAG_ID, text)
@@ -333,7 +369,7 @@ class WebhookMenuDisplayTests(unittest.TestCase):
             "webhook_tag_user_id": TAG_ID,
         })
         text = self._menu_text(cfg)
-        self.assertIn("Tag Discord: Enabled", text)
+        self.assertIn("Discord Mention: Enabled", text)
         self.assertNotIn(f"<@{TAG_ID}>", text)
         self.assertNotIn(TAG_ID, text)
 
@@ -343,13 +379,13 @@ class WebhookMenuDisplayTests(unittest.TestCase):
         mode_idx = text.index("1. Mode")
         interval_idx = text.index("2. Interval")
         url_idx = text.index("3. URL")
-        tag_idx = text.index("4. Tag Discord")
+        mention_idx = text.index("4. Discord Mention")
         test_idx = text.index("5. Test Webhook Now")
         back_idx = text.index("6. Back")
         self.assertLess(mode_idx, interval_idx)
         self.assertLess(interval_idx, url_idx)
-        self.assertLess(url_idx, tag_idx)
-        self.assertLess(tag_idx, test_idx)
+        self.assertLess(url_idx, mention_idx)
+        self.assertLess(mention_idx, test_idx)
         self.assertLess(test_idx, back_idx)
 
 

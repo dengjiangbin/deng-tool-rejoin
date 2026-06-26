@@ -22,7 +22,7 @@ from typing import Any
 from .url_utils import mask_launch_url
 from . import safe_http
 from .constants import CONFIG_PATH, DATA_DIR
-from .runtime_format import format_lifecycle_dead_runtime, format_runtime_compact
+from .runtime_format import format_runtime_compact
 
 WEBHOOK_MODES = {"edit", "new_post", "none"}
 MIN_WEBHOOK_INTERVAL_MINUTES = 5
@@ -295,156 +295,6 @@ _STATUS_CATEGORY: dict[str, str] = {
 }
 
 
-def build_status_embed_payload(
-    config_data: dict[str, Any],
-    *,
-    event: str = "status",
-    error: str | None = None,
-    app_stats: dict[str, Any] | None = None,
-    supervisor_snapshot: list[dict] | None = None,
-) -> dict[str, Any]:
-    """Build a Discord embed payload for periodic status updates."""
-    from .config import mask_license_key
-    from .license import get_public_device_model
-
-    raw_packages = config_data.get("roblox_packages") or [config_data.get("roblox_package", "unknown")]
-    entries: list[dict[str, str]] = []
-    for item in raw_packages:
-        if isinstance(item, dict):
-            package = str(item.get("package") or "unknown")
-            username = str(item.get("account_username") or item.get("label") or "").strip()
-        else:
-            package = str(item)
-            username = ""
-        entries.append({"package": package, "username": username})
-
-    app_stats = app_stats or {}
-
-    # Count status categories from supervisor_snapshot or fall back to app_stats
-    counts: dict[str, int] = {cat: 0 for cat in ("online", "ready", "preparing", "warning", "offline", "failed")}
-    if supervisor_snapshot:
-        for snap in supervisor_snapshot:
-            category = _STATUS_CATEGORY.get(snap.get("status", ""), "offline")
-            counts[category] = counts.get(category, 0) + 1
-        total = len(supervisor_snapshot)
-    else:
-        # Backward-compatible: use app_stats boolean
-        for e in entries:
-            if app_stats.get(e["package"], {}).get("online"):
-                counts["online"] += 1
-            else:
-                counts["offline"] += 1
-        total = len(entries)
-    online_count = counts["online"]
-
-    # Embed color
-    if error:
-        color = EMBED_COLOR_YELLOW
-    elif online_count > 0:
-        color = EMBED_COLOR_GREEN
-    else:
-        color = EMBED_COLOR_RED
-
-    # System stats (injected by caller via _mem_info, _cpu_pct, _temp_c keys)
-    mem_info = config_data.get("_mem_info") or {}
-    if isinstance(mem_info, dict):
-        _free_mb = _memory_mb_value(mem_info.get("free_mb") or mem_info.get("available_mb"))
-        mem_info = {
-            **mem_info,
-            "free_mb": int(round(_free_mb)) if _free_mb is not None else 0,
-            "percent_free": int(round(_coerce_float(mem_info.get("percent_free")) or 0)),
-        }
-    else:
-        mem_info = {}
-    cpu_pct = _coerce_float(config_data.get("_cpu_pct"))
-    temp_c = _coerce_float(config_data.get("_temp_c"))
-    sys_lines: list[str] = []
-    if mem_info.get("free_mb"):
-        sys_lines.append(f"💾 RAM: {mem_info['free_mb']}MB free ({mem_info.get('percent_free', 0)}%)")
-    if cpu_pct is not None:
-        sys_lines.append(f"⚙️ CPU: {cpu_pct:.0f}%")
-    if temp_c is not None:
-        sys_lines.append(f"🌡️ Temp: {temp_c}°C")
-    sys_value = "\n".join(sys_lines) or "N/A"
-
-    # Status overview — full 7-category breakdown
-    overview_parts = [
-        f"🟢 Online: {counts['online']}",
-        f"🟡 Ready: {counts['ready']}",
-        f"🔵 Preparing: {counts['preparing']}",
-        f"🟠 Warning: {counts['warning']}",
-        f"🔴 Offline: {counts['offline']}",
-        f"❌ Failed: {counts['failed']}",
-        f"🤖 Total: {total}",
-    ]
-    overview = "\n".join(overview_parts)
-
-    # Per-app application details
-    detail_lines: list[str] = []
-    snapshot_by_package = {str(row.get("package") or ""): row for row in (supervisor_snapshot or [])}
-    for e in entries:
-        stats = app_stats.get(e["package"], {})
-        snap = snapshot_by_package.get(e["package"], {})
-        indicator = "🟢" if stats.get("online") else "🔴"
-        label = str(snap.get("username") or e["username"] or e["package"]).strip()
-        detail_lines.append(f"{indicator} {label}")
-        sub: list[str] = []
-        if snap.get("online_since") and stats.get("online"):
-            try:
-                sub.append("\u23f1\ufe0f " + format_runtime_compact(time.time() - float(snap["online_since"])))
-            except (TypeError, ValueError):
-                pass
-        uptime = _format_uptime(stats.get("uptime_start"))
-        if uptime:
-            sub.append(f"⏱️ {uptime}")
-        mem = _memory_mb_value(stats.get("memory_mb"))
-        if mem is not None:
-            sub.append(f"💾 {int(mem)} MB")
-        cpu = _coerce_float(stats.get("cpu_pct"))
-        if cpu is not None:
-            sub.append(f"⚡ {cpu:.1f}%")
-        if sub:
-            detail_lines.append("└ " + " | ".join(sub))
-    detail_value = "\n".join(detail_lines) or "No accounts configured"
-
-    # License + tags
-    masked_key = mask_license_key(config_data.get("license_key", ""))
-    webhook_tags = config_data.get("webhook_tags") or []
-    tags_value = f"[{len(webhook_tags)}]"
-    phone_type = get_public_device_model()
-    host_name = str(config_data.get("device_name", "unknown"))
-    device_value = host_name
-    if phone_type and phone_type != "Unknown":
-        device_value = f"{host_name}\n📱 Type: {phone_type}"
-
-    fields: list[dict[str, Any]] = [
-        {"name": "📱 Device",           "value": device_value,                               "inline": True},
-        {"name": "🔑 License",          "value": masked_key,                                     "inline": True},
-        {"name": "🏷️ Tags",             "value": tags_value,                                     "inline": True},
-        {"name": "🖥️ System Stats",     "value": sys_value,                                      "inline": False},
-        {"name": "Status Overview",     "value": overview,                                       "inline": False},
-        {"name": "Application Details", "value": detail_value,                                   "inline": False},
-    ]
-    if error:
-        fields.append({"name": "⚠️ Last Error", "value": error[:512], "inline": False})
-
-    version = config_data.get("agent_version", "1.0.0")
-    return {
-        "username": WEBHOOK_USERNAME,
-        "avatar_url": WEBHOOK_AVATAR_URL,
-        "allowed_mentions": {"parse": []},
-        "embeds": [
-            {
-                "title": "📊 DENG Status Monitor",
-                "description": f"Event: **{event}**",
-                "color": color,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "fields": fields,
-                "footer": {"text": f"DENG Tool: Rejoin • v{version}"},
-            }
-        ],
-    }
-
 
 def build_alert_embed_payload(
     config_data: dict[str, Any],
@@ -505,7 +355,7 @@ _PACKAGE_LIFECYCLE_PRELAUNCH = frozenset({
 
 
 def validate_discord_tag_user_id(value: Any) -> str:
-    """Validate a Discord user ID for Package Dead tagging (17–20 digits)."""
+    """Validate a Discord user ID for Account Dead mentions (17–20 digits)."""
     text = str(value or "").strip()
     if not re.fullmatch(r"\d{17,20}", text):
         raise ValueError("Discord user ID must be 17-20 digits only")
@@ -520,21 +370,22 @@ def _discord_tag_user_id_from_config(config_data: dict[str, Any]) -> str | None:
 
 
 def _lifecycle_tag_settings(config_data: dict[str, Any]) -> tuple[bool, str | None]:
-    """Resolve Tag Discord settings for Package Dead (disk wins when fully configured)."""
-    enabled = bool(config_data.get("webhook_tag_enabled"))
-    uid_raw = config_data.get("webhook_tag_user_id")
+    """Resolve Discord Mention settings for Account Dead (installed config is source of truth)."""
     try:
         from .config import load_config
 
-        fresh = load_config()
-        disk_enabled = bool(fresh.get("webhook_tag_enabled"))
-        disk_uid = str(fresh.get("webhook_tag_user_id") or "").strip()
-        if disk_enabled and disk_uid:
-            enabled = True
-            uid_raw = disk_uid
+        disk = load_config()
     except Exception:
-        pass
+        disk = {}
+    if isinstance(disk, dict) and any(k in disk for k in ("webhook_tag_enabled", "webhook_tag_user_id")):
+        enabled = bool(disk.get("webhook_tag_enabled"))
+        uid_raw = str(disk.get("webhook_tag_user_id") or "").strip()
+    else:
+        enabled = bool(config_data.get("webhook_tag_enabled"))
+        uid_raw = str(config_data.get("webhook_tag_user_id") or "").strip()
     if not enabled:
+        return False, None
+    if not uid_raw:
         return False, None
     try:
         return True, validate_discord_tag_user_id(uid_raw)
@@ -698,6 +549,89 @@ def mark_package_lifecycle_recovered(package: str, username: str | None = None) 
     _save_package_lifecycle_state(state)
 
 
+def _lifecycle_event_title(event: str) -> str:
+    normalized = str(event or "").strip().lower()
+    if normalized == "package_dead":
+        return "Account Dead"
+    if normalized == "package_recovered":
+        return "Account Recovered"
+    return str(event or "Lifecycle")
+
+
+def _lifecycle_embed_color(event: str) -> int:
+    normalized = str(event or "").strip().lower()
+    if normalized == "package_dead":
+        return EMBED_COLOR_RED
+    return EMBED_COLOR_GREEN
+
+
+def _resolve_lifecycle_dead_runtime_seconds(
+    package: str,
+    runtime_seconds: float | None,
+) -> float | None:
+    if runtime_seconds is not None:
+        return runtime_seconds
+    return lifecycle_dead_runtime_seconds(package)
+
+
+def _lifecycle_runtime_field(runtime_seconds: float | None) -> dict[str, Any] | None:
+    from .runtime_format import format_runtime
+
+    display = format_runtime(runtime_seconds)
+    if not display:
+        return None
+    return {"name": "Runtime", "value": display[:256], "inline": True}
+
+
+def _lifecycle_embed_fields(
+    *,
+    device: str,
+    package: str,
+    username: str,
+    event: str,
+    runtime_seconds: float | None = None,
+) -> list[dict[str, Any]]:
+    from .package_identity import format_discord_username_spoiler
+
+    pkg_value = str(package or "").strip() or "Unknown"
+    user_value = format_discord_username_spoiler(username)
+    if not user_value:
+        raise ValueError("username_resolution_failed")
+    fields: list[dict[str, Any]] = [
+        {"name": "Device", "value": device[:256], "inline": True},
+        {"name": "Account", "value": pkg_value[:256], "inline": True},
+        {"name": "Username", "value": user_value[:256], "inline": True},
+    ]
+    normalized = str(event or "").strip().lower()
+    if normalized == "package_dead":
+        runtime_field = _lifecycle_runtime_field(
+            _resolve_lifecycle_dead_runtime_seconds(package, runtime_seconds),
+        )
+        if runtime_field:
+            fields.append(runtime_field)
+    return fields
+
+
+def _lifecycle_runtime_from_payload(payload: dict[str, Any]) -> tuple[bool, str]:
+    embeds = payload.get("embeds") or []
+    if not embeds:
+        return False, ""
+    fields = embeds[0].get("fields") or []
+    for field in fields:
+        if isinstance(field, dict) and field.get("name") == "Runtime":
+            return True, str(field.get("value") or "")
+    return False, ""
+
+
+def _mask_discord_user_id(user_id: str | None) -> str:
+    text = str(user_id or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 6:
+        return "***"
+    return f"{text[:3]}...{text[-3:]}"
+
+
 def build_package_lifecycle_embed_payload(
     config_data: dict[str, Any],
     *,
@@ -706,33 +640,19 @@ def build_package_lifecycle_embed_payload(
     username: str,
     runtime_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """Build a minimal Package Dead / Package Recovered embed."""
+    """Build a minimal Account Dead / Account Recovered embed."""
     from .license import get_public_device_model
-    from .package_identity import format_discord_username_spoiler
 
-    normalized = str(event or "").strip().lower()
-    if normalized == "package_dead":
-        title = "Package Dead"
-        color = EMBED_COLOR_RED
-    else:
-        title = "Package Recovered"
-        color = EMBED_COLOR_GREEN
-
+    title = _lifecycle_event_title(event)
+    color = _lifecycle_embed_color(event)
     device = _public_device_label(config_data, get_public_device_model()) or "Unknown"
-    pkg_value = str(package or "").strip() or "Unknown"
-    user_value = format_discord_username_spoiler(username)
-    if not user_value:
-        raise ValueError("username_resolution_failed")
-
-    fields: list[dict[str, Any]] = [
-        {"name": "Device", "value": device[:256], "inline": True},
-        {"name": "Package", "value": pkg_value[:256], "inline": True},
-        {"name": "Username", "value": user_value[:256], "inline": True},
-    ]
-    if normalized == "package_dead" and runtime_seconds is not None:
-        runtime_display = format_lifecycle_dead_runtime(runtime_seconds)
-        if runtime_display:
-            fields.append({"name": "Runtime", "value": runtime_display[:256], "inline": True})
+    fields = _lifecycle_embed_fields(
+        device=device,
+        package=package,
+        username=username,
+        event=event,
+        runtime_seconds=runtime_seconds,
+    )
 
     return {
         "username": WEBHOOK_USERNAME,
@@ -777,7 +697,7 @@ def send_package_lifecycle_alert(
     username: str,
     runtime_seconds: float | None = None,
 ) -> tuple[bool, str]:
-    """Send one Package Dead / Package Recovered embed without blocking relaunch."""
+    """Send one Account Dead / Account Recovered embed without blocking relaunch."""
     from .package_identity import format_discord_username_spoiler
 
     spoiler = format_discord_username_spoiler(username)
@@ -820,6 +740,9 @@ def send_package_lifecycle_alert(
         username=username,
         runtime_seconds=runtime_seconds,
     )
+    embed = (payload.get("embeds") or [{}])[0]
+    runtime_present, runtime_value = _lifecycle_runtime_from_payload(payload)
+    tag_enabled, tag_uid = _lifecycle_tag_settings(config_data)
     payload["allowed_mentions"] = _lifecycle_allowed_mentions(config_data, event)
     content = _lifecycle_content(config_data, event)
     if content:
@@ -829,6 +752,12 @@ def send_package_lifecycle_alert(
         source="send_package_lifecycle_alert",
         event=event,
         webhook_mode=mode,
+        lifecycle_event=event,
+        lifecycle_title=str(embed.get("title") or ""),
+        lifecycle_runtime_present=runtime_present,
+        lifecycle_runtime_value=runtime_value,
+        discord_mention_enabled=tag_enabled,
+        discord_mention_user_id_masked=_mask_discord_user_id(tag_uid),
         send_attempted=True,
         http_method="POST",
     )
@@ -838,6 +767,8 @@ def send_package_lifecycle_alert(
         event=event,
         send_result="success" if ok else "failure",
         http_status=_http_status_from_message(message),
+        last_http_status=_http_status_from_message(message),
+        last_error=message if not ok else "",
     )
     return ok, message
 

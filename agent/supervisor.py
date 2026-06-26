@@ -1370,20 +1370,20 @@ class WatchdogSupervisor:
         """Maintain the one current Online session used by the runtime column."""
         if state in _METRIC_ACTIVE_STATES:
             self._last_online_ts[pkg] = now
-        if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
-            self._online_start_ts[pkg] = now
-            try:
-                from . import webhook as lifecycle_webhook
+            if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
+                self._online_start_ts[pkg] = now
+                try:
+                    from . import webhook as lifecycle_webhook
 
-                lifecycle_webhook.record_package_lifecycle_alive(pkg, now)
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                from .android_memory import finalize_launch_incremental_sample
-                finalize_launch_incremental_sample(pkg)
-            except Exception:  # noqa: BLE001
-                pass
-        else:
+                    lifecycle_webhook.record_package_lifecycle_alive(pkg, now)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from .android_memory import finalize_launch_incremental_sample
+                    finalize_launch_incremental_sample(pkg)
+                except Exception:  # noqa: BLE001
+                    pass
+        elif state not in _METRIC_ACTIVE_STATES:
             self._online_start_ts.pop(pkg, None)
 
         if state == STATUS_DEAD:

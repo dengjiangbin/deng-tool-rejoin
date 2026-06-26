@@ -594,7 +594,7 @@ class WebhookSubmenuTests(unittest.TestCase):
 
     def test_webhook_submenu_has_tag_discord_option(self):
         text = self._webhook_submenu_text()
-        self.assertIn("4. Tag Discord", text)
+        self.assertIn("4. Discord Mention", text)
 
     def test_webhook_submenu_has_test_option(self):
         text = self._webhook_submenu_text()

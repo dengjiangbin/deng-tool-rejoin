@@ -18,8 +18,13 @@ def format_runtime_compact(seconds: float) -> str:
     return f"{total}s"
 
 
+def format_runtime(seconds: float | None) -> str | None:
+    """Human-readable account session runtime — maximum two units, no filler words."""
+    return format_lifecycle_dead_runtime(seconds)
+
+
 def format_lifecycle_dead_runtime(seconds: float | None) -> str | None:
-    """Human-readable Package Dead runtime — maximum two units, no filler words."""
+    """Human-readable Account Dead runtime — maximum two units, no filler words."""
     if seconds is None:
         return None
     total = max(0, int(seconds))

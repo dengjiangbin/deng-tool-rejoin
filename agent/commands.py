@@ -3728,7 +3728,7 @@ def _resolve_per_package_key_display(draft: dict[str, Any], package: str) -> str
 
 
 def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
-    """Webhook submenu: Mode, Interval, URL, Tag Discord, and test send."""
+    """Webhook submenu: Mode, Interval, URL, Discord Mention, and test send."""
     if not _is_interactive():
         return draft
     while True:
@@ -3750,12 +3750,12 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
             print(f"  Interval: {interval}m")
         url_status = "configured" if url and mode != "none" else "not configured"
         print(f"  URL: {url_status}")
-        print(f"  Tag Discord: {'Enabled' if tag_enabled else 'Disabled'}")
+        print(f"  Discord Mention: {'Enabled' if tag_enabled else 'Disabled'}")
         print()
         print("1. Mode")
         print("2. Interval")
         print("3. URL")
-        print("4. Tag Discord")
+        print("4. Discord Mention")
         print("5. Test Webhook Now")
         print("6. Back")
         print(termux_ui.separator("-"))
@@ -3786,10 +3786,10 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _config_webhook_tag_discord(draft: dict[str, Any]) -> None:
-    """Tag Discord submenu: enable/disable Package Dead user mention."""
+    """Discord Mention submenu: enable/disable Account Dead user mention."""
     while True:
         print()
-        print("Tag Discord")
+        print("Discord Mention")
         enabled = bool(draft.get("webhook_tag_enabled"))
         tag_id = str(draft.get("webhook_tag_user_id") or "").strip()
         if enabled and tag_id:
@@ -3812,12 +3812,12 @@ def _config_webhook_tag_discord(draft: dict[str, Any]) -> None:
                 continue
             draft["webhook_tag_enabled"] = True
             draft["webhook_tag_user_id"] = tag_id
-            print(f"Tag Discord enabled for <@{tag_id}>")
+            print(f"Discord Mention enabled for <@{tag_id}>")
             break
         if choice == "2":
             draft["webhook_tag_enabled"] = False
             draft["webhook_tag_user_id"] = ""
-            print("Tag Discord disabled. Package Dead webhooks will not tag anyone.")
+            print("Discord Mention disabled. Account Dead webhooks will not mention anyone.")
             break
         print("Please choose 1, 2, or 0.")
 

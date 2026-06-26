@@ -629,9 +629,12 @@ def _capture_webhook_debug() -> dict[str, Any]:
     path = DATA_DIR / "webhook-debug.json"
     try:
         from .config import load_config
+        from . import webhook as webhook_mod
+
         cfg = load_config()
     except Exception:  # noqa: BLE001
         cfg = {}
+        webhook_mod = None
     latest = trace[-1] if trace else {}
     trace_merged: dict[str, Any] = {}
     for row in trace:
@@ -641,6 +644,16 @@ def _capture_webhook_debug() -> dict[str, Any]:
     probe_fields = {
         "webhook_mode": str(cfg.get("webhook_mode") or "none"),
         "webhook_url_present_redacted": bool(cfg.get("webhook_url")),
+        "discord_mention_enabled": bool(cfg.get("webhook_tag_enabled")),
+        "discord_mention_user_id_masked": (
+            webhook_mod._mask_discord_user_id(str(cfg.get("webhook_tag_user_id") or "").strip() or None)
+            if webhook_mod is not None
+            else ""
+        ),
+        "last_lifecycle_event": trace_merged.get("lifecycle_event") or trace_merged.get("event") or "",
+        "last_lifecycle_title": trace_merged.get("lifecycle_title") or "",
+        "last_lifecycle_runtime_present": trace_merged.get("lifecycle_runtime_present"),
+        "last_lifecycle_runtime_value": trace_merged.get("lifecycle_runtime_value") or "",
         "state_path": str(CONFIG_PATH),
         "state_message_id_present": bool(state_message_id),
         "state_message_id_redacted": mask(state_message_id) if state_message_id else "",

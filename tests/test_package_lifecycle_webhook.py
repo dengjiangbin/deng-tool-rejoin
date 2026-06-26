@@ -47,12 +47,12 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
             runtime_seconds=45.0,
         )
         embed = payload["embeds"][0]
-        self.assertEqual(embed["title"], "Package Dead")
+        self.assertEqual(embed["title"], "Account Dead")
         self.assertEqual(embed["color"], webhook.EMBED_COLOR_RED)
         names = [field["name"] for field in embed["fields"]]
-        self.assertEqual(names, ["Device", "Package", "Username", "Runtime"])
+        self.assertEqual(names, ["Device", "Account", "Username", "Runtime"])
         values = {field["name"]: field["value"] for field in embed["fields"]}
-        self.assertEqual(values["Package"], "com.roblox.client")
+        self.assertEqual(values["Account"], "com.roblox.client")
         self.assertEqual(values["Username"], "||MainUser||")
         self.assertEqual(values["Runtime"], "45s")
 
@@ -64,9 +64,9 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
             username="MainUser",
         )
         embed = payload["embeds"][0]
-        self.assertEqual(embed["title"], "Package Recovered")
+        self.assertEqual(embed["title"], "Account Recovered")
         self.assertEqual(embed["color"], webhook.EMBED_COLOR_GREEN)
-        self.assertEqual([field["name"] for field in embed["fields"]], ["Device", "Package", "Username"])
+        self.assertEqual([field["name"] for field in embed["fields"]], ["Device", "Account", "Username"])
 
     def test_embed_does_not_leak_private_or_webhook_urls(self) -> None:
         cfg = self._cfg()
