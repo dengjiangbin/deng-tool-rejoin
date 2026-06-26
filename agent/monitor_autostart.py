@@ -497,12 +497,19 @@ def _packages_from_supervisor(sup: Any) -> list[dict[str, Any]] | None:
                 runtime_seconds = max(0, int(now - float(online_since)))
         except (TypeError, ValueError):
             runtime_seconds = 0
-        # RAM — supervisor may or may not include it. Never call dumpsys
-        # from this thread (idle-safety rule); use the cached value the
-        # supervisor publishes if present, else 0.
+        # RAM — supervisor publishes PSS (pss_mb) when available; never invent.
         ram_mb = 0
         try:
-            ram_mb = max(0, int(row.get("ram_mb") or 0))
+            if row.get("pss_mb") is not None:
+                ram_mb = max(0, int(row.get("pss_mb") or 0))
+            elif row.get("ram_mb") is not None:
+                raw_ram = row.get("ram_mb")
+                if isinstance(raw_ram, (int, float)) and not isinstance(raw_ram, bool):
+                    ram_mb = max(0, int(raw_ram))
+                else:
+                    from .webhook import _memory_mb_value
+                    parsed = _memory_mb_value(raw_ram)
+                    ram_mb = max(0, int(round(parsed))) if parsed is not None else 0
         except (TypeError, ValueError):
             ram_mb = 0
         out.append({

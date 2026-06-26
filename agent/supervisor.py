@@ -1370,8 +1370,13 @@ class WatchdogSupervisor:
         """Maintain the one current Online session used by the runtime column."""
         if state in _METRIC_ACTIVE_STATES:
             self._last_online_ts[pkg] = now
-            if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
-                self._online_start_ts[pkg] = now
+        if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
+            self._online_start_ts[pkg] = now
+            try:
+                from .android_memory import finalize_launch_incremental_sample
+                finalize_launch_incremental_sample(pkg)
+            except Exception:  # noqa: BLE001
+                pass
         else:
             self._online_start_ts.pop(pkg, None)
 
@@ -2524,6 +2529,13 @@ class WatchdogSupervisor:
         url_configured = url_context.get("url_mode") == "private_url"
         launcher_label = "private_url" if url_configured else "app_only"
         t0 = time.monotonic()
+        try:
+            from .android_memory import record_launch_baseline, snapshot_mem_available_kb
+            avail = snapshot_mem_available_kb()
+            if avail is not None:
+                record_launch_baseline(pkg, avail)
+        except Exception:  # noqa: BLE001
+            pass
         # Ensure package key license file is present before relaunch.
         # Separate from DENG Tool license — writes FREE_ key to the Roblox data dir.
         try:
@@ -2841,8 +2853,10 @@ class WatchdogSupervisor:
 
         # ── Measure RAM ───────────────────────────────────────────────────────
         ram_result = android.get_package_ram_usage(pkg, self._root_info)
-        rss_kb: int = int(ram_result.get("rss_kb", 0))
-        usage_mb: float = rss_kb / 1024.0
+        pss_kb: int = int(ram_result.get("pss_kb") or 0)
+        if pss_kb <= 0:
+            pss_kb = int(ram_result.get("rss_kb", 0))
+        usage_mb: float = pss_kb / 1024.0
         usage_display: str = str(ram_result.get("usage_mb", "0MB"))
         method: str = str(ram_result.get("method", "unknown"))
 
@@ -3255,12 +3269,20 @@ class WatchdogSupervisor:
         for pkg in self.packages:
             status = self.status_map.get(pkg, STATUS_DEAD)
             ram_mb: str | None = None
+            pss_mb: int = 0
             if status in _METRIC_ACTIVE_STATES:
                 try:
                     ram_result = android.get_package_ram_usage(pkg, self._root_info)
                     ram_mb = str(ram_result.get("usage_mb") or "")
+                    raw_pss = ram_result.get("pss_kb")
+                    if raw_pss is not None:
+                        try:
+                            pss_mb = max(0, int(raw_pss) // 1024)
+                        except (TypeError, ValueError):
+                            pss_mb = 0
                 except Exception:  # noqa: BLE001
                     ram_mb = None
+                    pss_mb = 0
             pres = self._presence_last_detail.get(pkg, {})
             snapshot.append(
                 {
@@ -3274,6 +3296,7 @@ class WatchdogSupervisor:
                     "online_since": self._online_start_ts.get(pkg) or self._last_online_ts.get(pkg),
                     "last_seen_at": self._last_online_ts.get(pkg),
                     "ram_mb":       ram_mb,
+                    "pss_mb":       pss_mb,
                 }
             )
         return snapshot

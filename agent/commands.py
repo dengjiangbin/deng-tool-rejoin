@@ -4591,6 +4591,19 @@ def cmd_state(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_doctor_ram(cfg: dict[str, Any] | None) -> int:
+    """Print PSS-based RAM report (hidden ``doctor ram`` subcommand)."""
+    from .android_memory import build_ram_report_text
+    from .config import enabled_package_entries
+
+    packages: list[str] = []
+    if cfg:
+        packages = [str(e.get("package") or "") for e in enabled_package_entries(cfg)]
+        packages = [p for p in packages if p]
+    print(build_ram_report_text(packages))
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Doctor command (internal).  Public users normally do NOT see this output.
 
@@ -4633,6 +4646,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     if getattr(args, "doctor_versions", False):
         return _cmd_doctor_versions()
+
+    if getattr(args, "doctor_ram", False):
+        ram_cfg: dict[str, Any] | None = None
+        try:
+            ram_cfg = load_config()
+        except ConfigError:
+            ram_cfg = None
+        return _cmd_doctor_ram(ram_cfg)
 
     doctor_package = str(getattr(args, "doctor_package", "") or "").strip()
     if doctor_package:
@@ -8402,6 +8423,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # Map positional sub-subcommands for `doctor`: "doctor layout", "doctor root-state".
     ns.doctor_install = False
+    ns.doctor_ram = False
     if ns.command == "doctor" and _unknown:
         sub = (_unknown[0] or "").lower().replace("-", "_")
         if sub in ("layout", "layout_test"):
@@ -8416,6 +8438,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             ns.doctor_install = True
         elif sub in ("versions", "version_info"):
             ns.doctor_versions = True
+        elif sub in ("ram", "ram_report", "memory"):
+            ns.doctor_ram = True
         elif sub.startswith("com.") or "." in sub:
             ns.doctor_package = _unknown[0]
         # Any other doctor sub is just dropped silently — no traceback.

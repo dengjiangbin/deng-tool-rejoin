@@ -261,69 +261,109 @@ class TestGetPackageRamUsage(unittest.TestCase):
         self.assertEqual(result["rss_kb"], 0)
 
     def test_running_package_with_dumpsys_shows_mb(self) -> None:
-        """Package whose dumpsys meminfo returns 256 MB shows '256MB'."""
+        """Package whose PSS is 256 MB shows '256 MB'."""
         from unittest.mock import patch
-        with patch("agent.android.detect_root") as mock_root, \
-             patch("agent.android.get_package_pid", return_value=""), \
-             patch("agent.android.get_app_memory_mb", return_value=256.0):
-            mock_root.return_value = type("RI", (), {"available": False, "tool": None})()
+        fake_metrics = {
+            "package": "com.test.pkg0",
+            "pids": [],
+            "pss_kb": 256 * 1024,
+            "rss_kb": 400 * 1024,
+            "usage_mb": "256 MB",
+            "method": "dumpsys_meminfo_package",
+            "success": True,
+            "error": "",
+            "notes": [],
+            "status": "background",
+        }
+        with patch("agent.android_memory.collect_package_memory", return_value=fake_metrics):
             from agent.android import get_package_ram_usage
             result = get_package_ram_usage("com.test.pkg0")
         self.assertEqual(result["usage_mb"], "256 MB")
         self.assertEqual(result["success"], True)
 
     def test_first_supervised_package_uses_its_pid_for_dumpsys(self) -> None:
-        """The first package must not lose its RAM value to shared output parsing."""
+        """The first package must query the exact supervised PID."""
         from unittest.mock import patch
         package = "com.moons.litesc"
-        with patch("agent.android.detect_root") as mock_root, \
-             patch("agent.android.get_package_pid", return_value="4242"), \
-             patch("agent.android.get_app_memory_mb", return_value=512.0) as memory, \
-             patch("builtins.open", side_effect=OSError("proc unavailable")):
-            mock_root.return_value = type("RI", (), {"available": True, "tool": "su"})()
+        fake_metrics = {
+            "package": package,
+            "pids": ["4242"],
+            "pss_kb": 512 * 1024,
+            "rss_kb": 700 * 1024,
+            "usage_mb": "512 MB",
+            "method": "dumpsys_meminfo_pid",
+            "success": True,
+            "error": "",
+            "notes": [],
+            "status": "foreground",
+        }
+        with patch("agent.android_memory.collect_package_memory", return_value=fake_metrics) as collector:
             from agent.android import get_package_ram_usage
             result = get_package_ram_usage(package)
-        memory.assert_called_once_with("4242")
+        collector.assert_called_once()
         self.assertEqual(result["usage_mb"], "512 MB")
         self.assertEqual(result["method"], "dumpsys_meminfo_pid")
+        self.assertEqual(result["pid"], "4242")
         self.assertTrue(result["success"])
 
     def test_missing_proc_file_does_not_crash(self) -> None:
-        """Even if /proc/PID/status doesn't exist, must return safely."""
-        from unittest.mock import patch, mock_open
-        with patch("agent.android.detect_root") as mock_root, \
-             patch("agent.android.get_package_pid", return_value="99999"), \
-             patch("agent.android.get_app_memory_mb", return_value=None), \
-             patch("builtins.open", side_effect=OSError("no such file")):
-            mock_root.return_value = type("RI", (), {"available": True, "tool": "su"})()
+        """Even if process files are missing, must return safely."""
+        from unittest.mock import patch
+        fake_metrics = {
+            "package": "com.test.pkg0",
+            "pids": ["99999"],
+            "pss_kb": None,
+            "rss_kb": 0,
+            "usage_mb": "N/A",
+            "method": "unknown",
+            "success": False,
+            "error": "PSS unavailable",
+            "notes": [],
+            "status": "background",
+        }
+        with patch("agent.android_memory.collect_package_memory", return_value=fake_metrics):
             from agent.android import get_package_ram_usage
             result = get_package_ram_usage("com.test.pkg0")
-        # Must not crash; rss_kb may be 0
         self.assertIsInstance(result, dict)
         self.assertEqual(result["rss_kb"], 0)
 
     def test_proc_status_vms_rss_parsed(self) -> None:
-        """VmRSS line in /proc/PID/status is parsed correctly."""
-        from unittest.mock import patch, mock_open
-        fake_status = "Name:\tcom.test.pkg\nVmRSS:\t 131072 kB\n"
-        with patch("agent.android.detect_root") as mock_root, \
-             patch("agent.android.get_package_pid", return_value="1234"), \
-             patch("agent.android.get_app_memory_mb", return_value=None), \
-             patch("builtins.open", mock_open(read_data=fake_status)):
-            mock_root.return_value = type("RI", (), {"available": True, "tool": "su"})()
+        """RSS from /proc/PID/status is kept as debug reference."""
+        from unittest.mock import patch
+        fake_metrics = {
+            "package": "com.test.pkg0",
+            "pids": ["1234"],
+            "pss_kb": 300 * 1024,
+            "rss_kb": 131072,
+            "usage_mb": "300 MB",
+            "method": "proc_smaps_rollup",
+            "success": True,
+            "error": "",
+            "notes": ["rss_from_proc_status_debug_only"],
+            "status": "background",
+        }
+        with patch("agent.android_memory.collect_package_memory", return_value=fake_metrics):
             from agent.android import get_package_ram_usage
             result = get_package_ram_usage("com.test.pkg0")
         self.assertEqual(result["rss_kb"], 131072)
-        self.assertEqual(result["method"], "proc_status")
         self.assertTrue(result["success"])
 
     def test_gb_display_for_large_ram(self) -> None:
-        """Packages using >1 GB should display as X.XGB."""
+        """Packages using >1 GB PSS should display as X.X GB."""
         from unittest.mock import patch
-        with patch("agent.android.detect_root") as mock_root, \
-             patch("agent.android.get_package_pid", return_value=""), \
-             patch("agent.android.get_app_memory_mb", return_value=1500.0):
-            mock_root.return_value = type("RI", (), {"available": False, "tool": None})()
+        fake_metrics = {
+            "package": "com.test.pkg0",
+            "pids": ["1"],
+            "pss_kb": 1536 * 1024,
+            "rss_kb": 2048 * 1024,
+            "usage_mb": "1.5 GB",
+            "method": "proc_smaps_rollup",
+            "success": True,
+            "error": "",
+            "notes": [],
+            "status": "background",
+        }
+        with patch("agent.android_memory.collect_package_memory", return_value=fake_metrics):
             from agent.android import get_package_ram_usage
             result = get_package_ram_usage("com.test.pkg0")
         self.assertIn("GB", result["usage_mb"],

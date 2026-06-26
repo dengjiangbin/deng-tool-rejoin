@@ -1959,140 +1959,98 @@ def get_memory_info() -> dict[str, int]:
 
 
 def get_app_memory_mb(package_or_pid: str) -> float | None:
-    """Get approximate RAM usage in MB via one targeted ``dumpsys meminfo`` call.
-
-    A PID resolved from the exact package process is preferred. A validated
-    package name remains a safe fallback when no PID is available.
-    """
+    """Return per-target PSS in MB via ``dumpsys meminfo`` (never RSS/VSS)."""
     target = str(package_or_pid or "").strip()
     if not target:
         return None
     if not target.isdigit():
         target = validate_package_name(target)
+    from .android_memory import parse_dumpsys_meminfo
+
     result = run_android_command(["dumpsys", "meminfo", target], timeout=8, prefer_root=False)
     if not result.ok:
         return None
-    # Look for "TOTAL PSS:" or similar summary line (KB → MB)
-    for line in result.stdout.splitlines():
-        m = re.search(r"TOTAL\s+(?:PSS|RSS)?\s*:?\s*(\d+)", line, re.IGNORECASE)
-        if m:
-            return round(int(m.group(1)) / 1024.0, 0)
-    for line in result.stdout.splitlines():
-        if line.strip().upper().startswith("TOTAL"):
-            for part in line.split():
-                if part.isdigit() and int(part) > 100:
-                    return round(int(part) / 1024.0, 0)
-    return None
+    parsed = parse_dumpsys_meminfo(result.stdout or "")
+    pss_kb = parsed.get("pss_kb")
+    if pss_kb is None:
+        return None
+    return round(int(pss_kb) / 1024.0, 0)
 
 
 def get_package_ram_usage(
     package: str,
     root_info: "RootInfo | None" = None,
 ) -> dict[str, object]:
-    """Return per-package RAM usage in MB.
+    """Return per-package RAM usage using PSS as the primary metric.
 
-    Strategy (in order, first success wins):
-    1. ``/proc/<pid>/smaps_rollup`` RSS/PSS — best if accessible.
-    2. ``/proc/<pid>/status`` VmRSS — fast readable PID fallback.
-    3. ``dumpsys meminfo <pid>`` TOTAL PSS/RSS (package only when no PID exists).
-    4. Return ``N/A`` on failure so UI cells are never blank.
+    Uses :mod:`agent.android_memory` for PSS, private dirty/USS, swap PSS, and
+    RSS (debug only). Never treats RSS or VSS as real private RAM.
 
     Returns a dict with:
-      pid           – PID string used (empty if not found)
-      rss_kb        – raw kilobytes (0 on failure)
-      usage_mb      – formatted string e.g. "256 MB", "1.2 GB", or "N/A"
-      method        – one of ``proc_*`` / ``dumpsys_meminfo_pid`` /
-                      ``dumpsys_meminfo_package`` / ``unknown``
+      pid           – first PID string (empty if not found)
+      pids          – all PIDs for the package
+      pss_kb        – proportional shared RAM (primary)
+      rss_kb        – raw RSS kilobytes (debug/reference)
+      private_dirty_kb, uss_kb, swap_pss_kb – when available
+      usage_mb      – formatted PSS e.g. \"256 MB\", \"N/A\"
+      method        – collection path used
       success       – bool
       error         – error string (empty on success)
+      notes         – user-facing caveats (e.g. inflated RSS)
 
     Probe tag: [DENG_REJOIN_PACKAGE_USAGE]
     """
     import logging as _log_mod
+    from .android_memory import collect_package_memory
+
     _log = _log_mod.getLogger("deng.rejoin.android")
 
     package = validate_package_name(package)
-    pid_str = ""
-    rss_kb  = 0
-    method  = "unknown"
-    success = False
-    error   = ""
-
     try:
-        # ── Strategy 1: /proc/<pid>/smaps_rollup / status ────────────────
-        _ri = root_info or detect_root()
-        pid_str = get_package_pid(package, _ri) if _ri.available else ""
-        if pid_str:
-            for proc_name, key_name, method_name in (
-                ("smaps_rollup", "Rss:", "proc_smaps_rollup"),
-                ("status", "VmRSS:", "proc_status"),
-            ):
-                proc_path = f"/proc/{pid_str}/{proc_name}"
-                try:
-                    with open(proc_path, "r", encoding="utf-8", errors="replace") as fh:
-                        content = fh.read()
-                except OSError as exc:
-                    error = str(exc)[:80]
-                    continue
-                for line in content.splitlines():
-                    if line.startswith(key_name):
-                        parts = line.split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            rss_kb = int(parts[1])
-                            method = method_name
-                            success = True
-                            break
-                if success:
-                    break
-            if not success:
-                try:
-                    with open(f"/proc/{pid_str}/status", "r", encoding="utf-8", errors="replace") as fh:
-                        for line in fh:
-                            if line.startswith("VmRSS:"):
-                                parts = line.split()
-                                if len(parts) >= 2 and parts[1].isdigit():
-                                    rss_kb = int(parts[1])
-                                    method = "proc_status"
-                                    success = True
-                                    break
-                except OSError:
-                    pass  # fall through to strategy 2
-
-        # ── Strategy 2: targeted dumpsys meminfo ──────────────────────────
-        if not success:
-            # Query the exact PID when available. This avoids bulk-output
-            # parsing and guarantees the first supervised package is treated
-            # exactly like every later package.
-            mb = get_app_memory_mb(pid_str or package)
-            if mb is not None:
-                rss_kb = int(mb * 1024)
-                method = "dumpsys_meminfo_pid" if pid_str else "dumpsys_meminfo_package"
-                success = True
-
+        metrics = collect_package_memory(package, root_info)
     except Exception as exc:  # noqa: BLE001
-        error = str(exc)[:80]
+        metrics = {
+            "package": package,
+            "pids": [],
+            "pss_kb": None,
+            "rss_kb": 0,
+            "usage_mb": "N/A",
+            "method": "unknown",
+            "success": False,
+            "error": str(exc)[:80],
+            "notes": [],
+        }
 
-    # Format display string
-    if rss_kb <= 0:
-        usage_mb = "N/A"
-    elif rss_kb >= 1024 * 1024:
-        usage_mb = f"{rss_kb / (1024 * 1024):.1f} GB"
-    else:
-        usage_mb = f"{round(rss_kb / 1024)} MB"
+    pids = metrics.get("pids") or []
+    pid_str = str(pids[0]) if pids else ""
+    pss_kb = metrics.get("pss_kb")
+    rss_kb = int(metrics.get("rss_kb") or 0)
+    usage_mb = str(metrics.get("usage_mb") or "N/A")
+    method = str(metrics.get("method") or "unknown")
+    success = bool(metrics.get("success"))
+    error = str(metrics.get("error") or "")
 
     _log.debug(
         "[DENG_REJOIN_PACKAGE_USAGE] package=%s pid=%s method=%s"
-        " rss_kb=%d usage_display=%s success=%s error=%s",
-        package, pid_str, method, rss_kb, usage_mb,
+        " pss_kb=%s rss_kb=%d usage_display=%s success=%s error=%s",
+        package, pid_str, method,
+        str(pss_kb), rss_kb, usage_mb,
         str(success).lower(), error,
     )
     return {
-        "pid":       pid_str,
-        "rss_kb":    rss_kb,
-        "usage_mb":  usage_mb,
-        "method":    method,
-        "success":   success,
-        "error":     error,
+        "pid": pid_str,
+        "pids": pids,
+        "pss_kb": pss_kb,
+        "rss_kb": rss_kb,
+        "private_dirty_kb": metrics.get("private_dirty_kb"),
+        "uss_kb": metrics.get("uss_kb"),
+        "swap_pss_kb": metrics.get("swap_pss_kb"),
+        "usage_mb": usage_mb,
+        "method": method,
+        "success": success,
+        "error": error,
+        "notes": list(metrics.get("notes") or []),
+        "status": metrics.get("status"),
     }
 
 
