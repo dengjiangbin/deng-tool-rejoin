@@ -521,26 +521,28 @@ class TestLicenseGateNetworkResilience(unittest.TestCase):
         self.assertFalse(result)  # chose Exit cleanly, no crash
 
     def test_gate_retries_then_succeeds(self):
-        """After choosing Try Again, the second check succeeds."""
+        """After choosing Enter Different Key, user must type a fresh key."""
         import copy
         from agent.commands import _ensure_remote_license_menu_loop
         base_cfg = self._cfg_with_key()
         cfg = copy.deepcopy(base_cfg)
+        new_key = "DENG-1111-2222-3333-4444"
 
         responses = iter([
             ("server_unavailable", "timeout"),
             ("active", "License active."),
         ])
 
-        # Return fresh cfg copy each time so key is always present after reload.
         with patch("agent.commands.load_config", side_effect=lambda: copy.deepcopy(base_cfg)), \
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c), \
              patch("agent.commands.save_config", side_effect=lambda c: c), \
              patch("agent.commands._remote_license_run_check", side_effect=lambda c: next(responses)), \
+             patch("agent.commands._remote_license_run_bind", return_value=("active", "License active.")), \
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._persist_license_status", side_effect=lambda c, r: c), \
              patch("agent.commands.print_beginner_menu_license_prompt"), \
-             patch("agent.safe_io.safe_prompt", side_effect=["1"]):  # Try Again once
+             patch("agent.commands.validate_license_key", side_effect=lambda k: k.strip()), \
+             patch("agent.safe_io.safe_prompt", side_effect=["1", new_key]):
             result = _ensure_remote_license_menu_loop(cfg, self._make_args(), False)
 
         self.assertTrue(result)
@@ -604,11 +606,16 @@ class TestBannerNotSpammedOnRetry(unittest.TestCase):
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c), \
              patch("agent.commands.save_config", side_effect=lambda c: c), \
              patch("agent.commands._remote_license_run_check", side_effect=lambda c: next(responses)), \
+             patch("agent.commands._remote_license_run_bind", return_value=("active", "ok")), \
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._persist_license_status", side_effect=lambda c, r: c), \
              patch("agent.commands.print_banner") as mock_banner, \
              patch("agent.commands.print_beginner_menu_license_prompt"), \
-             patch("agent.safe_io.safe_prompt", side_effect=["1", "1"]):  # retry twice
+             patch("agent.commands.validate_license_key", side_effect=lambda k: k.strip()), \
+             patch("agent.safe_io.safe_prompt", side_effect=[
+                 "1", base_cfg["license"]["key"],
+                 "1", base_cfg["license"]["key"],
+             ]):
             _ensure_remote_license_menu_loop(cfg, self._make_args(), False)
 
         # Banner must NOT be called inside the license retry loop itself.

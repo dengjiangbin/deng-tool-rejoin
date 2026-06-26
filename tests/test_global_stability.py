@@ -710,10 +710,12 @@ class TestLicenseGateStability(unittest.TestCase):
             return ("invalid", "bad key")
 
         with unittest.mock.patch("agent.commands._remote_license_run_check", side_effect=always_invalid), \
+             unittest.mock.patch("agent.commands._remote_license_run_bind", side_effect=always_invalid), \
              unittest.mock.patch("agent.commands._ensure_install_id_saved", side_effect=lambda x: x), \
              unittest.mock.patch("agent.commands.load_config", side_effect=lambda: dict(cfg)), \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda x: x), \
-             unittest.mock.patch("builtins.input", side_effect=_input_seq(*["1"] * 20)), \
+             unittest.mock.patch("agent.commands.validate_license_key", side_effect=lambda k: k.strip()), \
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=_input_seq(*(["1", "DENG-RETRY-KEY"] * 20))), \
              redirect_stdout(io.StringIO()):
             result = _ensure_remote_license_menu_loop(cfg, args, False)
         self.assertFalse(result)

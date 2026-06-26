@@ -243,6 +243,10 @@ WRONG_DEVICE_USER_MESSAGE = (
 
 HWID_RESET_REENTRY_MESSAGE = WRONG_DEVICE_USER_MESSAGE
 
+LICENSE_CHECK_TIMEOUT_USER_MESSAGE = (
+    "License check timed out. Check your connection or try another key."
+)
+
 KEY_NOT_REDEEMED_API_MESSAGE = (
     "This key has not been redeemed yet. Redeem it in the DENG Tool: Rejoin Panel first."
 )

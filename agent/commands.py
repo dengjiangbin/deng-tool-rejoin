@@ -87,6 +87,7 @@ from .supervisor import MultiPackageSupervisor, WatchdogSupervisor, Supervisor
 from . import keystore
 from .license import (
     HWID_RESET_REENTRY_MESSAGE,
+    LICENSE_CHECK_TIMEOUT_USER_MESSAGE,
     WRONG_DEVICE_USER_MESSAGE,
     bind_remote_license_key,
     check_remote_license_status,
@@ -585,9 +586,77 @@ _LICENSE_OFFLINE_GRACE_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 _LICENSE_TRANSIENT_RESULTS = {
     "server_unavailable",
+    "check_timeout",
     "error",
     "",  # parser couldn't determine anything
 }
+
+
+def _license_subprocess_timeout_seconds() -> int:
+    raw = (os.environ.get("DENG_LICENSE_SUBPROCESS_TIMEOUT") or "55").strip()
+    try:
+        return max(15, min(120, int(raw)))
+    except ValueError:
+        return 55
+
+
+def _license_server_host_for_log(cfg: dict[str, Any]) -> str:
+    lic = cfg.setdefault("license", {})
+    srv = (lic.get("server_url") or "").strip()
+    if not srv:
+        try:
+            from . import api_config as _api_cfg  # noqa: PLC0415
+
+            srv = _api_cfg.license_server_url()
+        except Exception:  # noqa: BLE001
+            return "unknown"
+    try:
+        from urllib.parse import urlparse  # noqa: PLC0415
+
+        parsed = urlparse(srv)
+        return parsed.netloc or parsed.path or "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _log_license_subprocess_timeout(cfg: dict[str, Any], *, timeout: int, op: str) -> None:
+    import logging as _logging  # noqa: PLC0415
+
+    _logging.getLogger("deng.rejoin").warning(
+        "license %s subprocess timed out after %ds host=%s",
+        op,
+        timeout,
+        _license_server_host_for_log(cfg),
+    )
+
+
+def _normalize_license_check_result(result: str, message: str) -> tuple[str, str]:
+    """Map legacy timeout strings to structured ``check_timeout``."""
+    norm = str(result or "").strip().lower()
+    msg = str(message or "").strip()
+    if norm == "server_unavailable" and "timed out" in msg.lower():
+        return "check_timeout", LICENSE_CHECK_TIMEOUT_USER_MESSAGE
+    return norm, msg
+
+
+def _license_failure_user_message(result: str, msg: str) -> str:
+    norm = str(result or "").strip().lower()
+    text = str(msg or "").strip()
+    if norm in ("wrong_device", "requires_manual_rebind"):
+        return WRONG_DEVICE_USER_MESSAGE
+    if norm == "check_timeout":
+        return LICENSE_CHECK_TIMEOUT_USER_MESSAGE
+    if norm == "expired":
+        return text or "This license key has expired."
+    if norm in ("not_found", "invalid", "inactive", "revoked"):
+        return text or "License key is not valid."
+    if norm == "key_not_redeemed":
+        return text or "This key has not been activated."
+    if norm in _LICENSE_TRANSIENT_RESULTS:
+        return text or "Could not reach the license server. Check your connection."
+    if norm == "missing_key":
+        return "No license key found."
+    return text or f"License check failed ({norm or 'unknown'})."
 
 
 def _license_cache_age_seconds(lic: dict[str, Any]) -> float | None:
@@ -686,13 +755,8 @@ def _license_gate_user_exit() -> bool:
     return False
 
 
-def _print_wrong_device_retry_menu(use_color: bool) -> None:
-    _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+def _print_license_gate_retry_menu() -> None:
     print("\n1. Enter Different Key\n0. Exit")
-
-
-def _print_license_retry_menu(use_color: bool) -> None:
-    print("\n1. Try Another Key\n0. Exit")
 
 
 def _prompt_license_gate_choice(*, default: str = "0") -> str | None:
@@ -709,38 +773,41 @@ def _prompt_fresh_license_key() -> str | None:
     return raw.strip()
 
 
-def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) -> tuple[str, str]:
-    """Run the remote license check inside a child Python process.
+def _handle_license_gate_failure(
+    cfg: dict[str, Any],
+    result: str,
+    msg: str,
+    use_color: bool,
+) -> tuple[dict[str, Any], bool]:
+    """Clear rejected key/session, show failure + numbered menu.
 
-    Real-device cause: on Termux/Python 3.13.13, the network code path in
-    :func:`check_remote_license_status` segfaults the *parent* process
-    (probe ``p-39924732cd`` showed ``last_step == 'license_remote_check'``
-    with rc = -11).  Doing the call in a short-lived child process means
-    the worst case is a clean ``"server_unavailable"`` result — the menu
-    never crashes.
-
-    Returns (result, message).  On any subprocess failure (non-zero exit,
-    timeout, signal kill, malformed output), returns
-    ``("server_unavailable", <reason>)``.
+    Returns ``(cfg, retry_with_fresh_key)``.  ``retry_with_fresh_key`` is
+    False when the user chose Exit.
     """
+    cfg = _clear_cached_license_key(cfg)
+    _print_license_err(_license_failure_user_message(result, msg), use_color)
+    while True:
+        _print_license_gate_retry_menu()
+        choice = _prompt_license_gate_choice(default="0")
+        if choice is None or choice in ("0", "2"):
+            return cfg, False
+        if choice == "1":
+            return cfg, True
+
+
+def _run_license_isolated_subprocess(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    timeout: int,
+    op: str,
+) -> tuple[str, str]:
+    """Run license check/bind in a child process with timeout kill + logging."""
     import subprocess as _sp  # noqa: PLC0415
 
-    payload = {
-        "key": (cfg.setdefault("license", {}).get("key") or "").strip(),
-        "install_id": (cfg.setdefault("license", {}).get("install_id") or "").strip(),
-        "device_label": str(cfg.setdefault("license", {}).get("device_label") or "")[:80],
-        "server_url": (cfg.setdefault("license", {}).get("server_url") or "").strip(),
-    }
-    # Real-device evidence (probe p-09484eaab4): the child Python was
-    # exiting with rc=1 because ``python3 -c "from agent.license ..."``
-    # doesn't have the parent's ``sys.path``.  Pass the agent package's
-    # parent directory via PYTHONPATH so the child can find it, and add
-    # the same path explicitly inside the code string so ``DENG_REJOIN_HOME``
-    # overrides work too.  Without this fix every check returned rc=1
-    # and the menu loop persisted ``last_status = server_unavailable``,
-    # corrupting the cache permanently.
     try:
         from pathlib import Path as _Path  # noqa: PLC0415
+
         _agent_parent = str(_Path(__file__).resolve().parent.parent)
     except Exception:  # noqa: BLE001
         _agent_parent = os.path.expanduser("~/.deng-tool/rejoin")
@@ -783,49 +850,81 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) ->
         "            device_label=p['device_label'],\n"
         "        )\n"
         "except Exception as exc:\n"
-        "    r, m = 'server_unavailable', f'check exception: {exc}'\n"
+        "    r, m = 'server_unavailable', f'{op} exception: {exc}'\n"
         "sys.stdout.write(json.dumps({'result': r, 'message': m}))\n"
     )
-    # Pass PYTHONPATH as a belt-and-braces so even subprocess implementations
-    # that strip ``-c`` script directory still find ``agent``.
     env = dict(os.environ)
     prev_pp = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = (
         _agent_parent + (os.pathsep + prev_pp if prev_pp else "")
     )
     try:
-        proc = _sp.run(
+        proc = _sp.Popen(
             [sys.executable, "-c", code],
-            input=json.dumps(payload).encode("utf-8"),
+            stdin=_sp.PIPE,
             stdout=_sp.PIPE,
             stderr=_sp.PIPE,
-            timeout=timeout,
-            check=False,
             env=env,
         )
-    except _sp.TimeoutExpired:
-        return "server_unavailable", "License check subprocess timed out."
+        try:
+            stdout, stderr = proc.communicate(
+                input=json.dumps(payload).encode("utf-8"),
+                timeout=timeout,
+            )
+        except _sp.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except Exception:  # noqa: BLE001
+                pass
+            _log_license_subprocess_timeout(cfg, timeout=timeout, op=op)
+            return "check_timeout", LICENSE_CHECK_TIMEOUT_USER_MESSAGE
     except OSError as exc:
-        return "server_unavailable", f"License check subprocess launch error: {exc}"
+        return "server_unavailable", f"License {op} subprocess launch error: {exc}"
 
     if proc.returncode < 0:
-        # Crashed (SIGSEGV etc.) — DO NOT pollute terminal; treat as a
-        # transient network problem.  Cached license keeps the user
-        # running until the next clean check.
-        return "server_unavailable", f"License check crashed safely (signal {-proc.returncode})."
+        return "server_unavailable", f"License {op} crashed safely (signal {-proc.returncode})."
     if proc.returncode != 0:
-        # Capture stderr's first line so future probes pinpoint *why*
-        # the child failed (ImportError / SyntaxError / etc.).
-        stderr_line = (proc.stderr or b"").decode("utf-8", errors="replace").splitlines()
+        stderr_line = (stderr or b"").decode("utf-8", errors="replace").splitlines()
         hint = stderr_line[0][:80] if stderr_line else ""
-        return "server_unavailable", f"License check exited rc={proc.returncode} ({hint})"
+        return "server_unavailable", f"License {op} exited rc={proc.returncode} ({hint})"
     try:
-        data = json.loads((proc.stdout or b"").decode("utf-8", errors="replace") or "{}")
+        data = json.loads((stdout or b"").decode("utf-8", errors="replace") or "{}")
     except json.JSONDecodeError:
-        return "server_unavailable", "License check returned invalid JSON."
+        return "server_unavailable", f"License {op} returned invalid JSON."
     result = str(data.get("result") or "server_unavailable").strip().lower()
     message = str(data.get("message") or "").strip()
-    return result, message
+    return _normalize_license_check_result(result, message)
+
+
+def _remote_license_isolated(
+    cfg: dict[str, Any],
+    *,
+    op: str = "check",
+    timeout: int | None = None,
+) -> tuple[str, str]:
+    timeout = _license_subprocess_timeout_seconds() if timeout is None else timeout
+    payload = {
+        "key": (cfg.setdefault("license", {}).get("key") or "").strip(),
+        "install_id": (cfg.setdefault("license", {}).get("install_id") or "").strip(),
+        "device_label": str(cfg.setdefault("license", {}).get("device_label") or "")[:80],
+        "server_url": (cfg.setdefault("license", {}).get("server_url") or "").strip(),
+    }
+    if op != "check":
+        payload["op"] = op
+    return _run_license_isolated_subprocess(cfg, payload, timeout=timeout, op=op)
+
+
+def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int | None = None) -> tuple[str, str]:
+    """Run the remote license check inside a child Python process.
+
+    Real-device cause: on Termux/Python 3.13.13, the network code path in
+    :func:`check_remote_license_status` segfaults the *parent* process
+    (probe ``p-39924732cd`` showed ``last_step == 'license_remote_check'``
+    with rc = -11).  Doing the call in a short-lived child process means
+    the worst case is a clean transient result — the menu never crashes.
+    """
+    return _remote_license_isolated(cfg, op="check", timeout=timeout)
 
 
 def _ensure_install_id_saved(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -887,97 +986,9 @@ def _remote_license_bind_direct(cfg: dict[str, Any]) -> tuple[str, str]:
     )
 
 
-def _remote_license_bind_isolated(cfg: dict[str, Any], *, timeout: int = 35) -> tuple[str, str]:
+def _remote_license_bind_isolated(cfg: dict[str, Any], *, timeout: int | None = None) -> tuple[str, str]:
     """Run manual bind inside a child process (same SIGSEGV isolation as check)."""
-    import subprocess as _sp  # noqa: PLC0415
-
-    payload = {
-        "op": "bind",
-        "key": (cfg.setdefault("license", {}).get("key") or "").strip(),
-        "install_id": (cfg.setdefault("license", {}).get("install_id") or "").strip(),
-        "device_label": str(cfg.setdefault("license", {}).get("device_label") or "")[:80],
-        "server_url": (cfg.setdefault("license", {}).get("server_url") or "").strip(),
-    }
-    try:
-        from pathlib import Path as _Path  # noqa: PLC0415
-        _agent_parent = str(_Path(__file__).resolve().parent.parent)
-    except Exception:  # noqa: BLE001
-        _agent_parent = os.path.expanduser("~/.deng-tool/rejoin")
-    code = (
-        "import json, os, sys\n"
-        f"sys.path.insert(0, {_agent_parent!r})\n"
-        "_home = os.environ.get('DENG_REJOIN_HOME')\n"
-        "if _home and _home not in sys.path:\n"
-        "    sys.path.insert(0, _home)\n"
-        "try:\n"
-        "    from agent.license import (\n"
-        "        check_remote_license_status, bind_remote_license_key,\n"
-        "        hash_install_id, DEFAULT_LICENSE_SERVER_URL, get_public_device_model,\n"
-        "    )\n"
-        "    from agent.constants import VERSION\n"
-        "except Exception as _imp_exc:\n"
-        "    sys.stdout.write(json.dumps({\n"
-        "        'result': 'server_unavailable',\n"
-        "        'message': f'license import error: {_imp_exc}',\n"
-        "    }))\n"
-        "    sys.exit(0)\n"
-        "p = json.loads(sys.stdin.read())\n"
-        "srv = p['server_url'] or DEFAULT_LICENSE_SERVER_URL\n"
-        "try:\n"
-        "    model = get_public_device_model() or 'unknown'\n"
-        "except Exception:\n"
-        "    model = 'unknown'\n"
-        "try:\n"
-        "    op = p.get('op') or 'check'\n"
-        "    if op == 'bind':\n"
-        "        r, m = bind_remote_license_key(\n"
-        "            srv, license_key=p['key'], install_id=p['install_id'],\n"
-        "            device_model=model, app_version=VERSION,\n"
-        "            device_label=p['device_label'],\n"
-        "        )\n"
-        "    else:\n"
-        "        r, m = check_remote_license_status(\n"
-        "            srv, license_key=p['key'], install_id=p['install_id'],\n"
-        "            device_model=model, app_version=VERSION,\n"
-        "            device_label=p['device_label'],\n"
-        "        )\n"
-        "except Exception as exc:\n"
-        "    r, m = 'server_unavailable', f'bind exception: {exc}'\n"
-        "sys.stdout.write(json.dumps({'result': r, 'message': m}))\n"
-    )
-    env = dict(os.environ)
-    prev_pp = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (
-        _agent_parent + (os.pathsep + prev_pp if prev_pp else "")
-    )
-    try:
-        proc = _sp.run(
-            [sys.executable, "-c", code],
-            input=json.dumps(payload).encode("utf-8"),
-            stdout=_sp.PIPE,
-            stderr=_sp.PIPE,
-            timeout=timeout,
-            check=False,
-            env=env,
-        )
-    except _sp.TimeoutExpired:
-        return "server_unavailable", "License bind subprocess timed out."
-    except OSError as exc:
-        return "server_unavailable", f"License bind subprocess launch error: {exc}"
-
-    if proc.returncode < 0:
-        return "server_unavailable", f"License bind crashed safely (signal {-proc.returncode})."
-    if proc.returncode != 0:
-        stderr_line = (proc.stderr or b"").decode("utf-8", errors="replace").splitlines()
-        hint = stderr_line[0][:80] if stderr_line else ""
-        return "server_unavailable", f"License bind exited rc={proc.returncode} ({hint})"
-    try:
-        data = json.loads((proc.stdout or b"").decode("utf-8", errors="replace") or "{}")
-    except json.JSONDecodeError:
-        return "server_unavailable", "License bind returned invalid JSON."
-    result = str(data.get("result") or "server_unavailable").strip().lower()
-    message = str(data.get("message") or "").strip()
-    return result, message
+    return _remote_license_isolated(cfg, op="bind", timeout=timeout)
 
 
 def _should_isolate_license_check() -> bool:
@@ -1016,15 +1027,19 @@ def _should_isolate_license_check() -> bool:
 def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
     """Validate-only ``/api/license/check`` — never binds or rebinds."""
     if _should_isolate_license_check():
-        return _remote_license_check_isolated(cfg)
-    return _remote_license_check_direct(cfg)
+        result, msg = _remote_license_check_isolated(cfg)
+    else:
+        result, msg = _remote_license_check_direct(cfg)
+    return _normalize_license_check_result(result, msg)
 
 
 def _remote_license_run_bind(cfg: dict[str, Any]) -> tuple[str, str]:
     """Explicit manual bind via ``POST /api/license/bind`` only."""
     if _should_isolate_license_check():
-        return _remote_license_bind_isolated(cfg)
-    return _remote_license_bind_direct(cfg)
+        result, msg = _remote_license_bind_isolated(cfg)
+    else:
+        result, msg = _remote_license_bind_direct(cfg)
+    return _normalize_license_check_result(result, msg)
 
 
 def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool) -> bool:
@@ -1110,17 +1125,13 @@ def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespac
             except Exception:  # noqa: BLE001
                 pass
             return True
-        _print_license_err(msg, use_color)
         if not _is_interactive():
+            _print_license_err(msg, use_color)
             return False
-        _print_license_retry_menu(use_color)
-        while True:
-            choice = _prompt_license_gate_choice(default="0")
-            if choice is None or choice in ("0", "2"):
-                return _license_gate_user_exit()
-            if choice == "1":
-                force_fresh_prompt = True
-                break
+        cfg, retry_fresh = _handle_license_gate_failure(cfg, "invalid", msg, use_color)
+        if not retry_fresh:
+            return _license_gate_user_exit()
+        force_fresh_prompt = True
 
 
 def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
@@ -1189,6 +1200,7 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
         except Exception as exc:  # noqa: BLE001
             _print_license_err(f"License check failed: {exc}", use_color)
             result, msg = "error", str(exc)
+        result, msg = _normalize_license_check_result(result, msg)
 
         if result == "active":
             global _license_session_validated, _license_manual_verification_success
@@ -1215,35 +1227,16 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             except Exception:  # noqa: BLE001
                 pass
 
-        if result in ("requires_manual_rebind", "wrong_device"):
-            cfg = _clear_cached_license_key(cfg)
-        elif result == "key_not_redeemed":
-            _print_license_err(msg, use_color)
-            if not _is_interactive():
-                return False
-        else:
-            _print_license_err(f"License Invalid: {msg}", use_color)
-            if not _is_interactive():
-                return False
-
         if not _is_interactive():
+            if result not in _LICENSE_TRANSIENT_RESULTS:
+                cfg = _clear_cached_license_key(cfg)
+            _print_license_err(_license_failure_user_message(result, msg), use_color)
             return False
 
-        while True:
-            if result in ("requires_manual_rebind", "wrong_device"):
-                _print_wrong_device_retry_menu(use_color)
-            elif result == "key_not_redeemed":
-                _print_license_err(msg, use_color)
-                _print_license_retry_menu(use_color)
-            else:
-                _print_license_retry_menu(use_color)
-            choice = _prompt_license_gate_choice(default="0")
-            if choice is None or choice in ("0", "2"):
-                return _license_gate_user_exit()
-            if choice == "1":
-                if result in ("wrong_device", "requires_manual_rebind"):
-                    force_fresh_prompt = True
-                break
+        cfg, retry_fresh = _handle_license_gate_failure(cfg, result, msg, use_color)
+        if not retry_fresh:
+            return _license_gate_user_exit()
+        force_fresh_prompt = True
         continue
     return False
 

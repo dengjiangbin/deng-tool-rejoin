@@ -77,7 +77,7 @@ class LicensePromptTextTests(unittest.TestCase):
         self.assertIn("[?] Verifying License:", text)
         self.assertIn("[!] No License Key Found.", text)
         self.assertNotIn("\x1b[", text)
-        self.assertIn("Enter License Key", prompt.call_args[0][0])
+        self.assertIn("Enter license key:", prompt.call_args[0][0])
 
     def test_no_saved_key_prompt_color(self) -> None:
         cfg = self._cfg_without_key()

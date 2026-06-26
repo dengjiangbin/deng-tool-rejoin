@@ -107,56 +107,65 @@ class LicenseOfflineGraceTest(unittest.TestCase):
 class IsolatedRemoteCheckTest(unittest.TestCase):
     """``_remote_license_check_isolated`` translates subprocess outcomes."""
 
-    def _patched(self, proc_mock: mock.Mock) -> tuple[str, str]:
+    _VALID_KEY = "DENG-AAAA-BBBB-CCCC-DDDD"
+
+    def _patched(
+        self,
+        *,
+        returncode: int = 0,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+    ) -> tuple[str, str]:
         from agent import commands  # noqa: PLC0415
-        with mock.patch("subprocess.run", return_value=proc_mock):
-            return commands._remote_license_check_isolated({"license": {"key": "X"}})
+
+        proc = mock.Mock()
+        proc.returncode = returncode
+        proc.communicate.return_value = (stdout, stderr)
+        proc.kill = mock.Mock()
+
+        with mock.patch("subprocess.Popen", return_value=proc):
+            return commands._remote_license_check_isolated(
+                {"license": {"key": self._VALID_KEY}},
+            )
 
     def test_normal_active(self) -> None:
-        proc = mock.Mock()
-        proc.returncode = 0
-        proc.stdout = json.dumps({"result": "active", "message": "ok"}).encode()
-        proc.stderr = b""
-        result, msg = self._patched(proc)
+        stdout = json.dumps({"result": "active", "message": "ok"}).encode()
+        result, msg = self._patched(stdout=stdout)
         self.assertEqual(result, "active")
         self.assertEqual(msg, "ok")
 
     def test_sigsegv_child_returns_server_unavailable(self) -> None:
         """Child SIGSEGV (rc = -11) MUST NOT raise — must become a soft fail."""
-        proc = mock.Mock()
-        proc.returncode = -11
-        proc.stdout = b""
-        proc.stderr = b""
-        result, msg = self._patched(proc)
+        result, msg = self._patched(returncode=-11)
         self.assertEqual(result, "server_unavailable")
         self.assertIn("crashed safely", msg)
         self.assertIn("signal 11", msg)
 
     def test_nonzero_exit_returns_server_unavailable(self) -> None:
-        proc = mock.Mock()
-        proc.returncode = 2
-        proc.stdout = b""
-        proc.stderr = b""
-        result, msg = self._patched(proc)
+        result, msg = self._patched(returncode=2)
         self.assertEqual(result, "server_unavailable")
         self.assertIn("rc=2", msg)
 
     def test_invalid_json_returns_server_unavailable(self) -> None:
-        proc = mock.Mock()
-        proc.returncode = 0
-        proc.stdout = b"this is not json"
-        proc.stderr = b""
-        result, msg = self._patched(proc)
+        result, msg = self._patched(stdout=b"this is not json")
         self.assertEqual(result, "server_unavailable")
         self.assertIn("invalid JSON", msg)
 
-    def test_timeout_returns_server_unavailable(self) -> None:
+    def test_timeout_returns_check_timeout(self) -> None:
         import subprocess
         from agent import commands  # noqa: PLC0415
-        with mock.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)):
-            result, msg = commands._remote_license_check_isolated({"license": {"key": "X"}})
-        self.assertEqual(result, "server_unavailable")
+
+        proc = mock.Mock()
+        proc.kill = mock.Mock()
+        proc.communicate.side_effect = subprocess.TimeoutExpired("cmd", 5)
+
+        with mock.patch("subprocess.Popen", return_value=proc):
+            result, msg = commands._remote_license_check_isolated(
+                {"license": {"key": self._VALID_KEY}},
+            )
+        self.assertEqual(result, "check_timeout")
         self.assertIn("timed out", msg.lower())
+        proc.kill.assert_called_once()
 
 
 class LicenseMenuLoopFreshCheckTest(unittest.TestCase):
@@ -383,6 +392,22 @@ class IsolatedSubprocessImportsAgentTest(unittest.TestCase):
     license check returned ``server_unavailable``.
     """
 
+    def _fake_popen_success(self, captured: dict) -> mock.Mock:
+        proc = mock.Mock()
+        proc.returncode = 0
+        proc.communicate.return_value = (
+            json.dumps({"result": "active", "message": "ok"}).encode(),
+            b"",
+        )
+        proc.kill = mock.Mock()
+
+        def fake_popen(args, **kwargs):  # noqa: ANN001, ANN002
+            captured["args"] = list(args)
+            captured["env"] = dict(kwargs.get("env") or {})
+            return proc
+
+        return fake_popen
+
     def test_pythonpath_passed_to_subprocess(self) -> None:
         """Subprocess env MUST carry PYTHONPATH pointing at the agent's parent."""
         from pathlib import Path  # noqa: PLC0415
@@ -390,23 +415,16 @@ class IsolatedSubprocessImportsAgentTest(unittest.TestCase):
 
         from agent import commands  # noqa: PLC0415
 
-        captured_env: dict[str, str] = {}
+        captured: dict = {}
+        with mock.patch("subprocess.Popen", side_effect=self._fake_popen_success(captured)):
+            commands._remote_license_check_isolated(
+                {"license": {"key": "DENG-AAAA-BBBB-CCCC-DDDD"}},
+            )
 
-        def fake_run(args, **kwargs):  # noqa: ANN001, ANN002
-            captured_env.update(kwargs.get("env") or {})
-            m = mock.Mock()
-            m.returncode = 0
-            m.stdout = json.dumps({"result": "active", "message": "ok"}).encode()
-            m.stderr = b""
-            return m
-
-        with mock.patch("subprocess.run", side_effect=fake_run):
-            commands._remote_license_check_isolated({"license": {"key": "X"}})
-
+        captured_env = captured.get("env") or {}
         self.assertIn("PYTHONPATH", captured_env, "PYTHONPATH must be set")
         agent_parent = str(Path(commands.__file__).resolve().parent.parent)
         pp = captured_env["PYTHONPATH"]
-        # First entry must be the agent's parent directory.
         first = pp.split(os.pathsep)[0]
         self.assertEqual(first, agent_parent,
                          f"PYTHONPATH[0] must point at {agent_parent}, got {pp!r}")
@@ -417,21 +435,15 @@ class IsolatedSubprocessImportsAgentTest(unittest.TestCase):
         sandboxes do this)."""
         from agent import commands  # noqa: PLC0415
 
-        captured_args: list[list[str]] = []
+        captured: dict = {}
+        with mock.patch("subprocess.Popen", side_effect=self._fake_popen_success(captured)):
+            commands._remote_license_check_isolated(
+                {"license": {"key": "DENG-AAAA-BBBB-CCCC-DDDD"}},
+            )
 
-        def fake_run(args, **kwargs):  # noqa: ANN001, ANN002
-            captured_args.append(list(args))
-            m = mock.Mock()
-            m.returncode = 0
-            m.stdout = json.dumps({"result": "active", "message": "ok"}).encode()
-            m.stderr = b""
-            return m
-
-        with mock.patch("subprocess.run", side_effect=fake_run):
-            commands._remote_license_check_isolated({"license": {"key": "X"}})
-
-        self.assertEqual(len(captured_args), 1)
-        code = captured_args[0][-1]
+        captured_args = captured.get("args") or []
+        self.assertGreaterEqual(len(captured_args), 1)
+        code = captured_args[-1]
         self.assertIn("sys.path.insert", code,
                       "inline code MUST manipulate sys.path")
         self.assertIn("from agent.license import", code,
@@ -446,20 +458,15 @@ class IsolatedSubprocessImportsAgentTest(unittest.TestCase):
 
         proc = mock.Mock()
         proc.returncode = 1
-        proc.stdout = b""
-        proc.stderr = (
-            b"Traceback (most recent call last):\n"
-            b"  File \"<string>\", line 5, in <module>\n"
-            b"ModuleNotFoundError: No module named 'agent'\n"
-        )
-        with mock.patch("subprocess.run", return_value=proc):
+        proc.communicate.return_value = (b"", b"ModuleNotFoundError: No module named 'agent'\n")
+        proc.kill = mock.Mock()
+        with mock.patch("subprocess.Popen", return_value=proc):
             result, msg = commands._remote_license_check_isolated(
-                {"license": {"key": "X"}},
+                {"license": {"key": "DENG-AAAA-BBBB-CCCC-DDDD"}},
             )
         self.assertEqual(result, "server_unavailable")
         self.assertIn("rc=1", msg)
-        # The stderr hint is included so future probes pinpoint the cause.
-        self.assertIn("Traceback", msg)
+        self.assertIn("ModuleNotFoundError", msg)
 
 
 if __name__ == "__main__":
