@@ -1117,6 +1117,22 @@ def _capture_start_crash_state(errors: list[dict[str, str]]) -> dict[str, Any]:
         }
 
 
+def _capture_package_state_detector(errors: list[dict[str, str]]) -> dict[str, Any]:
+    path = DATA_DIR / "package-state-detector.json"
+    if not path.is_file():
+        return {
+            "package_state_detector_enabled": False,
+            "note": "no package-state-detector.json yet (watchdog not running)",
+        }
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "package_state_detector", "error": str(exc)[:200]})
+    return {"package_state_detector_enabled": False, "error": "invalid_json"}
+
+
 def _capture_landscape_debug_state(errors: list[dict[str, str]]) -> dict[str, Any]:
     """Capture current landscape/home evidence using the same Start checks."""
     try:
@@ -1311,6 +1327,7 @@ def collect_probe(
     except Exception as exc:  # noqa: BLE001
         out["package_lifecycle_username"] = {"error": str(exc)[:120]}
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
+    out["package_state_detector"] = _capture_package_state_detector(errors)
     try:
         from .config import get_package_display_username
         from . import package_username as _pu

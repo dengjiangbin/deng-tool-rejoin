@@ -1316,6 +1316,12 @@ class WatchdogSupervisor:
         self._watchdog_round_rate_limited: bool = False
         self._lobby_entered_at: dict[str, float] = {}
         self._root_info = android.detect_root()
+        from .package_state_detector import PackageStateDetector
+
+        self._package_detector = PackageStateDetector(
+            self.packages,
+            root_info=self._root_info,
+        )
 
         for e in self.entries:
             pkg = str(e.get("package") or "").strip()
@@ -1426,6 +1432,10 @@ class WatchdogSupervisor:
                 self._online_start_ts[pkg] = now
                 if previous_state == STATUS_RELAUNCHING:
                     self._relaunch_runtime_active[pkg] = True
+                try:
+                    self._package_detector.mark_recovered(pkg)
+                except Exception:  # noqa: BLE001
+                    pass
                 try:
                     from . import webhook as lifecycle_webhook
 
@@ -2293,28 +2303,38 @@ class WatchdogSupervisor:
         return state, detail
 
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
-        """Classify one package from installed + live Android evidence only."""
+        """Classify one package from process + logcat evidence (per-package, not global)."""
         t0 = time.monotonic()
         try:
             installed = android.package_installed(pkg)
         except Exception:  # noqa: BLE001
             installed = False
+
+        was_metric_active = bool(
+            self._last_online_ts.get(pkg)
+            or self._online_start_ts.get(pkg)
+            or self.status_map.get(pkg) in {
+                STATUS_ONLINE, STATUS_RELAUNCHING, STATUS_LAUNCHING,
+            }
+        )
+        check = self._package_detector.check_package(
+            pkg,
+            current_status=str(self.status_map.get(pkg) or ""),
+            was_metric_active=was_metric_active,
+        )
         try:
             evidence = android.get_package_alive_evidence(pkg) if installed else {}
         except Exception:  # noqa: BLE001
             evidence = {}
-        process_evidence = bool(evidence.get("process"))
+
+        process_evidence = bool(check.process_alive or evidence.get("process"))
         activity_evidence = bool(evidence.get("activity"))
         window_evidence = bool(evidence.get("window"))
-        alive = bool(evidence.get("strict_alive", False))
         verify_until = self._relaunch_verify_until.get(pkg, 0.0)
-        if alive:
+
+        if check.process_alive:
             state = STATUS_ONLINE
-            reason = (
-                "current_process_record" if process_evidence else
-                "current_activity_record" if activity_evidence else
-                "current_window"
-            )
+            reason = "process_alive"
             self._relaunch_inflight.discard(pkg)
             self._relaunch_verify_until.pop(pkg, None)
             self._missing_evidence_since.pop(pkg, None)
@@ -2324,6 +2344,30 @@ class WatchdogSupervisor:
         elif pkg in self._relaunch_inflight and time.monotonic() < verify_until:
             state = STATUS_RELAUNCHING
             reason = "android_relaunch_verification_pending"
+        elif check.confirmed_dead:
+            state = STATUS_DEAD
+            reason = str(check.dead_reason or "process_missing")
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+            self._missing_evidence_since.pop(pkg, None)
+        elif check.dead_reason == "process_missing_pending":
+            self._missing_evidence_since.setdefault(pkg, time.monotonic())
+            if self.status_map.get(pkg) == STATUS_ONLINE:
+                state = STATUS_ONLINE
+            else:
+                state = STATUS_LAUNCHING
+            reason = "process_missing_pending"
+        elif not installed:
+            missing_since = self._missing_evidence_since.setdefault(pkg, time.monotonic())
+            missing_for = time.monotonic() - missing_since
+            if missing_for < self.MISSING_EVIDENCE_CONFIRM_SECONDS and was_metric_active:
+                state = STATUS_ONLINE if self.status_map.get(pkg) == STATUS_ONLINE else STATUS_LAUNCHING
+                reason = "missing_evidence_confirmation_pending"
+            else:
+                state = STATUS_DEAD
+                reason = "package_not_installed"
+                self._relaunch_inflight.discard(pkg)
+                self._relaunch_verify_until.pop(pkg, None)
         else:
             missing_since = self._missing_evidence_since.setdefault(pkg, time.monotonic())
             missing_for = time.monotonic() - missing_since
@@ -2335,8 +2379,9 @@ class WatchdogSupervisor:
                 reason = "no_current_android_evidence"
                 self._relaunch_inflight.discard(pkg)
                 self._relaunch_verify_until.pop(pkg, None)
+
         detail = {
-            "process_running": "not_used",
+            "process_running": "true" if check.process_alive else "false",
             "process_evidence": str(process_evidence).lower(),
             "activity_evidence": str(activity_evidence).lower(),
             "window_evidence": str(window_evidence).lower(),
@@ -2346,14 +2391,20 @@ class WatchdogSupervisor:
             "heartbeat_ok": "not_used",
             "warning_detected": "false",
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
-            "root_available": "not_required",
+            "root_available": str(bool(getattr(self._root_info, "available", False))).lower(),
             "foreground_package": pkg if evidence.get("foreground") else "",
             "activity": state,
             "in_game_proof": "android_local",
             "heartbeat_age_sec": "not_used",
             "presence_source": "not_used",
             "reason": reason,
-            "missing_evidence_duration_sec": round(time.monotonic() - self._missing_evidence_since.get(pkg, time.monotonic()), 1),
+            "dead_reason": str(check.dead_reason or reason),
+            "dead_detection_evidence": str(check.dead_reason or reason),
+            "ram_display": str(check.ram_display or "N/A"),
+            "ram_source": str(check.ram_source or "none"),
+            "missing_evidence_duration_sec": round(
+                time.monotonic() - self._missing_evidence_since.get(pkg, time.monotonic()), 1
+            ),
             "process_block_id": str(evidence.get("process_block_id") or ""),
             "activity_block_id": str(evidence.get("activity_block_id") or ""),
             "window_block_id": str(evidence.get("window_block_id") or ""),
@@ -2710,6 +2761,7 @@ class WatchdogSupervisor:
         prev: str,
         state: str,
         now: float,
+        detail: dict[str, Any] | None = None,
     ) -> None:
         if not self._should_attempt_package_dead_webhook(pkg, prev, state, now):
             return
@@ -2752,6 +2804,8 @@ class WatchdogSupervisor:
                 package=pkg,
                 username=username,
                 runtime_seconds=runtime_seconds,
+                dead_reason=str((detail or {}).get("dead_reason") or (detail or {}).get("reason") or ""),
+                ram_display=str((detail or {}).get("ram_display") or ""),
             )
             if ok:
                 lifecycle_webhook.mark_package_lifecycle_dead_notified(pkg, username=username)
@@ -3189,6 +3243,12 @@ class WatchdogSupervisor:
                 total=total,
             )
 
+            try:
+                self._package_detector.poll_logcat()
+                self._package_detector.write_probe_file()
+            except Exception:  # noqa: BLE001
+                pass
+
             checked = 0
             round_started = time.monotonic()
             for idx, pkg in enumerate(self.packages, 1):
@@ -3302,7 +3362,7 @@ class WatchdogSupervisor:
 
                 self._record_runtime_session_state(pkg, prev, state, now)
                 if state == STATUS_DEAD:
-                    self._maybe_send_package_dead_webhook(pkg, entry, prev, state, now)
+                    self._maybe_send_package_dead_webhook(pkg, entry, prev, state, now, detail)
                     _maybe_render(force=True)
 
                 recovery_gate = False

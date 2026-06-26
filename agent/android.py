@@ -1696,20 +1696,37 @@ def get_current_android_package_evidence(package: str) -> dict[str, object]:
         except Exception:  # noqa: BLE001
             return ""
 
-    process_dump = _dump(["dumpsys", "activity", "processes"])
-    for block in _dumpsys_record_blocks(process_dump, "ProcessRecord{"):
-        head = block[:900]
-        block_offset = process_dump.find(block)
-        prior_section = process_dump[:block_offset].lower()
-        in_bad_section = "bad processes" in prior_section or "recent crashes" in prior_section
-        if not _exact_package_in_text(head, package) or in_bad_section or _ANDROID_DEAD_CONTEXT_RE.search(head):
-            continue
-        first_line = head.splitlines()[0] if head.splitlines() else head
-        if re.search(rf"\b\d+:{re.escape(package)}(?:/|\b)", first_line):
-            evidence["process"] = True
-            evidence["process_block_id"] = first_line[:180]
-            break
+    evidence["running"] = False
+    evidence["root_running"] = False
+    process_running = False
+    pid = ""
+    try:
+        process_running = is_process_running(package)
+    except Exception:  # noqa: BLE001
+        process_running = False
+    if not process_running:
+        try:
+            root_info = detect_root()
+            if root_info.available:
+                process_running = is_process_running_any(package, root_info.tool)
+        except Exception:  # noqa: BLE001
+            process_running = False
+    if process_running:
+        try:
+            pid_res = run_command(["pidof", package], timeout=2)
+            if pid_res.ok and (pid_res.stdout or "").strip():
+                pid = (pid_res.stdout or "").strip().split()[0]
+        except Exception:  # noqa: BLE001
+            pid = ""
+        evidence["running"] = True
+        evidence["process"] = True
+        evidence["process_block_id"] = f"pidof:{pid}" if pid else "process_alive"
+    else:
+        evidence["process"] = False
+        evidence["process_block_id"] = ""
 
+    # dumpsys activity/window are diagnostic only — stale records must not
+    # override a missing real process when deciding strict_alive.
     activity_dump = _dump(["dumpsys", "activity", "activities"])
     for block in _dumpsys_record_blocks(activity_dump, "ActivityRecord{"):
         head = block[:1400]
@@ -1717,9 +1734,8 @@ def get_current_android_package_evidence(package: str) -> dict[str, object]:
             continue
         if "Activities=[]" in head or not re.search(r"app=ProcessRecord\{[^}]+\}", head):
             continue
-        first_line = head.splitlines()[0] if head.splitlines() else head
         evidence["activity"] = True
-        evidence["activity_block_id"] = first_line[:180]
+        evidence["activity_block_id"] = (head.splitlines()[0] if head.splitlines() else head)[:180]
         break
 
     window_dump = _dump(["dumpsys", "window", "windows"])
@@ -1731,14 +1747,13 @@ def get_current_android_package_evidence(package: str) -> dict[str, object]:
         app_alive = re.search(r"\bmAppDied=false\b", head, re.IGNORECASE)
         ready = re.search(r"\b(?:isReadyForDisplay\(\)=true|mDrawState=HAS_DRAWN|isOnScreen=true)\b", head, re.IGNORECASE)
         if has_surface and app_alive and ready:
-            first_line = head.splitlines()[0] if head.splitlines() else head
             evidence["window"] = True
-            evidence["window_block_id"] = first_line[:180]
+            evidence["window_block_id"] = (head.splitlines()[0] if head.splitlines() else head)[:180]
             break
 
-    evidence["running"] = bool(evidence["process"])
-    evidence["alive"] = bool(evidence["process"] and (evidence["activity"] or evidence["window"]))
-    evidence["strict_alive"] = evidence["alive"]
+    evidence["strict_alive"] = process_running
+    evidence["alive"] = process_running
+    evidence["pid"] = pid
     return evidence
     try:
         from . import dumpsys_cache as _dc

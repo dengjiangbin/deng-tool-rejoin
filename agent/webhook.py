@@ -590,6 +590,8 @@ def _lifecycle_embed_fields(
     username: str,
     event: str,
     runtime_seconds: float | None = None,
+    dead_reason: str | None = None,
+    ram_display: str | None = None,
 ) -> list[dict[str, Any]]:
     from .package_identity import format_discord_username_spoiler
 
@@ -609,6 +611,14 @@ def _lifecycle_embed_fields(
         )
         if runtime_field:
             fields.append(runtime_field)
+        reason_text = str(dead_reason or "").strip()
+        if reason_text:
+            fields.append({"name": "Dead Reason", "value": reason_text[:256], "inline": True})
+        ram_text = str(ram_display or "").strip()
+        if ram_text and ram_text.lower() not in {"", "n/a", "na", "none", "unknown"}:
+            fields.append({"name": "RAM", "value": ram_text[:256], "inline": True})
+        elif ram_text.lower() in {"n/a", "na", "unknown"}:
+            fields.append({"name": "RAM", "value": "N/A", "inline": True})
     return fields
 
 
@@ -639,6 +649,8 @@ def build_package_lifecycle_embed_payload(
     package: str,
     username: str,
     runtime_seconds: float | None = None,
+    dead_reason: str | None = None,
+    ram_display: str | None = None,
 ) -> dict[str, Any]:
     """Build a minimal Account Dead / Account Recovered embed."""
     from .license import get_public_device_model
@@ -652,6 +664,8 @@ def build_package_lifecycle_embed_payload(
         username=username,
         event=event,
         runtime_seconds=runtime_seconds,
+        dead_reason=dead_reason,
+        ram_display=ram_display,
     )
 
     return {
@@ -696,6 +710,8 @@ def send_package_lifecycle_alert(
     package: str,
     username: str,
     runtime_seconds: float | None = None,
+    dead_reason: str | None = None,
+    ram_display: str | None = None,
 ) -> tuple[bool, str]:
     """Send one Account Dead / Account Recovered embed without blocking relaunch."""
     from .package_identity import format_discord_username_spoiler
@@ -739,6 +755,8 @@ def send_package_lifecycle_alert(
         package=package,
         username=username,
         runtime_seconds=runtime_seconds,
+        dead_reason=dead_reason,
+        ram_display=ram_display,
     )
     embed = (payload.get("embeds") or [{}])[0]
     runtime_present, runtime_value = _lifecycle_runtime_from_payload(payload)
