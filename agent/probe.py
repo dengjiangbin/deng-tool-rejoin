@@ -1117,20 +1117,40 @@ def _capture_start_crash_state(errors: list[dict[str, str]]) -> dict[str, Any]:
         }
 
 
-def _capture_package_state_detector(errors: list[dict[str, str]]) -> dict[str, Any]:
-    path = DATA_DIR / "package-state-detector.json"
-    if not path.is_file():
-        return {
-            "package_state_detector_enabled": False,
-            "note": "no package-state-detector.json yet (watchdog not running)",
-        }
+def _capture_rjn_style_detection(errors: list[dict[str, str]]) -> dict[str, Any]:
+    path = DATA_DIR / "rjn-style-detection.json"
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"step": "rjn_style_detection", "error": str(exc)[:200]})
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return data
+        from .rjn_lifecycle_monitor import RjnLifecycleMonitor
+
+        cfg_packages: list[str] = []
+        from .config import load_config
+
+        cfg = load_config()
+        entries = cfg.get("roblox_packages") or []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("package"):
+                cfg_packages.append(str(entry["package"]))
+        if cfg_packages:
+            mon = RjnLifecycleMonitor(cfg_packages)
+            mon.refresh_uid_map()
+            for pkg in cfg_packages:
+                mon.evaluate_package(pkg)
+            return {"rjn_style_detection": mon.probe_snapshot()}
     except Exception as exc:  # noqa: BLE001
-        errors.append({"step": "package_state_detector", "error": str(exc)[:200]})
-    return {"package_state_detector_enabled": False, "error": "invalid_json"}
+        errors.append({"step": "rjn_style_detection_live", "error": str(exc)[:200]})
+    return {
+        "rjn_style_detection": {
+            "enabled": False,
+            "reason": "no rjn-style-detection.json and live probe failed",
+        },
+    }
 
 
 def _capture_landscape_debug_state(errors: list[dict[str, str]]) -> dict[str, Any]:
@@ -1327,7 +1347,7 @@ def collect_probe(
     except Exception as exc:  # noqa: BLE001
         out["package_lifecycle_username"] = {"error": str(exc)[:120]}
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
-    out["package_state_detector"] = _capture_package_state_detector(errors)
+    out["rjn_style_detection"] = _capture_rjn_style_detection(errors)
     try:
         from .config import get_package_display_username
         from . import package_username as _pu

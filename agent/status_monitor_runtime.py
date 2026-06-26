@@ -1,10 +1,9 @@
-"""Persisted per-package Launching timestamps for Status Monitor runtime."""
+"""Persisted online_since for Status Monitor runtime (confirmed online only)."""
 
 from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
 from typing import Any
 
 from .constants import DATA_DIR
@@ -51,6 +50,7 @@ def load_package_launch_started_at() -> dict[str, float]:
 
 
 def persist_package_launch_started(package: str, started_at: float | None = None) -> float:
+    """Debug-only launch duration anchor — never used for Status Monitor Runtime."""
     pkg = str(package or "").strip()
     if not pkg:
         return 0.0
@@ -81,7 +81,150 @@ def clear_package_launch_started(package: str) -> None:
     _save_state(state)
 
 
+def load_online_since(package: str) -> tuple[float | None, dict[str, Any]]:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return None, {}
+    row = (_load_state().get("packages") or {}).get(pkg)
+    if not isinstance(row, dict):
+        return None, {}
+    try:
+        return float(row.get("online_since")), dict(row)
+    except (TypeError, ValueError):
+        return None, dict(row)
+
+
+def load_all_online_since() -> dict[str, float]:
+    packages = _load_state().get("packages") or {}
+    out: dict[str, float] = {}
+    for pkg, row in packages.items():
+        if not isinstance(row, dict):
+            continue
+        try:
+            out[str(pkg)] = float(row.get("online_since"))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def mark_online_confirmed_gamejoin(
+    package: str,
+    at: float,
+    *,
+    previous_state: str = "",
+) -> float:
+    """Set online_since from UID-matched gamejoinloadtime (rjn runtime source)."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return 0.0
+    ts = float(at)
+    state = _load_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    prev = str(previous_state or row.get("state") or "").strip()
+    if prev != "ONLINE_CONFIRMED":
+        row["online_since"] = ts
+        row["last_transition_at"] = ts
+        row["last_transition_reason"] = "gamejoinloadtime"
+        row["last_online_evidence_at"] = ts
+    row["state"] = "ONLINE_CONFIRMED"
+    row["runtime_source"] = "gamejoinloadtime"
+    row["last_gamejoinloadtime_at"] = ts
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_state(state)
+    return float(row.get("online_since") or ts)
+
+
+def mark_online_confirmed(
+    package: str,
+    now: float,
+    evidence: dict[str, Any] | None = None,
+    *,
+    previous_state: str = "",
+) -> float:
+    """Set online_since when transitioning into ONLINE_CONFIRMED."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return 0.0
+    ts = float(now)
+    state = _load_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    prev = str(previous_state or row.get("state") or "").strip()
+    if prev != "ONLINE_CONFIRMED":
+        row["online_since"] = ts
+        row["last_transition_at"] = ts
+        row["last_transition_reason"] = "online_confirmed"
+        row["last_online_evidence_at"] = ts
+    row["state"] = "ONLINE_CONFIRMED"
+    if evidence:
+        row["last_online_evidence"] = {
+            k: evidence.get(k)
+            for k in (
+                "resumed_activity",
+                "top_activity",
+                "experience_level",
+                "pid",
+            )
+            if evidence.get(k)
+        }
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_state(state)
+    return float(row.get("online_since") or ts)
+
+
+def record_lifecycle_transition(
+    package: str,
+    state: str,
+    reason: str,
+    *,
+    now: float | None = None,
+    offline: bool = False,
+) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    ts = float(now if now is not None else time.time())
+    data = _load_state()
+    packages = data.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row["state"] = str(state or "").strip()
+    row["last_transition_at"] = ts
+    row["last_transition_reason"] = str(reason or "")[:180]
+    if offline:
+        row["last_offline_evidence_at"] = ts
+        row.pop("online_since", None)
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_state(data)
+
+
+def clear_online_since(package: str) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    state = _load_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row.pop("online_since", None)
+    row["state"] = "DEAD"
+    row["last_transition_reason"] = "online_cleared"
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_state(state)
+
+
+def lifecycle_row_for_package(package: str) -> dict[str, Any]:
+    pkg = str(package or "").strip()
+    row = (_load_state().get("packages") or {}).get(pkg)
+    return dict(row) if isinstance(row, dict) else {}
+
+
 def monitor_started_at_from_config(config_data: dict[str, Any] | None) -> float | None:
+    from datetime import datetime, timezone
+
     cfg = config_data if isinstance(config_data, dict) else {}
     raw = cfg.get("monitor_started_at")
     try:
@@ -109,18 +252,5 @@ def fallback_monitor_started_at(
     config_data: dict[str, Any] | None,
     package: str,
 ) -> tuple[float | None, str]:
-    cfg = config_data if isinstance(config_data, dict) else {}
-    pkg = str(package or "").strip()
-    start_times = cfg.get("package_start_times") or {}
-    if isinstance(start_times, dict) and pkg in start_times:
-        try:
-            dt = datetime.fromisoformat(str(start_times[pkg]).replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp(), "fallback_monitor_started_at"
-        except (ValueError, TypeError):
-            pass
-    global_at = monitor_started_at_from_config(cfg)
-    if global_at is not None:
-        return global_at, "fallback_monitor_started_at"
+    """Legacy fallback — must not be used for Status Monitor Runtime display."""
     return None, "missing"

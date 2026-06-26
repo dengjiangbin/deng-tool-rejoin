@@ -1316,11 +1316,12 @@ class WatchdogSupervisor:
         self._watchdog_round_rate_limited: bool = False
         self._lobby_entered_at: dict[str, float] = {}
         self._root_info = android.detect_root()
-        from .package_state_detector import PackageStateDetector
+        from .rjn_lifecycle_monitor import RjnLifecycleMonitor
 
-        self._package_detector = PackageStateDetector(
+        self._rjn_monitor = RjnLifecycleMonitor(
             self.packages,
             root_info=self._root_info,
+            stop_event=self.stop_event,
         )
 
         for e in self.entries:
@@ -1389,57 +1390,46 @@ class WatchdogSupervisor:
     def _clear_status_monitor_runtime_state(self, pkg: str) -> None:
         self._package_launch_started_at.pop(pkg, None)
         self._relaunch_runtime_active.pop(pkg, None)
-        from .status_monitor_runtime import clear_package_launch_started
+        from .status_monitor_runtime import clear_online_since, clear_package_launch_started
 
         clear_package_launch_started(pkg)
+        clear_online_since(pkg)
 
     def _status_monitor_runtime_started_at(self, pkg: str, status: str) -> tuple[float | None, str]:
-        """Return wall-clock runtime anchor and source label for Status Monitor only."""
-        from .status_monitor_runtime import fallback_monitor_started_at
+        """Return wall-clock runtime anchor — only from gamejoinloadtime online_since."""
+        from .status_monitor_runtime import load_online_since
 
         if status == STATUS_ONLINE:
-            if self._relaunch_runtime_active.get(pkg) and pkg in self._online_start_ts:
-                return self._online_start_ts[pkg], "relaunch_online_started_at"
-            launch_at = self._package_launch_started_at.get(pkg)
-            if launch_at:
-                return launch_at, "package_launch_started_at"
-            fallback_at, source = fallback_monitor_started_at(self.cfg, pkg)
-            if fallback_at is not None:
-                return fallback_at, source
+            online_since, row = load_online_since(pkg)
+            if online_since is not None:
+                src = str(row.get("runtime_source") or "gamejoinloadtime")
+                return online_since, src
             if pkg in self._online_start_ts:
-                return self._online_start_ts[pkg], "package_online_started_at"
-        launch_at = self._package_launch_started_at.get(pkg)
-        if launch_at and status in {
-            STATUS_LAUNCHING,
-            STATUS_RELAUNCHING,
-            STATUS_REOPENING,
-            STATUS_PREPARING,
-            STATUS_CLEAR_CACHE,
-        }:
-            return launch_at, "package_launch_started_at"
-        fallback_at, source = fallback_monitor_started_at(self.cfg, pkg)
-        if fallback_at is not None:
-            return fallback_at, source
+                return self._online_start_ts[pkg], "gamejoinloadtime"
         return None, "missing"
 
     def _record_runtime_session_state(
         self, pkg: str, previous_state: str, state: str, now: float
     ) -> None:
-        """Maintain the one current Online session used by the runtime column."""
+        """Maintain online session timestamps from gamejoinloadtime only."""
+        from .status_monitor_runtime import load_online_since
+
         if state in _METRIC_ACTIVE_STATES:
             self._last_online_ts[pkg] = now
+            online_since, _ = load_online_since(pkg)
+            if online_since is not None:
+                self._online_start_ts[pkg] = online_since
+            elif state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
+                # Do not invent runtime — wait for gamejoinloadtime persistence.
+                self._online_start_ts.pop(pkg, None)
             if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
-                self._online_start_ts[pkg] = now
                 if previous_state == STATUS_RELAUNCHING:
                     self._relaunch_runtime_active[pkg] = True
                 try:
-                    self._package_detector.mark_recovered(pkg)
-                except Exception:  # noqa: BLE001
-                    pass
-                try:
                     from . import webhook as lifecycle_webhook
 
-                    lifecycle_webhook.record_package_lifecycle_alive(pkg, now)
+                    alive_at = self._online_start_ts.get(pkg) or now
+                    lifecycle_webhook.record_package_lifecycle_alive(pkg, alive_at)
                 except Exception:  # noqa: BLE001
                     pass
                 try:
@@ -1450,9 +1440,10 @@ class WatchdogSupervisor:
         elif state not in _METRIC_ACTIVE_STATES:
             self._online_start_ts.pop(pkg, None)
 
-        if state == STATUS_DEAD:
+        if state in {STATUS_DEAD, STATUS_DISCONNECTED}:
             self._last_online_ts.pop(pkg, None)
-            self._clear_status_monitor_runtime_state(pkg)
+            if state == STATUS_DEAD:
+                self._clear_status_monitor_runtime_state(pkg)
 
     def _handle_stop(self, signum: Any, frame: Any) -> None:
         source = "sigterm" if signum == signal.SIGTERM else ("sigint" if signum == signal.SIGINT else f"signal_{signum}")
@@ -1480,7 +1471,7 @@ class WatchdogSupervisor:
             status = requested
         elif requested == "Reconnecting":
             status = STATUS_LAUNCHING
-        elif requested not in {STATUS_ONLINE, STATUS_DEAD}:
+        elif requested not in {STATUS_ONLINE, STATUS_DEAD, STATUS_DISCONNECTED}:
             status = STATUS_DEAD
         if requested in {STATUS_REOPENING, STATUS_RELAUNCHING}:
             status = STATUS_RELAUNCHING
@@ -1566,6 +1557,10 @@ class WatchdogSupervisor:
             for pkg in self.packages:
                 self._last_launched_at.setdefault(pkg, now)
             self._all_launches_completed = True
+        try:
+            self._rjn_monitor.start_session()
+        except Exception:  # noqa: BLE001
+            pass
         log_event(
             self._logger,
             "info",
@@ -1577,6 +1572,10 @@ class WatchdogSupervisor:
     def mark_package_launched(self, pkg: str) -> None:
         """Register a launch/reopen and bind loading-grace protection."""
         self._mark_launched(pkg)
+        try:
+            self._rjn_monitor.begin_launch_watchdog(pkg, relaunch=False)
+        except Exception:  # noqa: BLE001
+            pass
         self._set_status(pkg, STATUS_LAUNCHING)
 
     def _mark_launched(self, pkg: str) -> None:
@@ -2303,112 +2302,51 @@ class WatchdogSupervisor:
         return state, detail
 
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
-        """Classify one package from process + logcat evidence (per-package, not global)."""
+        """Classify package from rjn UID logcat + process watchdog (not package-exists-only)."""
         t0 = time.monotonic()
-        try:
-            installed = android.package_installed(pkg)
-        except Exception:  # noqa: BLE001
-            installed = False
-
-        was_metric_active = bool(
-            self._last_online_ts.get(pkg)
-            or self._online_start_ts.get(pkg)
-            or self.status_map.get(pkg) in {
-                STATUS_ONLINE, STATUS_RELAUNCHING, STATUS_LAUNCHING,
-            }
-        )
-        check = self._package_detector.check_package(
-            pkg,
-            current_status=str(self.status_map.get(pkg) or ""),
-            was_metric_active=was_metric_active,
-        )
-        try:
-            evidence = android.get_package_alive_evidence(pkg) if installed else {}
-        except Exception:  # noqa: BLE001
-            evidence = {}
-
-        process_evidence = bool(check.process_alive or evidence.get("process"))
-        activity_evidence = bool(evidence.get("activity"))
-        window_evidence = bool(evidence.get("window"))
-        verify_until = self._relaunch_verify_until.get(pkg, 0.0)
-
-        if check.process_alive:
-            state = STATUS_ONLINE
-            reason = "process_alive"
-            self._relaunch_inflight.discard(pkg)
-            self._relaunch_verify_until.pop(pkg, None)
-            self._missing_evidence_since.pop(pkg, None)
-        elif self.status_map.get(pkg) in {STATUS_LAUNCHING, STATUS_RELAUNCHING} and self._in_loading_grace(pkg):
-            state = self.status_map[pkg]
-            reason = "launch_grace_started"
-        elif pkg in self._relaunch_inflight and time.monotonic() < verify_until:
-            state = STATUS_RELAUNCHING
-            reason = "android_relaunch_verification_pending"
-        elif check.confirmed_dead:
-            state = STATUS_DEAD
-            reason = str(check.dead_reason or "process_missing")
-            self._relaunch_inflight.discard(pkg)
-            self._relaunch_verify_until.pop(pkg, None)
-            self._missing_evidence_since.pop(pkg, None)
-        elif check.dead_reason == "process_missing_pending":
-            self._missing_evidence_since.setdefault(pkg, time.monotonic())
-            if self.status_map.get(pkg) == STATUS_ONLINE:
-                state = STATUS_ONLINE
-            else:
-                state = STATUS_LAUNCHING
-            reason = "process_missing_pending"
-        elif not installed:
-            missing_since = self._missing_evidence_since.setdefault(pkg, time.monotonic())
-            missing_for = time.monotonic() - missing_since
-            if missing_for < self.MISSING_EVIDENCE_CONFIRM_SECONDS and was_metric_active:
-                state = STATUS_ONLINE if self.status_map.get(pkg) == STATUS_ONLINE else STATUS_LAUNCHING
-                reason = "missing_evidence_confirmation_pending"
-            else:
-                state = STATUS_DEAD
-                reason = "package_not_installed"
-                self._relaunch_inflight.discard(pkg)
-                self._relaunch_verify_until.pop(pkg, None)
-        else:
-            missing_since = self._missing_evidence_since.setdefault(pkg, time.monotonic())
-            missing_for = time.monotonic() - missing_since
-            if missing_for < self.MISSING_EVIDENCE_CONFIRM_SECONDS:
-                state = STATUS_ONLINE if self.status_map.get(pkg) == STATUS_ONLINE else STATUS_LAUNCHING
-                reason = "missing_evidence_confirmation_pending"
-            else:
-                state = STATUS_DEAD
-                reason = "no_current_android_evidence"
-                self._relaunch_inflight.discard(pkg)
-                self._relaunch_verify_until.pop(pkg, None)
-
-        detail = {
-            "process_running": "true" if check.process_alive else "false",
-            "process_evidence": str(process_evidence).lower(),
-            "activity_evidence": str(activity_evidence).lower(),
-            "window_evidence": str(window_evidence).lower(),
+        ev = self._rjn_monitor.evaluate_package(pkg)
+        state = ev.public_status
+        reason = ev.reason
+        detail = dict(ev.detail)
+        detail.update({
+            "process_evidence": str(ev.process_exists).lower(),
+            "activity_evidence": "diagnostic_only",
+            "window_evidence": "diagnostic_only",
             "surface_evidence": "diagnostic_only",
             "recent_task_evidence": "diagnostic_only",
-            "in_game": "not_used",
+            "in_game": str(ev.is_online_confirmed).lower(),
             "heartbeat_ok": "not_used",
             "warning_detected": "false",
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
             "root_available": str(bool(getattr(self._root_info, "available", False))).lower(),
-            "foreground_package": pkg if evidence.get("foreground") else "",
+            "foreground_package": "",
             "activity": state,
-            "in_game_proof": "android_local",
+            "in_game_proof": "gamejoinloadtime" if ev.is_online_confirmed else "none",
             "heartbeat_age_sec": "not_used",
             "presence_source": "not_used",
             "reason": reason,
-            "dead_reason": str(check.dead_reason or reason),
-            "dead_detection_evidence": str(check.dead_reason or reason),
-            "ram_display": str(check.ram_display or "N/A"),
-            "ram_source": str(check.ram_source or "none"),
-            "missing_evidence_duration_sec": round(
-                time.monotonic() - self._missing_evidence_since.get(pkg, time.monotonic()), 1
+            "dead_reason": detail.get("dead_reason") or (
+                reason if state in {STATUS_DEAD, STATUS_DISCONNECTED} else ""
             ),
-            "process_block_id": str(evidence.get("process_block_id") or ""),
-            "activity_block_id": str(evidence.get("activity_block_id") or ""),
-            "window_block_id": str(evidence.get("window_block_id") or ""),
-        }
+            "dead_detection_evidence": reason,
+            "online_confirmed": str(ev.is_online_confirmed).lower(),
+            "failed_checks": ",".join(ev.failed_checks),
+            "internal_state": ev.internal_state,
+        })
+        if ev.is_online_confirmed:
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+            self._missing_evidence_since.pop(pkg, None)
+        elif state in {STATUS_DEAD, STATUS_DISCONNECTED}:
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+            self._missing_evidence_since.pop(pkg, None)
+        elif state == STATUS_RELAUNCHING:
+            verify_until = self._relaunch_verify_until.get(pkg, 0.0)
+            if pkg in self._relaunch_inflight and time.monotonic() < verify_until:
+                reason = "android_relaunch_verification_pending"
+        elif state == STATUS_LAUNCHING and self._in_loading_grace(pkg):
+            reason = "launch_grace_started"
         self._log_state_evidence(pkg, detail, {}, state)
         return state, detail
 
@@ -2908,6 +2846,10 @@ class WatchdogSupervisor:
                 self._set_grace(pkg, now)
                 self._relaunch_verify_until[pkg] = time.monotonic() + float(self.LOADING_GRACE_SECONDS)
                 self._mark_launched(pkg)
+                try:
+                    self._rjn_monitor.begin_launch_watchdog(pkg, relaunch=True)
+                except Exception:  # noqa: BLE001
+                    pass
                 self._set_status(pkg, STATUS_RELAUNCHING)
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
@@ -3244,8 +3186,7 @@ class WatchdogSupervisor:
             )
 
             try:
-                self._package_detector.poll_logcat()
-                self._package_detector.write_probe_file()
+                self._rjn_monitor.write_probe_file()
             except Exception:  # noqa: BLE001
                 pass
 
@@ -3361,13 +3302,13 @@ class WatchdogSupervisor:
                     self._nhb_since.pop(pkg, None)
 
                 self._record_runtime_session_state(pkg, prev, state, now)
-                if state == STATUS_DEAD:
+                if state in {STATUS_DEAD, STATUS_DISCONNECTED}:
                     self._maybe_send_package_dead_webhook(pkg, entry, prev, state, now, detail)
                     _maybe_render(force=True)
 
                 recovery_gate = False
                 if state not in {STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
-                    if state == STATUS_DEAD:
+                    if state in {STATUS_DEAD, STATUS_DISCONNECTED}:
                         recovery_gate = self._handle_state(
                             pkg, entry, state, prev, now,
                             render_callback=render_callback,
