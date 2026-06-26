@@ -17,7 +17,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.0.0/deng-tool-rejoin-v1.0.0.tar.gz",
-    "artifact_sha256": "c0c7733bd6681b1c47da75050ee58b82d15d601032660db141d40b3ceae657d5",
+    "artifact_sha256": "52835687b340383ad9d8c178bdf9faf08485cf785d9939d6994dc1f6f3b7c60e",
     "installer_endpoint": "/install/v1.0.0",
     "notes": "Frozen public stable release. Immutable artifact built from refs/tags/v1.0.0.",
     "enabled": true
@@ -89,7 +89,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.1.0/deng-tool-rejoin-v1.1.0.tar.gz",
-    "artifact_sha256": "1c4e9f358b15d874a65aa26702b4b650c75db76dd07a43fb1b98ac1c99a29050",
+    "artifact_sha256": "50251a2ab6e0dbe6b62a863807e7f6aa087db17f0b587241c2c03e6b32c53535",
     "installer_endpoint": "/install/v1.1.0",
     "notes": "Frozen public stable release for Discord webhook Edit Mode persistence and status embed cleanup.",
     "enabled": true
@@ -107,7 +107,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.2.0/deng-tool-rejoin-v1.2.0.tar.gz",
-    "artifact_sha256": "8bbfe4744e746cbed399d37b2e8cb255f12950b3cd53112e4a3c92dbb8cfd7f6",
+    "artifact_sha256": "3aed7e8a8bdd3303c38c1661c86ca9e2d3b76d5d523c99d15044d294492dd321",
     "installer_endpoint": "/install/v1.2.0",
     "notes": "Frozen public stable release for Delta Auto Execute file management and runtime version display fixes.",
     "enabled": true
@@ -125,6 +125,6 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "72b0e8179b16c61d2aa08004fc1962047c5ed941188b1453472488f9a7ad1478"
+    "artifact_sha256": "a147bea54f1dd0e5c075f99fcde54485e826421ab3a5b8c3cd7fb158eab005db"
   }
 ]

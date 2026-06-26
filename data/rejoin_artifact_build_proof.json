@@ -1,0 +1,48 @@
+{
+  "artifacts": [
+    {
+      "version": "v1.0.0",
+      "channel": "stable",
+      "installer_endpoint": "/install/v1.0.0",
+      "artifact_path": "releases/v1.0.0/deng-tool-rejoin-v1.0.0.tar.gz",
+      "artifact_sha256": "52835687b340383ad9d8c178bdf9faf08485cf785d9939d6994dc1f6f3b7c60e",
+      "git_commit": "314139253844",
+      "built_at_iso": "2026-06-26T01:35:22Z",
+      "license_gate": "license-gated",
+      "stable_latest": false
+    },
+    {
+      "version": "v1.1.0",
+      "channel": "stable",
+      "installer_endpoint": "/install/v1.1.0",
+      "artifact_path": "releases/v1.1.0/deng-tool-rejoin-v1.1.0.tar.gz",
+      "artifact_sha256": "50251a2ab6e0dbe6b62a863807e7f6aa087db17f0b587241c2c03e6b32c53535",
+      "git_commit": "314139253844",
+      "built_at_iso": "2026-06-26T01:35:30Z",
+      "license_gate": "license-gated",
+      "stable_latest": false
+    },
+    {
+      "version": "v1.2.0",
+      "channel": "stable",
+      "installer_endpoint": "/install/v1.2.0",
+      "artifact_path": "releases/v1.2.0/deng-tool-rejoin-v1.2.0.tar.gz",
+      "artifact_sha256": "3aed7e8a8bdd3303c38c1661c86ca9e2d3b76d5d523c99d15044d294492dd321",
+      "git_commit": "314139253844",
+      "built_at_iso": "2026-06-26T01:35:36Z",
+      "license_gate": "license-gated",
+      "stable_latest": true
+    },
+    {
+      "version": "main-dev",
+      "channel": "main-dev",
+      "installer_endpoint": "/install/test/latest",
+      "artifact_path": "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz",
+      "artifact_sha256": "a147bea54f1dd0e5c075f99fcde54485e826421ab3a5b8c3cd7fb158eab005db",
+      "git_commit": "314139253844",
+      "built_at_iso": "2026-06-26T01:35:44Z",
+      "license_gate": "key-free (test channel only)",
+      "stable_latest": false
+    }
+  ]
+}

@@ -207,6 +207,18 @@ _FORBIDDEN_STRING_MARKERS = (
     "create_key_in_db",
     "license_panel",
     "reset HWID admin",
+    "use Reset HWID",
+    "Open DENG Tool: Rejoin Panel and use Reset HWID",
+)
+
+_LICENSE_GATE_REQUIRED_STRINGS = (
+    "already bound to another device",
+    "Enter license key:",
+)
+
+_USER_FACING_FORBIDDEN_STRINGS = (
+    "use Reset HWID",
+    "Open DENG Tool: Rejoin Panel and use Reset HWID",
 )
 
 _SKIP_DIR_NAMES = frozenset(
@@ -588,7 +600,7 @@ def build_internal_test_tarball(
     return digest.hexdigest()
 
 
-def verify_tarball_exclusions(tar_bytes: bytes) -> None:
+def verify_tarball_exclusions(tar_bytes: bytes, *, require_license_gate_strings: bool = False) -> None:
     """Raise AssertionError if forbidden names appear inside tarball bytes.
 
     Also asserts the tarball contains a top-level ``BUILD-INFO.json`` so
@@ -627,3 +639,15 @@ def verify_tarball_exclusions(tar_bytes: bytes) -> None:
     for marker in _FORBIDDEN_STRING_MARKERS:
         if marker in combined:
             raise AssertionError(f"forbidden string marker in tarball: {marker}")
+    bundle_raw = file_bytes.get(_PROTECTED_BUNDLE) or file_bytes.get(_PROTECTED_BUNDLE.lower()) or b""
+    if bundle_raw:
+        try:
+            bundle_text = zlib.decompress(bundle_raw).decode("utf-8", errors="ignore")
+        except Exception:
+            bundle_text = bundle_raw.decode("utf-8", errors="ignore")
+        for marker in _USER_FACING_FORBIDDEN_STRINGS:
+            if marker in bundle_text:
+                raise AssertionError(f"forbidden user-facing string in protected bundle: {marker}")
+        for required in _LICENSE_GATE_REQUIRED_STRINGS:
+            if require_license_gate_strings and required not in bundle_text:
+                raise AssertionError(f"required license-gate string missing from bundle: {required}")

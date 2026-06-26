@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build protected stable and main-dev artifacts and update release registry."""
+"""Build protected Rejoin install artifacts for every enabled release row."""
 
 from __future__ import annotations
 
@@ -12,95 +12,98 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from agent.internal_test_artifact import build_internal_test_tarball  # noqa: E402
+from agent.internal_test_artifact import (  # noqa: E402
+    build_internal_test_tarball,
+    verify_tarball_exclusions,
+)
+from agent.install_registry import row_enabled  # noqa: E402
 
 
-def _stable_version(repo: Path) -> str:
-    version = (repo / "VERSION").read_text(encoding="utf-8").strip()
-    if not version:
-        raise RuntimeError("VERSION file is empty")
-    return version if version.startswith("v") else f"v{version}"
-
-
-def _update_row(rows: list[dict], version: str, *, path: str, sha: str) -> None:
+def _rows_to_build(rows: list[dict]) -> list[dict]:
+    """Every enabled install row that ships a tarball (stable + main-dev)."""
+    built: list[dict] = []
     for row in rows:
-        if str(row.get("version") or "") == version:
-            row["artifact_path"] = path.replace("\\", "/")
-            row["artifact_sha256"] = sha
-            row["enabled"] = True
-            if version == "v1.0.0":
-                row["channel"] = "stable"
-                row["visibility"] = "public"
-                row["installer_endpoint"] = "/install/v1.0.0"
-            elif version == "main-dev":
-                row["channel"] = "dev"
-                row["visibility"] = "admin"
-                row["installer_endpoint"] = "/install/test/latest"
-            return
-    raise RuntimeError(f"release registry row not found: {version}")
+        if row.get("kind") == "channel_pointers":
+            continue
+        if not row_enabled(row):
+            continue
+        version = str(row.get("version") or "").strip()
+        if not version:
+            continue
+        rel = str(row.get("artifact_path") or "").strip()
+        if not rel:
+            continue
+        built.append(row)
+    return built
 
 
-def _ensure_stable_row(rows: list[dict], version: str) -> dict:
-    existing = next((row for row in rows if str(row.get("version") or "") == version), None)
-    if existing is not None:
-        return existing
-    row = {
-        "version": version,
-        "id": version,
-        "channel": "stable",
-        "title": f"Version {version.lstrip('v')}",
-        "label": version,
-        "recommended": True,
-        "visibility": "public",
-        "install_ref": f"refs/tags/{version}",
-        "git_ref": f"refs/tags/{version}",
-        "release_stage": "stable",
-        "frozen": True,
-        "artifact_path": "",
-        "artifact_sha256": "",
-        "installer_endpoint": f"/install/{version}",
-        "notes": f"Frozen public stable release. Immutable artifact built for {version}.",
-        "enabled": True,
-    }
-    insert_at = next((i for i, existing_row in enumerate(rows) if existing_row.get("version") == "main-dev"), len(rows))
-    rows.insert(insert_at, row)
-    return row
+def _channel_for_row(row: dict) -> str:
+    version = str(row.get("version") or "").strip()
+    if version == "main-dev":
+        return "main-dev"
+    return str(row.get("channel") or "stable").strip() or "stable"
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Build protected stable and main-dev artifacts.")
+    ap = argparse.ArgumentParser(description="Build all enabled Rejoin install artifacts.")
     ap.add_argument("--repo-root", type=Path, default=_PROJECT_ROOT)
     args = ap.parse_args()
     repo = args.repo_root.resolve()
     manifest_path = repo / "data" / "rejoin_versions.json"
     rows = json.loads(manifest_path.read_text(encoding="utf-8"))
-    stable_version = _stable_version(repo)
 
-    _ensure_stable_row(rows, stable_version)
-
-    stable_rel = f"releases/{stable_version}/deng-tool-rejoin-{stable_version}.tar.gz"
-    dev_rel = "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz"
-    stable_sha = build_internal_test_tarball(
-        repo,
-        repo / stable_rel,
-        channel="stable",
-        version=stable_version,
-    )
-    dev_sha = build_internal_test_tarball(
-        repo,
-        repo / dev_rel,
-        channel="main-dev",
-        version="main-dev",
-    )
-    _update_row(rows, stable_version, path=stable_rel, sha=stable_sha)
-    _update_row(rows, "main-dev", path=dev_rel, sha=dev_sha)
+    stable_latest = ""
     for row in rows:
         if row.get("kind") == "channel_pointers":
-            row["stable_latest"] = stable_version
+            stable_latest = str(row.get("stable_latest") or "").strip()
+            break
+
+    report: list[dict] = []
+    for row in _rows_to_build(rows):
+        version = str(row.get("version") or "").strip()
+        rel = str(row.get("artifact_path") or "").strip()
+        out = repo / rel
+        channel = _channel_for_row(row)
+        sha = build_internal_test_tarball(
+            repo,
+            out,
+            channel=channel,
+            version=version,
+        )
+        verify_tarball_exclusions(out.read_bytes(), require_license_gate_strings=True)
+        row["artifact_sha256"] = sha
+        row["enabled"] = True
+        import tarfile
+
+        with tarfile.open(out, mode="r:gz") as tf:
+            build_info = json.loads(tf.extractfile("BUILD-INFO.json").read().decode("utf-8"))
+        license_gate = "key-free (test channel only)" if version == "main-dev" else "license-gated"
+        endpoint = str(row.get("installer_endpoint") or f"/install/{version}")
+        report.append(
+            {
+                "version": version,
+                "channel": channel,
+                "installer_endpoint": endpoint,
+                "artifact_path": rel.replace("\\", "/"),
+                "artifact_sha256": sha,
+                "git_commit": build_info.get("git_commit"),
+                "built_at_iso": build_info.get("built_at_iso"),
+                "license_gate": license_gate,
+                "stable_latest": version == stable_latest,
+            }
+        )
+        print(f"built {version} sha256={sha} commit={build_info.get('git_commit')}")
+
+    for row in rows:
+        if row.get("kind") == "channel_pointers" and stable_latest:
+            row["stable_latest"] = stable_latest
             row["test_latest"] = "main-dev"
+
     manifest_path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
-    print(f"{stable_version} artifact_sha256={stable_sha}")
-    print(f"main-dev artifact_sha256={dev_sha}")
+    proof_path = repo / "data" / "rejoin_artifact_build_proof.json"
+    proof_path.write_text(json.dumps({"artifacts": report}, indent=2) + "\n", encoding="utf-8")
+    print(f"Updated {manifest_path}")
+    print(f"Wrote {proof_path}")
     return 0
 
 
