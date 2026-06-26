@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +15,7 @@ if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
 from agent import commands, runtime_format, supervisor, webhook
+from agent.config import default_config, validate_config
 
 URL = "https://discord.com/api/webhooks/1234567890/secret-token"
 TAG_ID = "123456789012345678"
@@ -178,6 +181,62 @@ class WebhookTagDiscordTests(unittest.TestCase):
         with patch("agent.commands._prompt", side_effect=["bad-id", "0"]):
             commands._config_webhook_tag_discord(draft)
         self.assertFalse(draft.get("webhook_tag_enabled"))
+
+
+class WebhookMenuDisplayTests(unittest.TestCase):
+    def _menu_text(self, cfg: dict) -> str:
+        with patch("agent.commands._is_interactive", return_value=True), \
+             patch("agent.safe_io.safe_prompt", return_value="6"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                commands._config_menu_webhook(cfg)
+        return buf.getvalue()
+
+    def test_summary_tag_disabled(self) -> None:
+        cfg = validate_config(default_config())
+        cfg.update({
+            "webhook_mode": "edit",
+            "webhook_url": URL,
+            "webhook_interval_minutes": 5,
+            "webhook_tag_enabled": False,
+        })
+        text = self._menu_text(cfg)
+        self.assertIn("Mode: Edit", text)
+        self.assertIn("Interval: 5m", text)
+        self.assertIn("URL: configured", text)
+        self.assertIn("Tag Discord: Disabled", text)
+        self.assertNotIn("Webhook: Edit every 5m", text)
+        self.assertNotIn(URL, text)
+        self.assertNotIn(TAG_ID, text)
+
+    def test_summary_tag_enabled(self) -> None:
+        cfg = validate_config(default_config())
+        cfg.update({
+            "webhook_mode": "edit",
+            "webhook_url": URL,
+            "webhook_interval_minutes": 5,
+            "webhook_tag_enabled": True,
+            "webhook_tag_user_id": TAG_ID,
+        })
+        text = self._menu_text(cfg)
+        self.assertIn("Tag Discord: Enabled", text)
+        self.assertNotIn(f"<@{TAG_ID}>", text)
+        self.assertNotIn(TAG_ID, text)
+
+    def test_menu_order(self) -> None:
+        cfg = validate_config(default_config())
+        text = self._menu_text(cfg)
+        mode_idx = text.index("1. Mode")
+        interval_idx = text.index("2. Interval")
+        url_idx = text.index("3. URL")
+        tag_idx = text.index("4. Tag Discord")
+        test_idx = text.index("5. Test Webhook Now")
+        back_idx = text.index("6. Back")
+        self.assertLess(mode_idx, interval_idx)
+        self.assertLess(interval_idx, url_idx)
+        self.assertLess(url_idx, tag_idx)
+        self.assertLess(tag_idx, test_idx)
+        self.assertLess(test_idx, back_idx)
 
 
 if __name__ == "__main__":

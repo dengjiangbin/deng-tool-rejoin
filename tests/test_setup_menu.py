@@ -574,7 +574,7 @@ class WebhookSubmenuTests(unittest.TestCase):
         if cfg is None:
             cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
-            with unittest.mock.patch("builtins.input", return_value="0"):
+            with unittest.mock.patch("agent.safe_io.safe_prompt", return_value="6"):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_webhook(cfg)
@@ -582,40 +582,44 @@ class WebhookSubmenuTests(unittest.TestCase):
 
     def test_webhook_submenu_has_url_option(self):
         text = self._webhook_submenu_text()
-        self.assertIn("Webhook URL", text)
+        self.assertIn("3. URL", text)
 
     def test_webhook_submenu_has_interval_option(self):
         text = self._webhook_submenu_text()
-        self.assertIn("Webhook Interval", text)
+        self.assertIn("2. Interval", text)
 
     def test_webhook_submenu_has_mode_option(self):
         text = self._webhook_submenu_text()
-        self.assertIn("Webhook Mode", text)
+        self.assertIn("1. Mode", text)
 
-    def test_webhook_submenu_has_snapshot_option(self):
+    def test_webhook_submenu_has_tag_discord_option(self):
         text = self._webhook_submenu_text()
-        self.assertIn("Snapshot", text)
+        self.assertIn("4. Tag Discord", text)
 
-    def test_snapshot_requires_webhook_url(self):
+    def test_webhook_submenu_has_test_option(self):
+        text = self._webhook_submenu_text()
+        self.assertIn("5. Test Webhook Now", text)
+
+    def test_test_webhook_requires_url(self):
         cfg = _base_cfg()
         cfg["webhook_url"] = ""
         cfg["webhook_enabled"] = False
-        # Choose option 4 (Snapshot) → "Press Enter to continue..." → Back
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
-            with unittest.mock.patch("builtins.input", side_effect=["4", "", "0"]):
+            with unittest.mock.patch("agent.safe_io.safe_prompt", side_effect=["5", "6"]):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_webhook(cfg)
         text = buf.getvalue()
-        self.assertIn("Set Webhook URL First", text)
+        self.assertIn("Webhook test failed", text)
 
     def test_webhook_url_masked_in_display(self):
         cfg = _base_cfg()
         cfg["webhook_url"] = "https://discord.com/api/webhooks/99999/super-secret-token"
         cfg["webhook_enabled"] = True
+        cfg["webhook_mode"] = "edit"
         text = self._webhook_submenu_text(cfg)
         self.assertNotIn("super-secret-token", text)
-        self.assertIn("MASKED", text)
+        self.assertIn("URL: configured", text)
 
     def test_test_webhook_failure_does_not_crash(self):
         from agent.commands import _test_webhook
@@ -858,16 +862,18 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
     def test_webhook_submenu_shows_current_url_masked(self):
         cfg = _base_cfg()
         cfg["webhook_url"] = "https://discord.com/api/webhooks/11111/tok-secret"
-        cfg["webhook_interval_seconds"] = 120
+        cfg["webhook_mode"] = "edit"
+        cfg["webhook_interval_minutes"] = 2
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
-            with unittest.mock.patch("builtins.input", return_value="0"):
+            with unittest.mock.patch("agent.safe_io.safe_prompt", return_value="6"):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_webhook(cfg)
         text = buf.getvalue()
         self.assertIn("Current Webhook", text)
         self.assertNotIn("tok-secret", text)
-        self.assertIn("120 Seconds", text)
+        self.assertIn("Interval: 2m", text)
+        self.assertIn("Mode: Edit", text)
 
     def test_yescaptcha_submenu_shows_configured_when_key_set(self):
         cfg = _base_cfg()

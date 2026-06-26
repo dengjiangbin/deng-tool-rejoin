@@ -74,8 +74,11 @@ class WebhookCliRecoveryTests(unittest.TestCase):
         self.assertIn('print("1. mode")', source)
         self.assertIn('print("2. interval")', source)
         self.assertIn('print("3. url")', source)
+        self.assertIn('print("4. tag discord")', source)
+        self.assertIn("5. test webhook now", source)
+        self.assertIn("6. back", source)
         self.assertNotIn("snapshot", source)
-        self.assertIn("4. test webhook now", source)
+        self.assertNotIn("webhook: edit every", source)
 
 
 if __name__ == "__main__":

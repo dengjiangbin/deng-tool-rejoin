@@ -3728,7 +3728,7 @@ def _resolve_per_package_key_display(draft: dict[str, Any], package: str) -> str
 
 
 def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
-    """Webhook submenu: only Mode, Interval, and masked URL."""
+    """Webhook submenu: Mode, Interval, URL, Tag Discord, and test send."""
     if not _is_interactive():
         return draft
     while True:
@@ -3737,26 +3737,33 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         print("Webhook")
         print(termux_ui.separator("-"))
         url = draft.get("webhook_url", "") or ""
-        masked_url = webhook.mask_webhook_url(url) if url else "Not Set"
         interval = draft.get("webhook_interval_minutes", 5)
         mode = draft.get("webhook_mode", "none")
         mode_label = {"edit": "Edit", "new_post": "New Post", "none": "None"}.get(mode, "None")
+        tag_id = str(draft.get("webhook_tag_user_id") or "").strip()
+        tag_enabled = bool(draft.get("webhook_tag_enabled")) and bool(tag_id)
         print("Current Webhook:")
-        print(f"  Webhook: {mode_label + ' every ' + str(interval) + 'm' if mode != 'none' else 'None'}")
-        print(f"  Webhook URL: {'configured' if url and mode != 'none' else 'not configured'}")
+        if mode == "none":
+            print("  Mode: None")
+        else:
+            print(f"  Mode: {mode_label}")
+            print(f"  Interval: {interval}m")
+        url_status = "configured" if url and mode != "none" else "not configured"
+        print(f"  URL: {url_status}")
+        print(f"  Tag Discord: {'Enabled' if tag_enabled else 'Disabled'}")
         print()
         print("1. Mode")
         print("2. Interval")
         print("3. URL")
-        print("4. Test Webhook Now")
-        print("5. Tag Discord")
-        print("0. Back")
+        print("4. Tag Discord")
+        print("5. Test Webhook Now")
+        print("6. Back")
         print(termux_ui.separator("-"))
-        _whc = safe_io.safe_prompt("Choose [0]: ", default="0")
+        _whc = safe_io.safe_prompt("Choose [6]: ", default="6")
         if _whc is None:
             break
-        choice = _whc.strip() or "0"
-        if choice == "0":
+        choice = _whc.strip() or "6"
+        if choice in {"0", "6"}:
             break
         elif choice == "1":
             _config_webhook_mode(draft)
@@ -3769,12 +3776,12 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
             _config_webhook_url(draft)
             draft = save_config(draft)
         elif choice == "4":
-            _test_webhook_now(draft)
-        elif choice == "5":
             _config_webhook_tag_discord(draft)
             draft = save_config(draft)
+        elif choice == "5":
+            _test_webhook_now(draft)
         else:
-            print("Please choose 1-5 or 0.")
+            print("Please choose 1-6.")
     return draft
 
 
