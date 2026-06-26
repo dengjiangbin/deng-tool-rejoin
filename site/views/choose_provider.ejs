@@ -33,7 +33,7 @@
     </div>
     <h2 class="provider-name"><%= PROVIDER_META.lootlabs.label %></h2>
     <p class="provider-desc">Complete the LootLabs ad step, then return automatically to unlock your key.</p>
-    <form method="POST" action="/key/provider/lootlabs">
+    <form method="POST" action="/license/provider/lootlabs">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
       <input type="hidden" name="challenge_id" value="<%= challengeId %>">
       <input type="hidden" name="provider" value="lootlabs">
@@ -60,7 +60,7 @@
     </div>
     <h2 class="provider-name"><%= PROVIDER_META.linkvertise.label %></h2>
     <p class="provider-desc">Complete the Linkvertise ad step, then return automatically to unlock your key.</p>
-    <form method="POST" action="/key/provider/linkvertise">
+    <form method="POST" action="/license/provider/linkvertise">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
       <input type="hidden" name="challenge_id" value="<%= challengeId %>">
       <input type="hidden" name="provider" value="linkvertise">

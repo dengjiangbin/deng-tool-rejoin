@@ -26,7 +26,9 @@
 const axios = require('axios');
 
 const DEFAULT_ENCRYPT_URL = 'https://creators.lootlabs.gg/api/public/url_encryptor';
-const DEFAULT_BASE_LINK = ''; // No hardcoded fallback — env must provide it.
+/** Canonical LootLabs shortlink — env overrides are normalized to this slug. */
+const CANONICAL_LOOTLABS_BASE_LINK = 'https://lootdest.org/s?kb1mUj43';
+const STALE_LOOTLABS_SLUG_MARKERS = ['TqZQAW38', 'subdo'];
 
 const ENCRYPT_TIMEOUT_MS = parseInt(process.env.LOOTLABS_ENCRYPT_TIMEOUT_MS || '8000', 10);
 
@@ -66,12 +68,28 @@ function stripDataParam(baseLink) {
   return s;
 }
 
+function normalizeLootLabsBaseLink(baseLink) {
+  let s = stripDataParam(baseLink);
+  if (!s) return CANONICAL_LOOTLABS_BASE_LINK;
+  // Env mistakes: template placeholder pasted into the base-link var.
+  s = s.replace(/[?&]url=\{url\}/gi, '').replace(/&url=\{url\}/gi, '');
+  for (const marker of STALE_LOOTLABS_SLUG_MARKERS) {
+    if (s.includes(marker)) return CANONICAL_LOOTLABS_BASE_LINK;
+  }
+  // URLSearchParams-style corruption of the valueless shortlink key.
+  s = s.replace(/\?kb1mUj43=/i, '?kb1mUj43').replace(/&kb1mUj43=/i, '&kb1mUj43');
+  if (/lootdest\.org\/s\?/i.test(s) && !/\bkb1mUj43\b/.test(s)) {
+    return CANONICAL_LOOTLABS_BASE_LINK;
+  }
+  return s;
+}
+
 function getLootLabsBaseLink() {
   const raw = cleanEnvValue(
     'LOOTLABS_BASE_LINK',
-    cleanEnvValue('LOOTLABS_MONETIZED_URL', DEFAULT_BASE_LINK),
+    cleanEnvValue('LOOTLABS_MONETIZED_URL', CANONICAL_LOOTLABS_BASE_LINK),
   );
-  return stripDataParam(raw);
+  return normalizeLootLabsBaseLink(raw);
 }
 
 function getLootLabsApiToken() {
@@ -255,6 +273,7 @@ async function encryptLootLabsDestination({ destinationUrl, requestId }) {
 
 module.exports = {
   REASON_CODES,
+  CANONICAL_LOOTLABS_BASE_LINK,
   isLootLabsConfigured,
   getLootLabsUnavailableReason,
   getLootLabsBaseLink,

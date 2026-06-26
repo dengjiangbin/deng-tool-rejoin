@@ -48,6 +48,18 @@ describe('key generation ad links', () => {
     assert.notEqual(base, OLD_LOOTLABS);
   });
 
+  test('stale LOOTLABS_BASE_LINK env is normalized to kb1mUj43', () => {
+    process.env.LOOTLABS_BASE_LINK = OLD_LOOTLABS;
+    assert.equal(lootlabs.getLootLabsBaseLink(), NEW_LOOTLABS);
+    process.env.LOOTLABS_BASE_LINK = NEW_LOOTLABS;
+  });
+
+  test('template placeholder in LOOTLABS_BASE_LINK env is stripped', () => {
+    process.env.LOOTLABS_BASE_LINK = `${NEW_LOOTLABS}&url={url}`;
+    assert.equal(lootlabs.getLootLabsBaseLink(), NEW_LOOTLABS);
+    process.env.LOOTLABS_BASE_LINK = NEW_LOOTLABS;
+  });
+
   test('LootLabs redirect builder never emits stale subdo/old slug markers', () => {
     const url = lootlabs.buildLootLabsStartUrl({
       baseLink: NEW_LOOTLABS,
@@ -64,11 +76,11 @@ describe('key generation ad links', () => {
     assert.ok(linkvertise.getLinkvertiseTargetLinkUrl().includes('link-hub.net'));
   });
 
-  test('missing LootLabs base link fails clearly instead of stale fallback', () => {
+  test('missing LootLabs env vars still use canonical kb1mUj43 default', () => {
     delete process.env.LOOTLABS_BASE_LINK;
     delete process.env.LOOTLABS_MONETIZED_URL;
-    assert.equal(lootlabs.isLootLabsConfigured(), false);
-    assert.match(lootlabs.getLootLabsUnavailableReason() || '', /LOOTLABS_BASE_LINK/);
+    assert.equal(lootlabs.getLootLabsBaseLink(), NEW_LOOTLABS);
+    assert.equal(lootlabs.isLootLabsConfigured(), true);
     process.env.LOOTLABS_BASE_LINK = NEW_LOOTLABS;
     process.env.LOOTLABS_MONETIZED_URL = NEW_LOOTLABS;
   });

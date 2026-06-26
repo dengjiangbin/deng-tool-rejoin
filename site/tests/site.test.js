@@ -561,7 +561,14 @@ async function startChallenge(agent) {
   const csrf = csrfFrom(page.text);
   const res = await agent.post('/api/key/start').type('form').send({ _csrf: csrf });
   assert.equal(res.status, 200);
-  return { html: res.text, csrf: csrfFrom(res.text), challengeId: challengeIdFrom(res.text) };
+  const body = JSON.parse(res.text);
+  const providerPage = await agent.get('/key/provider');
+  assert.equal(providerPage.status, 200);
+  return {
+    html: providerPage.text,
+    csrf,
+    challengeId: body.challenge_id || challengeIdFrom(providerPage.text),
+  };
 }
 
 async function chooseProvider(agent, provider = 'lootlabs') {
@@ -2161,6 +2168,43 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
   });
 
+  test('license/generate then LootLabs via /license/provider redirects to lootdest.org/s?kb1mUj43', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const license = await agent.get('/license');
+    const csrf = csrfFrom(license.text);
+    const gen = await agent.post('/license/generate').type('form').send({ _csrf: csrf });
+    assert.equal(gen.status, 303);
+    assert.equal(gen.headers.location, '/key/provider');
+    const providerPage = await agent.get('/key/provider');
+    const challengeId = challengeIdFrom(providerPage.text);
+    const providerCsrf = csrfFrom(providerPage.text);
+    const res = await agent.post('/license/provider/lootlabs').type('form').send({
+      _csrf: providerCsrf,
+      challenge_id: challengeId,
+      provider: 'lootlabs',
+    });
+    assert.equal(res.status, 303);
+    assert.notEqual(res.headers.location, '/license');
+    assert.ok(
+      res.headers.location.startsWith('https://lootdest.org/s?kb1mUj43&data='),
+      `expected lootdest.org/s?kb1mUj43&data=… , got: ${res.headers.location}`,
+    );
+  });
+
+  test('LootLabs provider alias LootLabs is accepted', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const started = await startChallenge(agent);
+    const res = await agent.post('/license/provider/LootLabs').type('form').send({
+      _csrf: started.csrf,
+      challenge_id: started.challengeId,
+      provider: 'LootLabs',
+    });
+    assert.equal(res.status, 303);
+    assert.ok(res.headers.location.startsWith('https://lootdest.org/s?kb1mUj43&data='));
+  });
+
   test('LootLabs encrypt API failure (HTTP 500) fails closed (no redirect to lootdest.org, no key)', async () => {
     const agent = request.agent(app);
     await login(agent);
@@ -3102,7 +3146,7 @@ describe('provider UI and security gate', () => {
       const { html } = await startChallenge(agent);
       assert.match(html, /LootLabs is temporarily unavailable/i);
       // No active submit form for LootLabs when disabled.
-      assert.doesNotMatch(html, /action="\/key\/provider\/lootlabs"/);
+      assert.doesNotMatch(html, /action="\/license\/provider\/lootlabs"/);
     } finally {
       if (originalToken !== undefined) process.env.LOOTLABS_API_TOKEN = originalToken;
     }
@@ -3358,10 +3402,13 @@ describe('provider UI and security gate', () => {
     assert.doesNotMatch(page.text, /action="\/api\/key\/start"/);
 
     const started = await agent.post('/license/generate').type('form').send({ _csrf: csrf });
-    assert.equal(started.status, 200);
-    assert.match(started.headers['content-type'], /text\/html/);
-    assert.match(started.text, /Choose Provider/);
-    assert.doesNotMatch(started.text, /\{"challenge_id":/);
+    assert.equal(started.status, 303);
+    assert.equal(started.headers.location, '/key/provider');
+    const providerPage = await agent.get('/key/provider');
+    assert.equal(providerPage.status, 200);
+    assert.match(providerPage.text, /Choose Provider/);
+    assert.match(providerPage.text, /action="\/license\/provider\/lootlabs"/);
+    assert.doesNotMatch(providerPage.text, /\{"challenge_id":/);
 
     const directApiNavigation = await agent.get('/api/key/start');
     assert.equal(directApiNavigation.status, 303);

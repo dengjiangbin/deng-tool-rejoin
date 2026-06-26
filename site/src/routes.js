@@ -106,7 +106,7 @@ function getProviderConfig(provider) {
     return {
       provider,
       enabled: envEnabled('LOOTLABS_ENABLED', DEFAULT_PROVIDER_CONFIG.lootlabs.enabled),
-      monetizedUrl: cleanEnv('LOOTLABS_MONETIZED_URL', DEFAULT_PROVIDER_CONFIG.lootlabs.monetizedUrl),
+      monetizedUrl: lootlabs.getLootLabsBaseLink(),
       completeUrl: cleanEnv('LOOTLABS_COMPLETE_URL', DEFAULT_PROVIDER_CONFIG.lootlabs.completeUrl),
     };
   }
@@ -692,7 +692,10 @@ async function loadHistory(siteUserId, limit = 20, fallbackDiscordUserId = '', {
 }
 
 function ensureProvider(provider) {
-  return ['lootlabs', 'linkvertise'].includes(provider) ? provider : '';
+  const normalized = String(provider || '').trim().toLowerCase().replace(/_/g, '');
+  if (normalized === 'lootlabs' || normalized === 'lootlab') return 'lootlabs';
+  if (normalized === 'linkvertise') return 'linkvertise';
+  return '';
 }
 
 async function handleKeyStart(req, res) {
@@ -819,12 +822,7 @@ async function handleKeyStart(req, res) {
     });
 
     if (wantsJson(req)) return res.json({ challenge_id: row.row.id, status: row.row.status, resumed: row.resumed });
-    return res.render('choose_provider', {
-      title: 'Choose Unlock Method - DENG All In One',
-      challengeId: row.row.id,
-      providers: enabledProviders(),
-      providerLabel,
-    });
+    return res.redirect(303, '/key/provider');
   } catch (err) {
     const code = codeFromError(err, err?.code === 'NO_PROVIDER_CONFIGURED' ? 'NO_PROVIDER_CONFIGURED' : 'CHALLENGE_INSERT_FAILED');
     logSafeError('api/key/start', code, err);
@@ -983,6 +981,15 @@ async function handleProvider(req, res) {
         encryptedData: enc.encrypted,
         baseLink,
       });
+      if (!startUrl || !startUrl.startsWith(lootlabs.CANONICAL_LOOTLABS_BASE_LINK)) {
+        console.warn(
+          '[key/provider] provider=lootlabs invalid_start_url prefix=%s',
+          String(startUrl || '').slice(0, 64),
+        );
+        if (wantsJson(req)) return res.status(503).json({ error: 'PROVIDER_NOT_CONFIGURED', message: messageFor('PROVIDER_NOT_CONFIGURED') });
+        safeFlash(req, 'error', messageFor('PROVIDER_NOT_CONFIGURED'));
+        return res.redirect('/license');
+      }
 
       await challenge.markLootLabsPendingById(workingRow.id, req, user, {
         baseLink,
