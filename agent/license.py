@@ -237,12 +237,11 @@ def get_device_summary() -> dict[str, str]:
 # ── Remote license API (POST /api/license/check) ───────────────────────────────
 
 WRONG_DEVICE_USER_MESSAGE = (
-    "Wrong device. Open DENG Tool: Rejoin Panel and use Reset HWID."
+    "This key is already bound to another device.\n"
+    "Use a different key generated for this device."
 )
 
-HWID_RESET_REENTRY_MESSAGE = (
-    "License key must be entered again after HWID reset."
-)
+HWID_RESET_REENTRY_MESSAGE = WRONG_DEVICE_USER_MESSAGE
 
 KEY_NOT_REDEEMED_API_MESSAGE = (
     "This key has not been redeemed yet. Redeem it in the DENG Tool: Rejoin Panel first."

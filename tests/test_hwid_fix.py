@@ -738,19 +738,19 @@ class TestLicenseRetryFlowSafety(unittest.TestCase):
 
     def test_wrong_device_does_not_crash(self):
         """wrong_device result must not raise SystemExit or segfault."""
-        inputs = ["DENG-AAAA", "2"]  # key, then choose Exit
+        inputs = ["DENG-AAAA", "0"]  # key, then choose Exit
         result = self._run_license_loop(inputs, [("wrong_device", "Wrong device")])
         self.assertFalse(result)
 
     def test_invalid_key_does_not_crash(self):
         """Invalid key must not crash."""
-        inputs = ["DENG-BBBB", "2"]
+        inputs = ["DENG-BBBB", "0"]
         result = self._run_license_loop(inputs, [("invalid", "Not found")])
         self.assertFalse(result)
 
     def test_choosing_enter_different_key_re_prompts(self):
         """Selecting 'Enter Different Key' must show the license prompt again."""
-        inputs = ["DENG-CCCC", "1", "DENG-DDDD", "2"]
+        inputs = ["DENG-CCCC", "1", "DENG-DDDD", "0"]
         # First key wrong_device, second key also wrong_device → user exits
         result = self._run_license_loop(inputs, [("wrong_device", "w"), ("wrong_device", "w")])
         self.assertFalse(result)
@@ -763,7 +763,7 @@ class TestLicenseRetryFlowSafety(unittest.TestCase):
 
     def test_no_system_exit_in_retry_flow(self):
         """Retry flow must never call sys.exit or raise SystemExit."""
-        inputs = ["DENG-GGGG", "2"]
+        inputs = ["DENG-GGGG", "0"]
         try:
             result = self._run_license_loop(inputs, [("invalid", "bad")])
         except SystemExit:
@@ -772,7 +772,7 @@ class TestLicenseRetryFlowSafety(unittest.TestCase):
 
     def test_blank_key_input_does_not_crash(self):
         """Blank key input must be ignored and re-prompt, not crash."""
-        inputs = ["", "DENG-HHHH", "2"]
+        inputs = ["", "DENG-HHHH", "0"]
         result = self._run_license_loop(inputs, [("invalid", "bad")])
         self.assertFalse(result)
 

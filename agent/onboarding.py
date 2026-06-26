@@ -48,7 +48,7 @@ Main menu options
 How to enter a license key
 --------------------------
 From the main menu choose "Enter / Update License Key", paste your key,
-and wait for "License OK". If you change phones, ask support about Reset HWID.
+and wait for "License OK". If you change phones, generate a new key for the new device.
 
 Package auto-detection
 ----------------------
@@ -119,7 +119,7 @@ def print_beginner_license_gate_help(*, show_hwid_footer: bool = True) -> None:
     print("     Then choose First Time Setup Config.")
     if show_hwid_footer:
         print()
-        print("If your key says wrong device, ask support to Reset HWID.")
+        print("If your key is bound to another device, generate a new key for this device.")
 
 
 def print_beginner_menu_license_prompt() -> None:
@@ -133,7 +133,7 @@ def print_beginner_menu_license_prompt() -> None:
     print("  The DENG Tool: Rejoin Panel in Discord → Key Stats or Generate Key.")
     print()
     print("Paste your key below when prompted.")
-    print("If your key shows 'wrong device', ask support to Reset HWID.")
+    print("If your key is bound to another device, use a different key for this device.")
     print()
 
 
@@ -152,7 +152,7 @@ def _license_ui_line(cfg: dict[str, Any], *, dev_mode: bool) -> str:
     if st == "active":
         return "License: Verified"
     if st == "wrong_device":
-        return "License: Wrong device (you may need Reset HWID)"
+        return "License: Bound to another device — use a different key"
     if st == "key_not_redeemed":
         return "License: Redeem this key in the Discord panel first"
     if not st or st in ("missing_key", "not_configured"):

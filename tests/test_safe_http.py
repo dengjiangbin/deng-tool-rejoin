@@ -381,7 +381,8 @@ class TestLicenseModule(unittest.TestCase):
                 app_version="1.0.0",
             )
         self.assertEqual(result, "wrong_device")
-        self.assertIn("Reset HWID", msg)
+        self.assertIn("already bound to another device", msg)
+        self.assertNotIn("Reset HWID", msg)
 
     def test_license_key_not_in_http_backend_logs(self):
         """License key is passed as payload data, not as a raw debug-log string."""

@@ -658,9 +658,55 @@ def _clear_cached_license_key(cfg: dict[str, Any]) -> dict[str, Any]:
     lic.pop("last_status", None)
     lic.pop("last_check_at", None)
     try:
+        from .license_session import clear_session  # noqa: PLC0415
+
+        clear_session()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         return save_config(cfg)
     except Exception:  # noqa: BLE001
         return cfg
+
+
+def _load_license_key_from_cfg(cfg: dict[str, Any]) -> str:
+    lic = cfg.setdefault("license", {})
+    return (str(lic.get("key") or "").strip() or str(cfg.get("license_key") or "").strip())
+
+
+def _set_license_key_in_memory(cfg: dict[str, Any], key: str) -> None:
+    lic = cfg.setdefault("license", {})
+    lic["key"] = key
+    cfg["license_key"] = key
+
+
+def _license_gate_user_exit() -> bool:
+    """User chose Exit from the license gate — avoid Termux teardown segfault."""
+    _termux_exit_clean()
+    return False
+
+
+def _print_wrong_device_retry_menu(use_color: bool) -> None:
+    _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+    print("\n1. Enter Different Key\n0. Exit")
+
+
+def _print_license_retry_menu(use_color: bool) -> None:
+    print("\n1. Try Another Key\n0. Exit")
+
+
+def _prompt_license_gate_choice(*, default: str = "0") -> str | None:
+    choice_raw = safe_io.safe_prompt(f"Choose [{default}]: ", default=default)
+    if choice_raw is None:
+        return None
+    return (choice_raw.strip() or default)
+
+
+def _prompt_fresh_license_key() -> str | None:
+    raw = safe_io.safe_prompt("Enter license key: ")
+    if raw is None:
+        return None
+    return raw.strip()
 
 
 def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) -> tuple[str, str]:
@@ -1023,6 +1069,7 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
 
 
 def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
+    force_fresh_prompt = False
     while True:
         try:
             cfg = load_config()
@@ -1030,44 +1077,60 @@ def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespac
             _print_license_err(str(exc), use_color)
             return False
         lic = cfg.setdefault("license", {})
-        key = (lic.get("key") or "").strip() or (cfg.get("license_key") or "").strip()
-        if not key:
+        key = _load_license_key_from_cfg(cfg)
+        if force_fresh_prompt:
+            force_fresh_prompt = False
+            cfg = _clear_cached_license_key(cfg)
+            raw = _prompt_fresh_license_key()
+            if raw is None:
+                return _license_gate_user_exit()
+            if not raw:
+                continue
+            try:
+                key = validate_license_key(raw)
+            except ConfigError as exc:
+                _print_license_err(str(exc), use_color)
+                continue
+            _set_license_key_in_memory(cfg, key)
+        elif not key:
             if not _is_interactive():
                 _print_license_err("No License Key Found", use_color)
                 print_beginner_license_gate_help()
                 return False
             print_beginner_menu_license_prompt()
             if not keystore.prompt_and_verify_key():
-                return False
+                return _license_gate_user_exit()
             global _license_manual_verification_success
             _license_manual_verification_success = True
             return True
         ok, msg = keystore.verify_key(key)
         if ok:
+            try:
+                cfg = save_config(cfg)
+            except Exception:  # noqa: BLE001
+                pass
             return True
         _print_license_err(msg, use_color)
         if not _is_interactive():
             return False
-        print("\n1. Enter Different Key\n2. Exit")
-        _lc = safe_io.safe_prompt("Choose [2]: ", default="2")
-        if _lc is None:
-            return False
-        choice = _lc.strip() or "2"
-        if choice != "1":
-            return False
-        lic["key"] = ""
-        cfg["license_key"] = ""
-        cfg = save_config(cfg)
+        _print_license_retry_menu(use_color)
+        while True:
+            choice = _prompt_license_gate_choice(default="0")
+            if choice is None or choice in ("0", "2"):
+                return _license_gate_user_exit()
+            if choice == "1":
+                force_fresh_prompt = True
+                break
 
 
 def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
     """Gate the menu behind a remote license check. Allows bounded retries without recursion."""
     _MAX_RETRIES = 10
     attempt = 0
+    force_fresh_prompt = False
     while attempt < _MAX_RETRIES:
         attempt += 1
         manual_key_entry = False
-        # Always reload config fresh to pick up any changes from save_config
         try:
             cfg = load_config()
         except ConfigError as exc:
@@ -1077,21 +1140,17 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
         try:
             cfg = _ensure_install_id_saved(cfg)
         except Exception:  # noqa: BLE001
-            pass  # non-fatal; continue with current cfg
+            pass
 
         lic = cfg.setdefault("license", {})
+        key = _load_license_key_from_cfg(cfg)
 
-        key = (lic.get("key") or "").strip()
-
-        if not key:
-            if not _is_interactive():
-                _print_license_err("No License Key Found", use_color)
-                print_beginner_license_gate_help()
-                return False
-            _print_missing_license_prompt(use_color)
-            raw = safe_io.safe_prompt(f"{termux_ui.prompt_prefix('Enter License Key')} ")
+        if force_fresh_prompt:
+            force_fresh_prompt = False
+            cfg = _clear_cached_license_key(cfg)
+            raw = _prompt_fresh_license_key()
             if raw is None:
-                return False
+                return _license_gate_user_exit()
             if not raw:
                 continue
             try:
@@ -1099,13 +1158,26 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             except ConfigError as exc:
                 _print_license_err(str(exc), use_color)
                 continue
-            lic["key"] = norm
-            cfg["license_key"] = norm
-            try:
-                cfg = save_config(cfg)
-            except Exception as exc:  # noqa: BLE001
-                _print_license_err(f"Could not save license key: {exc}", use_color)
+            _set_license_key_in_memory(cfg, norm)
+            key = norm
+            manual_key_entry = True
+        elif not key:
+            if not _is_interactive():
+                _print_license_err("No License Key Found", use_color)
+                print_beginner_license_gate_help()
+                return False
+            _print_missing_license_prompt(use_color)
+            raw = _prompt_fresh_license_key()
+            if raw is None:
+                return _license_gate_user_exit()
+            if not raw:
                 continue
+            try:
+                norm = validate_license_key(raw)
+            except ConfigError as exc:
+                _print_license_err(str(exc), use_color)
+                continue
+            _set_license_key_in_memory(cfg, norm)
             key = norm
             manual_key_entry = True
 
@@ -1124,69 +1196,55 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             if manual_key_entry:
                 _license_manual_verification_success = True
             try:
+                cfg = save_config(cfg)
                 _persist_license_status(cfg, "active")
             except Exception:  # noqa: BLE001
                 pass
             return True
 
-        # Offline grace only after a successful validate/bind this session,
-        # so stale ``last_status == active`` cannot bypass HWID reset when
-        # the server is temporarily unreachable.
         if (
             result in _LICENSE_TRANSIENT_RESULTS
             and _license_session_validated
             and _license_should_offline_grace(lic)
         ):
-            return True  # Silent — cached license still valid, no user action needed
+            return True
 
-        # Cache integrity: ONLY persist *definitive* answers
-        # (active / wrong_device / not_found / revoked / expired / inactive /
-        # key_not_redeemed / missing_key).  Persisting a transient
-        # ``server_unavailable`` / ``error`` would overwrite a previously
-        # valid ``last_status == "active"``, permanently disabling the
-        # cache fast-path and offline grace.  Real-device evidence
-        # (probe p-09484eaab4) showed this bug locking the user out
-        # after a single failed subprocess attempt.
         if result not in _LICENSE_TRANSIENT_RESULTS:
             try:
                 cfg = _persist_license_status(cfg, result)
             except Exception:  # noqa: BLE001
                 pass
 
-        if result == "requires_manual_rebind":
-            _print_license_err(HWID_RESET_REENTRY_MESSAGE, use_color)
+        if result in ("requires_manual_rebind", "wrong_device"):
             cfg = _clear_cached_license_key(cfg)
-            if not _is_interactive():
-                return False
-            continue
-
-        if result == "wrong_device":
-            _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
         elif result == "key_not_redeemed":
             _print_license_err(msg, use_color)
+            if not _is_interactive():
+                return False
         else:
             _print_license_err(f"License Invalid: {msg}", use_color)
+            if not _is_interactive():
+                return False
 
         if not _is_interactive():
             return False
 
-        if result == "wrong_device":
-            print("\n1. Enter Different Key\n2. Exit")
-        else:
-            print("\n1. Try Another Key\n2. Exit")
-        _lc2 = safe_io.safe_prompt("Choose [2]: ", default="2")
-        if _lc2 is None:
-            return False
-        choice = _lc2.strip() or "2"
-        if choice != "1":
-            return False
-        # Clear bad key and retry
-        lic["key"] = ""
-        cfg["license_key"] = ""
-        try:
-            cfg = save_config(cfg)
-        except Exception:  # noqa: BLE001
-            pass  # Will be reloaded at top of loop
+        while True:
+            if result in ("requires_manual_rebind", "wrong_device"):
+                _print_wrong_device_retry_menu(use_color)
+            elif result == "key_not_redeemed":
+                _print_license_err(msg, use_color)
+                _print_license_retry_menu(use_color)
+            else:
+                _print_license_retry_menu(use_color)
+            choice = _prompt_license_gate_choice(default="0")
+            if choice is None or choice in ("0", "2"):
+                return _license_gate_user_exit()
+            if choice == "1":
+                if result in ("wrong_device", "requires_manual_rebind"):
+                    force_fresh_prompt = True
+                break
+        continue
     return False
 
 
@@ -8161,7 +8219,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
         ok = _ensure_remote_license_menu_loop(cfg, args, use_color)
 
     if not ok:
-        return 1
+        return 0
 
     if _license_manual_verification_success:
         termux_ui.print_license_success(pause_seconds=0.8)

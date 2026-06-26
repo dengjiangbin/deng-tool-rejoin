@@ -680,7 +680,7 @@ class TestLicenseGateStability(unittest.TestCase):
 
     def test_wrong_device_then_exit_choice_returns_false(self):
         ok, _ = self._run_remote_loop(
-            ["2"],  # choose Exit
+            ["0"],  # choose Exit
             [("wrong_device", "Device mismatch")]
         )
         self.assertFalse(ok)
