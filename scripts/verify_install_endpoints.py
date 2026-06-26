@@ -38,9 +38,9 @@ def fetch(url: str) -> tuple[int, str]:
 def parse_install_script(body: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for key, pattern in {
-        "package_sha256": r'package_sha256\s*=\s*"([a-f0-9]{64})"',
-        "version_label": r'version_label\s*=\s*"([^"]+)"',
-        "channel": r'channel\s*=\s*"([^"]+)"',
+        "package_sha256": r's="([a-f0-9]{64})"',
+        "version_label": r'info "Version: ([^"]+)"',
+        "channel": r'info "Channel: ([^"]+)"',
         "installer_endpoint": r'installer_endpoint\s*=\s*"([^"]+)"',
     }.items():
         m = re.search(pattern, body)
