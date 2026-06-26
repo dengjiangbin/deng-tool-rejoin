@@ -174,13 +174,127 @@ class WebhookTagDiscordTests(unittest.TestCase):
         with patch("agent.commands._prompt", return_value="2"):
             commands._config_webhook_tag_discord(draft)
         self.assertFalse(draft.get("webhook_tag_enabled"))
-        self.assertNotIn("webhook_tag_user_id", draft)
+        self.assertEqual(draft.get("webhook_tag_user_id"), "")
 
     def test_invalid_discord_id_rejected_in_menu(self) -> None:
         draft: dict = {}
         with patch("agent.commands._prompt", side_effect=["bad-id", "0"]):
             commands._config_webhook_tag_discord(draft)
         self.assertFalse(draft.get("webhook_tag_enabled"))
+
+
+class LifecycleTagHttpPayloadTests(unittest.TestCase):
+    def _cfg(self, tag_enabled: bool = False) -> dict:
+        cfg = validate_config(default_config())
+        cfg.update({
+            "webhook_mode": "new_post",
+            "webhook_enabled": True,
+            "webhook_url": URL,
+            "device_name": "TestPhone",
+            "webhook_tag_enabled": tag_enabled,
+        })
+        if tag_enabled:
+            cfg["webhook_tag_user_id"] = TAG_ID
+        return validate_config(cfg)
+
+    def test_save_config_persists_webhook_tag_user_id(self) -> None:
+        import tempfile
+        from agent.config import save_config
+
+        cfg = self._cfg(True)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            saved = save_config(cfg, config_path=path)
+            self.assertEqual(saved.get("webhook_tag_user_id"), TAG_ID)
+            self.assertTrue(saved.get("webhook_tag_enabled"))
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(raw.get("webhook_tag_user_id"), TAG_ID)
+
+    def test_package_dead_sender_http_payload_includes_tag(self) -> None:
+        cfg = self._cfg(True)
+        with patch.object(webhook, "_discord_json_request", return_value=(True, "ok", "m1")) as post:
+            ok, _ = webhook.send_package_lifecycle_alert(
+                cfg,
+                event="package_dead",
+                package=PKG,
+                username=USER,
+                runtime_seconds=45.0,
+            )
+        self.assertTrue(ok)
+        payload = post.call_args.args[1]
+        self.assertEqual(payload["content"], f"<@{TAG_ID}>")
+        self.assertEqual(payload["allowed_mentions"], {"parse": [], "users": [TAG_ID]})
+        username_field = next(f for f in payload["embeds"][0]["fields"] if f["name"] == "Username")
+        self.assertEqual(username_field["value"], "||denghub2||")
+        runtime_field = next(f for f in payload["embeds"][0]["fields"] if f["name"] == "Runtime")
+        self.assertEqual(runtime_field["value"], "45s")
+
+    def test_package_dead_sender_no_tag_when_disabled(self) -> None:
+        cfg = self._cfg(False)
+        with patch.object(webhook, "_discord_json_request", return_value=(True, "ok", "m1")) as post:
+            webhook.send_package_lifecycle_alert(
+                cfg,
+                event="package_dead",
+                package=PKG,
+                username=USER,
+                runtime_seconds=45.0,
+            )
+        payload = post.call_args.args[1]
+        self.assertNotIn("content", payload)
+        self.assertEqual(payload["allowed_mentions"], {"parse": []})
+
+    def test_package_recovered_sender_never_tags(self) -> None:
+        cfg = self._cfg(True)
+        with patch.object(webhook, "_discord_json_request", return_value=(True, "ok", "m1")) as post:
+            webhook.send_package_lifecycle_alert(
+                cfg,
+                event="package_recovered",
+                package=PKG,
+                username=USER,
+            )
+        payload = post.call_args.args[1]
+        self.assertNotIn("content", payload)
+        self.assertEqual(payload["allowed_mentions"], {"parse": []})
+        names = [f["name"] for f in payload["embeds"][0]["fields"]]
+        self.assertNotIn("Runtime", names)
+
+    def test_stats_sender_never_tags_when_tag_enabled(self) -> None:
+        cfg = self._cfg(True)
+        payload = webhook.build_status_embed_payload(cfg, supervisor_snapshot=[], app_stats={})
+        self.assertEqual(payload.get("allowed_mentions"), {"parse": []})
+        self.assertNotIn("content", payload)
+        blob = json.dumps(payload)
+        self.assertNotIn(f"<@{TAG_ID}>", blob)
+
+    def test_invalid_tag_user_id_ignored_without_mention(self) -> None:
+        cfg = self._cfg(True)
+        cfg["webhook_tag_user_id"] = "bad"
+        with patch.object(webhook, "_discord_json_request", return_value=(True, "ok", "m1")) as post:
+            webhook.send_package_lifecycle_alert(
+                cfg,
+                event="package_dead",
+                package=PKG,
+                username=USER,
+            )
+        payload = post.call_args.args[1]
+        self.assertNotIn("content", payload)
+        self.assertEqual(payload["allowed_mentions"], {"parse": []})
+
+    def test_no_everyone_here_or_parse_users_in_payload(self) -> None:
+        cfg = self._cfg(True)
+        with patch.object(webhook, "_discord_json_request", return_value=(True, "ok", "m1")) as post:
+            webhook.send_package_lifecycle_alert(
+                cfg,
+                event="package_dead",
+                package=PKG,
+                username=USER,
+            )
+        payload = post.call_args.args[1]
+        blob = json.dumps(payload)
+        self.assertNotIn("@everyone", blob)
+        self.assertNotIn("@here", blob)
+        self.assertNotIn('"parse":["users"]', blob.replace(" ", ""))
+        self.assertNotIn('"parse":["everyone"]', blob.replace(" ", ""))
 
 
 class WebhookMenuDisplayTests(unittest.TestCase):

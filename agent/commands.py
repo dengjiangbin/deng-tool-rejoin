@@ -3816,7 +3816,7 @@ def _config_webhook_tag_discord(draft: dict[str, Any]) -> None:
             break
         if choice == "2":
             draft["webhook_tag_enabled"] = False
-            draft.pop("webhook_tag_user_id", None)
+            draft["webhook_tag_user_id"] = ""
             print("Tag Discord disabled. Package Dead webhooks will not tag anyone.")
             break
         print("Please choose 1, 2, or 0.")

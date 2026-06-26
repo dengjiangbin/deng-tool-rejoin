@@ -513,12 +513,38 @@ def validate_discord_tag_user_id(value: Any) -> str:
 
 
 def _discord_tag_user_id_from_config(config_data: dict[str, Any]) -> str | None:
-    if not config_data.get("webhook_tag_enabled"):
+    enabled, uid = _lifecycle_tag_settings(config_data)
+    if not enabled or not uid:
         return None
+    return uid
+
+
+def _lifecycle_tag_settings(config_data: dict[str, Any]) -> tuple[bool, str | None]:
+    """Resolve Tag Discord settings for Package Dead (disk wins when fully configured)."""
+    enabled = bool(config_data.get("webhook_tag_enabled"))
+    uid_raw = config_data.get("webhook_tag_user_id")
     try:
-        return validate_discord_tag_user_id(config_data.get("webhook_tag_user_id"))
+        from .config import load_config
+
+        fresh = load_config()
+        disk_enabled = bool(fresh.get("webhook_tag_enabled"))
+        disk_uid = str(fresh.get("webhook_tag_user_id") or "").strip()
+        if disk_enabled and disk_uid:
+            enabled = True
+            uid_raw = disk_uid
+    except Exception:
+        pass
+    if not enabled:
+        return False, None
+    try:
+        return True, validate_discord_tag_user_id(uid_raw)
     except ValueError:
-        return None
+        record_webhook_trace(
+            source="lifecycle_tag",
+            send_result="skipped",
+            skip_reason="tag_user_id_invalid",
+        )
+        return False, None
 
 
 def record_package_lifecycle_alive(package: str, alive_since: float | None = None) -> None:

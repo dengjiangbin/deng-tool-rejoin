@@ -129,6 +129,7 @@ def default_config() -> dict[str, Any]:
         "webhook_last_sent_at": 0,
         "webhook_last_message_id": "",
         "webhook_tag_enabled": False,
+        "webhook_tag_user_id": "",
         "snapshot_max_age_seconds": 300,
         "snapshot_temp_path": "",
         "auto_resize_enabled": False,
@@ -835,9 +836,9 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
             merged["webhook_tag_user_id"] = validate_discord_tag_user_id(raw_tag_uid)
         except ValueError:
             merged["webhook_tag_enabled"] = False
-            merged.pop("webhook_tag_user_id", None)
+            merged["webhook_tag_user_id"] = ""
     else:
-        merged.pop("webhook_tag_user_id", None)
+        merged["webhook_tag_user_id"] = ""
 
     # Package start times (ISO timestamps of last launch per package)
     raw_start_times = merged.get("package_start_times")
