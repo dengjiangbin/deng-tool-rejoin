@@ -45,13 +45,23 @@ describe('tracker aio read routing', () => {
     }
   });
 
-  test('fishitTrackerRoutes registers tracker read aliases on web router', () => {
+  test('trackerReadApp serves account-status on read lane without 8791 fallback', () => {
+    const readSrc = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'trackerReadApp.js'),
+      'utf8',
+    );
+    assert.match(readSrc, /\/api\/tracker\/account-status/);
+    assert.match(readSrc, /precomputed-account-status/);
+    assert.match(readSrc, /buildReadAccountStatusPayload/);
+  });
+
+  test('public homepage stats are cached to avoid per-request disk sync', () => {
     const routesSrc = fs.readFileSync(
       path.join(__dirname, '..', 'src', 'fishitTrackerRoutes.js'),
       'utf8',
     );
-    assert.match(routesSrc, /router\.get\('\/api\/tracker\/get-backpack\/:username'/);
-    assert.match(routesSrc, /function registerTrackerWebReadAliases\(/);
-    assert.match(routesSrc, /router\.get\(aliasPath, \.\.\.handlers\)/);
+    assert.match(routesSrc, /PUBLIC_STATS_CACHE_MS/);
+    assert.match(routesSrc, /_publicNetworkStatsCache/);
+    assert.match(routesSrc, /DISK_SYNC_MIN_MS/);
   });
 });

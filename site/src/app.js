@@ -288,9 +288,15 @@ app.use((err, req, res, _next) => {
   if (err && (err.code === 'EBUSY' || err.code === 'EPERM' || err.code === 'EACCES')) {
     console.warn('[deng-tool-site] Recoverable filesystem error:', err.code, req.path);
     if (req.path.startsWith('/api/')) {
-      return res.status(503).json({ ok: false, error: 'temporarily_busy' });
+      if (!res.headersSent) {
+        return res.status(503).json({ ok: false, error: 'temporarily_busy' });
+      }
+      return;
     }
-    return res.status(503).render('error', { code: 503, message: 'Server is busy. Please retry.' });
+    if (!res.headersSent) {
+      return res.status(503).render('error', { code: 503, message: 'Server is busy. Please retry.' });
+    }
+    return;
   }
   console.error('[deng-tool-site] Unhandled error:', err);
   // Return JSON for API routes (e.g. PayloadTooLargeError from body parsers)

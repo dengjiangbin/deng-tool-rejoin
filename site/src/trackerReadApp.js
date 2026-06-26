@@ -24,8 +24,13 @@
 const express = require('express');
 const http = require('http');
 const fs = require('fs');
+const session = require('express-session');
 
 const precomputeStore = require('./fishitPrecomputeStore');
+const { FileSessionStore } = require('./sessionStore');
+const { buildSessionCookieOptions } = require('./sessionCookieConfig');
+const { requireTrackerReadAuth } = require('./trackerReadAuth');
+const { buildReadAccountStatusPayload } = require('./trackerReadAccountStatus');
 const {
   deriveAccountPresenceStatus,
   ACCOUNT_ONLINE_THRESHOLD_MS,
@@ -41,7 +46,7 @@ const PRESENCE_INPUT_FIELDS = [
   'lastAccountSeenAt', 'lastValidStatusAt', 'lastSuccessfulUploadAt',
   'lastSuccessfulHeartbeatAt', 'lastHeartbeatAt', 'lastUploadReceivedAt',
   'lastUploadAcceptedAt', 'lastSeenAt', 'lastSnapshotUploadAt', 'lastInventoryAt',
-  'lastStatsUploadAt', 'lastOfflineAt', 'lastFailureReason', 'lastUploadRejectReason',
+  'lastStatsUploadAt', 'leaderstatsUploadedAt', 'lastOfflineAt', 'lastFailureReason', 'lastUploadRejectReason',
   'rejectReason', 'lastUploadStatusCodeReturned', 'lastUploadHttpStatus',
   // Source-of-truth report identity (see trackerReportIdentity).
   'lastRealRobloxStatusAt', 'statusRevision', 'statusReportId', 'statusSeq',
@@ -67,6 +72,20 @@ function parsePresenceJson(presenceJson) {
     const obj = JSON.parse(presenceJson);
     return obj && typeof obj === 'object' ? obj : null;
   } catch (_) { return null; }
+}
+
+function pickNewestIso(...timestamps) {
+  let best = null;
+  let bestMs = -1;
+  for (const ts of timestamps) {
+    if (!ts) continue;
+    const ms = parseTimestampMs(ts);
+    if (ms != null && ms > bestMs) {
+      bestMs = ms;
+      best = ts;
+    }
+  }
+  return best;
 }
 
 function bodyHasRenderableData(body) {
@@ -165,7 +184,11 @@ function buildPresenceContract(hit, nowMs) {
     || null;
   const lastRealInventoryAt = input.lastRealInventoryAt
     || input.lastInventoryAt || input.lastSnapshotUploadAt || null;
-  const lastRealLeaderstatsAt = input.lastRealLeaderstatsAt || input.lastStatsUploadAt || null;
+  const lastRealLeaderstatsAt = pickNewestIso(
+    input.lastRealLeaderstatsAt,
+    input.lastStatsUploadAt,
+    input.leaderstatsUploadedAt,
+  );
   const lastRealUploadAt = input.lastSuccessfulUploadAt || input.lastSnapshotUploadAt || lastRealStatusAt || null;
   const isOnline = presence.accountPresenceLive === true;
   let presenceState;
@@ -360,9 +383,16 @@ function refreshCache() {
 
 function startCache() {
   if (cacheRefreshTimer) return;
-  warmLoadCache();
   cacheRefreshTimer = setInterval(refreshCache, CACHE_REFRESH_MS);
   if (cacheRefreshTimer.unref) cacheRefreshTimer.unref();
+  // Warm-load AFTER the HTTP server binds (see tracker-read-server.js). Blocking
+  // here for 15–20s on 1515+ snapshots blew PM2 listen_timeout and left orphan
+  // 8793 listeners — the read lane 502/red-account failure mode.
+  setImmediate(() => {
+    try { warmLoadCache(); } catch (err) {
+      console.error('[read] warm-load failed:', err && err.message ? err.message : err);
+    }
+  });
 }
 
 function lookupCached(key) {
@@ -374,8 +404,39 @@ function lookupCached(key) {
   return hit || null;
 }
 
+function hydrateCacheMiss(key) {
+  try {
+    const row = precomputeStore.getCacheRowByKey(key);
+    if (!row || !row.latest_precomputed_json) return null;
+    ingestRow(row);
+    return lookupCached(key);
+  } catch (_) {
+    return null;
+  }
+}
+
 const app = express();
 app.disable('x-powered-by');
+
+const sessionSecret = process.env.TOOL_SITE_COOKIE_SECRET || '';
+const readSessionMiddleware = sessionSecret.length >= 32
+  ? session({
+    name: 'deng_sid',
+    store: new FileSessionStore({
+      dir: process.env.TOOL_SITE_SESSION_DIR,
+      ttlMs: 7 * 24 * 60 * 60 * 1000,
+    }),
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: buildSessionCookieOptions(),
+  })
+  : null;
+
+function mountReadSession(req, res, next) {
+  if (!readSessionMiddleware) return next();
+  return readSessionMiddleware(req, res, next);
+}
 
 function sanitiseUsername(raw) {
   const s = String(raw == null ? '' : raw).trim();
@@ -462,8 +523,9 @@ function servePrecomputed(req, res) {
     return proxyToFallback(req, res, 'full_or_debug_not_cached');
   }
   const key = clean.toLowerCase();
-  // Pure in-memory lookup — no SQLite on the hot path.
-  const hit = lookupCached(key);
+  // Pure in-memory lookup — no SQLite on the hot path once warmed.
+  let hit = lookupCached(key);
+  if (!hit) hit = hydrateCacheMiss(key);
   if (!hit) {
     return proxyToFallback(req, res, 'not_precomputed_yet');
   }
@@ -547,14 +609,38 @@ app.get('/api/fishit-tracker/latest/:username', servePrecomputed);
 app.get('/api/tracker/snapshot/:username', servePrecomputed);
 app.get('/api/fishit-tracker/snapshot/:username', servePrecomputed);
 
+app.get('/api/tracker/account-status', mountReadSession, requireTrackerReadAuth, async (req, res) => {
+  try {
+    const payload = await buildReadAccountStatusPayload(req.inventoryOwnerDiscordId, {
+      lookupCached,
+      hydrateCacheMiss,
+      buildPresenceContract,
+    });
+    setBaseHeaders(res);
+    res.set('X-DENG-Read-Mode', 'precomputed-account-status');
+    res.set('X-DENG-Read-Fallback', '0');
+    res.set('X-DENG-Precomputed', '1');
+    return res.status(200).json(payload);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[read] account-status failed:', err && err.message ? err.message : err);
+    if (!res.headersSent) {
+      return res.status(500).json({
+        ok: false,
+        error: 'account_status_failed',
+        message: 'Could not load account status.',
+      });
+    }
+    return undefined;
+  }
+});
+
 // Any other tracker read that we do not serve precomputed is proxied to 8791 so
 // the read lane never silently drops a route during migration.
 app.get(['/api/tracker/*', '/api/fishit-tracker/*'], (req, res) => proxyToFallback(req, res, 'unhandled_read_route'));
 
-// Warm the in-memory cache and begin incremental sync as soon as the app is
-// loaded (whether started by the server entry point or required in a test).
-startCache();
-
+// Cache starts when the read server binds (tracker-read-server.js onListening).
+// Do NOT warm-load at require() time — it blocked listen for 15–20s.
 module.exports = app;
 module.exports.PORT = PORT;
 module.exports.startCache = startCache;

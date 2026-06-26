@@ -754,7 +754,9 @@ const liveTrackDB = {};
 if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1') {
   const hydrateLiveSessions = () => {
     try {
-      if (process.env.TRACKER_INGEST_MODE !== '1') {
+      // Website lane (8791) must not rebuild/persist the canonical catalog — ingest
+      // owns writes and competing persist causes EBUSY on shared shard files.
+      if (process.env.TRACKER_INGEST_MODE !== '1' && process.env.SKIP_TRACKER_UPLOAD_ROUTES !== '1') {
         canonicalCatalog.rebuildFromAllSources({ persist: true });
       }
       const loaded = sessionStore.migrateToShardedStorageIfNeeded();
@@ -768,7 +770,8 @@ if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1
       console.warn('[fishit-tracker] boot hydrate failed:', err && err.message ? err.message : err);
     }
   };
-  if (process.env.TRACKER_INGEST_MODE === '1') {
+  // Never block HTTP listen on the website lane — heavy hydrate runs after bind.
+  if (process.env.TRACKER_INGEST_MODE === '1' || process.env.SKIP_TRACKER_UPLOAD_ROUTES === '1') {
     setImmediate(hydrateLiveSessions);
   } else {
     hydrateLiveSessions();
@@ -806,8 +809,14 @@ if (process.env.FISHIT_TEST_FIXTURE !== '1') {
   hydrateRecoverySessionsFromRegistry();
 }
 
+let _lastDiskSyncAt = 0;
+const DISK_SYNC_MIN_MS = Number(process.env.TRACKER_DISK_SYNC_MIN_MS || 2000);
+
 function syncLiveTrackFromDisk() {
   if (process.env.TRACKER_WEB_MODE !== '1') return null;
+  const now = Date.now();
+  if (now - _lastDiskSyncAt < DISK_SYNC_MIN_MS) return { skipped: true, reason: 'throttled' };
+  _lastDiskSyncAt = now;
   return sessionStore.reloadIfChanged(liveTrackDB);
 }
 
@@ -927,13 +936,18 @@ function reinforceStatusFromLane(key, laneResult, online, nowIso) {
   if (upd) Object.assign(data, upd);
 }
 
-/** Persist heartbeat-critical session fields; non-blocking priority flush for cross-process reads. */
+/** Persist heartbeat-critical session fields; sync shard write so worker/read converge within one tick. */
 function persistSessionHeartbeat(key) {
   if (!key || key.startsWith('uid:')) return;
   const data = liveTrackDB[key];
   if (!data) return;
   try {
     sessionStore.saveSession(key, data, liveTrackDB);
+    if (process.env.TRACKER_INGEST_MODE === '1') {
+      sessionStore.flushSessionImmediate(key, data);
+    } else {
+      sessionStore.schedulePriorityFlush();
+    }
   } catch (err) {
     console.warn(
       '[fishit-tracker] heartbeat persist failed:',
@@ -3374,7 +3388,6 @@ async function enrichDashboardFishCardImages(cards, baseUrl) {
 
 async function handleTrackerDashboard(req, res) {
   res.set(NO_STORE_HEADERS);
-  syncLiveTrackFromDisk();
   const queryStartedAt = Date.now();
   const includeDebug = trackerPerf.isDebugRequest(req);
   try {
@@ -3531,7 +3544,6 @@ router.get('/api/inventory/dashboard', requireInventoryApiAuth, handleTrackerDas
 
 async function handleTrackerSummary(req, res) {
   res.set(NO_STORE_HEADERS);
-  syncLiveTrackFromDisk();
   try {
     const trackedAccounts = await inventoryTrackedAccounts.listTrackedAccounts(req.inventoryOwnerDiscordId);
     const summary = buildTrackerAccountSummary(trackedAccounts, liveTrackDB, {
@@ -3570,7 +3582,6 @@ function resolveSecondsSinceTimestamp(ts, serverNowMs = Date.now()) {
 
 async function handleAccountStatus(req, res) {
   res.set(NO_STORE_HEADERS);
-  syncLiveTrackFromDisk();
   try {
     const serverNowMs = Date.now();
     const serverNow = new Date(serverNowMs).toISOString();
@@ -6072,7 +6083,15 @@ function collectPublicFishItTrackerStats() {
   };
 }
 
+let _publicNetworkStatsCache = null;
+let _publicNetworkStatsCacheAt = 0;
+const PUBLIC_STATS_CACHE_MS = Number(process.env.PUBLIC_TRACKER_STATS_CACHE_MS || 30000);
+
 function collectPublicTrackerNetworkStats() {
+  const now = Date.now();
+  if (_publicNetworkStatsCache && (now - _publicNetworkStatsCacheAt) < PUBLIC_STATS_CACHE_MS) {
+    return _publicNetworkStatsCache;
+  }
   syncLiveTrackFromDisk();
   const canonical = computeCanonicalTrackerUsers(liveTrackDB);
   const registeredTrackedCount = inventoryTrackedAccounts.countRegisteredTrackedUsernamesSync();
@@ -6088,7 +6107,7 @@ function collectPublicTrackerNetworkStats() {
       inventoriesSynced += 1;
     }
   }
-  return {
+  const result = {
     available: canonical.available,
     rawUploadRows: canonical.rawUploadRows,
     rawSessionRows: canonical.rawSessionRows,
@@ -6107,6 +6126,9 @@ function collectPublicTrackerNetworkStats() {
     inventoriesSynced,
     updatedAt: canonical.updatedAt,
   };
+  _publicNetworkStatsCache = result;
+  _publicNetworkStatsCacheAt = now;
+  return result;
 }
 
 function collectPublicTrackerNetworkProof() {
