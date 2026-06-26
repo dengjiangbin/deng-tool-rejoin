@@ -2588,14 +2588,41 @@ class WatchdogSupervisor:
             return False
 
     def _package_entry_username(self, entry: dict[str, Any]) -> str:
+        """Legacy helper — lifecycle webhooks use _resolve_lifecycle_username instead."""
         username = str(entry.get("account_username") or entry.get("label") or "").strip()
-        return username or "Unknown"
+        return username
 
-    def _should_notify_package_dead(self, pkg: str, prev: str, state: str, now: float) -> bool:
+    def _resolve_lifecycle_username(
+        self, pkg: str, entry: dict[str, Any]
+    ) -> tuple[str | None, str]:
+        from .package_identity import record_package_identity, resolve_lifecycle_username
+
+        username, source = resolve_lifecycle_username(
+            pkg,
+            entry=entry,
+            supervisor=self,
+            cfg=self.cfg,
+        )
+        if username:
+            record_package_identity(
+                pkg,
+                username,
+                source=source,
+                confidence="high",
+            )
+        return username, source
+
+    def _should_attempt_package_dead_webhook(
+        self, pkg: str, prev: str, state: str, now: float
+    ) -> bool:
         if state != STATUS_DEAD:
             return False
-        if prev == STATUS_DEAD:
+        from . import webhook as lifecycle_webhook
+
+        if lifecycle_webhook.package_lifecycle_dead_already_notified(pkg):
             return False
+        if prev == STATUS_DEAD:
+            return True
         if self._in_loading_grace(pkg) or self._in_grace(pkg, now):
             return False
         if prev in {
@@ -2607,9 +2634,10 @@ class WatchdogSupervisor:
             STATUS_RELAUNCHING,
         } and not self._last_online_ts.get(pkg):
             return False
-        from . import webhook as lifecycle_webhook
+        return True
 
-        return not lifecycle_webhook.package_lifecycle_dead_already_notified(pkg)
+    def _should_notify_package_dead(self, pkg: str, prev: str, state: str, now: float) -> bool:
+        return self._should_attempt_package_dead_webhook(pkg, prev, state, now)
 
     def _maybe_send_package_dead_webhook(
         self,
@@ -2619,18 +2647,34 @@ class WatchdogSupervisor:
         state: str,
         now: float,
     ) -> None:
-        if not self._should_notify_package_dead(pkg, prev, state, now):
+        if not self._should_attempt_package_dead_webhook(pkg, prev, state, now):
             return
         from . import webhook as lifecycle_webhook
 
+        username, source = self._resolve_lifecycle_username(pkg, entry)
+        if not username:
+            lifecycle_webhook.record_package_lifecycle_username_failure(pkg)
+            log_event(
+                self._logger,
+                "warning",
+                "[DENG_REJOIN_PACKAGE_LIFECYCLE_USERNAME]",
+                package=pkg,
+                event="package_dead",
+                result="username_resolution_failed",
+                source=source,
+            )
+            return
+
+        lifecycle_webhook.clear_package_lifecycle_username_failure(pkg)
         try:
-            lifecycle_webhook.send_package_lifecycle_alert(
+            ok, _msg = lifecycle_webhook.send_package_lifecycle_alert(
                 self.cfg,
                 event="package_dead",
                 package=pkg,
-                username=self._package_entry_username(entry),
+                username=username,
             )
-            lifecycle_webhook.mark_package_lifecycle_dead_notified(pkg)
+            if ok:
+                lifecycle_webhook.mark_package_lifecycle_dead_notified(pkg, username=username)
         except Exception:  # noqa: BLE001
             pass
 
@@ -2639,14 +2683,31 @@ class WatchdogSupervisor:
 
         if not lifecycle_webhook.package_lifecycle_recover_pending(pkg):
             return
+
+        username, source = self._resolve_lifecycle_username(pkg, entry)
+        if not username:
+            lifecycle_webhook.record_package_lifecycle_username_failure(pkg)
+            log_event(
+                self._logger,
+                "warning",
+                "[DENG_REJOIN_PACKAGE_LIFECYCLE_USERNAME]",
+                package=pkg,
+                event="package_recovered",
+                result="username_resolution_failed",
+                source=source,
+            )
+            return
+
+        lifecycle_webhook.clear_package_lifecycle_username_failure(pkg)
         try:
-            lifecycle_webhook.send_package_lifecycle_alert(
+            ok, _msg = lifecycle_webhook.send_package_lifecycle_alert(
                 self.cfg,
                 event="package_recovered",
                 package=pkg,
-                username=self._package_entry_username(entry),
+                username=username,
             )
-            lifecycle_webhook.mark_package_lifecycle_recovered(pkg)
+            if ok:
+                lifecycle_webhook.mark_package_lifecycle_recovered(pkg, username=username)
         except Exception:  # noqa: BLE001
             pass
 

@@ -535,18 +535,55 @@ def package_lifecycle_dead_already_notified(package: str) -> bool:
     return bool(row.get("dead_notified"))
 
 
-def mark_package_lifecycle_dead_notified(package: str) -> None:
+def mark_package_lifecycle_dead_notified(package: str, username: str | None = None) -> None:
     pkg = str(package or "").strip()
     if not pkg:
         return
     state = _load_package_lifecycle_state()
     packages = state.setdefault("packages", {})
-    packages[pkg] = {
+    row = dict(packages.get(pkg) or {})
+    row.update({
         "dead_notified": True,
         "dead_active": True,
         "updated_at": time.time(),
-    }
+        "username_resolution_failed": False,
+    })
+    clean = str(username or "").strip()
+    if clean:
+        row["last_username"] = clean
+    packages[pkg] = row
     _save_package_lifecycle_state(state)
+
+
+def record_package_lifecycle_username_failure(package: str) -> None:
+    """Defer lifecycle webhook until username can be resolved."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    state = _load_package_lifecycle_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row.update({
+        "username_resolution_failed": True,
+        "username_resolution_failed_at": time.time(),
+        "updated_at": time.time(),
+    })
+    packages[pkg] = row
+    _save_package_lifecycle_state(state)
+
+
+def clear_package_lifecycle_username_failure(package: str) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    state = _load_package_lifecycle_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row.pop("username_resolution_failed", None)
+    row.pop("username_resolution_failed_at", None)
+    if row:
+        packages[pkg] = row
+        _save_package_lifecycle_state(state)
 
 
 def package_lifecycle_recover_pending(package: str) -> bool:
@@ -557,17 +594,22 @@ def package_lifecycle_recover_pending(package: str) -> bool:
     return bool(row.get("dead_active") and row.get("dead_notified"))
 
 
-def mark_package_lifecycle_recovered(package: str) -> None:
+def mark_package_lifecycle_recovered(package: str, username: str | None = None) -> None:
     pkg = str(package or "").strip()
     if not pkg:
         return
     state = _load_package_lifecycle_state()
     packages = state.setdefault("packages", {})
-    packages[pkg] = {
+    row = {
         "dead_notified": False,
         "dead_active": False,
         "updated_at": time.time(),
+        "username_resolution_failed": False,
     }
+    clean = str(username or "").strip()
+    if clean:
+        row["last_username"] = clean
+    packages[pkg] = row
     _save_package_lifecycle_state(state)
 
 
@@ -580,6 +622,7 @@ def build_package_lifecycle_embed_payload(
 ) -> dict[str, Any]:
     """Build a minimal Package Dead / Package Recovered embed."""
     from .license import get_public_device_model
+    from .package_identity import format_discord_username_spoiler
 
     normalized = str(event or "").strip().lower()
     if normalized == "package_dead":
@@ -591,7 +634,9 @@ def build_package_lifecycle_embed_payload(
 
     device = _public_device_label(config_data, get_public_device_model()) or "Unknown"
     pkg_value = str(package or "").strip() or "Unknown"
-    user_value = str(username or "").strip() or "Unknown"
+    user_value = format_discord_username_spoiler(username)
+    if not user_value:
+        raise ValueError("username_resolution_failed")
 
     return {
         "username": WEBHOOK_USERNAME,
@@ -618,6 +663,19 @@ def send_package_lifecycle_alert(
     username: str,
 ) -> tuple[bool, str]:
     """Send one Package Dead / Package Recovered embed without blocking relaunch."""
+    from .package_identity import format_discord_username_spoiler
+
+    spoiler = format_discord_username_spoiler(username)
+    if not spoiler:
+        record_webhook_trace(
+            source="send_package_lifecycle_alert",
+            event=event,
+            send_attempted=False,
+            send_result="skipped",
+            skip_reason="username_resolution_failed",
+        )
+        return False, "username_resolution_failed"
+
     mode = str(config_data.get("webhook_mode") or "none")
     if mode == "none" or not config_data.get("webhook_enabled", mode != "none"):
         record_webhook_trace(

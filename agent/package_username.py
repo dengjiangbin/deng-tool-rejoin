@@ -388,6 +388,14 @@ def username_display_for_package(
 
     report = scan_package_username_root(pkg, timeout_seconds=timeout_seconds)
     if report.username:
+        from .package_identity import record_package_identity
+
+        record_package_identity(
+            pkg,
+            report.username,
+            source=report.source or "root_scan",
+            confidence=report.confidence or "high",
+        )
         return UsernameDisplayRow(
             package=pkg,
             username_display=report.username,
@@ -599,6 +607,14 @@ def resolve_package_display_username(
 
     row = username_display_for_package(pkg, timeout_seconds=timeout_seconds)
     if row.account_status == "logged_in":
+        from .package_identity import record_package_identity
+
+        record_package_identity(
+            pkg,
+            row.username_display,
+            source=row.username_source or "root_scan",
+            confidence="high",
+        )
         updated["account_username"] = row.username_display
         updated["username_source"] = validate_username_source(row.username_source, row.username_display)
         cache = dict(config_data.get("package_username_cache") or {})

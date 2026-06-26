@@ -1285,6 +1285,12 @@ def collect_probe(
     out["start_crash_state"] = _capture_start_crash_state(errors)
     out["last_failing_command"] = _capture_last_failing_command()
     out["webhook_debug"] = _capture_webhook_debug()
+    try:
+        from .package_identity import lifecycle_username_debug
+
+        out["package_lifecycle_username"] = lifecycle_username_debug()
+    except Exception as exc:  # noqa: BLE001
+        out["package_lifecycle_username"] = {"error": str(exc)[:120]}
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
     try:
         from .config import get_package_display_username

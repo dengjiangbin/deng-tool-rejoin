@@ -52,7 +52,7 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
         self.assertEqual(names, ["Device", "Package", "Username"])
         values = {field["name"]: field["value"] for field in embed["fields"]}
         self.assertEqual(values["Package"], "com.roblox.client")
-        self.assertEqual(values["Username"], "MainUser")
+        self.assertEqual(values["Username"], "||MainUser||")
 
     def test_package_recovered_embed_is_green_with_required_fields(self) -> None:
         payload = webhook.build_package_lifecycle_embed_payload(
@@ -206,8 +206,7 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
         sup._last_online_ts["com.roblox.client"] = 1.0
         with patch.object(sup, "_in_loading_grace", return_value=False), \
              patch.object(sup, "_in_grace", return_value=False), \
-             patch("agent.webhook.send_package_lifecycle_alert", return_value=(True, "ok")) as send, \
-             patch("agent.webhook.mark_package_lifecycle_dead_notified") as mark:
+             patch("agent.webhook.send_package_lifecycle_alert", return_value=(True, "ok")) as send:
             sup._maybe_send_package_dead_webhook(
                 "com.roblox.client",
                 entry,
@@ -223,19 +222,18 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
                 0.0,
             )
         send.assert_called_once()
-        mark.assert_called_once()
+        self.assertTrue(webhook.package_lifecycle_dead_already_notified("com.roblox.client"))
 
     def test_supervisor_recovered_only_after_recovery_gate_online(self) -> None:
         entry = {"package": "com.roblox.client", "account_username": "MainUser"}
         sup = supervisor.WatchdogSupervisor([entry], self._cfg())
         webhook.mark_package_lifecycle_dead_notified("com.roblox.client")
-        with patch("agent.webhook.send_package_lifecycle_alert", return_value=(True, "ok")) as send, \
-             patch("agent.webhook.mark_package_lifecycle_recovered") as mark:
+        with patch("agent.webhook.send_package_lifecycle_alert", return_value=(True, "ok")) as send:
             sup._maybe_send_package_recovered_webhook("com.roblox.client", entry)
         send.assert_called_once()
         kwargs = send.call_args.kwargs
         self.assertEqual(kwargs["event"], "package_recovered")
-        mark.assert_called_once()
+        self.assertTrue(webhook.package_lifecycle_recover_pending("com.roblox.client") is False)
 
     def test_periodic_status_still_works_after_lifecycle_send(self) -> None:
         cfg = self._cfg("new_post")
