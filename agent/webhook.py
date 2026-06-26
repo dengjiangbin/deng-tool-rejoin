@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import time
 import threading
 import urllib.error
@@ -21,7 +22,7 @@ from typing import Any
 from .url_utils import mask_launch_url
 from . import safe_http
 from .constants import CONFIG_PATH, DATA_DIR
-from .runtime_format import format_runtime_compact
+from .runtime_format import format_lifecycle_dead_runtime, format_runtime_compact
 
 WEBHOOK_MODES = {"edit", "new_post", "none"}
 MIN_WEBHOOK_INTERVAL_MINUTES = 5
@@ -503,6 +504,62 @@ _PACKAGE_LIFECYCLE_PRELAUNCH = frozenset({
 })
 
 
+def validate_discord_tag_user_id(value: Any) -> str:
+    """Validate a Discord user ID for Package Dead tagging (17–20 digits)."""
+    text = str(value or "").strip()
+    if not re.fullmatch(r"\d{17,20}", text):
+        raise ValueError("Discord user ID must be 17-20 digits only")
+    return text
+
+
+def _discord_tag_user_id_from_config(config_data: dict[str, Any]) -> str | None:
+    if not config_data.get("webhook_tag_enabled"):
+        return None
+    try:
+        return validate_discord_tag_user_id(config_data.get("webhook_tag_user_id"))
+    except ValueError:
+        return None
+
+
+def record_package_lifecycle_alive(package: str, alive_since: float | None = None) -> None:
+    """Persist alive_since when a package becomes online (survives supervisor restart)."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    ts = float(alive_since if alive_since is not None else time.time())
+    state = _load_package_lifecycle_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row["alive_since"] = ts
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_package_lifecycle_state(state)
+
+
+def lifecycle_dead_runtime_seconds(
+    package: str,
+    dead_at: float | None = None,
+    *,
+    fallback_alive_since: float | None = None,
+) -> float | None:
+    """Seconds the package was alive before confirmed dead."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return None
+    row = _load_package_lifecycle_state().get("packages", {}).get(pkg, {})
+    alive_raw = row.get("alive_since") if isinstance(row, dict) else None
+    if alive_raw is None and fallback_alive_since is not None:
+        alive_raw = fallback_alive_since
+    try:
+        alive = float(alive_raw)
+    except (TypeError, ValueError):
+        return None
+    end = float(dead_at if dead_at is not None else time.time())
+    if end < alive:
+        return None
+    return end - alive
+
+
 def _load_package_lifecycle_state() -> dict[str, Any]:
     try:
         if _PACKAGE_LIFECYCLE_STATE_PATH.is_file():
@@ -605,10 +662,12 @@ def mark_package_lifecycle_recovered(package: str, username: str | None = None) 
         "dead_active": False,
         "updated_at": time.time(),
         "username_resolution_failed": False,
+        "recovered_at": time.time(),
     }
     clean = str(username or "").strip()
     if clean:
         row["last_username"] = clean
+    row.pop("alive_since", None)
     packages[pkg] = row
     _save_package_lifecycle_state(state)
 
@@ -619,6 +678,7 @@ def build_package_lifecycle_embed_payload(
     event: str,
     package: str,
     username: str,
+    runtime_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Build a minimal Package Dead / Package Recovered embed."""
     from .license import get_public_device_model
@@ -638,21 +698,49 @@ def build_package_lifecycle_embed_payload(
     if not user_value:
         raise ValueError("username_resolution_failed")
 
+    fields: list[dict[str, Any]] = [
+        {"name": "Device", "value": device[:256], "inline": True},
+        {"name": "Package", "value": pkg_value[:256], "inline": True},
+        {"name": "Username", "value": user_value[:256], "inline": True},
+    ]
+    if normalized == "package_dead" and runtime_seconds is not None:
+        runtime_display = format_lifecycle_dead_runtime(runtime_seconds)
+        if runtime_display:
+            fields.append({"name": "Runtime", "value": runtime_display[:256], "inline": True})
+
     return {
         "username": WEBHOOK_USERNAME,
         "avatar_url": WEBHOOK_AVATAR_URL,
-        "allowed_mentions": {"parse": []},
         "embeds": [{
             "title": title,
             "color": color,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "fields": [
-                {"name": "Device", "value": device[:256], "inline": True},
-                {"name": "Package", "value": pkg_value[:256], "inline": True},
-                {"name": "Username", "value": user_value[:256], "inline": True},
-            ],
+            "fields": fields,
         }],
     }
+
+
+def _lifecycle_allowed_mentions(
+    config_data: dict[str, Any],
+    event: str,
+) -> dict[str, Any]:
+    normalized = str(event or "").strip().lower()
+    if normalized != "package_dead":
+        return {"parse": []}
+    uid = _discord_tag_user_id_from_config(config_data)
+    if uid:
+        return {"parse": [], "users": [uid]}
+    return {"parse": []}
+
+
+def _lifecycle_content(config_data: dict[str, Any], event: str) -> str | None:
+    normalized = str(event or "").strip().lower()
+    if normalized != "package_dead":
+        return None
+    uid = _discord_tag_user_id_from_config(config_data)
+    if not uid:
+        return None
+    return f"<@{uid}>"
 
 
 def send_package_lifecycle_alert(
@@ -661,6 +749,7 @@ def send_package_lifecycle_alert(
     event: str,
     package: str,
     username: str,
+    runtime_seconds: float | None = None,
 ) -> tuple[bool, str]:
     """Send one Package Dead / Package Recovered embed without blocking relaunch."""
     from .package_identity import format_discord_username_spoiler
@@ -703,7 +792,12 @@ def send_package_lifecycle_alert(
         event=event,
         package=package,
         username=username,
+        runtime_seconds=runtime_seconds,
     )
+    payload["allowed_mentions"] = _lifecycle_allowed_mentions(config_data, event)
+    content = _lifecycle_content(config_data, event)
+    if content:
+        payload["content"] = content
     post_url = url + ("&" if "?" in url else "?") + "wait=true"
     record_webhook_trace(
         source="send_package_lifecycle_alert",

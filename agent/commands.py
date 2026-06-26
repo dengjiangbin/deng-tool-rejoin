@@ -3749,6 +3749,7 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         print("2. Interval")
         print("3. URL")
         print("4. Test Webhook Now")
+        print("5. Tag Discord")
         print("0. Back")
         print(termux_ui.separator("-"))
         _whc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -3769,9 +3770,49 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
             draft = save_config(draft)
         elif choice == "4":
             _test_webhook_now(draft)
+        elif choice == "5":
+            _config_webhook_tag_discord(draft)
+            draft = save_config(draft)
         else:
-            print("Please choose 1-4 or 0.")
+            print("Please choose 1-5 or 0.")
     return draft
+
+
+def _config_webhook_tag_discord(draft: dict[str, Any]) -> None:
+    """Tag Discord submenu: enable/disable Package Dead user mention."""
+    while True:
+        print()
+        print("Tag Discord")
+        enabled = bool(draft.get("webhook_tag_enabled"))
+        tag_id = str(draft.get("webhook_tag_user_id") or "").strip()
+        if enabled and tag_id:
+            print(f"  Status: Enabled for <@{tag_id}>")
+        else:
+            print("  Status: Disabled")
+        print()
+        print("1. Enable")
+        print("2. Disable")
+        print("0. Back")
+        choice = (_prompt("Choose", "0") or "0").strip()
+        if choice == "0":
+            break
+        if choice == "1":
+            raw = _prompt("Discord user ID (17-20 digits)", "").strip()
+            try:
+                tag_id = webhook.validate_discord_tag_user_id(raw)
+            except ValueError as exc:
+                print(f"Invalid Discord user ID: {exc}")
+                continue
+            draft["webhook_tag_enabled"] = True
+            draft["webhook_tag_user_id"] = tag_id
+            print(f"Tag Discord enabled for <@{tag_id}>")
+            break
+        if choice == "2":
+            draft["webhook_tag_enabled"] = False
+            draft.pop("webhook_tag_user_id", None)
+            print("Tag Discord disabled. Package Dead webhooks will not tag anyone.")
+            break
+        print("Please choose 1, 2, or 0.")
 
 
 def _config_webhook_url(draft: dict[str, Any]) -> None:

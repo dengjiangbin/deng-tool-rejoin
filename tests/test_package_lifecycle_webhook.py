@@ -44,15 +44,17 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
             event="package_dead",
             package="com.roblox.client",
             username="MainUser",
+            runtime_seconds=45.0,
         )
         embed = payload["embeds"][0]
         self.assertEqual(embed["title"], "Package Dead")
         self.assertEqual(embed["color"], webhook.EMBED_COLOR_RED)
         names = [field["name"] for field in embed["fields"]]
-        self.assertEqual(names, ["Device", "Package", "Username"])
+        self.assertEqual(names, ["Device", "Package", "Username", "Runtime"])
         values = {field["name"]: field["value"] for field in embed["fields"]}
         self.assertEqual(values["Package"], "com.roblox.client")
         self.assertEqual(values["Username"], "||MainUser||")
+        self.assertEqual(values["Runtime"], "45s")
 
     def test_package_recovered_embed_is_green_with_required_fields(self) -> None:
         payload = webhook.build_package_lifecycle_embed_payload(

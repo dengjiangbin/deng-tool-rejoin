@@ -128,6 +128,7 @@ def default_config() -> dict[str, Any]:
         "webhook_interval_seconds": 300,
         "webhook_last_sent_at": 0,
         "webhook_last_message_id": "",
+        "webhook_tag_enabled": False,
         "snapshot_max_age_seconds": 300,
         "snapshot_temp_path": "",
         "auto_resize_enabled": False,
@@ -824,6 +825,19 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if not isinstance(raw_tags, list):
         raw_tags = []
     merged["webhook_tags"] = [str(t).strip()[:80] for t in raw_tags if str(t).strip()][:20]
+
+    merged["webhook_tag_enabled"] = _as_bool(merged.get("webhook_tag_enabled", False))
+    raw_tag_uid = merged.get("webhook_tag_user_id")
+    if merged["webhook_tag_enabled"]:
+        try:
+            from .webhook import validate_discord_tag_user_id
+
+            merged["webhook_tag_user_id"] = validate_discord_tag_user_id(raw_tag_uid)
+        except ValueError:
+            merged["webhook_tag_enabled"] = False
+            merged.pop("webhook_tag_user_id", None)
+    else:
+        merged.pop("webhook_tag_user_id", None)
 
     # Package start times (ISO timestamps of last launch per package)
     raw_start_times = merged.get("package_start_times")

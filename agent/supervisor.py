@@ -1373,6 +1373,12 @@ class WatchdogSupervisor:
         if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
             self._online_start_ts[pkg] = now
             try:
+                from . import webhook as lifecycle_webhook
+
+                lifecycle_webhook.record_package_lifecycle_alive(pkg, now)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
                 from .android_memory import finalize_launch_incremental_sample
                 finalize_launch_incremental_sample(pkg)
             except Exception:  # noqa: BLE001
@@ -2666,12 +2672,28 @@ class WatchdogSupervisor:
             return
 
         lifecycle_webhook.clear_package_lifecycle_username_failure(pkg)
+        dead_at = float(now)
+        runtime_seconds = lifecycle_webhook.lifecycle_dead_runtime_seconds(
+            pkg,
+            dead_at,
+            fallback_alive_since=self._online_start_ts.get(pkg),
+        )
+        if runtime_seconds is None:
+            log_event(
+                self._logger,
+                "warning",
+                "[DENG_REJOIN_PACKAGE_LIFECYCLE_RUNTIME]",
+                package=pkg,
+                event="package_dead",
+                result="runtime_unavailable",
+            )
         try:
             ok, _msg = lifecycle_webhook.send_package_lifecycle_alert(
                 self.cfg,
                 event="package_dead",
                 package=pkg,
                 username=username,
+                runtime_seconds=runtime_seconds,
             )
             if ok:
                 lifecycle_webhook.mark_package_lifecycle_dead_notified(pkg, username=username)

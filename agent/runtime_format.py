@@ -16,3 +16,22 @@ def format_runtime_compact(seconds: float) -> str:
     if minutes:
         return f"{minutes}m {remainder}s"
     return f"{total}s"
+
+
+def format_lifecycle_dead_runtime(seconds: float | None) -> str | None:
+    """Human-readable Package Dead runtime — maximum two units, no filler words."""
+    if seconds is None:
+        return None
+    total = max(0, int(seconds))
+    if total < 60:
+        return f"{total}s"
+    if total < 3_600:
+        minutes, secs = divmod(total, 60)
+        return f"{minutes}m {secs}s"
+    if total < 86_400:
+        hours, remainder = divmod(total, 3_600)
+        minutes = remainder // 60
+        return f"{hours}h {minutes:02d}m"
+    days, remainder = divmod(total, 86_400)
+    hours = remainder // 3_600
+    return f"{days}d {hours:02d}h"
