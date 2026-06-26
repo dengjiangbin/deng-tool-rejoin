@@ -1573,7 +1573,7 @@ class WatchdogSupervisor:
         """Register a launch/reopen and bind loading-grace protection."""
         self._mark_launched(pkg)
         try:
-            self._rjn_monitor.begin_launch_watchdog(pkg, relaunch=False)
+            self._rjn_monitor.note_launch_watchdog(pkg, relaunch=False)
         except Exception:  # noqa: BLE001
             pass
         self._set_status(pkg, STATUS_LAUNCHING)
@@ -2302,12 +2302,69 @@ class WatchdogSupervisor:
         return state, detail
 
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
-        """Classify package from rjn UID logcat + process watchdog (not package-exists-only)."""
+        """Merge rjn detection with supervisor launch/relaunch state (detection only)."""
+        from .rjn_lifecycle_monitor import (
+            STATE_DEAD as RJN_DEAD,
+            STATE_DISCONNECTED as RJN_DISCONNECTED,
+            STATE_FAILED as RJN_FAILED,
+        )
+
         t0 = time.monotonic()
         ev = self._rjn_monitor.evaluate_package(pkg)
-        state = ev.public_status
-        reason = ev.reason
+        current = str(self.status_map.get(pkg) or "").strip()
         detail = dict(ev.detail)
+        reason = str(detail.get("reason") or ev.reason)
+
+        if ev.is_online_confirmed:
+            state = STATUS_ONLINE
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+            self._missing_evidence_since.pop(pkg, None)
+        elif ev.internal_state == RJN_DISCONNECTED or detail.get("last_with_reason_at"):
+            state = STATUS_DISCONNECTED
+            reason = str(detail.get("reason_user_friendly") or reason)
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+            self._missing_evidence_since.pop(pkg, None)
+        elif (
+            detail.get("launch_failed_reason") == "launch_watchdog_timeout"
+            or ev.internal_state == RJN_FAILED
+        ):
+            state = STATUS_JOIN_FAILED
+            reason = str(detail.get("reason_user_friendly") or reason)
+        elif ev.internal_state == RJN_DEAD:
+            state = STATUS_DEAD
+            reason = str(detail.get("reason_internal") or detail.get("dead_reason") or reason)
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+            self._missing_evidence_since.pop(pkg, None)
+        elif current in {STATUS_RELAUNCHING, STATUS_REOPENING} and not ev.is_online_confirmed:
+            state = STATUS_RELAUNCHING
+            verify_until = self._relaunch_verify_until.get(pkg, 0.0)
+            if pkg in self._relaunch_inflight and time.monotonic() < verify_until:
+                reason = "android_relaunch_verification_pending"
+            else:
+                reason = "relaunch_pending_gamejoinloadtime"
+        elif current in {
+            STATUS_LAUNCHING,
+            STATUS_WAITING,
+            STATUS_CHECKING,
+            STATUS_PENDING,
+            STATUS_PREPARING,
+        }:
+            state = STATUS_LAUNCHING
+            if self._in_loading_grace(pkg):
+                reason = "launch_grace_started"
+            else:
+                reason = "launch_pending_gamejoinloadtime"
+        elif current == STATUS_ONLINE and not ev.is_online_confirmed:
+            state = STATUS_DEAD if not ev.process_exists else STATUS_LAUNCHING
+            reason = str(detail.get("reason_internal") or "online_proof_lost")
+        elif current in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED, STATUS_FAILED}:
+            state = current
+        else:
+            state = current or ev.public_status
+
         detail.update({
             "process_evidence": str(ev.process_exists).lower(),
             "activity_evidence": "diagnostic_only",
@@ -2325,28 +2382,13 @@ class WatchdogSupervisor:
             "heartbeat_age_sec": "not_used",
             "presence_source": "not_used",
             "reason": reason,
-            "dead_reason": detail.get("dead_reason") or (
-                reason if state in {STATUS_DEAD, STATUS_DISCONNECTED} else ""
-            ),
-            "dead_detection_evidence": reason,
+            "dead_reason": str(detail.get("reason_internal") or detail.get("dead_reason") or ""),
+            "dead_detection_evidence": str(detail.get("reason_internal") or reason),
             "online_confirmed": str(ev.is_online_confirmed).lower(),
             "failed_checks": ",".join(ev.failed_checks),
             "internal_state": ev.internal_state,
+            "detection_only": "true",
         })
-        if ev.is_online_confirmed:
-            self._relaunch_inflight.discard(pkg)
-            self._relaunch_verify_until.pop(pkg, None)
-            self._missing_evidence_since.pop(pkg, None)
-        elif state in {STATUS_DEAD, STATUS_DISCONNECTED}:
-            self._relaunch_inflight.discard(pkg)
-            self._relaunch_verify_until.pop(pkg, None)
-            self._missing_evidence_since.pop(pkg, None)
-        elif state == STATUS_RELAUNCHING:
-            verify_until = self._relaunch_verify_until.get(pkg, 0.0)
-            if pkg in self._relaunch_inflight and time.monotonic() < verify_until:
-                reason = "android_relaunch_verification_pending"
-        elif state == STATUS_LAUNCHING and self._in_loading_grace(pkg):
-            reason = "launch_grace_started"
         self._log_state_evidence(pkg, detail, {}, state)
         return state, detail
 
@@ -2581,6 +2623,9 @@ class WatchdogSupervisor:
         url_context = private_url_launch_context(entry, self.cfg)
         url_configured = url_context.get("url_mode") == "private_url"
         launcher_label = "private_url" if url_configured else "app_only"
+        from .launch_relaunch_trace import record_launch_attempt, sanitized_url_from_context
+
+        url_present, url_masked = sanitized_url_from_context(url_context)
         t0 = time.monotonic()
         try:
             from .android_memory import record_launch_baseline, snapshot_mem_available_kb
@@ -2629,9 +2674,31 @@ class WatchdogSupervisor:
             )
             if result.success:
                 _reapply_layout_for_package(pkg)
+            record_launch_attempt(
+                pkg,
+                action=f"launch_{reason}",
+                success=bool(result.success),
+                launcher=launcher_label,
+                url_present=url_present,
+                url_sanitized=url_masked,
+                command_type=launcher_label,
+                error=str(result.error or ""),
+                state_after=str(self.status_map.get(pkg) or ""),
+            )
             return result.success
         except Exception as exc:  # noqa: BLE001
             elapsed_ms = int((time.monotonic() - t0) * 1000)
+            record_launch_attempt(
+                pkg,
+                action=f"launch_{reason}",
+                success=False,
+                launcher=launcher_label,
+                url_present=url_present,
+                url_sanitized=url_masked,
+                command_type=launcher_label,
+                error=str(exc)[:180],
+                state_after=str(self.status_map.get(pkg) or ""),
+            )
             log_event(
                 logger, "error", "[DENG_REJOIN_RECOVERY_LAUNCH_RESULT]",
                 package=pkg, reason=reason, launcher=launcher_label,
@@ -2847,7 +2914,7 @@ class WatchdogSupervisor:
                 self._relaunch_verify_until[pkg] = time.monotonic() + float(self.LOADING_GRACE_SECONDS)
                 self._mark_launched(pkg)
                 try:
-                    self._rjn_monitor.begin_launch_watchdog(pkg, relaunch=True)
+                    self._rjn_monitor.note_launch_watchdog(pkg, relaunch=True)
                 except Exception:  # noqa: BLE001
                     pass
                 self._set_status(pkg, STATUS_RELAUNCHING)

@@ -1349,6 +1349,37 @@ def collect_probe(
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
     out["rjn_style_detection"] = _capture_rjn_style_detection(errors)
     try:
+        from .launch_relaunch_trace import probe_snapshot as launch_probe_snapshot
+
+        rjn = out.get("rjn_style_detection") or {}
+        rjn_inner = rjn.get("rjn_style_detection") if isinstance(rjn, dict) else rjn
+        pkg_row = {}
+        if isinstance(rjn_inner, dict):
+            pkgs = rjn_inner.get("packages") or {}
+            if isinstance(pkgs, dict) and pkgs:
+                pkg_row = next(iter(pkgs.values()), {})
+        out["launch_relaunch"] = launch_probe_snapshot()
+        out["rjn_detection_only"] = {
+            "uid_map_ready": bool((rjn_inner or {}).get("uid_map")),
+            "logcat_stream_alive": bool((rjn_inner or {}).get("logcat_stream_alive")),
+            "watched_phrases": (rjn_inner or {}).get("watched_phrases") or [],
+            "last_gamejoinloadtime_at": (pkg_row or {}).get("last_gamejoinloadtime_at"),
+            "last_with_reason_at": (pkg_row or {}).get("last_with_reason_at"),
+            "last_doteleport_at": (pkg_row or {}).get("last_doteleport_at"),
+            "online_confirmed_by": "uid_matched_gamejoinloadtime",
+            "detection_only": True,
+        }
+        out["decision"] = {
+            "state": (pkg_row or {}).get("state"),
+            "reason_internal": (pkg_row or {}).get("launch_failed_reason")
+            or (pkg_row or {}).get("decision"),
+            "reason_user_friendly": (pkg_row or {}).get("reason_user_friendly")
+            or (pkg_row or {}).get("decision"),
+            "is_online_confirmed": (pkg_row or {}).get("is_online_confirmed"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "launch_relaunch_probe", "error": str(exc)[:200]})
+    try:
         from .config import get_package_display_username
         from . import package_username as _pu
         menu_diag = []

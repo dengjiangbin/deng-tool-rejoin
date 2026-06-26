@@ -74,6 +74,7 @@ class PackageRjnState:
     last_process_check_at: float = 0.0
     process_exists: bool = False
     pids: list[str] = field(default_factory=list)
+    relaunching: bool = False
     force_close_detected: bool = False
     process_missing_streak: int = 0
     last_transition_at: float = 0.0
@@ -195,6 +196,7 @@ class RjnLifecycleMonitor:
             return False
 
     def start_session(self) -> None:
+        """Detection-only session start: clear logcat, build UID map, start reader."""
         with self._lock:
             if self._session_started:
                 return
@@ -202,12 +204,6 @@ class RjnLifecycleMonitor:
             self._monitor_started_at = time.time()
             self.clear_logcat()
             self.refresh_uid_map()
-            for pkg in self.packages:
-                row = self._states[pkg]
-                if row.internal_state == STATE_STOPPED:
-                    row.internal_state = STATE_LAUNCHING
-                    row.last_transition_at = self._monitor_started_at
-                    row.last_transition_reason = "session_start"
             self._start_logcat_thread()
 
     def stop_session(self) -> None:
@@ -339,6 +335,7 @@ class RjnLifecycleMonitor:
             row.last_transition_reason = "gamejoinloadtime"
             row.process_missing_streak = 0
             row.force_close_detected = False
+            row.relaunching = False
             from .status_monitor_runtime import mark_online_confirmed_gamejoin
 
             mark_online_confirmed_gamejoin(pkg, at, previous_state=prev)
@@ -361,7 +358,8 @@ class RjnLifecycleMonitor:
                 row.last_transition_reason = "doTeleport"
             event.action_taken = "TELEPORTING"
 
-    def begin_launch_watchdog(self, package: str, *, relaunch: bool = False) -> None:
+    def note_launch_watchdog(self, package: str, *, relaunch: bool = False) -> None:
+        """Detection-only launch timer — does not launch/relaunch or change supervisor state."""
         pkg = str(package or "").strip()
         if not pkg:
             return
@@ -371,38 +369,36 @@ class RjnLifecycleMonitor:
             row.launch_started_at = now
             row.watchdog_active = True
             row.launch_failed_reason = ""
-            new_state = STATE_RELAUNCHING if relaunch else STATE_LAUNCHING
-            row.internal_state = new_state
-            row.last_transition_at = now
-            row.last_transition_reason = "launch_started"
+            row.relaunching = bool(relaunch)
             if relaunch:
-                row.online_since = 0.0
-                row.runtime_source = ""
+                row.internal_state = STATE_RELAUNCHING
+                row.last_transition_at = now
+                row.last_transition_reason = "relaunch_watchdog_started"
+            elif row.internal_state in {STATE_STOPPED, STATE_DEAD, STATE_FAILED}:
+                row.internal_state = STATE_LAUNCHING
+                row.last_transition_at = now
+                row.last_transition_reason = "launch_watchdog_started"
+
+    def begin_launch_watchdog(self, package: str, *, relaunch: bool = False) -> None:
+        """Backward-compatible alias — detection only."""
+        self.note_launch_watchdog(package, relaunch=relaunch)
 
     def _process_check(self, package: str) -> tuple[bool, list[str]]:
+        """Roblox package PID check — pidof/is_process_running only (no pgrep -f)."""
         pkg = android.validate_package_name(package)
         pids: list[str] = []
         root_tool = getattr(self._root_info, "tool", None) if self._root_info else None
         try:
-            res = android.run_command(["pgrep", "-f", pkg], timeout=3)
-            if res.ok and (res.stdout or "").strip():
-                pids = [p for p in res.stdout.strip().split() if p.isdigit()]
-        except Exception:  # noqa: BLE001
-            pass
-        if not pids:
-            try:
-                res = android.run_command(["pidof", pkg], timeout=2)
-                if res.ok and (res.stdout or "").strip():
-                    pids = res.stdout.strip().split()
-            except Exception:  # noqa: BLE001
-                pass
-        if not pids and getattr(self._root_info, "available", False) and root_tool:
-            try:
+            if getattr(self._root_info, "available", False) and root_tool:
                 res = android.run_root_command(["pidof", pkg], root_tool=root_tool, timeout=2)
                 if res.ok and (res.stdout or "").strip():
                     pids = res.stdout.strip().split()
-            except Exception:  # noqa: BLE001
-                pass
+            elif android.is_process_running(pkg):
+                res = android.run_command(["pidof", pkg], timeout=2)
+                if res.ok and (res.stdout or "").strip():
+                    pids = res.stdout.strip().split()
+        except Exception:  # noqa: BLE001
+            pass
         return bool(pids), pids
 
     def evaluate_package(self, package: str) -> PackageEvaluateResult:
@@ -428,21 +424,23 @@ class RjnLifecycleMonitor:
                         row.watchdog_active = False
                         row.launch_failed_reason = "launch_watchdog_timeout"
                         row.error_count += 1
-                        self._transition(
-                            pkg,
-                            STATE_FAILED,
-                            "launch_watchdog_timeout",
-                            at=now,
-                            offline=True,
-                        )
+                        row.internal_state = STATE_FAILED
+                        row.last_transition_at = now
+                        row.last_transition_reason = "launch_watchdog_timeout"
 
             if not process_exists:
                 row.process_missing_streak += 1
                 if row.process_missing_streak >= PROCESS_MISSING_CONFIRM:
                     row.force_close_detected = True
-                    if row.internal_state in {
-                        STATE_ONLINE_CONFIRMED,
-                        STATE_TELEPORTING,
+                    if row.internal_state in {STATE_ONLINE_CONFIRMED, STATE_TELEPORTING}:
+                        self._transition(
+                            pkg,
+                            STATE_DEAD,
+                            "process_missing",
+                            at=now,
+                            offline=True,
+                        )
+                    elif row.last_gamejoinloadtime_at > 0 and row.internal_state not in {
                         STATE_LAUNCHING,
                         STATE_RELAUNCHING,
                     }:
@@ -472,8 +470,13 @@ class RjnLifecycleMonitor:
                 failed.append("no_uid_matched_gamejoinloadtime")
                 is_online = False
 
-            public = self._map_public_status(internal, is_online)
+            public = self._map_public_status(
+                internal,
+                is_online,
+                relaunching=bool(row.relaunching or internal == STATE_RELAUNCHING),
+            )
             reason = self._decision_reason(row, is_online, failed)
+            from .lifecycle_reasons import format_user_friendly_dead_reason
 
             detail = {
                 "internal_state": internal,
@@ -491,7 +494,11 @@ class RjnLifecycleMonitor:
                 ),
                 "last_gamejoinloadtime_at": row.last_gamejoinloadtime_at or "",
                 "last_with_reason_at": row.last_with_reason_at or "",
-                "last_doteleport_at": row.last_doteleport_at or "",
+                "launch_failed_reason": row.launch_failed_reason or "",
+                "reason_internal": row.last_transition_reason or row.launch_failed_reason or reason,
+                "reason_user_friendly": format_user_friendly_dead_reason(
+                    row.launch_failed_reason or row.last_transition_reason or reason
+                ),
             }
             return PackageEvaluateResult(
                 package=pkg,
@@ -504,19 +511,19 @@ class RjnLifecycleMonitor:
                 detail=detail,
             )
 
-    def _map_public_status(self, internal: str, is_online: bool) -> str:
+    def _map_public_status(self, internal: str, is_online: bool, *, relaunching: bool = False) -> str:
         if is_online:
             return "Online"
         if internal == STATE_DISCONNECTED:
             return "Disconnected"
-        if internal in {STATE_LAUNCHING, STATE_TELEPORTING}:
-            return "Launching"
-        if internal == STATE_RELAUNCHING:
+        if internal == STATE_FAILED:
+            return "Join Failed"
+        if relaunching or internal == STATE_RELAUNCHING:
             return "Relaunching"
-        if internal in {STATE_DEAD, STATE_FAILED}:
-            return "Dead"
-        if internal == STATE_STOPPED:
+        if internal in {STATE_LAUNCHING, STATE_TELEPORTING, STATE_STOPPED}:
             return "Launching"
+        if internal in {STATE_DEAD}:
+            return "Dead"
         return "Dead"
 
     def _decision_reason(
@@ -568,6 +575,7 @@ class RjnLifecycleMonitor:
                     "launch_watchdog_timeout_seconds": self._launch_watchdog_seconds,
                     "launch_failed_reason": row.launch_failed_reason or None,
                     "decision": ev.reason,
+                    "reason_user_friendly": ev.detail.get("reason_user_friendly") or ev.reason,
                     "failed_checks": list(ev.failed_checks),
                     "is_online_confirmed": ev.is_online_confirmed,
                 }
@@ -584,6 +592,7 @@ class RjnLifecycleMonitor:
             ]
             return {
                 "enabled": self._session_started,
+                "detection_only": True,
                 "logcat_stream_alive": self._logcat_stream_alive,
                 "logcat_started_at": self._logcat_started_at or None,
                 "logcat_cleared_at": self._logcat_cleared_at or None,

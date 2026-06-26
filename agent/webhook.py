@@ -613,7 +613,13 @@ def _lifecycle_embed_fields(
             fields.append(runtime_field)
         reason_text = str(dead_reason or "").strip()
         if reason_text:
-            fields.append({"name": "Dead Reason", "value": reason_text[:256], "inline": True})
+            from .lifecycle_reasons import format_user_friendly_dead_reason
+
+            fields.append({
+                "name": "Reason",
+                "value": format_user_friendly_dead_reason(reason_text)[:256],
+                "inline": True,
+            })
         ram_text = str(ram_display or "").strip()
         if ram_text and ram_text.lower() not in {"", "n/a", "na", "none", "unknown"}:
             fields.append({"name": "RAM", "value": ram_text[:256], "inline": True})
