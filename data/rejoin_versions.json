@@ -1,6 +1,6 @@
 [
   {
-    "stable_latest": "v1.2.0",
+    "stable_latest": "v1.3.0",
     "test_latest": "main-dev",
     "kind": "channel_pointers"
   },
@@ -100,7 +100,7 @@
     "channel": "stable",
     "title": "Version 1.2.0",
     "label": "v1.2.0",
-    "recommended": true,
+    "recommended": false,
     "visibility": "public",
     "install_ref": "refs/tags/v1.2.0",
     "git_ref": "refs/tags/v1.2.0",
@@ -110,6 +110,24 @@
     "artifact_sha256": "0ee9377355d38f2834d09cfffed79853e81e28e5c58c28e50e8437159b8d5b9a",
     "installer_endpoint": "/install/v1.2.0",
     "notes": "Frozen public stable release for Delta Auto Execute file management and runtime version display fixes.",
+    "enabled": true
+  },
+  {
+    "version": "v1.3.0",
+    "id": "v1.3.0",
+    "channel": "stable",
+    "title": "Version 1.3.0",
+    "label": "v1.3.0",
+    "recommended": true,
+    "visibility": "public",
+    "install_ref": "refs/tags/v1.3.0",
+    "git_ref": "refs/tags/v1.3.0",
+    "release_stage": "stable",
+    "frozen": true,
+    "artifact_path": "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz",
+    "artifact_sha256": "b51b768a4cb35dd64b41a6455f0fca5f0a87c9b801ab07358f8b968719716aca",
+    "installer_endpoint": "/install/v1.3.0",
+    "notes": "Public stable release: portrait pb99 window resize, online detection timing, and portrait Start layout fixes.",
     "enabled": true
   },
   {

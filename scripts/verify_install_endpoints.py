@@ -20,10 +20,18 @@ BASES = (
 
 ENDPOINTS = (
     "/install/latest",
+    "/install/v1.3.0",
     "/install/v1.2.0",
     "/install/v1.0.0",
     "/install/test/latest",
 )
+
+
+def _stable_latest_version(rows: list[dict]) -> str:
+    for row in rows:
+        if row.get("kind") == "channel_pointers":
+            return str(row.get("stable_latest") or "").strip()
+    return ""
 
 
 def fetch(url: str) -> tuple[int, str]:
@@ -53,6 +61,7 @@ def parse_install_script(body: str) -> dict[str, str]:
 
 def main() -> int:
     rows = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    stable_latest = _stable_latest_version(rows)
     by_endpoint: dict[str, dict] = {}
     for row in rows:
         if row.get("kind") == "channel_pointers":
@@ -60,10 +69,11 @@ def main() -> int:
         ep = str(row.get("installer_endpoint") or "").strip()
         if ep:
             by_endpoint[ep] = row
-    by_endpoint["/install/latest"] = next(
-        (r for r in rows if str(r.get("version") or "") == "v1.2.0"),
-        {},
-    )
+    if stable_latest:
+        by_endpoint["/install/latest"] = next(
+            (r for r in rows if str(r.get("version") or "") == stable_latest),
+            {},
+        )
 
     proof = {}
     if PROOF.is_file():
@@ -76,7 +86,10 @@ def main() -> int:
             url = base + ep
             status, body = fetch(url)
             parsed = parse_install_script(body) if status == 200 else {}
-            expected = by_endpoint.get(ep if ep != "/install/latest" else "/install/v1.2.0", {})
+            if ep == "/install/latest":
+                expected = by_endpoint.get("/install/latest", {})
+            else:
+                expected = by_endpoint.get(ep, {})
             expected_sha = str(expected.get("artifact_sha256") or "").lower()
             live_sha = str(parsed.get("package_sha256") or "").lower()
             match = (not expected_sha) or (live_sha == expected_sha)

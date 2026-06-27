@@ -31,6 +31,17 @@
       "git_commit": "821012b9f77c",
       "built_at_iso": "2026-06-26T15:08:50Z",
       "license_gate": "license-gated",
+      "stable_latest": false
+    },
+    {
+      "version": "v1.3.0",
+      "channel": "stable",
+      "installer_endpoint": "/install/v1.3.0",
+      "artifact_path": "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz",
+      "artifact_sha256": "b51b768a4cb35dd64b41a6455f0fca5f0a87c9b801ab07358f8b968719716aca",
+      "git_commit": "d1e741761519",
+      "built_at_iso": "2026-06-27T10:54:06Z",
+      "license_gate": "license-gated",
       "stable_latest": true
     },
     {
