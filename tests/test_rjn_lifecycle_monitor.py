@@ -203,6 +203,19 @@ class RjnWatchdogTimeoutTests(unittest.TestCase):
         self.assertFalse(ev.is_online_confirmed)
 
 
+class RjnLaunchingDeadTests(unittest.TestCase):
+    def test_process_missing_during_launching_marks_dead(self) -> None:
+        mon = RjnLifecycleMonitor(["com.pkg.launch"])
+        mon._uid_map = {"com.pkg.launch": "800"}
+        mon._uid_to_package = {"800": "com.pkg.launch"}
+        mon.begin_launch_watchdog("com.pkg.launch")
+        self.assertEqual(mon._states["com.pkg.launch"].internal_state, STATE_LAUNCHING)
+        with patch.object(mon, "_process_check", return_value=(False, [])):
+            mon.evaluate_package("com.pkg.launch")
+            ev = mon.evaluate_package("com.pkg.launch")
+        self.assertEqual(ev.internal_state, STATE_DEAD)
+
+
 class RjnRecentsNotOnlineTests(unittest.TestCase):
     def test_process_without_gamejoin_not_online(self) -> None:
         mon = RjnLifecycleMonitor(["com.pkg.g"])
@@ -210,7 +223,7 @@ class RjnRecentsNotOnlineTests(unittest.TestCase):
         with patch.object(mon, "_process_check", return_value=(True, ["7"])):
             ev = mon.evaluate_package("com.pkg.g")
         self.assertFalse(ev.is_online_confirmed)
-        self.assertIn("no_uid_matched_gamejoinloadtime", ev.failed_checks)
+        self.assertIn("no_positive_online_evidence", ev.failed_checks)
 
 
 if __name__ == "__main__":

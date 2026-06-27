@@ -107,6 +107,36 @@ def load_all_online_since() -> dict[str, float]:
     return out
 
 
+def mark_online_confirmed_evidence(
+    package: str,
+    at: float,
+    *,
+    source: str,
+    previous_state: str = "",
+) -> float:
+    """Set online_since from accepted fallback evidence (presence, logcat join hints)."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return 0.0
+    ts = float(at)
+    src = str(source or "online_evidence").strip() or "online_evidence"
+    state = _load_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    prev = str(previous_state or row.get("state") or "").strip()
+    if prev != "ONLINE_CONFIRMED":
+        row["online_since"] = ts
+        row["last_transition_at"] = ts
+        row["last_transition_reason"] = src
+        row["last_online_evidence_at"] = ts
+    row["state"] = "ONLINE_CONFIRMED"
+    row["runtime_source"] = src
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_state(state)
+    return float(row.get("online_since") or ts)
+
+
 def mark_online_confirmed_gamejoin(
     package: str,
     at: float,

@@ -1352,30 +1352,107 @@ def collect_probe(
         from .launch_relaunch_trace import probe_snapshot as launch_probe_snapshot
 
         rjn = out.get("rjn_style_detection") or {}
+        out["launch_relaunch"] = launch_probe_snapshot()
+        lr = out["launch_relaunch"] if isinstance(out["launch_relaunch"], dict) else {}
         rjn_inner = rjn.get("rjn_style_detection") if isinstance(rjn, dict) else rjn
+        if not isinstance(rjn_inner, dict):
+            rjn_inner = {}
         pkg_row = {}
         if isinstance(rjn_inner, dict):
             pkgs = rjn_inner.get("packages") or {}
             if isinstance(pkgs, dict) and pkgs:
                 pkg_row = next(iter(pkgs.values()), {})
-        out["launch_relaunch"] = launch_probe_snapshot()
+        current_state = str((pkg_row or {}).get("state") or lr.get("last_launch_state") or "")
+        online_confirmed = bool((pkg_row or {}).get("is_online_confirmed"))
+        dead_internal = (
+            (pkg_row or {}).get("launch_failed_reason")
+            or (pkg_row or {}).get("decision")
+            or ""
+        )
+        from .lifecycle_reasons import format_user_friendly_dead_reason
+
+        dead_friendly = (pkg_row or {}).get("reason_user_friendly") or format_user_friendly_dead_reason(
+            str(dead_internal)
+        )
+        webhook_dbg = out.get("webhook_debug") if isinstance(out.get("webhook_debug"), dict) else {}
         out["rjn_detection_only"] = {
             "uid_map_ready": bool((rjn_inner or {}).get("uid_map")),
             "logcat_stream_alive": bool((rjn_inner or {}).get("logcat_stream_alive")),
+            "logcat_pid": (rjn_inner or {}).get("logcat_pid"),
+            "logcat_last_line_at": (rjn_inner or {}).get("logcat_last_line_at"),
+            "logcat_last_uid_matched_line_at": (rjn_inner or {}).get(
+                "logcat_last_uid_matched_line_at"
+            ),
             "watched_phrases": (rjn_inner or {}).get("watched_phrases") or [],
             "last_gamejoinloadtime_at": (pkg_row or {}).get("last_gamejoinloadtime_at"),
+            "last_positive_online_evidence_at": (pkg_row or {}).get(
+                "last_positive_online_evidence_at"
+            ),
             "last_with_reason_at": (pkg_row or {}).get("last_with_reason_at"),
             "last_doteleport_at": (pkg_row or {}).get("last_doteleport_at"),
-            "online_confirmed_by": "uid_matched_gamejoinloadtime",
+            "online_confirmed_by": (pkg_row or {}).get("online_evidence_source")
+            or (
+                "uid_matched_gamejoinloadtime"
+                if (pkg_row or {}).get("last_gamejoinloadtime_at")
+                else "none"
+            ),
+            "detector_errors": (rjn_inner or {}).get("detector_errors") or [],
+            "ignored_uid_lines": (rjn_inner or {}).get("ignored_uid_lines") or [],
             "detection_only": True,
         }
         out["decision"] = {
-            "state": (pkg_row or {}).get("state"),
-            "reason_internal": (pkg_row or {}).get("launch_failed_reason")
-            or (pkg_row or {}).get("decision"),
-            "reason_user_friendly": (pkg_row or {}).get("reason_user_friendly")
-            or (pkg_row or {}).get("decision"),
-            "is_online_confirmed": (pkg_row or {}).get("is_online_confirmed"),
+            "state": current_state,
+            "reason_internal": dead_internal,
+            "reason_user_friendly": dead_friendly,
+            "is_online_confirmed": online_confirmed,
+        }
+        out["state_machine"] = {
+            "current_state": current_state,
+            "previous_state": lr.get("last_launch_state"),
+            "last_transition_at": (pkg_row or {}).get("last_transition_at"),
+            "last_transition_reason": (pkg_row or {}).get("last_transition_reason"),
+            "active_monitored": bool((rjn_inner or {}).get("enabled")),
+            "can_trigger_dead_from_current_state": True,
+            "can_trigger_relaunch_from_dead": bool((lr.get("relaunch") or {}).get("relaunch_queued")),
+            "can_trigger_webhook_from_dead": bool(webhook_dbg.get("webhook_enabled")),
+        }
+        out["online_detection"] = {
+            "online_confirmed": online_confirmed,
+            "online_since": (pkg_row or {}).get("online_since"),
+            "runtime_source": (pkg_row or {}).get("runtime_source"),
+            "primary_required_signal": "gamejoinloadtime",
+            "last_gamejoinloadtime_at": (pkg_row or {}).get("last_gamejoinloadtime_at"),
+            "last_positive_online_evidence_at": (pkg_row or {}).get(
+                "last_positive_online_evidence_at"
+            ),
+            "fallback_evidence_checked": True,
+            "fallback_evidence_result": (pkg_row or {}).get("online_evidence_source") or "none",
+            "why_still_launching": (pkg_row or {}).get("why_still_launching") or (
+                (pkg_row or {}).get("decision") if not online_confirmed else ""
+            ),
+        }
+        out["dead_detection"] = {
+            "process_exists": bool((pkg_row or {}).get("process_exists")),
+            "pids": (pkg_row or {}).get("pids") or [],
+            "last_process_check_at": (pkg_row or {}).get("last_process_check_at"),
+            "dead_detected": current_state in {"DEAD", "FAILED", "DISCONNECTED"},
+            "dead_reason_internal": dead_internal,
+            "dead_reason_user_friendly": dead_friendly,
+        }
+        out["relaunch"] = lr.get("relaunch") or {}
+        out["account_dead_webhook"] = {
+            "enabled": bool(webhook_dbg.get("webhook_enabled")),
+            "should_send_for_current_dead_event": current_state in {
+                "DEAD",
+                "FAILED",
+                "DISCONNECTED",
+                "Join Failed",
+            },
+            "sent": bool(webhook_dbg.get("last_lifecycle_send_ok")),
+            "last_send_status": webhook_dbg.get("last_http_status"),
+            "last_error": webhook_dbg.get("last_error"),
+            "field_label": "Reason",
+            "reason_user_friendly": dead_friendly,
         }
     except Exception as exc:  # noqa: BLE001
         errors.append({"step": "launch_relaunch_probe", "error": str(exc)[:200]})

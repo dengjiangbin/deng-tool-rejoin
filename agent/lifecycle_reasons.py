@@ -12,6 +12,7 @@ _USER_FRIENDLY: dict[str, str] = {
     "game_crash": "Roblox crashed",
     "private_server_launch_failed": "Could not open the private server link",
     "no_gamejoinloadtime": "Roblox opened but did not finish joining the server",
+    "no_online_confirmation": "Roblox opened but could not be confirmed inside the game",
     "unknown": "Roblox stopped responding or could not be confirmed online",
 }
 

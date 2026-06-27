@@ -187,6 +187,11 @@ STATUS_DISCONNECTED      = "Disconnected"
 
 # Presence-confirmed steady states that kick off RAM/runtime metric loops.
 _METRIC_ACTIVE_STATES = frozenset({STATUS_ONLINE})
+_ACCOUNT_DEAD_WEBHOOK_STATES = frozenset({
+    STATUS_DEAD,
+    STATUS_DISCONNECTED,
+    STATUS_JOIN_FAILED,
+})
 
 # All healthy states — used for legacy _PackageWorker state-machine guards.
 # WatchdogSupervisor never reads _HEALTHY_STATES; only _PackageWorker uses it.
@@ -1440,9 +1445,9 @@ class WatchdogSupervisor:
         elif state not in _METRIC_ACTIVE_STATES:
             self._online_start_ts.pop(pkg, None)
 
-        if state in {STATUS_DEAD, STATUS_DISCONNECTED}:
+        if state in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED}:
             self._last_online_ts.pop(pkg, None)
-            if state == STATUS_DEAD:
+            if state in {STATUS_DEAD, STATUS_JOIN_FAILED}:
                 self._clear_status_monitor_runtime_state(pkg)
 
     def _handle_stop(self, signum: Any, frame: Any) -> None:
@@ -2301,6 +2306,62 @@ class WatchdogSupervisor:
 
         return state, detail
 
+    def _definitive_dead_detail(self, detail: dict[str, Any] | None) -> bool:
+        if not detail:
+            return False
+        reason = str(
+            detail.get("dead_reason")
+            or detail.get("reason_internal")
+            or detail.get("launch_failed_reason")
+            or detail.get("reason")
+            or ""
+        ).lower()
+        tokens = (
+            "process_missing",
+            "with_reason",
+            "launch_watchdog",
+            "no_online_confirmation",
+            "force_close",
+            "disconnect",
+            "logcat_with_reason",
+            "game_crash",
+        )
+        return any(token in reason for token in tokens)
+
+    def _try_online_evidence_fallback(
+        self, pkg: str, ev: Any
+    ) -> Any:
+        """Presence / fallback online proof when gamejoinloadtime is absent."""
+        if ev.is_online_confirmed:
+            return ev
+        current = str(self.status_map.get(pkg) or "").strip()
+        if current not in {
+            STATUS_LAUNCHING,
+            STATUS_RELAUNCHING,
+            STATUS_CHECKING,
+            STATUS_WAITING,
+            STATUS_PENDING,
+        }:
+            return ev
+        if not ev.process_exists:
+            return ev
+        presence = None
+        try:
+            presence = self._fetch_presence(pkg)
+        except Exception:  # noqa: BLE001
+            presence = None
+        if presence is not None and getattr(presence, "is_in_game", False):
+            try:
+                self._rjn_monitor.confirm_online_evidence(
+                    pkg,
+                    time.time(),
+                    source="presence_in_experience",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            return self._rjn_monitor.evaluate_package(pkg)
+        return ev
+
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
         """Merge rjn detection with supervisor launch/relaunch state (detection only)."""
         from .rjn_lifecycle_monitor import (
@@ -2311,6 +2372,7 @@ class WatchdogSupervisor:
 
         t0 = time.monotonic()
         ev = self._rjn_monitor.evaluate_package(pkg)
+        ev = self._try_online_evidence_fallback(pkg, ev)
         current = str(self.status_map.get(pkg) or "").strip()
         detail = dict(ev.detail)
         reason = str(detail.get("reason") or ev.reason)
@@ -2327,7 +2389,10 @@ class WatchdogSupervisor:
             self._relaunch_verify_until.pop(pkg, None)
             self._missing_evidence_since.pop(pkg, None)
         elif (
-            detail.get("launch_failed_reason") == "launch_watchdog_timeout"
+            detail.get("launch_failed_reason") in {
+                "launch_watchdog_timeout",
+                "no_online_confirmation",
+            }
             or ev.internal_state == RJN_FAILED
         ):
             state = STATUS_JOIN_FAILED
@@ -2378,7 +2443,11 @@ class WatchdogSupervisor:
             "root_available": str(bool(getattr(self._root_info, "available", False))).lower(),
             "foreground_package": "",
             "activity": state,
-            "in_game_proof": "gamejoinloadtime" if ev.is_online_confirmed else "none",
+            "in_game_proof": (
+                str(detail.get("online_evidence_source") or "gamejoinloadtime")
+                if ev.is_online_confirmed
+                else "none"
+            ),
             "heartbeat_age_sec": "not_used",
             "presence_source": "not_used",
             "reason": reason,
@@ -2733,31 +2802,34 @@ class WatchdogSupervisor:
         return username, source
 
     def _should_attempt_package_dead_webhook(
-        self, pkg: str, prev: str, state: str, now: float
+        self,
+        pkg: str,
+        prev: str,
+        state: str,
+        now: float,
+        detail: dict[str, Any] | None = None,
     ) -> bool:
-        if state != STATUS_DEAD:
+        if state not in _ACCOUNT_DEAD_WEBHOOK_STATES:
             return False
         from . import webhook as lifecycle_webhook
 
         if lifecycle_webhook.package_lifecycle_dead_already_notified(pkg):
             return False
-        if prev == STATUS_DEAD:
-            return True
-        if self._in_loading_grace(pkg) or self._in_grace(pkg, now):
-            return False
-        if prev in {
-            STATUS_LAUNCHING,
-            STATUS_PENDING,
-            STATUS_CHECKING,
-            STATUS_WAITING,
-            STATUS_REOPENING,
-            STATUS_RELAUNCHING,
-        } and not self._last_online_ts.get(pkg):
+        if (self._in_loading_grace(pkg) or self._in_grace(pkg, now)) and not self._definitive_dead_detail(
+            detail
+        ):
             return False
         return True
 
-    def _should_notify_package_dead(self, pkg: str, prev: str, state: str, now: float) -> bool:
-        return self._should_attempt_package_dead_webhook(pkg, prev, state, now)
+    def _should_notify_package_dead(
+        self,
+        pkg: str,
+        prev: str,
+        state: str,
+        now: float,
+        detail: dict[str, Any] | None = None,
+    ) -> bool:
+        return self._should_attempt_package_dead_webhook(pkg, prev, state, now, detail)
 
     def _maybe_send_package_dead_webhook(
         self,
@@ -2768,7 +2840,7 @@ class WatchdogSupervisor:
         now: float,
         detail: dict[str, Any] | None = None,
     ) -> None:
-        if not self._should_attempt_package_dead_webhook(pkg, prev, state, now):
+        if not self._should_attempt_package_dead_webhook(pkg, prev, state, now, detail):
             return
         from . import webhook as lifecycle_webhook
 
@@ -2809,7 +2881,13 @@ class WatchdogSupervisor:
                 package=pkg,
                 username=username,
                 runtime_seconds=runtime_seconds,
-                dead_reason=str((detail or {}).get("dead_reason") or (detail or {}).get("reason") or ""),
+                dead_reason=str(
+                    (detail or {}).get("reason_user_friendly")
+                    or (detail or {}).get("dead_reason")
+                    or (detail or {}).get("reason_internal")
+                    or (detail or {}).get("reason")
+                    or ""
+                ),
                 ram_display=str((detail or {}).get("ram_display") or ""),
             )
             if ok:
@@ -2859,6 +2937,7 @@ class WatchdogSupervisor:
         now: float,
         render_callback: Any = None,
         immediate_recovery: bool = False,
+        detail: dict[str, Any] | None = None,
     ) -> bool:
         """Apply recovery action based on current state.
 
@@ -2872,7 +2951,7 @@ class WatchdogSupervisor:
         url_context = private_url_launch_context(entry, self.cfg)
         url_configured = url_context.get("url_mode") == "private_url"
 
-        if state == STATUS_DEAD:
+        if state in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED}:
             if pkg in self._relaunch_inflight:
                 return False
             if not self._reserve_recovery_launch_attempt(pkg):
@@ -2881,16 +2960,27 @@ class WatchdogSupervisor:
                     self._interruptible_sleep(remaining)
                 return False
             action = "private_url_relaunch" if url_configured else "app_only_relaunch"
+            dead_label = str(state)
             log_event(
                 logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
-                package=pkg, state="Dead",
+                package=pkg, state=dead_label,
                 private_url_mode=url_context.get("private_url_mode", "global"),
                 url_mode=url_context.get("url_mode", "app_only"),
                 url_config_source=url_context.get("url_config_source", "blank"),
                 private_url_configured=str(url_configured).lower(),
                 action=action,
-                reason="process_not_running",
+                reason=str(state).lower(),
             )
+            try:
+                from .launch_relaunch_trace import record_dead_detected, record_relaunch_queued
+
+                record_dead_detected(
+                    pkg,
+                    str((detail or {}).get("reason_internal") or state),
+                )
+                record_relaunch_queued(pkg)
+            except Exception:  # noqa: BLE001
+                pass
             self._relaunch_inflight.add(pkg)
             self._set_status(pkg, STATUS_REOPENING)
             cache_result = android.clear_package_cache_verified(pkg)
@@ -2915,6 +3005,16 @@ class WatchdogSupervisor:
                 self._mark_launched(pkg)
                 try:
                     self._rjn_monitor.note_launch_watchdog(pkg, relaunch=True)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from .launch_relaunch_trace import record_relaunch_started
+
+                    record_relaunch_started(
+                        pkg,
+                        success=True,
+                        url_present=bool(url_configured),
+                    )
                 except Exception:  # noqa: BLE001
                     pass
                 self._set_status(pkg, STATUS_RELAUNCHING)
@@ -3369,25 +3469,28 @@ class WatchdogSupervisor:
                     self._nhb_since.pop(pkg, None)
 
                 self._record_runtime_session_state(pkg, prev, state, now)
-                if state in {STATUS_DEAD, STATUS_DISCONNECTED}:
+                if state in _ACCOUNT_DEAD_WEBHOOK_STATES:
                     self._maybe_send_package_dead_webhook(pkg, entry, prev, state, now, detail)
                     _maybe_render(force=True)
 
                 recovery_gate = False
-                if state not in {STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
-                    if state in {STATUS_DEAD, STATUS_DISCONNECTED}:
+                if state not in {STATUS_WRONG_GAME, STATUS_UNKNOWN}:
+                    if state in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED}:
                         recovery_gate = self._handle_state(
                             pkg, entry, state, prev, now,
                             render_callback=render_callback,
+                            detail=detail,
                         )
                     elif state == STATUS_ONLINE:
                         recovery_gate = self._handle_state(
-                            pkg, entry, state, prev, now, render_callback=render_callback
+                            pkg, entry, state, prev, now, render_callback=render_callback,
+                            detail=detail,
                         )
 
                     if self.status_map.get(pkg) == STATUS_DEAD and state != STATUS_DEAD:
                         recovery_gate = self._handle_state(
-                            pkg, entry, STATUS_DEAD, prev, now, render_callback=render_callback
+                            pkg, entry, STATUS_DEAD, prev, now, render_callback=render_callback,
+                            detail=detail,
                         ) or recovery_gate
 
                 if recovery_gate:

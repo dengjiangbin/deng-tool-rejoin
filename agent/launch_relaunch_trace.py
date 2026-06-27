@@ -78,6 +78,60 @@ def record_launch_attempt(
     _save(data)
 
 
+def record_relaunch_started(
+    package: str,
+    *,
+    success: bool,
+    url_present: bool,
+    error: str = "",
+) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    data = _load()
+    now = time.time()
+    data["relaunch"] = {
+        "enabled": True,
+        "last_relaunch_started_at": now,
+        "last_relaunch_command_ran": bool(success),
+        "last_relaunch_package": pkg,
+        "last_relaunch_used_private_server_url": bool(url_present),
+        "last_relaunch_error": str(error or "")[:180] or None,
+        "relaunch_queued": True,
+    }
+    _save(data)
+
+
+def record_dead_detected(package: str, reason: str) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    data = _load()
+    relaunch = dict(data.get("relaunch") or {})
+    relaunch.update({
+        "last_dead_detected_at": time.time(),
+        "last_dead_reason": str(reason or "")[:120],
+    })
+    data["relaunch"] = relaunch
+    _save(data)
+
+
+def record_relaunch_queued(package: str) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    data = _load()
+    relaunch = dict(data.get("relaunch") or {})
+    relaunch.update({
+        "enabled": True,
+        "relaunch_queued": True,
+        "relaunch_queue_size": 1,
+        "last_relaunch_package": pkg,
+    })
+    data["relaunch"] = relaunch
+    _save(data)
+
+
 def probe_snapshot() -> dict[str, Any]:
     data = _load()
     return {
@@ -101,6 +155,7 @@ def probe_snapshot() -> dict[str, Any]:
         ),
         "opened_package": (data.get("last_launch") or {}).get("package"),
         "last_relaunch": data.get("last_relaunch"),
+        "relaunch": data.get("relaunch"),
     }
 
 
