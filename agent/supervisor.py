@@ -7,6 +7,7 @@ import signal
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from . import android, db
@@ -156,6 +157,7 @@ STATUS_IN_LOBBY          = "In Lobby"          # Roblox presence type 1 (home/lo
 STATUS_OFFLINE           = "Offline"
 STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
 STATUS_LAUNCHING         = "Launching"
+STATUS_READY             = "Ready"               # Awaiting first staggered open
 STATUS_REOPENING         = "Relaunching"        # legacy constant name
 STATUS_RELAUNCHING       = "Relaunching"
 STATUS_WAITING           = "Waiting"
@@ -1201,6 +1203,8 @@ class WatchdogSupervisor:
     PACKAGE_ROUND_ROBIN_SECONDS: int = 3
     PACKAGE_CHECKING_HOLD_SECONDS: float = 1.0
     PACKAGE_ROUND_ROBIN_TAIL_SECONDS: float = 2.0
+    PACKAGE_STAGGER_TAIL_SECONDS: float = 0.5
+    DEFAULT_DETECTION_WORKER_COUNT: int = 2
 
     # ── Blocking recovery gate: poll interval while fixing one package ───────
     RECOVERY_GATE_POLL_SECONDS: float = 5.0
@@ -1258,19 +1262,38 @@ class WatchdogSupervisor:
 
         # Public status dict — mutated in-place (read by dashboard callback).
         self.status_map: dict[str, str] = {
-            pkg: STATUS_LAUNCHING for pkg in self.packages
+            pkg: STATUS_READY for pkg in self.packages
         }
+        self._package_opened: set[str] = set()
         # Normalize prior sessions to the Android-local public vocabulary.
         if initial_status:
             for pkg, st in initial_status.items():
-                if pkg in self.status_map:
-                    value = str(st or "").strip()
-                    if value == STATUS_ONLINE:
-                        self.status_map[pkg] = STATUS_ONLINE
-                    elif value in {STATUS_RELAUNCHING, STATUS_REOPENING, STATUS_LAUNCHING, "Launching", "Reconnecting"}:
-                        self.status_map[pkg] = STATUS_RELAUNCHING
-                    else:
-                        self.status_map[pkg] = STATUS_DEAD
+                if pkg not in self.status_map:
+                    continue
+                value = str(st or "").strip()
+                if value == STATUS_ONLINE:
+                    self.status_map[pkg] = STATUS_ONLINE
+                elif value == STATUS_PENDING:
+                    self.status_map[pkg] = STATUS_READY
+                elif value == STATUS_READY:
+                    self.status_map[pkg] = STATUS_READY
+                elif value in {
+                    STATUS_RELAUNCHING,
+                    STATUS_REOPENING,
+                    STATUS_LAUNCHING,
+                    STATUS_WAITING,
+                    STATUS_CHECKING,
+                    "Launching",
+                    "Reconnecting",
+                    "Joining",
+                }:
+                    self.status_map[pkg] = STATUS_LAUNCHING
+                elif value in {STATUS_DISCONNECTED, STATUS_JOIN_FAILED, STATUS_FAILED}:
+                    self.status_map[pkg] = value
+                elif value == STATUS_DEAD:
+                    self.status_map[pkg] = STATUS_DEAD
+                else:
+                    self.status_map[pkg] = STATUS_LAUNCHING
 
         self.on_status_change = on_status_change
 
@@ -1302,6 +1325,7 @@ class WatchdogSupervisor:
         self._relaunch_inflight: set[str] = set()
         self._relaunch_verify_until: dict[str, float] = {}
         self._missing_evidence_since: dict[str, float] = {}
+        self._landscape_repair_round: int = 0  # legacy counter; periodic repair disabled
 
         # ── Per-package RAM optimization tracking ─────────────────────────────
         self._ram_last_check_at: dict[str, float] = {}   # last RAM measurement ts
@@ -1425,7 +1449,6 @@ class WatchdogSupervisor:
             if online_since is not None:
                 self._online_start_ts[pkg] = online_since
             elif state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
-                # Do not invent runtime — wait for gamejoinloadtime persistence.
                 self._online_start_ts.pop(pkg, None)
             if state == STATUS_ONLINE and previous_state != STATUS_ONLINE:
                 if previous_state == STATUS_RELAUNCHING:
@@ -1433,7 +1456,7 @@ class WatchdogSupervisor:
                 try:
                     from . import webhook as lifecycle_webhook
 
-                    alive_at = self._online_start_ts.get(pkg) or now
+                    alive_at = online_since or self._online_start_ts.get(pkg) or now
                     lifecycle_webhook.record_package_lifecycle_alive(pkg, alive_at)
                 except Exception:  # noqa: BLE001
                     pass
@@ -1472,11 +1495,22 @@ class WatchdogSupervisor:
         requested = str(status or "").strip()
         if requested in {STATUS_CHECKING, STATUS_PENDING, STATUS_WAITING, "Joining"}:
             return
-        if requested in {STATUS_PREPARING, STATUS_CLEAR_CACHE, STATUS_LAUNCHING, STATUS_RELAUNCHING, STATUS_REOPENING}:
+        if requested in {
+            STATUS_PREPARING,
+            STATUS_CLEAR_CACHE,
+            STATUS_LAUNCHING,
+            STATUS_READY,
+            STATUS_RELAUNCHING,
+            STATUS_REOPENING,
+            STATUS_JOIN_FAILED,
+            STATUS_FAILED,
+        }:
             status = requested
         elif requested == "Reconnecting":
             status = STATUS_LAUNCHING
-        elif requested not in {STATUS_ONLINE, STATUS_DEAD, STATUS_DISCONNECTED}:
+        elif requested in {STATUS_ONLINE, STATUS_DEAD, STATUS_DISCONNECTED}:
+            status = requested
+        else:
             status = STATUS_DEAD
         if requested in {STATUS_REOPENING, STATUS_RELAUNCHING}:
             status = STATUS_RELAUNCHING
@@ -1574,8 +1608,83 @@ class WatchdogSupervisor:
             package_count=len(self.packages),
         )
 
+    def _watchdog_monitoring_active(self) -> bool:
+        with self._state_lock:
+            return bool(self._package_opened) or self._all_launches_completed
+
+    def _opened_packages(self) -> list[str]:
+        with self._state_lock:
+            return [pkg for pkg in self.packages if pkg in self._package_opened]
+
+    def _detection_worker_count(self) -> int:
+        sup = self.cfg.get("supervisor")
+        if not isinstance(sup, dict):
+            sup = {}
+        raw = sup.get("detection_worker_count", self.cfg.get("detection_worker_count"))
+        if raw is None:
+            raw = self.DEFAULT_DETECTION_WORKER_COUNT
+        try:
+            count = int(raw)
+        except (TypeError, ValueError):
+            count = self.DEFAULT_DETECTION_WORKER_COUNT
+        return max(1, min(count, 3))
+
+    def _round_robin_tail_seconds(self) -> float:
+        with self._state_lock:
+            stagger_active = bool(self._package_opened) and not self._all_launches_completed
+        if stagger_active:
+            return float(self.PACKAGE_STAGGER_TAIL_SECONDS)
+        return float(self.PACKAGE_ROUND_ROBIN_TAIL_SECONDS)
+
+    def _prefetch_package_detection(
+        self,
+        packages: list[str],
+    ) -> dict[str, tuple[str, dict[str, Any], bool, str]]:
+        """Best-effort parallel detection for opened packages (recovery stays sequential)."""
+        if len(packages) <= 1 or self._detection_worker_count() <= 1:
+            return {}
+
+        def _detect_one(pkg: str) -> tuple[str, str, dict[str, Any], bool, str]:
+            entry = self.entry_by_pkg[pkg]
+            launching_eval = self._needs_launching_evaluation(pkg)
+            try:
+                if launching_eval:
+                    state, detail = self._evaluate_launching_or_pending(pkg, entry)
+                else:
+                    state, detail = self._detect_package_state(pkg, entry)
+                return pkg, state, detail, launching_eval, ""
+            except Exception as exc:  # noqa: BLE001
+                prev = str(self._prev_state.get(pkg) or self.status_map.get(pkg) or "")
+                state = prev if prev in {STATUS_ONLINE, STATUS_DEAD} else STATUS_DEAD
+                detail = {
+                    "process_running": "unknown",
+                    "in_game": "unknown",
+                    "heartbeat_ok": "unknown",
+                    "warning_detected": "unknown",
+                    "reason": "detector_exception",
+                }
+                return pkg, state, detail, launching_eval, str(exc)[:180]
+
+        prefetched: dict[str, tuple[str, dict[str, Any], bool, str]] = {}
+        workers = min(self._detection_worker_count(), len(packages))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="deng-detect") as pool:
+            futures = [pool.submit(_detect_one, pkg) for pkg in packages]
+            for future in as_completed(futures):
+                pkg, state, detail, launching_eval, error_text = future.result()
+                prefetched[pkg] = (state, detail, launching_eval, error_text)
+        return prefetched
+
     def mark_package_launched(self, pkg: str) -> None:
         """Register a launch/reopen and bind loading-grace protection."""
+        first_open = False
+        with self._state_lock:
+            first_open = pkg not in self._package_opened
+            self._package_opened.add(pkg)
+        if first_open:
+            try:
+                self._rjn_monitor.start_session()
+            except Exception:  # noqa: BLE001
+                pass
         self._mark_launched(pkg)
         try:
             self._rjn_monitor.note_launch_watchdog(pkg, relaunch=False)
@@ -2027,7 +2136,7 @@ class WatchdogSupervisor:
                     detail["roblox_user_id_source"] = "authenticated_cookie"
 
             if uid <= 0:
-                uname = self._presence_usernames.get(pkg, "")
+                uname = self._resolve_presence_username(pkg)
                 last_attempt = self._presence_lookup_attempt_at.get(pkg, 0.0)
                 should_try = bool(uname) and (time.monotonic() - last_attempt) >= 30.0
                 if should_try:
@@ -2226,7 +2335,14 @@ class WatchdogSupervisor:
             # A just-dispatched launch needs time to start.  Poll Launching
             # and Waiting without force-stopping them again; otherwise the
             # launch timestamp is reset every pass and grace can never end.
-            if state not in {STATUS_LAUNCHING, STATUS_WAITING}:
+            if state not in {
+                STATUS_LAUNCHING,
+                STATUS_WAITING,
+                STATUS_RELAUNCHING,
+                STATUS_REOPENING,
+                STATUS_CHECKING,
+                STATUS_PREPARING,
+            }:
                 dispatched = self._deploy_gate_recovery_cycle(
                     pkg, entry, now, render_callback=render_callback,
                 )
@@ -2324,30 +2440,183 @@ class WatchdogSupervisor:
             "force_close",
             "disconnect",
             "logcat_with_reason",
+            "idle_disconnect",
+            "idle_disconnect_278",
+            "ui_disconnect",
+            "logcat_disconnect",
             "game_crash",
         )
-        return any(token in reason for token in tokens)
+        if any(token in reason for token in tokens):
+            return True
+        friendly = str((detail or {}).get("reason_user_friendly") or "").lower()
+        friendly_tokens = (
+            "disconnect",
+            "idle",
+            "error code",
+            "kicked",
+            "closed",
+            "force-stopped",
+            "crashed",
+        )
+        return any(token in friendly for token in friendly_tokens)
+
+    def _package_was_steady_online(
+        self,
+        pkg: str,
+        prev: str,
+        detail: dict[str, Any] | None = None,
+    ) -> bool:
+        if prev == STATUS_ONLINE:
+            return True
+        if self._last_online_ts.get(pkg):
+            return True
+        try:
+            positive = float((detail or {}).get("last_positive_online_evidence_at") or 0.0)
+            if positive > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+        try:
+            from .status_monitor_runtime import load_online_since
+
+            online_since, _ = load_online_since(pkg)
+            if online_since is not None:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    def _resolve_lifecycle_dead_reason_text(
+        self,
+        detail: dict[str, Any] | None,
+    ) -> str:
+        from .roblox_disconnect_reasons import format_lifecycle_dead_reason
+
+        detail = detail or {}
+        internal = str(
+            detail.get("reason_internal")
+            or detail.get("dead_reason")
+            or detail.get("reason")
+            or ""
+        ).strip()
+        matched = str(
+            detail.get("disconnect_prompt_text")
+            or detail.get("matched_disconnect_text")
+            or ""
+        ).strip()
+        return format_lifecycle_dead_reason(internal, matched or None)
+
+    def _resolve_presence_username(self, pkg: str) -> str:
+        """Best-effort Roblox username for presence API when config is empty."""
+        cached = str(self._presence_usernames.get(pkg) or "").strip()
+        if cached:
+            return cached
+        entry = self.entry_by_pkg.get(pkg) or {}
+        configured = str(entry.get("account_username") or "").strip()
+        if configured:
+            self._presence_usernames[pkg] = configured
+            return configured
+        try:
+            from .package_identity import get_package_identity
+
+            identity = get_package_identity(pkg) or {}
+            identity_user = str(identity.get("username") or "").strip()
+            if identity_user:
+                self._presence_usernames[pkg] = identity_user
+                return identity_user
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from . import package_username as _pu
+
+            scan = _pu.scan_package_username_root(pkg, timeout_seconds=4.0)
+            scanned = str(scan.username or "").strip()
+            if scanned:
+                self._presence_usernames[pkg] = scanned
+                return scanned
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .config import get_package_display_username
+
+            display = str(get_package_display_username(entry, self.cfg) or "").strip()
+            if display and display.lower() not in {"unknown", "n/a", "—", "-"}:
+                self._presence_usernames[pkg] = display
+                return display
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
+    def _package_awaiting_first_open(self, pkg: str) -> bool:
+        return pkg not in self._package_opened
+
+    def _ready_state_detail(self, pkg: str) -> dict[str, Any]:
+        return {
+            "internal_state": "READY",
+            "online_confirmed": "false",
+            "process_running": "false",
+            "in_game": "false",
+            "reason": "awaiting_first_launch",
+            "reason_internal": "awaiting_first_launch",
+            "detection_only": "true",
+        }
+
+    def _fallback_online_allowed(self, pkg: str) -> bool:
+        """Weak online fallbacks wait until the post-launch window has elapsed."""
+        try:
+            row = self._rjn_monitor._states.get(pkg)
+        except Exception:  # noqa: BLE001
+            row = None
+        if row is None or row.launch_started_at <= 0:
+            return True
+        from .rjn_lifecycle_monitor import LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS
+
+        return (time.time() - row.launch_started_at) >= float(LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS)
 
     def _try_online_evidence_fallback(
         self, pkg: str, ev: Any
     ) -> Any:
         """Presence / fallback online proof when gamejoinloadtime is absent."""
+        if self._package_awaiting_first_open(pkg):
+            return ev
+        if not self._fallback_online_allowed(pkg):
+            return ev
+        if ev.process_exists:
+            try:
+                from .package_online_evidence import detect_live_disconnect
+
+                disconnect_reason, matched = detect_live_disconnect(
+                    pkg,
+                    root_info=getattr(self, "_root_info", None),
+                )
+                if disconnect_reason:
+                    self._rjn_monitor.apply_disconnect(
+                        pkg,
+                        time.time(),
+                        reason=disconnect_reason,
+                        matched_text=matched,
+                    )
+                    return self._rjn_monitor.evaluate_package(pkg)
+            except Exception:  # noqa: BLE001
+                pass
         if ev.is_online_confirmed:
             return ev
         current = str(self.status_map.get(pkg) or "").strip()
-        if current not in {
+        allow_fallback = current in {
             STATUS_LAUNCHING,
             STATUS_RELAUNCHING,
             STATUS_CHECKING,
             STATUS_WAITING,
             STATUS_PENDING,
-        }:
+            STATUS_JOIN_FAILED,
+        }
+        if not allow_fallback:
             return ev
         if not ev.process_exists:
             return ev
         presence = None
         try:
-            presence = self._fetch_presence(pkg)
+            presence = self._fetch_presence(pkg, force_cookie_rescan=True)
         except Exception:  # noqa: BLE001
             presence = None
         if presence is not None and getattr(presence, "is_in_game", False):
@@ -2360,6 +2629,37 @@ class WatchdogSupervisor:
             except Exception:  # noqa: BLE001
                 pass
             return self._rjn_monitor.evaluate_package(pkg)
+        try:
+            from .package_online_evidence import (
+                collect_online_evidence,
+                evaluate_online_confirmed,
+            )
+
+            scan = collect_online_evidence(pkg, root_info=self._root_info)
+            decision = evaluate_online_confirmed(scan)
+            if bool(getattr(decision, "is_disconnected", False)):
+                from .package_online_evidence import detect_live_disconnect
+
+                disconnect_reason, matched = detect_live_disconnect(
+                    pkg,
+                    root_info=self._root_info,
+                )
+                self._rjn_monitor.apply_disconnect(
+                    pkg,
+                    time.time(),
+                    reason=disconnect_reason or "ui_disconnect",
+                    matched_text=matched,
+                )
+                return self._rjn_monitor.evaluate_package(pkg)
+            if decision.is_online_confirmed:
+                self._rjn_monitor.confirm_online_evidence(
+                    pkg,
+                    time.time(),
+                    source="activity_in_game",
+                )
+                return self._rjn_monitor.evaluate_package(pkg)
+        except Exception:  # noqa: BLE001
+            pass
         return ev
 
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
@@ -2371,6 +2671,11 @@ class WatchdogSupervisor:
         )
 
         t0 = time.monotonic()
+        if self._package_awaiting_first_open(pkg):
+            detail = self._ready_state_detail(pkg)
+            detail["elapsed_ms"] = int((time.monotonic() - t0) * 1000)
+            self._log_state_evidence(pkg, detail, {}, STATUS_READY)
+            return STATUS_READY, detail
         ev = self._rjn_monitor.evaluate_package(pkg)
         ev = self._try_online_evidence_fallback(pkg, ev)
         current = str(self.status_map.get(pkg) or "").strip()
@@ -2395,8 +2700,12 @@ class WatchdogSupervisor:
             }
             or ev.internal_state == RJN_FAILED
         ):
-            state = STATUS_JOIN_FAILED
-            reason = str(detail.get("reason_user_friendly") or reason)
+            if self._in_loading_grace(pkg) and ev.process_exists:
+                state = STATUS_LAUNCHING
+                reason = "launch_grace_pending_confirmation"
+            else:
+                state = STATUS_JOIN_FAILED
+                reason = str(detail.get("reason_user_friendly") or reason)
         elif ev.internal_state == RJN_DEAD:
             state = STATUS_DEAD
             reason = str(detail.get("reason_internal") or detail.get("dead_reason") or reason)
@@ -2416,6 +2725,7 @@ class WatchdogSupervisor:
             STATUS_CHECKING,
             STATUS_PENDING,
             STATUS_PREPARING,
+            STATUS_READY,
         }:
             state = STATUS_LAUNCHING
             if self._in_loading_grace(pkg):
@@ -2423,8 +2733,12 @@ class WatchdogSupervisor:
             else:
                 reason = "launch_pending_gamejoinloadtime"
         elif current == STATUS_ONLINE and not ev.is_online_confirmed:
-            state = STATUS_DEAD if not ev.process_exists else STATUS_LAUNCHING
-            reason = str(detail.get("reason_internal") or "online_proof_lost")
+            if ev.process_exists:
+                state = STATUS_LAUNCHING
+                reason = str(detail.get("reason_internal") or "online_proof_lost")
+            else:
+                state = STATUS_DEAD
+                reason = str(detail.get("reason_internal") or "online_proof_lost")
         elif current in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED, STATUS_FAILED}:
             state = current
         else:
@@ -2815,11 +3129,44 @@ class WatchdogSupervisor:
 
         if lifecycle_webhook.package_lifecycle_dead_already_notified(pkg):
             return False
-        if (self._in_loading_grace(pkg) or self._in_grace(pkg, now)) and not self._definitive_dead_detail(
-            detail
-        ):
+        was_online = self._package_was_steady_online(pkg, prev, detail)
+        definitive = self._definitive_dead_detail(detail)
+        if state == STATUS_DISCONNECTED and was_online:
+            return True
+        if was_online and definitive:
+            return True
+        if (self._in_loading_grace(pkg) or self._in_grace(pkg, now)) and not definitive:
             return False
         return True
+
+    def _maybe_retry_pending_dead_webhooks(self) -> None:
+        from . import webhook as lifecycle_webhook
+
+        for entry in self.entries:
+            pkg = str(entry.get("package") or "").strip()
+            if not pkg or not lifecycle_webhook.package_lifecycle_dead_pending(pkg):
+                continue
+            pending_state, detail = lifecycle_webhook.load_package_lifecycle_dead_pending(pkg)
+            if not pending_state:
+                continue
+            prev = str(self._prev_state.get(pkg) or STATUS_ONLINE)
+            self._maybe_send_package_dead_webhook(
+                pkg,
+                entry,
+                prev,
+                pending_state,
+                time.time(),
+                detail,
+                allow_pending_retry=True,
+            )
+
+    def _keep_termux_session_alive(self) -> None:
+        try:
+            from .termux_session import ensure_termux_session_alive
+
+            ensure_termux_session_alive(self.cfg)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _should_notify_package_dead(
         self,
@@ -2839,14 +3186,36 @@ class WatchdogSupervisor:
         state: str,
         now: float,
         detail: dict[str, Any] | None = None,
+        *,
+        allow_pending_retry: bool = False,
     ) -> None:
-        if not self._should_attempt_package_dead_webhook(pkg, prev, state, now, detail):
-            return
         from . import webhook as lifecycle_webhook
+
+        if lifecycle_webhook.package_lifecycle_dead_already_notified(pkg):
+            lifecycle_webhook.clear_package_lifecycle_dead_pending(pkg)
+            return
+        if state in _ACCOUNT_DEAD_WEBHOOK_STATES and prev == STATUS_ONLINE:
+            lifecycle_webhook.arm_package_lifecycle_dead_episode(pkg)
+        if not allow_pending_retry and not self._should_attempt_package_dead_webhook(
+            pkg, prev, state, now, detail
+        ):
+            if state in _ACCOUNT_DEAD_WEBHOOK_STATES and self._definitive_dead_detail(detail):
+                lifecycle_webhook.record_package_lifecycle_dead_pending(
+                    pkg,
+                    state=state,
+                    detail=dict(detail or {}),
+                )
+            return
 
         username, source = self._resolve_lifecycle_username(pkg, entry)
         if not username:
             lifecycle_webhook.record_package_lifecycle_username_failure(pkg)
+            if state in _ACCOUNT_DEAD_WEBHOOK_STATES:
+                lifecycle_webhook.record_package_lifecycle_dead_pending(
+                    pkg,
+                    state=state,
+                    detail=dict(detail or {}),
+                )
             log_event(
                 self._logger,
                 "warning",
@@ -2866,14 +3235,17 @@ class WatchdogSupervisor:
             fallback_alive_since=self._online_start_ts.get(pkg),
         )
         if runtime_seconds is None:
-            log_event(
-                self._logger,
-                "warning",
-                "[DENG_REJOIN_PACKAGE_LIFECYCLE_RUNTIME]",
-                package=pkg,
-                event="package_dead",
-                result="runtime_unavailable",
-            )
+            try:
+                from .status_monitor_runtime import load_online_since
+
+                online_since, _ = load_online_since(pkg)
+                if online_since is not None:
+                    runtime_seconds = max(0.0, dead_at - float(online_since))
+            except Exception:  # noqa: BLE001
+                pass
+        if runtime_seconds is None and self._last_online_ts.get(pkg):
+            runtime_seconds = max(0.0, dead_at - float(self._last_online_ts[pkg]))
+        reason_text = self._resolve_lifecycle_dead_reason_text(detail)
         try:
             ok, _msg = lifecycle_webhook.send_package_lifecycle_alert(
                 self.cfg,
@@ -2881,17 +3253,12 @@ class WatchdogSupervisor:
                 package=pkg,
                 username=username,
                 runtime_seconds=runtime_seconds,
-                dead_reason=str(
-                    (detail or {}).get("reason_user_friendly")
-                    or (detail or {}).get("dead_reason")
-                    or (detail or {}).get("reason_internal")
-                    or (detail or {}).get("reason")
-                    or ""
-                ),
+                dead_reason=reason_text,
                 ram_display=str((detail or {}).get("ram_display") or ""),
             )
             if ok:
                 lifecycle_webhook.mark_package_lifecycle_dead_notified(pkg, username=username)
+                lifecycle_webhook.clear_package_lifecycle_dead_pending(pkg)
         except Exception:  # noqa: BLE001
             pass
 
@@ -3309,11 +3676,12 @@ class WatchdogSupervisor:
                     pass
                 _next_render = time.time() + display_interval
 
-        while not self.stop_event.is_set() and not self._all_launches_completed:
+        while not self.stop_event.is_set() and not self._watchdog_monitoring_active():
             log_event(
                 logger, "debug", "[DENG_REJOIN_WATCHDOG_LAUNCH_LATCH]",
                 waiting="true",
                 all_launches_completed="false",
+                opened_packages=len(self._package_opened),
             )
             self._interruptible_sleep(1.0)
 
@@ -3334,6 +3702,8 @@ class WatchdogSupervisor:
             total = len(self.packages)
             round_robin_sec = float(self.PACKAGE_ROUND_ROBIN_SECONDS)
             self._watchdog_round_rate_limited = False
+            self._keep_termux_session_alive()
+            self._maybe_retry_pending_dead_webhooks()
 
             _any_url = any(
                 bool(str(effective_private_server_url(e, self.cfg) or "").strip())
@@ -3359,10 +3729,17 @@ class WatchdogSupervisor:
 
             checked = 0
             round_started = time.monotonic()
+            opened_packages = self._opened_packages()
+            monitor_total = len(opened_packages) or len(self.packages)
+            prefetched = self._prefetch_package_detection(opened_packages)
+            opened_index = 0
             for idx, pkg in enumerate(self.packages, 1):
                 if self.stop_event.is_set():
                     break
+                if self._package_awaiting_first_open(pkg):
+                    continue
 
+                opened_index += 1
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = ""
 
@@ -3374,9 +3751,9 @@ class WatchdogSupervisor:
                         phase="package_check",
                         session_id=str(self.cfg.get("start_session_id") or ""),
                         screen_mode=str(self.cfg.get("screen_mode") or ""),
-                        package_count=total,
+                        package_count=monitor_total,
                         package=pkg,
-                        package_index=idx,
+                        package_index=opened_index,
                         watchdog_round=self._round,
                     )
                 except Exception:  # noqa: BLE001
@@ -3384,9 +3761,11 @@ class WatchdogSupervisor:
                 log_event(
                     logger, "info", "[DENG_REJOIN_PACKAGE_CHECK_START]",
                     round=self._round,
-                    index=idx,
-                    total=total,
+                    index=opened_index,
+                    total=monitor_total,
                     package=pkg,
+                    detection_workers=self._detection_worker_count(),
+                    prefetch_used=str(pkg in prefetched).lower(),
                 )
 
                 prev = self._prev_state.get(pkg, self.status_map.get(pkg, ""))
@@ -3395,28 +3774,31 @@ class WatchdogSupervisor:
                 self._set_status(pkg, STATUS_CHECKING)
                 _maybe_render(force=True)
                 self._interruptible_sleep(self.PACKAGE_CHECKING_HOLD_SECONDS)
-                try:
-                    if launching_eval:
-                        state, detail = self._evaluate_launching_or_pending(pkg, entry)
-                    else:
-                        state, detail = self._detect_package_state(pkg, entry)
-                except Exception as exc:  # noqa: BLE001
-                    error_text = str(exc)[:180]
-                    state = prev if prev in {STATUS_ONLINE, STATUS_DEAD} else STATUS_DEAD
-                    detail = {
-                        "process_running": "unknown",
-                        "in_game": "unknown",
-                        "heartbeat_ok": "unknown",
-                        "warning_detected": "unknown",
-                        "elapsed_ms": int((time.monotonic() - check_started) * 1000),
-                        "reason": "detector_exception",
-                    }
+                if pkg in prefetched:
+                    state, detail, launching_eval, error_text = prefetched[pkg]
+                else:
+                    try:
+                        if launching_eval:
+                            state, detail = self._evaluate_launching_or_pending(pkg, entry)
+                        else:
+                            state, detail = self._detect_package_state(pkg, entry)
+                    except Exception as exc:  # noqa: BLE001
+                        error_text = str(exc)[:180]
+                        state = prev if prev in {STATUS_ONLINE, STATUS_DEAD} else STATUS_DEAD
+                        detail = {
+                            "process_running": "unknown",
+                            "in_game": "unknown",
+                            "heartbeat_ok": "unknown",
+                            "warning_detected": "unknown",
+                            "elapsed_ms": int((time.monotonic() - check_started) * 1000),
+                            "reason": "detector_exception",
+                        }
 
                 log_event(
                     logger, "info", "[DENG_REJOIN_PACKAGE_CHECK]",
                     round=self._round,
-                    index=idx,
-                    total=total,
+                    index=opened_index,
+                    total=monitor_total,
                     package=pkg,
                     process_running=detail.get("process_running", "unknown"),
                     in_game=detail.get("in_game", "unknown"),
@@ -3429,8 +3811,8 @@ class WatchdogSupervisor:
                 log_event(
                     logger, "info", "[DENG_REJOIN_PACKAGE_CHECK_END]",
                     round=self._round,
-                    index=idx,
-                    total=total,
+                    index=opened_index,
+                    total=monitor_total,
                     package=pkg,
                     state=state,
                     elapsed_ms=detail.get("elapsed_ms", int((time.monotonic() - check_started) * 1000)),
@@ -3439,7 +3821,7 @@ class WatchdogSupervisor:
                 checked += 1
 
                 if state == STATUS_FAILED:
-                    state = STATUS_DEAD
+                    state = STATUS_JOIN_FAILED
                 process_hard_drop = (
                     state == STATUS_DEAD
                     and str(detail.get("reason") or "") == "root_ps_missing"
@@ -3497,8 +3879,8 @@ class WatchdogSupervisor:
                     self._run_blocking_recovery_gate(
                         pkg,
                         entry,
-                        package_index=idx,
-                        package_total=total,
+                        package_index=opened_index,
+                        package_total=monitor_total,
                         render_callback=render_callback,
                     )
                     _maybe_render()
@@ -3510,11 +3892,11 @@ class WatchdogSupervisor:
                         logger, "info", "[DENG_REJOIN_WATCHDOG_ROUND_ROBIN_PAUSE]",
                         round=self._round,
                         package=pkg,
-                        next_package_index=(idx + 1) if idx < total else 1,
+                        next_package_index=(opened_index + 1) if opened_index < monitor_total else 1,
                         checking_hold_sec=self.PACKAGE_CHECKING_HOLD_SECONDS,
-                        tail_pause_sec=self.PACKAGE_ROUND_ROBIN_TAIL_SECONDS,
+                        tail_pause_sec=self._round_robin_tail_seconds(),
                     )
-                    self._interruptible_sleep(self.PACKAGE_ROUND_ROBIN_TAIL_SECONDS)
+                    self._interruptible_sleep(self._round_robin_tail_seconds())
 
             _counts = {
                 "online":       sum(1 for v in self.status_map.values() if v == STATUS_ONLINE),

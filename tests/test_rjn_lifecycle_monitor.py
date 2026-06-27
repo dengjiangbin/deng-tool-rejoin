@@ -147,6 +147,26 @@ class RjnDisconnectTests(unittest.TestCase):
         self.assertFalse(ev.is_online_confirmed)
         self.assertEqual(ev.internal_state, STATE_DISCONNECTED)
 
+    def test_idle_disconnect_ui_while_online_marks_disconnected(self) -> None:
+        mon = RjnLifecycleMonitor(["com.pkg.idle"])
+        mon._uid_map = {"com.pkg.idle": "301"}
+        row = mon._states["com.pkg.idle"]
+        row.internal_state = STATE_ONLINE_CONFIRMED
+        row.last_positive_online_evidence_at = time.time() - 120
+        row.online_since = time.time() - 120
+        row.online_evidence_source = "activity_in_game"
+        row.last_disconnect_scan_at = 0.0
+        with patch.object(mon, "_process_check", return_value=(True, ["4"])), \
+             patch.object(mon, "_detect_live_disconnect", return_value=("idle_disconnect_278", "Error Code: 278 idle")):
+            ev = mon.evaluate_package("com.pkg.idle")
+        self.assertFalse(ev.is_online_confirmed)
+        self.assertEqual(ev.internal_state, STATE_DISCONNECTED)
+        self.assertEqual(row.last_transition_reason, "idle_disconnect_278")
+        self.assertIn(
+            "idle",
+            ev.detail.get("reason_user_friendly", "").lower(),
+        )
+
     def test_doteleport_then_gamejoin(self) -> None:
         mon = RjnLifecycleMonitor(["com.pkg.d"])
         mon._uid_map = {"com.pkg.d": "400"}
@@ -180,6 +200,7 @@ class RjnForceCloseTests(unittest.TestCase):
         row = mon._states["com.pkg.e"]
         row.internal_state = STATE_ONLINE_CONFIRMED
         row.last_gamejoinloadtime_at = time.time() - 10
+        row.last_positive_online_evidence_at = time.time() - 10
         row.online_since = time.time() - 10
         with patch.object(mon, "_process_check", return_value=(False, [])):
             mon.evaluate_package("com.pkg.e")
@@ -204,7 +225,7 @@ class RjnWatchdogTimeoutTests(unittest.TestCase):
 
 
 class RjnLaunchingDeadTests(unittest.TestCase):
-    def test_process_missing_during_launching_marks_dead(self) -> None:
+    def test_process_missing_during_launching_stays_launching(self) -> None:
         mon = RjnLifecycleMonitor(["com.pkg.launch"])
         mon._uid_map = {"com.pkg.launch": "800"}
         mon._uid_to_package = {"800": "com.pkg.launch"}
@@ -213,7 +234,40 @@ class RjnLaunchingDeadTests(unittest.TestCase):
         with patch.object(mon, "_process_check", return_value=(False, [])):
             mon.evaluate_package("com.pkg.launch")
             ev = mon.evaluate_package("com.pkg.launch")
-        self.assertEqual(ev.internal_state, STATE_DEAD)
+        self.assertEqual(ev.internal_state, STATE_LAUNCHING)
+        self.assertFalse(ev.is_online_confirmed)
+
+    def test_launch_online_fallback_before_watchdog_timeout(self) -> None:
+        mon = RjnLifecycleMonitor(["com.pkg.g"], launch_watchdog_seconds=120.0)
+        t0 = 4_000_000.0
+        mon.begin_launch_watchdog("com.pkg.g")
+        row = mon._states["com.pkg.g"]
+        row.launch_started_at = t0
+        row.watchdog_active = True
+        def _confirm(_pkg: str, _now: float) -> bool:
+            mon._confirm_online_evidence(_pkg, _now, source="activity_in_game")
+            return True
+
+        with patch("agent.rjn_lifecycle_monitor.time.time", return_value=t0 + 20), \
+             patch.object(mon, "_process_check", return_value=(True, ["7"])), \
+             patch.object(mon, "_try_confirm_launch_online", side_effect=_confirm) as confirm:
+            ev = mon.evaluate_package("com.pkg.g")
+        confirm.assert_called_once()
+        self.assertTrue(ev.is_online_confirmed)
+        self.assertEqual(row.internal_state, STATE_ONLINE_CONFIRMED)
+
+    def test_weak_online_confirmation_deferred_before_min_age(self) -> None:
+        mon = RjnLifecycleMonitor(["com.pkg.h"])
+        t0 = 5_000_000.0
+        mon.begin_launch_watchdog("com.pkg.h")
+        row = mon._states["com.pkg.h"]
+        row.launch_started_at = t0
+        with patch("agent.rjn_lifecycle_monitor.time.time", return_value=t0 + 5):
+            mon._confirm_online_evidence("com.pkg.h", t0 + 5, source="logcat_join_hint")
+        self.assertNotEqual(row.internal_state, STATE_ONLINE_CONFIRMED)
+        with patch("agent.rjn_lifecycle_monitor.time.time", return_value=t0 + 21):
+            mon._confirm_online_evidence("com.pkg.h", t0 + 21, source="logcat_join_hint")
+        self.assertEqual(row.internal_state, STATE_ONLINE_CONFIRMED)
 
 
 class RjnRecentsNotOnlineTests(unittest.TestCase):

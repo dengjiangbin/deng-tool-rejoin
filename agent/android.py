@@ -725,7 +725,11 @@ def enforce_landscape_home_state(*, phase: str = "before_start", screen_mode_con
         root = detect_root()
         correction_applied.extend(
             r.get("cmd", "")
-            for r in _apply_user_rotation(target, root_info=root, strict=False)
+            for r in _apply_user_rotation(
+                target,
+                root_info=root,
+                strict=(target == "portrait"),
+            )
             if r.get("cmd")
         )
         time.sleep(0.3)
@@ -821,7 +825,12 @@ def enforce_screen_orientation(
     protected.add("com.termux")
     root_info = detect_root()
     before = get_display_orientation_state()
-    apply_results = _apply_user_rotation(requested, root_info=root_info)
+    strict_rotation = requested == "portrait"
+    apply_results = _apply_user_rotation(
+        requested,
+        root_info=root_info,
+        strict=strict_rotation,
+    )
     time.sleep(0.4)
     after = get_display_orientation_state()
     success = after.get("orientation") == requested
@@ -838,7 +847,7 @@ def enforce_screen_orientation(
             override_action = "force_stop"
             if not stop_result.ok:
                 error = (stop_result.stderr or stop_result.stdout or "force-stop failed")[:180]
-            _apply_user_rotation(requested, root_info=root_info)
+            _apply_user_rotation(requested, root_info=root_info, strict=strict_rotation)
             time.sleep(0.5)
             after = get_display_orientation_state()
             success = after.get("orientation") == requested

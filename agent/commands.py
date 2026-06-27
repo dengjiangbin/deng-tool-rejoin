@@ -5311,6 +5311,15 @@ def _prepare_automatic_layout(
                 row.get("backup_created"),
             )
 
+        if _screen_mode == "portrait":
+            try:
+                android.enforce_screen_orientation(
+                    "portrait",
+                    protected_packages=[*packages, "com.termux"],
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
         return cfg, f"layout_prepared n={n} mode={pipeline.mode}"
     except Exception as exc:  # noqa: BLE001
         _layout_log.debug("Layout error (non-fatal): %s", exc)

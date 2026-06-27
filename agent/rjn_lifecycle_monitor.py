@@ -26,6 +26,15 @@ WATCHED_PHRASES = (
 )
 DEFAULT_LAUNCH_WATCHDOG_SECONDS = 120.0
 PROCESS_MISSING_CONFIRM = 2
+DISCONNECT_SCAN_INTERVAL_SECONDS = 5.0
+LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS = 20.0
+
+_UID_OPTIONAL_ONLINE_SOURCES = frozenset({
+    "presence_in_experience",
+    "activity_in_game",
+    "online_evidence",
+    "logcat_join_hint",
+})
 
 STATE_STOPPED = "STOPPED"
 STATE_LAUNCHING = "LAUNCHING"
@@ -46,10 +55,17 @@ _ACTIVE_MONITOR_STATES = frozenset({
 })
 
 _UID_RE = re.compile(r"userId=(\d+)")
+_LOGCAT_HEADER_RE = re.compile(
+    r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+(\d+)\s+(\d+)\s+(\d+)\s"
+)
 _LOGCAT_UID_RE = re.compile(r"uid=(\d+)")
 _GAME_JOIN_RE = re.compile(r"gamejoinloadtime", re.I)
 _DO_TELEPORT_RE = re.compile(r"doTeleport", re.I)
 _WITH_REASON_RE = re.compile(r"with reason", re.I)
+_IDLE_DISCONNECT_RE = re.compile(
+    r"(disconnected for being idle|Error Code:\s*278|idle\s+\d+\s+minutes|You were disconnected.*idle)",
+    re.I,
+)
 _POSITIVE_ONLINE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("gamejoinloadtime", re.compile(r"gamejoinloadtime", re.I)),
     (
@@ -119,6 +135,8 @@ class PackageRjnState:
     last_offline_evidence_at: float = 0.0
     last_dead_detected_at: float = 0.0
     last_dead_reason: str = ""
+    last_disconnect_scan_at: float = 0.0
+    disconnect_prompt_text: str = ""
 
 
 @dataclass
@@ -139,6 +157,15 @@ def _sanitize_line(line: str) -> str:
     return text
 
 
+def _package_force_stopped_quick(package: str) -> bool:
+    try:
+        from .package_online_evidence import _package_force_stopped
+
+        return bool(_package_force_stopped(package))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def resolve_package_uid(package: str) -> UidResolution:
     pkg = android.validate_package_name(package)
     now = time.time()
@@ -157,6 +184,19 @@ def resolve_package_uid(package: str) -> UidResolution:
                 resolved_at=now,
                 command_output_sample=text[:400],
             )
+        try:
+            from .android_logcat_detector import package_uid_map
+
+            mapped = package_uid_map([pkg]).get(pkg)
+            if mapped:
+                return UidResolution(
+                    package=pkg,
+                    uid=str(mapped),
+                    resolved_at=now,
+                    command_output_sample=text[:400],
+                )
+        except Exception:  # noqa: BLE001
+            pass
         return UidResolution(
             package=pkg,
             uid=None,
@@ -194,6 +234,9 @@ class RjnLifecycleMonitor:
         }
         self._uid_map: dict[str, str] = {}
         self._uid_to_package: dict[str, str] = {}
+        self._pid_map: dict[str, str] = {}
+        self._pid_to_package: dict[str, str] = {}
+        self._last_pid_refresh_at: float = 0.0
         self._uid_resolutions: dict[str, UidResolution] = {}
         self._recent_events: list[LogcatEvent] = []
         self._monitor_started_at: float = 0.0
@@ -209,6 +252,7 @@ class RjnLifecycleMonitor:
         self._ignored_uid_lines: list[dict[str, Any]] = []
         self._detector_errors: list[str] = []
         self._session_started: bool = False
+        self._last_logcat_poll_at: float = 0.0
 
     def refresh_uid_map(self) -> dict[str, str]:
         with self._lock:
@@ -224,10 +268,23 @@ class RjnLifecycleMonitor:
                 else:
                     row.uid = ""
                     row.uid_error = res.error or "uid_unresolved"
-                    if row.internal_state not in {STATE_DEAD, STATE_STOPPED}:
-                        row.internal_state = STATE_FAILED
-                        row.last_transition_reason = row.uid_error
             return dict(self._uid_map)
+
+    def refresh_pid_map(self) -> dict[str, str]:
+        with self._lock:
+            from .android_logcat_detector import package_pid_map
+
+            self._pid_map = package_pid_map(self.packages)
+            self._pid_to_package = {
+                pid: pkg for pkg, pid in self._pid_map.items() if pid
+            }
+            for pkg, row in self._states.items():
+                _exists, pids = self._process_check(pkg)
+                for pid in pids:
+                    self._pid_map[pkg] = pid
+                    self._pid_to_package[pid] = pkg
+            self._last_pid_refresh_at = time.time()
+            return dict(self._pid_map)
 
     def clear_logcat(self) -> bool:
         try:
@@ -247,6 +304,7 @@ class RjnLifecycleMonitor:
             self._monitor_started_at = time.time()
             self.clear_logcat()
             self.refresh_uid_map()
+            self.refresh_pid_map()
             self._start_logcat_thread()
 
     def stop_session(self) -> None:
@@ -322,14 +380,121 @@ class RjnLifecycleMonitor:
             self._logcat_pid = 0
 
     def _uid_for_line(self, line: str) -> str | None:
+        match = _LOGCAT_HEADER_RE.match(line.strip())
+        if match:
+            return match.group(1)
         match = _LOGCAT_UID_RE.search(line)
         return match.group(1) if match else None
+
+    def _pid_for_line(self, line: str) -> str | None:
+        match = _LOGCAT_HEADER_RE.match(line.strip())
+        return match.group(2) if match else None
+
+    def _package_for_line(self, line: str, uid: str | None) -> str | None:
+        if uid:
+            pkg = self._uid_to_package.get(uid)
+            if pkg:
+                return pkg
+        pid = self._pid_for_line(line)
+        if pid:
+            pkg = self._pid_to_package.get(pid)
+            if pkg:
+                return pkg
+        matches = [pkg for pkg in self.packages if pkg and pkg in line]
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def _match_positive_online(self, line: str) -> str | None:
         for source, pattern in _POSITIVE_ONLINE_RES:
             if pattern.search(line):
                 return source
         return None
+
+    def _poll_recent_logcat(self) -> None:
+        """Backfill join/disconnect hints from recent logcat when stream misses lines."""
+        now = time.time()
+        if now - self._last_logcat_poll_at < 5.0:
+            return
+        self._last_logcat_poll_at = now
+        if now - self._last_pid_refresh_at >= 8.0:
+            self.refresh_pid_map()
+        try:
+            from .android_logcat_detector import poll_logcat_events
+
+            events, _state = poll_logcat_events(
+                self.packages,
+                uid_map=dict(self._uid_map),
+                pid_map=dict(self._pid_map),
+                max_lines=400,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._detector_errors.append(f"logcat_poll:{exc}"[:120])
+            return
+        for event in events:
+            if event.event == "package_logcat_game_join_loaded":
+                self._confirm_online_evidence(
+                    event.package,
+                    event.at,
+                    source="gamejoinloadtime",
+                )
+            elif event.event == "package_logcat_join_hint":
+                self._confirm_online_evidence(
+                    event.package,
+                    event.at,
+                    source="logcat_join_hint",
+                )
+            elif event.event == "package_logcat_reason":
+                self._apply_phrase(
+                    event.package,
+                    "with reason",
+                    event.at,
+                    LogcatEvent(
+                        package=event.package,
+                        uid=self._uid_map.get(event.package, ""),
+                        phrase="with reason",
+                        raw_line_sanitized=_sanitize_line(event.line),
+                        seen_at=event.at,
+                    ),
+                )
+            elif event.event == "package_logcat_idle_disconnect":
+                self._apply_phrase(
+                    event.package,
+                    "idle_disconnect_278",
+                    event.at,
+                    LogcatEvent(
+                        package=event.package,
+                        uid=self._uid_map.get(event.package, ""),
+                        phrase="idle_disconnect_278",
+                        raw_line_sanitized=_sanitize_line(event.line),
+                        seen_at=event.at,
+                    ),
+                )
+            elif event.event == "package_process_missing":
+                row = self._states.get(event.package)
+                if row and self._was_ever_online_confirmed(row):
+                    row.process_missing_streak = PROCESS_MISSING_CONFIRM
+                    row.force_close_detected = True
+                    self._transition(
+                        event.package,
+                        STATE_DEAD,
+                        "process_missing",
+                        at=event.at,
+                        offline=True,
+                    )
+            elif event.event == "package_logcat_teleport":
+                self._apply_phrase(
+                    event.package,
+                    "doTeleport",
+                    event.at,
+                    LogcatEvent(
+                        package=event.package,
+                        uid=self._uid_map.get(event.package, ""),
+                        phrase="doTeleport",
+                        raw_line_sanitized=_sanitize_line(event.line),
+                        seen_at=event.at,
+                    ),
+                )
 
     def _handle_logcat_line(self, line: str) -> None:
         if not line:
@@ -338,24 +503,27 @@ class RjnLifecycleMonitor:
         if self._monitor_started_at and seen_at < self._monitor_started_at:
             return
         uid = self._uid_for_line(line)
-        if not uid:
-            return
         with self._lock:
-            pkg = self._uid_to_package.get(uid)
+            pkg = self._package_for_line(line, uid)
             if not pkg:
-                self._ignored_uid_lines.append({
-                    "uid": uid,
-                    "line": _sanitize_line(line),
-                    "at": seen_at,
-                    "reason": "uid_not_mapped",
-                })
-                if len(self._ignored_uid_lines) > 32:
-                    self._ignored_uid_lines = self._ignored_uid_lines[-32:]
+                if uid:
+                    self._ignored_uid_lines.append({
+                        "uid": uid,
+                        "line": _sanitize_line(line),
+                        "at": seen_at,
+                        "reason": "uid_not_mapped",
+                    })
+                    if len(self._ignored_uid_lines) > 32:
+                        self._ignored_uid_lines = self._ignored_uid_lines[-32:]
                 return
-            self._logcat_last_uid_matched_at = seen_at
+            if uid:
+                self._logcat_last_uid_matched_at = seen_at
+            effective_uid = uid or self._uid_map.get(pkg) or ""
             phrase = ""
             if _WITH_REASON_RE.search(line):
                 phrase = "with reason"
+            elif _IDLE_DISCONNECT_RE.search(line):
+                phrase = "idle_disconnect_278"
             elif _DO_TELEPORT_RE.search(line):
                 phrase = "doTeleport"
             else:
@@ -366,27 +534,20 @@ class RjnLifecycleMonitor:
                     hint in line.lower()
                     for hint in ("placelauncher", "joingame", "in_experience", "game loaded")
                 ):
-                    self._ignored_uid_lines.append({
-                        "package": pkg,
-                        "uid": uid,
-                        "line": _sanitize_line(line),
-                        "at": seen_at,
-                        "reason": "positive_hint_unmatched",
-                    })
-                    if len(self._ignored_uid_lines) > 32:
-                        self._ignored_uid_lines = self._ignored_uid_lines[-32:]
-                    return
+                    phrase = "logcat_join_hint"
                 else:
                     return
 
             event = LogcatEvent(
                 package=pkg,
-                uid=uid,
+                uid=effective_uid,
                 phrase=phrase,
                 raw_line_sanitized=_sanitize_line(line),
                 seen_at=seen_at,
             )
             if phrase == "with reason":
+                self._apply_phrase(pkg, phrase, seen_at, event)
+            elif phrase == "idle_disconnect_278":
                 self._apply_phrase(pkg, phrase, seen_at, event)
             elif phrase == "doTeleport":
                 self._apply_phrase(pkg, phrase, seen_at, event)
@@ -413,6 +574,10 @@ class RjnLifecycleMonitor:
         if new_state in {STATE_DEAD, STATE_DISCONNECTED, STATE_FAILED}:
             row.last_dead_detected_at = at
             row.last_dead_reason = reason
+            row.last_positive_online_evidence_at = 0.0
+            row.last_gamejoinloadtime_at = 0.0
+            row.online_evidence_source = ""
+            row.watchdog_active = False
         if offline:
             row.online_since = 0.0
             row.runtime_source = ""
@@ -435,6 +600,15 @@ class RjnLifecycleMonitor:
         event: LogcatEvent | None = None,
     ) -> None:
         row = self._states[pkg]
+        source_norm = str(source or "").strip()
+        if row.launch_started_at > 0:
+            if source_norm != "gamejoinloadtime" and at < row.launch_started_at:
+                return
+            if (
+                source_norm != "gamejoinloadtime"
+                and (at - row.launch_started_at) < LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS
+            ):
+                return
         row.last_logcat_event_at = at
         row.watchdog_active = False
         row.launch_failed_reason = ""
@@ -477,6 +651,69 @@ class RjnLifecycleMonitor:
         with self._lock:
             self._confirm_online_evidence(pkg, float(at), source=str(source or "online_evidence"))
 
+    def apply_disconnect(
+        self,
+        package: str,
+        at: float,
+        *,
+        reason: str,
+        matched_text: str | None = None,
+    ) -> None:
+        """External disconnect proof (idle UI, logcat, etc.)."""
+        pkg = str(package or "").strip()
+        internal_reason = str(reason or "ui_disconnect").strip() or "ui_disconnect"
+        if not pkg:
+            return
+        with self._lock:
+            self._states.setdefault(pkg, PackageRjnState(package=pkg))
+            row = self._states[pkg]
+            row.last_with_reason_at = float(at)
+            prompt = str(matched_text or "").strip()
+            if prompt:
+                row.disconnect_prompt_text = prompt[:240]
+            self._transition(
+                pkg,
+                STATE_DISCONNECTED,
+                internal_reason,
+                at=float(at),
+                offline=True,
+            )
+
+    def _was_ever_online_confirmed(self, row: PackageRjnState) -> bool:
+        return row.last_positive_online_evidence_at > 0
+
+    def _try_confirm_launch_online(self, pkg: str, now: float) -> bool:
+        """Best-effort in-game proof during launch before watchdog marks join failed."""
+        try:
+            from .package_online_evidence import (
+                collect_online_evidence,
+                evaluate_online_confirmed,
+            )
+
+            scan = collect_online_evidence(pkg, root_info=self._root_info)
+            decision = evaluate_online_confirmed(scan)
+            if bool(getattr(decision, "is_disconnected", False)):
+                return False
+            if decision.is_online_confirmed:
+                self._confirm_online_evidence(pkg, now, source="activity_in_game")
+                return True
+        except Exception as exc:  # noqa: BLE001
+            self._detector_errors.append(f"launch_online_fallback:{exc}"[:120])
+        return False
+
+    def _detect_live_disconnect(self, package: str) -> tuple[str | None, str | None]:
+        try:
+            from .package_online_evidence import detect_live_disconnect
+
+            reason, matched = detect_live_disconnect(
+                package,
+                root_info=getattr(self, "_root_info", None),
+            )
+            return reason, matched
+        except Exception as exc:  # noqa: BLE001
+            self._detector_errors.append(f"disconnect_scan:{exc}"[:120])
+            return None, None
+
     def _apply_phrase(self, pkg: str, phrase: str, at: float, event: LogcatEvent) -> None:
         row = self._states[pkg]
         row.last_logcat_event_at = at
@@ -484,10 +721,26 @@ class RjnLifecycleMonitor:
             self._confirm_online_evidence(pkg, at, source="gamejoinloadtime", event=event)
         elif phrase == "with reason":
             row.last_with_reason_at = at
+            prompt = getattr(event, "raw_line_sanitized", "") if event is not None else ""
+            if prompt:
+                row.disconnect_prompt_text = str(prompt)[:240]
             self._transition(
                 pkg,
                 STATE_DISCONNECTED,
                 "logcat_with_reason",
+                at=at,
+                offline=True,
+            )
+            event.action_taken = "DISCONNECTED"
+        elif phrase == "idle_disconnect_278":
+            row.last_with_reason_at = at
+            prompt = getattr(event, "raw_line_sanitized", "") if event is not None else ""
+            if prompt:
+                row.disconnect_prompt_text = str(prompt)[:240]
+            self._transition(
+                pkg,
+                STATE_DISCONNECTED,
+                "idle_disconnect_278",
                 at=at,
                 offline=True,
             )
@@ -548,6 +801,7 @@ class RjnLifecycleMonitor:
         now = time.time()
         failed: list[str] = []
         self._ensure_logcat_stream()
+        self._poll_recent_logcat()
         with self._lock:
             row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
             effective_uid = row.uid or self._uid_map.get(pkg) or ""
@@ -562,6 +816,12 @@ class RjnLifecycleMonitor:
 
             if row.watchdog_active and row.launch_started_at > 0:
                 age = now - row.launch_started_at
+                if (
+                    age >= LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS
+                    and row.last_positive_online_evidence_at < row.launch_started_at
+                    and process_exists
+                ):
+                    self._try_confirm_launch_online(pkg, now)
                 if age > self._launch_watchdog_seconds:
                     had_positive = row.last_positive_online_evidence_at >= row.launch_started_at
                     if not had_positive and row.last_gamejoinloadtime_at < row.launch_started_at:
@@ -581,13 +841,22 @@ class RjnLifecycleMonitor:
             if not process_exists:
                 row.process_missing_streak += 1
                 if row.process_missing_streak >= PROCESS_MISSING_CONFIRM:
-                    row.force_close_detected = True
-                    active = (
-                        row.internal_state in _ACTIVE_MONITOR_STATES
-                        or row.watchdog_active
-                        or row.launch_started_at > 0
-                    )
-                    if active:
+                    if self._was_ever_online_confirmed(row):
+                        row.force_close_detected = True
+                        self._transition(
+                            pkg,
+                            STATE_DEAD,
+                            "process_missing",
+                            at=now,
+                            offline=True,
+                        )
+                    elif (
+                        row.watchdog_active
+                        or row.internal_state in {STATE_LAUNCHING, STATE_RELAUNCHING}
+                    ):
+                        row.process_missing_streak = 0
+                    elif row.internal_state == STATE_ONLINE_CONFIRMED:
+                        row.force_close_detected = True
                         self._transition(
                             pkg,
                             STATE_DEAD,
@@ -598,6 +867,23 @@ class RjnLifecycleMonitor:
             else:
                 row.process_missing_streak = 0
                 row.force_close_detected = False
+                if (
+                    row.internal_state in {STATE_ONLINE_CONFIRMED, STATE_TELEPORTING}
+                    and now - row.last_disconnect_scan_at >= DISCONNECT_SCAN_INTERVAL_SECONDS
+                ):
+                    row.last_disconnect_scan_at = now
+                    disconnect_reason, matched_text = self._detect_live_disconnect(pkg)
+                    if disconnect_reason:
+                        row.last_with_reason_at = now
+                        if matched_text:
+                            row.disconnect_prompt_text = str(matched_text)[:240]
+                        self._transition(
+                            pkg,
+                            STATE_DISCONNECTED,
+                            disconnect_reason,
+                            at=now,
+                            offline=True,
+                        )
 
             internal = row.internal_state
             has_positive_evidence = (
@@ -605,6 +891,9 @@ class RjnLifecycleMonitor:
                 and row.last_positive_online_evidence_at > 0
             )
             is_online = has_positive_evidence and process_exists
+            if process_exists and _package_force_stopped_quick(pkg):
+                failed.append("force_stopped")
+                is_online = False
             if internal == STATE_ONLINE_CONFIRMED and not process_exists:
                 failed.append("process_missing")
                 is_online = False
@@ -613,7 +902,8 @@ class RjnLifecycleMonitor:
                 is_online = False
             if not effective_uid:
                 failed.append("uid_not_resolved")
-                is_online = False
+                if row.online_evidence_source not in _UID_OPTIONAL_ONLINE_SOURCES:
+                    is_online = False
             if internal != STATE_ONLINE_CONFIRMED:
                 failed.append("no_positive_online_evidence")
                 is_online = False
@@ -627,7 +917,21 @@ class RjnLifecycleMonitor:
                 relaunching=bool(row.relaunching or internal == STATE_RELAUNCHING),
             )
             reason = self._decision_reason(row, is_online, failed)
-            from .lifecycle_reasons import format_user_friendly_dead_reason
+            from .roblox_disconnect_reasons import format_lifecycle_dead_reason
+
+            dead_reason_key = row.last_transition_reason or row.launch_failed_reason or row.last_dead_reason
+            if is_online:
+                reason_user_friendly = ""
+            elif internal in {STATE_DISCONNECTED, STATE_DEAD, STATE_FAILED}:
+                reason_user_friendly = format_lifecycle_dead_reason(
+                    dead_reason_key,
+                    row.disconnect_prompt_text or None,
+                )
+            else:
+                reason_user_friendly = format_lifecycle_dead_reason(
+                    row.launch_failed_reason or row.last_transition_reason or reason,
+                    row.disconnect_prompt_text or None,
+                )
 
             detail = {
                 "internal_state": internal,
@@ -649,9 +953,9 @@ class RjnLifecycleMonitor:
                 "last_with_reason_at": row.last_with_reason_at or "",
                 "launch_failed_reason": row.launch_failed_reason or "",
                 "reason_internal": row.last_transition_reason or row.launch_failed_reason or reason,
-                "reason_user_friendly": format_user_friendly_dead_reason(
-                    row.launch_failed_reason or row.last_transition_reason or reason
-                ),
+                "reason_user_friendly": reason_user_friendly,
+                "disconnect_prompt_text": row.disconnect_prompt_text or "",
+                "matched_disconnect_text": row.disconnect_prompt_text or "",
                 "why_still_launching": (
                     reason
                     if internal in {STATE_LAUNCHING, STATE_RELAUNCHING} and not is_online
@@ -696,6 +1000,10 @@ class RjnLifecycleMonitor:
         if row.force_close_detected or "process_missing" in failed:
             return "process_missing"
         if row.last_with_reason_at and row.last_with_reason_at >= row.last_positive_online_evidence_at:
+            if row.last_transition_reason == "idle_disconnect_278":
+                return "idle_disconnect_278"
+            if row.last_transition_reason in {"ui_disconnect", "logcat_disconnect"}:
+                return row.last_transition_reason
             return "UID-matched logcat line contained with reason"
         if row.launch_failed_reason in {"launch_watchdog_timeout", "no_online_confirmation"}:
             return row.launch_failed_reason
@@ -739,6 +1047,8 @@ class RjnLifecycleMonitor:
                     "launch_watchdog_age_seconds": round(age, 1),
                     "launch_watchdog_timeout_seconds": self._launch_watchdog_seconds,
                     "launch_failed_reason": row.launch_failed_reason or None,
+                    "last_transition_reason": row.last_transition_reason or None,
+                    "last_dead_reason": row.last_dead_reason or None,
                     "decision": ev.reason,
                     "reason_user_friendly": ev.detail.get("reason_user_friendly") or ev.reason,
                     "failed_checks": list(ev.failed_checks),
