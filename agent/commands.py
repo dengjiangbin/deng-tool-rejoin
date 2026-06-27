@@ -5444,11 +5444,14 @@ def _previous_start_crash_notice() -> str | None:
 def _verify_layout_post_launch(
     cfg: dict[str, Any], entries: list[dict[str, Any]]
 ) -> tuple[dict[str, bool], list[dict[str, Any]]]:
-    """Post-launch verification + direct-resize retry.
+    """Read-only post-launch layout verification.
 
-    Runs silently after the launch grace.  Returns a tuple of
-    ``({package: applied_ok}, [diagnostic_rows...])`` so callers can include
-    per-package details in the start diagnostics JSON.
+    Runs silently after the launch grace.  Does **not** re-write XML/pb99 or
+    run ``am stack resize`` on packages that are already online — those steps
+    were probe p-b8a026e11e evidence for mass force-closes after the last
+    package joined.  Returns a tuple of ``({package: applied_ok},
+    [diagnostic_rows...])`` so callers can include per-package details in the
+    start diagnostics JSON.
     """
     import logging as _logging
     _layout_log = _logging.getLogger("deng.rejoin.layout")
@@ -5532,7 +5535,9 @@ def _verify_layout_post_launch(
             force_stop_before=False,
             relaunch_after=False,
             verify_after=True,
-            retries=2,
+            pre_write=False,
+            allow_direct_resize=False,
+            retries=0,
             screen_mode=_screen_mode,
             touch_probe=False,
         )

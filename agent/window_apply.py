@@ -1252,6 +1252,8 @@ def apply_window_layout(
     force_stop_before: bool = False,
     relaunch_after: bool = False,
     verify_after: bool = True,
+    pre_write: bool = True,
+    allow_direct_resize: bool = True,
     retries: int = 1,
     tolerance: int = 32,
     wait_for_window_seconds: float = 6.0,
@@ -1317,17 +1319,21 @@ def apply_window_layout(
             results.append(result)
             continue
 
-        # Step 1: pre-write
-        _write_one_package(
-            rect,
-            root_tool=root_tool,
-            known_keys=known_keys_map.get(rect.package, []),
-            result=result,
-            screen_mode=mode,
-        )
+        # Step 1: pre-write (optional — skipped for read-only post-launch verify)
+        if pre_write:
+            _write_one_package(
+                rect,
+                root_tool=root_tool,
+                known_keys=known_keys_map.get(rect.package, []),
+                result=result,
+                screen_mode=mode,
+            )
+        else:
+            result.attempts.append("verify-only: pre-write skipped")
+            result.pre_write_ok = True
 
         # Step 2: force-stop so prefs reload on next launch
-        if force_stop_before and result.pre_write_ok:
+        if pre_write and force_stop_before and result.pre_write_ok:
             try:
                 android.force_stop_package(rect.package)
                 result.attempts.append("force-stop ok")
@@ -1385,7 +1391,7 @@ def apply_window_layout(
                         result.status = LAYOUT_FAILED
                         all_ok = False
                         corrected_rect = _titlebar_corrected_rect(result)
-                        if root_tool and corrected_rect is not None:
+                        if allow_direct_resize and root_tool and corrected_rect is not None:
                             ok, detail = _direct_resize_via_root(
                                 result.package, corrected_rect, root_tool
                             )
@@ -1407,6 +1413,12 @@ def apply_window_layout(
                     continue
 
             all_ok = False
+
+            if not allow_direct_resize:
+                result.attempts.append("verify-only: direct resize skipped")
+                result.final_ok = False
+                result.status = LAYOUT_UNVERIFIED
+                continue
 
             # Step 4: direct resize via root
             if root_tool:
@@ -1457,7 +1469,7 @@ def apply_window_layout(
 
             # Step 5: re-write keys then force-stop again so next launch
             # picks up the corrected prefs.
-            if attempt + 1 < max(1, retries + 1):
+            if allow_direct_resize and attempt + 1 < max(1, retries + 1):
                 rewrote = _write_one_package(
                     result.desired,
                     root_tool=root_tool,
@@ -1529,6 +1541,8 @@ def apply_window_layout_silent(
     force_stop_before: bool = False,
     relaunch_after: bool = False,
     verify_after: bool = True,
+    pre_write: bool = True,
+    allow_direct_resize: bool = True,
     retries: int = 1,
     screen_mode: str = "landscape",
 ) -> tuple[int, int]:
@@ -1542,6 +1556,8 @@ def apply_window_layout_silent(
             force_stop_before=force_stop_before,
             relaunch_after=relaunch_after,
             verify_after=verify_after,
+            pre_write=pre_write,
+            allow_direct_resize=allow_direct_resize,
             retries=retries,
             screen_mode=screen_mode,
         )
