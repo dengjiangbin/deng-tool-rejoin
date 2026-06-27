@@ -255,7 +255,11 @@ def write_pb99_bounds_root(
         )
         android.run_root_command(["sh", "-c", own_cmd], root_tool=root_tool, timeout=timeout)
         if sed_res.ok or exists:
-            android.force_stop_package(package, root_tool)
+            try:
+                root_info = android.detect_root()
+                android.force_stop_package(package, root_info)
+            except Exception:  # noqa: BLE001
+                pass
             return True, f"pb99 root write {path}"
         last_err = (sed_res.stderr or sed_res.stdout or last_err or "sed failed")[:120]
     return False, last_err or "pb99 write failed"

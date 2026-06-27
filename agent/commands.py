@@ -5473,28 +5473,28 @@ def _verify_layout_post_launch(
             if cfg.get("last_layout_mode") in (None, _screen_mode)
             else None
         )
-        rects = []
+        selected = set()
+        try:
+            from .logger import log_event as _log_event
+        except Exception:  # noqa: BLE001
+            _log_event = None
+        for e in entries:
+            pkg = e["package"]
+            reason = window_layout.layout_exclusion_reason(pkg)
+            excluded = bool(reason)
+            if _log_event:
+                _log_event(
+                    _layout_log,
+                    "info",
+                    "[DENG_REJOIN_LAYOUT_EXCLUSION]",
+                    package=pkg,
+                    reason=reason or "selected_package",
+                    excluded=str(excluded).lower(),
+                )
+            if not excluded:
+                selected.add(pkg)
+        rects: list[window_layout.WindowRect] = []
         if isinstance(stored_rects, list):
-            selected = set()
-            try:
-                from .logger import log_event as _log_event
-            except Exception:  # noqa: BLE001
-                _log_event = None
-            for e in entries:
-                pkg = e["package"]
-                reason = window_layout.layout_exclusion_reason(pkg)
-                excluded = bool(reason)
-                if _log_event:
-                    _log_event(
-                        _layout_log,
-                        "info",
-                        "[DENG_REJOIN_LAYOUT_EXCLUSION]",
-                        package=pkg,
-                        reason=reason or "selected_package",
-                        excluded=str(excluded).lower(),
-                    )
-                if not excluded:
-                    selected.add(pkg)
             for item in stored_rects:
                 if not isinstance(item, dict) or item.get("package") not in selected:
                     continue
@@ -5508,10 +5508,22 @@ def _verify_layout_post_launch(
                     ))
                 except (KeyError, TypeError, ValueError):
                     continue
-        if not rects:
+        if {r.package for r in rects} != selected:
+            from .resize_engine import compute_layout_rects
+
+            rects, layout, _screen_mode = compute_layout_rects(cfg, entries)
+            cfg["screen_mode"] = _screen_mode
+            cfg["last_layout_mode"] = _screen_mode
+            cfg["last_layout_preview"] = [r.as_dict() for r in rects]
+            cfg["_layout_rects"] = [r.as_dict() for r in rects]
+            try:
+                save_config(cfg)
+            except Exception:  # noqa: BLE001
+                pass
+        elif not rects:
             from .resize_engine import run_resize_pipeline
 
-            pipeline = run_resize_pipeline(cfg, entries, trigger="auto", force=False)
+            pipeline = run_resize_pipeline(cfg, entries, trigger="auto", force=True)
             rects = pipeline.rects
             _screen_mode = str(pipeline.mode or DEFAULT_SCREEN_MODE).lower()
         from . import window_apply
