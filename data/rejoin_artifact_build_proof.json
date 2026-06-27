@@ -1,13 +1,46 @@
 {
   "artifacts": [
     {
+      "version": "v1.0.0",
+      "channel": "stable",
+      "installer_endpoint": "/install/v1.0.0",
+      "artifact_path": "releases/v1.0.0/deng-tool-rejoin-v1.0.0.tar.gz",
+      "artifact_sha256": "7ec8477a1a78aab750e3aba98d88920721932ea14040b3f842a96751914c1542",
+      "git_commit": "1d6d6edca99a",
+      "built_at_iso": "2026-06-27T15:42:05Z",
+      "license_gate": "license-gated",
+      "stable_latest": false
+    },
+    {
+      "version": "v1.1.0",
+      "channel": "stable",
+      "installer_endpoint": "/install/v1.1.0",
+      "artifact_path": "releases/v1.1.0/deng-tool-rejoin-v1.1.0.tar.gz",
+      "artifact_sha256": "e9b3c5ee585888726dc8c27f082343fa51518ddcd24ff363545eeedf05bba299",
+      "git_commit": "1d6d6edca99a",
+      "built_at_iso": "2026-06-27T15:42:15Z",
+      "license_gate": "license-gated",
+      "stable_latest": false
+    },
+    {
+      "version": "v1.2.0",
+      "channel": "stable",
+      "installer_endpoint": "/install/v1.2.0",
+      "artifact_path": "releases/v1.2.0/deng-tool-rejoin-v1.2.0.tar.gz",
+      "artifact_sha256": "8ffa8a7ae8d22f995dd450732921722193d4c23d4795d9c4d83ab87b23c3fc51",
+      "git_commit": "1d6d6edca99a",
+      "built_at_iso": "2026-06-27T15:42:29Z",
+      "license_gate": "license-gated",
+      "stable_latest": false
+    },
+    {
       "version": "v1.3.0",
       "channel": "stable",
       "installer_endpoint": "/install/v1.3.0",
       "artifact_path": "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz",
-      "artifact_sha256": "312a9712549b58986362c8ebf84a9b7b5d68980e8305df7479de861ae712608c",
-      "git_commit": "e37123832799",
-      "built_at_iso": "2026-06-27T14:35:00Z",
+      "artifact_sha256": "c6ae36fda1cef4a56524e23d133b04a7bb289c1bc104ead14781df0cea1a258c",
+      "git_commit": "1d6d6edca99a",
+      "built_at_iso": "2026-06-27T15:42:41Z",
       "license_gate": "license-gated",
       "stable_latest": true
     },
@@ -16,9 +49,9 @@
       "channel": "main-dev",
       "installer_endpoint": "/install/test/latest",
       "artifact_path": "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz",
-      "artifact_sha256": "c899d4e30e71d8aa96e57298385fedb396be2ab318fb6a66481e093dfa453037",
-      "git_commit": "e37123832799",
-      "built_at_iso": "2026-06-27T14:35:00Z",
+      "artifact_sha256": "a0b6ce38e8e49d1cc5462a4bfcf4e6e097d06d051d01c12afb211aa106c7c6de",
+      "git_commit": "1d6d6edca99a",
+      "built_at_iso": "2026-06-27T15:42:52Z",
       "license_gate": "key-free (test channel only)",
       "stable_latest": false
     }

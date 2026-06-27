@@ -17,7 +17,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.0.0/deng-tool-rejoin-v1.0.0.tar.gz",
-    "artifact_sha256": "ba77f0dca53e7ee565f3733335822b0a536b481cf74cb91785503a365ed5a376",
+    "artifact_sha256": "7ec8477a1a78aab750e3aba98d88920721932ea14040b3f842a96751914c1542",
     "installer_endpoint": "/install/v1.0.0",
     "notes": "Frozen public stable release. Immutable artifact built from refs/tags/v1.0.0.",
     "enabled": true
@@ -89,7 +89,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.1.0/deng-tool-rejoin-v1.1.0.tar.gz",
-    "artifact_sha256": "6c7b162f8e5c88228c28e9d0ccb43b17e0a61eba23a24c7938535285f7029ac9",
+    "artifact_sha256": "e9b3c5ee585888726dc8c27f082343fa51518ddcd24ff363545eeedf05bba299",
     "installer_endpoint": "/install/v1.1.0",
     "notes": "Frozen public stable release for Discord webhook Edit Mode persistence and status embed cleanup.",
     "enabled": true
@@ -107,7 +107,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.2.0/deng-tool-rejoin-v1.2.0.tar.gz",
-    "artifact_sha256": "0ee9377355d38f2834d09cfffed79853e81e28e5c58c28e50e8437159b8d5b9a",
+    "artifact_sha256": "8ffa8a7ae8d22f995dd450732921722193d4c23d4795d9c4d83ab87b23c3fc51",
     "installer_endpoint": "/install/v1.2.0",
     "notes": "Frozen public stable release for Delta Auto Execute file management and runtime version display fixes.",
     "enabled": true
@@ -125,7 +125,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz",
-    "artifact_sha256": "312a9712549b58986362c8ebf84a9b7b5d68980e8305df7479de861ae712608c",
+    "artifact_sha256": "c6ae36fda1cef4a56524e23d133b04a7bb289c1bc104ead14781df0cea1a258c",
     "installer_endpoint": "/install/v1.3.0",
     "notes": "Public stable release: portrait pb99 window resize, online detection timing, and portrait Start layout fixes.",
     "enabled": true
@@ -143,6 +143,6 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "c899d4e30e71d8aa96e57298385fedb396be2ab318fb6a66481e093dfa453037"
+    "artifact_sha256": "a0b6ce38e8e49d1cc5462a4bfcf4e6e097d06d051d01c12afb211aa106c7c6de"
   }
 ]
