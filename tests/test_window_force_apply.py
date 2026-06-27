@@ -200,12 +200,35 @@ class TestDirectResize(unittest.TestCase):
             return _R()
 
         with mock.patch.object(window_apply, "_get_task_id", return_value=42), \
+             mock.patch.object(window_apply, "_get_stack_id", return_value=3), \
+             mock.patch.object(window_apply, "read_actual_bounds",
+                              return_value=((0, 0, 100, 100), "dumpsys_window")), \
              mock.patch.object(android, "run_root_command", fake_root):
             ok, detail = window_apply._direct_resize_via_root("p", rect, "su")
         self.assertTrue(ok)
-        # We should have at least tried set-task-windowing-mode plus the resize.
+        self.assertIn("verified", detail)
         joined = [" ".join(c) for c in seen]
-        self.assertTrue(any("resize-task" in s or "task resize" in s for s in joined))
+        self.assertTrue(any("resize" in s for s in joined))
+
+    def test_command_ok_but_fullscreen_readback_is_rejected(self) -> None:
+        rect = WindowRect(package="p", left=0, top=25, right=720, bottom=652)
+
+        def fake_root(cmd, root_tool=None, timeout=None):
+            class _R:
+                ok = True
+                stdout = ""
+                stderr = ""
+            return _R()
+
+        with mock.patch.object(window_apply, "_get_task_id", return_value=42), \
+             mock.patch.object(window_apply, "_get_stack_id", return_value=3), \
+             mock.patch.object(window_apply, "read_actual_bounds",
+                              return_value=((0, 0, 720, 1251), "dumpsys_window")), \
+             mock.patch.object(android, "run_root_command", fake_root):
+            ok, detail = window_apply._direct_resize_via_root("p", rect, "su")
+        self.assertFalse(ok)
+        self.assertIn("all direct-resize variants failed", detail)
+        self.assertIn("rc=0 but bounds=", detail)
 
     def test_all_variants_fail_returns_false(self) -> None:
         rect = WindowRect(package="p", left=0, top=0, right=100, bottom=100)
@@ -239,35 +262,29 @@ class TestForceResizePackage(unittest.TestCase):
 
     def test_success_when_readback_matches(self) -> None:
         with mock.patch.object(window_apply, "_direct_resize_via_root",
-                              return_value=(True, "ok")), \
+                              return_value=(True, "verified bounds=(10, 20, 510, 320)")), \
              mock.patch.object(android, "detect_root",
-                              return_value=android.RootInfo(True, "su", "")), \
-             mock.patch.object(window_apply, "read_actual_bounds",
-                              return_value=((10, 20, 510, 320), "dumpsys")):
+                              return_value=android.RootInfo(True, "su", "")):
             ok, detail = window_apply.force_resize_package("p", self._rect())
         self.assertTrue(ok)
         self.assertIn("verified", detail)
 
     def test_failure_when_readback_mismatches(self) -> None:
         with mock.patch.object(window_apply, "_direct_resize_via_root",
-                              return_value=(True, "ok")), \
+                              return_value=(False, "rc=0 but bounds=(0, 0, 100, 100)")), \
              mock.patch.object(android, "detect_root",
-                              return_value=android.RootInfo(True, "su", "")), \
-             mock.patch.object(window_apply, "read_actual_bounds",
-                              return_value=((0, 0, 100, 100), "dumpsys")):
+                              return_value=android.RootInfo(True, "su", "")):
             ok, detail = window_apply.force_resize_package("p", self._rect())
         self.assertFalse(ok)
 
     def test_failure_when_readback_is_still_fullscreen(self) -> None:
         with mock.patch.object(window_apply, "_direct_resize_via_root",
-                              return_value=(True, "ok")), \
+                              return_value=(False, "rc=0 but bounds=(0, 0, 720, 1280)")), \
              mock.patch.object(android, "detect_root",
-                              return_value=android.RootInfo(True, "su", "")), \
-             mock.patch.object(window_apply, "read_actual_bounds",
-                              return_value=((0, 0, 720, 1280), "dumpsys")):
+                              return_value=android.RootInfo(True, "su", "")):
             ok, detail = window_apply.force_resize_package("p", self._rect())
         self.assertFalse(ok)
-        self.assertIn("bounds still", detail)
+        self.assertIn("rc=0 but bounds=", detail)
 
     def test_no_root_returns_false(self) -> None:
         with mock.patch.object(android, "detect_root",

@@ -860,36 +860,31 @@ def _wait_for_window(package: str, timeout: float) -> bool:
 # stack is dynamically allocated, so callers should prefer
 # ``move-task <tid> <stack> true`` over hard-coding 5.
 ANDROID10_FREEFORM_WINDOWING_MODE = 5
+_DIRECT_RESIZE_SETTLE_SEC = 0.5
 
 
 def _direct_resize_via_root(
-    package: str, rect: WindowRect, root_tool: str
+    package: str,
+    rect: WindowRect,
+    root_tool: str,
+    *,
+    tolerance: int = 32,
 ) -> tuple[bool, str]:
-    """Try multiple direct-resize commands for the package's current task.
+    """Try direct-resize commands and return True only after bounds readback verifies.
 
-    Recipe (probe ``p-1239f2b5f9``, SM-N9810 / Android 10 / SDK 29):
-
-        1. Flip task → freeform windowing mode (``cmd activity
-           set-task-windowing-mode`` if available; otherwise
-           ``am stack move-task <tid> <freeform_stack> true``).
-        2. Resize the STACK (not the task) with COMMA-separated bounds —
-           Android 10 syntax is ``am stack resize <STACK_ID> <L,T,R,B>``.
-        3. Fall back to Android 11+ verbs (``cmd activity resize-task``,
-           ``am task resize``) which take SPACE-separated bounds.
-        4. Final attempt: ``wm task resize`` (some custom ROMs).
-
-    Each variant is logged with its rc / stderr.  Returns the first one
-    that runs without error.  Never raises.
+    Android 10 ``am stack resize`` often returns rc=0 even when the stack id
+    is wrong or the window stays fullscreen.  We therefore treat a command as
+    successful only when ``read_actual_bounds`` confirms the package landed
+    within ``tolerance`` px of ``rect``.  Never raises.
     """
-    task_id  = _get_task_id(package)
+    task_id = _get_task_id(package)
     stack_id = _get_stack_id(package)
     if task_id is None:
         return False, "no task id"
     l, t, r, b = rect.left, rect.top, rect.right, rect.bottom
-    bounds_comma = f"{l},{t},{r},{b}"     # Android 10 syntax
-    bounds_args  = [str(l), str(t), str(r), str(b)]  # Android 11+ syntax
+    bounds_comma = f"{l},{t},{r},{b}"
+    bounds_args = [str(l), str(t), str(r), str(b)]
 
-    # ── Step 1: move task into freeform ──
     flipped = False
     try:
         res = android.run_root_command(
@@ -901,9 +896,6 @@ def _direct_resize_via_root(
     except Exception:  # noqa: BLE001
         pass
     if not flipped:
-        # Android 10 path: move task to the freeform workspace stack.
-        # Pass the freeform windowing mode (5) as the target stack id —
-        # the system will route it into the freeform stack.
         try:
             android.run_root_command(
                 ["am", "stack", "move-task", str(task_id),
@@ -913,38 +905,26 @@ def _direct_resize_via_root(
         except Exception:  # noqa: BLE001
             pass
 
-    # Re-detect stack id now that the task may have been moved.
     new_stack = _get_stack_id(package)
     target_stack = new_stack if new_stack is not None else stack_id
 
     candidates: list[list[str]] = []
-
-    # ── Android 10 (CONFIRMED working on probe SM-N9810): stack-based,
-    # COMMA-separated bounds ──
     if target_stack is not None:
         candidates.append(
             ["am", "stack", "resize", str(target_stack), bounds_comma]
         )
         candidates.append(
-            ["am", "stack", "resize-animated", str(target_stack),
-             bounds_comma]
+            ["am", "stack", "resize-animated", str(target_stack), bounds_comma]
         )
-
-    # ── Android 11+ task-based verbs, SPACE-separated bounds ──
     candidates.extend([
         ["cmd", "activity", "resize-task", str(task_id), *bounds_args],
         ["cmd", "activity", "resize-task", str(task_id), *bounds_args, "1"],
         ["am", "task", "resize", str(task_id), *bounds_args],
     ])
-
-    # ── Stack-resize Android 11+ form (SPACE-separated, in case the
-    # device accepts both syntaxes) ──
     if target_stack is not None:
         candidates.append(
             ["am", "stack", "resize", str(target_stack), *bounds_args]
         )
-
-    # ── Last resort: wm task resize (custom ROMs only) ──
     candidates.append(
         ["wm", "task", "resize", str(task_id), *bounds_args]
     )
@@ -955,15 +935,20 @@ def _direct_resize_via_root(
             res = android.run_root_command(
                 cmd_args, root_tool=root_tool, timeout=4,
             )
-            if res.ok:
-                # On Android 10 ``am stack resize`` returns rc=0 even when
-                # the stack id is wrong.  We accept ok=True optimistically;
-                # the post-launch verifier will check the actual bounds.
+            if not res.ok:
+                last_err = (res.stderr or res.stdout or "command failed").strip()[:120]
+                continue
+            time.sleep(_DIRECT_RESIZE_SETTLE_SEC)
+            bounds, source = read_actual_bounds(package)
+            if bounds and _bounds_close_enough(bounds, rect, tolerance):
                 return True, (
-                    f"resize via {cmd_args[0]} {cmd_args[1]} "
-                    f"(stack={target_stack},task={task_id})"
+                    f"verified via {' '.join(cmd_args[:3])} "
+                    f"bounds={bounds} ({source})"
                 )
-            last_err = (res.stderr or res.stdout or "").strip()[:120]
+            last_err = (
+                f"{' '.join(cmd_args[:3])} rc=0 but bounds={bounds} "
+                f"(want {l},{t},{r},{b})"
+            )[:160]
         except Exception as exc:  # noqa: BLE001
             last_err = str(exc)[:120]
             continue
@@ -1590,16 +1575,6 @@ def force_resize_package(package: str, rect: WindowRect) -> tuple[bool, str]:
     if not root_info.available or not root_info.tool:
         return False, "no root"
     try:
-        ok, detail = _direct_resize_via_root(package, rect, root_info.tool)
+        return _direct_resize_via_root(package, rect, root_info.tool)
     except Exception as exc:  # noqa: BLE001
         return False, f"resize error: {exc}"
-    if not ok:
-        return False, detail
-    time.sleep(0.6)
-    try:
-        bounds, _src = read_actual_bounds(package)
-    except Exception:  # noqa: BLE001
-        return ok, f"{detail} (post-readback failed)"
-    if bounds and _bounds_close_enough(bounds, rect, 32):
-        return True, f"{detail} → bounds verified {bounds}"
-    return False, f"{detail} → bounds still {bounds} (want {rect.left,rect.top,rect.right,rect.bottom})"

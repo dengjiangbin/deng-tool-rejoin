@@ -251,7 +251,9 @@ class Android10StackResizeShapeTest(unittest.TestCase):
         with mock.patch.object(window_apply.android, "run_root_command",
                                side_effect=stub_root), \
              mock.patch.object(window_apply.android, "run_command",
-                               side_effect=stub_command):
+                               side_effect=stub_command), \
+             mock.patch.object(window_apply, "read_actual_bounds",
+                               return_value=((0, 0, 640, 360), "dumpsys_window")):
             ok, msg = _direct_resize_via_root(
                 "com.moons.litesc", rect, root_tool="su",
             )
