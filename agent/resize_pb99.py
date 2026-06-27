@@ -9,7 +9,7 @@ from typing import Any
 from . import android
 from .window_layout import WindowRect, _layout_tmp_dir, _serialize_xml
 
-_PB99_LEFT_OFFSET_PERCENT = 15
+_PB99_LEFT_OFFSET_PERCENT = 0
 _MCURRENT_ORIENTATION_RE = re.compile(
     r"mCurrentOrientation\s*=\s*(\d+)",
     re.IGNORECASE,

@@ -11,16 +11,16 @@ from agent.resize_pb99 import (
 
 
 class TestPb99Grid(unittest.TestCase):
-    def test_portrait_two_apps_one_column_with_left_offset(self) -> None:
+    def test_portrait_two_apps_one_column_full_width(self) -> None:
         pkgs = ["com.moons.litesc", "com.moons.litesd"]
         rects, layout = calculate_pb99_grid(pkgs, wm_width=720, wm_height=1280, rotation=0)
         self.assertEqual(layout["mode"], "PORTRAIT")
         self.assertEqual(layout["columns"], 1)
         self.assertEqual(layout["rows"], 2)
-        self.assertEqual(layout["left_offset"], 108)
+        self.assertEqual(layout["left_offset"], 0)
         self.assertEqual(len(rects), 2)
-        self.assertGreater(rects[0].left, 100)
-        self.assertLess(rects[0].right, 720)
+        self.assertEqual(rects[0].left, layout["side_margin"])
+        self.assertGreater(rects[0].right, rects[0].left)
         self.assertLessEqual(rects[0].bottom, rects[1].top)
         self.assertEqual(rects[0].package, "com.moons.litesc")
         self.assertEqual(rects[1].package, "com.moons.litesd")
