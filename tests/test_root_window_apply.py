@@ -222,6 +222,29 @@ class TestApplyPipelineOrder(unittest.TestCase):
             "Root XML write must be tried after direct write fails")
         self.assertEqual(results[0].pre_write_method, "xml-root")
 
+    def test_apply_pipeline_passes_portrait_screen_mode_to_xml(self):
+        import agent.window_apply as wa
+        from agent.logger import silence_public_loggers
+        silence_public_loggers()
+
+        rect = WindowRect("com.roblox.client", 0, 512, 360, 768)
+        seen_modes: list[str] = []
+
+        def _direct(pkg, r, *, known_keys=None, screen_mode="landscape"):
+            seen_modes.append(screen_mode)
+            return True, "ok"
+
+        with (
+            patch.object(wa, "update_app_cloner_xml", side_effect=_direct),
+            patch.object(wa.android, "detect_root",
+                         return_value=MagicMock(available=False, tool=None)),
+            patch.object(wa, "read_actual_bounds", return_value=(None, "unavailable")),
+            patch.object(wa, "_discover_known_keys", return_value={"com.roblox.client": []}),
+        ):
+            wa.apply_window_layout([rect], verify_after=True, screen_mode="portrait")
+
+        self.assertEqual(seen_modes, ["portrait"])
+
 
 class TestVerifyBoundsTolerance(unittest.TestCase):
     """Bounds within ±32px tolerance must be considered applied successfully."""

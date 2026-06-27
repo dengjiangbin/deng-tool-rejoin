@@ -11,6 +11,7 @@ from . import android
 from .package_identity import get_package_identity
 from .resize_grid import calculate_resize_grid, validate_grid_bounds
 from .resize_mode import detect_effective_resize_mode, resolve_runtime_screen_mode
+from .resize_pb99 import calculate_pb99_grid, read_display_rotation, write_pb99_bounds_root
 from .resize_packages import get_trusted_resize_packages
 from .resize_trace import append_resize_event
 from .resize_xml import safe_write_resize_bounds
@@ -118,15 +119,35 @@ def run_resize_pipeline(
     screen_width, screen_height = (
         (major, minor) if mode == "LANDSCAPE" else (minor, major)
     )
-    left_offset = _left_offset_pixels(cfg, screen_width)
 
-    rects, layout = calculate_resize_grid(
-        trusted,
-        mode=mode,
-        major=major,
-        minor=minor,
-        left_offset=left_offset,
-    )
+    wm = android.get_wm_size()
+    wm_w = int(wm.get("width") or screen_width or 0)
+    wm_h = int(wm.get("height") or screen_height or 0)
+    if wm_w <= 0 or wm_h <= 0:
+        wm_w, wm_h = screen_width, screen_height
+
+    if mode == "PORTRAIT":
+        rotation = read_display_rotation()
+        try:
+            rotation = int(mode_info.get("signals", {}).get("rotation") or rotation)
+        except (TypeError, ValueError):
+            pass
+        rects, layout = calculate_pb99_grid(
+            trusted,
+            wm_width=wm_w,
+            wm_height=wm_h,
+            rotation=rotation,
+        )
+        left_offset = int(layout.get("left_offset") or 0)
+    else:
+        left_offset = _left_offset_pixels(cfg, screen_width)
+        rects, layout = calculate_resize_grid(
+            trusted,
+            mode=mode,
+            major=major,
+            minor=minor,
+            left_offset=left_offset,
+        )
     grid_errors = validate_grid_bounds(rects, layout["screen_width"], layout["screen_height"])
     if grid_errors:
         event = {
@@ -170,11 +191,15 @@ def run_resize_pipeline(
             continue
         identity = get_package_identity(pkg) or {}
         account = str(identity.get("username") or "")
+        active_root = root_tool
+        if not active_root:
+            retry = android.detect_root()
+            active_root = retry.tool if retry.available else None
         row = safe_write_resize_bounds(
             pkg,
             rect,
             screen_mode=mode.lower(),
-            root_tool=root_tool,
+            root_tool=active_root,
         )
         row["account"] = account
         status = str(row.get("status") or "failed")

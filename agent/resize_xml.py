@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import android
+from .resize_pb99 import write_pb99_bounds_root
 from .window_layout import (
     WindowRect,
     clone_prefs_candidates,
@@ -98,6 +99,19 @@ def safe_write_resize_bounds(
     if not result["bounds_valid"]:
         result["reason"] = "desired_bounds_invalid"
         return result
+
+    mode = str(screen_mode or "landscape").strip().lower()
+    if mode == "portrait" and root_tool:
+        ok, method = write_pb99_bounds_root(package, rect, root_tool)
+        if ok:
+            result["xml_path"] = f"/data/data/{package}/shared_prefs/{package}_preferences.xml"
+            result["owner_restored"] = True
+            result["permission_restored"] = True
+            result["force_stop_ok"] = True
+            result["status"] = "resized"
+            result["reason"] = method or "pb99_ok"
+            result["timestamp_marker_ok"] = True
+            return result
 
     candidates = list(clone_prefs_candidates(package))
     if not candidates:

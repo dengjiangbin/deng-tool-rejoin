@@ -38,9 +38,9 @@
       "channel": "main-dev",
       "installer_endpoint": "/install/test/latest",
       "artifact_path": "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz",
-      "artifact_sha256": "0c005026b8faa92262292aea9212e91157011ecaf9f66a7918680258f079f620",
-      "git_commit": "821012b9f77c",
-      "built_at_iso": "2026-06-26T15:09:00Z",
+      "artifact_sha256": "9c495fccd066de4009af55354df9541b6629d187da53ec4b43f5fab642e6ded8",
+      "git_commit": "69160e40a3a2",
+      "built_at_iso": "2026-06-27T10:23:07Z",
       "license_gate": "key-free (test channel only)",
       "stable_latest": false
     }

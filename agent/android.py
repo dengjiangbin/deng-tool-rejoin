@@ -721,14 +721,15 @@ def enforce_landscape_home_state(*, phase: str = "before_start", screen_mode_con
         target, _ = resolve_runtime_screen_mode(configured=target)
 
     display = before_display
-    if before_display.get("orientation") != target:
+    # Portrait layout uses native touch coordinates — never rotation-lock here.
+    if target != "portrait" and before_display.get("orientation") != target:
         root = detect_root()
         correction_applied.extend(
             r.get("cmd", "")
             for r in _apply_user_rotation(
                 target,
                 root_info=root,
-                strict=(target == "portrait"),
+                strict=False,
             )
             if r.get("cmd")
         )
@@ -825,11 +826,31 @@ def enforce_screen_orientation(
     protected.add("com.termux")
     root_info = detect_root()
     before = get_display_orientation_state()
-    strict_rotation = requested == "portrait"
+
+    # Portrait uses native coordinate space for bounds/touch — rotation lock
+    # (especially set-fix-to-user-rotation) misaligns window clicks.
+    if requested == "portrait":
+        return {
+            "requested": requested,
+            "actual_before": before.get("orientation", "unknown"),
+            "actual_after": before.get("orientation", "unknown"),
+            "before": before,
+            "after": before,
+            "root_available": bool(root_info.available),
+            "success": True,
+            "override_detected": False,
+            "override_package": "",
+            "override_candidates": [],
+            "override_action": "none",
+            "apply_results": [],
+            "error": "",
+            "rotation_lock_skipped": True,
+        }
+
     apply_results = _apply_user_rotation(
         requested,
         root_info=root_info,
-        strict=strict_rotation,
+        strict=False,
     )
     time.sleep(0.4)
     after = get_display_orientation_state()
@@ -847,7 +868,7 @@ def enforce_screen_orientation(
             override_action = "force_stop"
             if not stop_result.ok:
                 error = (stop_result.stderr or stop_result.stdout or "force-stop failed")[:180]
-            _apply_user_rotation(requested, root_info=root_info, strict=strict_rotation)
+            _apply_user_rotation(requested, root_info=root_info, strict=False)
             time.sleep(0.5)
             after = get_display_orientation_state()
             success = after.get("orientation") == requested

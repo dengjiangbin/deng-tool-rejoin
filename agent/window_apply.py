@@ -1000,9 +1000,22 @@ def _write_one_package(
 
     Returns True if at least one write method succeeded.
     """
+    mode = str(screen_mode or "landscape").strip().lower()
+    if mode == "portrait" and root_tool:
+        try:
+            from .resize_pb99 import write_pb99_bounds_root
+
+            ok, msg = write_pb99_bounds_root(rect.package, rect, root_tool)
+            result.attempts.append(f"pb99-root: {msg}")
+            if ok:
+                result.pre_write_ok = True
+                result.pre_write_method = "pb99-root"
+                return True
+        except Exception as exc:  # noqa: BLE001
+            result.attempts.append(f"pb99-root-error: {exc}")
     try:
         ok, msg = update_app_cloner_xml(
-            rect.package, rect, known_keys=known_keys, screen_mode="landscape",
+            rect.package, rect, known_keys=known_keys, screen_mode=screen_mode,
         )
         result.attempts.append(f"xml-direct: {msg}")
         if ok:
@@ -1016,7 +1029,7 @@ def _write_one_package(
             ok, msg = update_app_cloner_xml_root(
                 rect.package, rect, root_tool,
                 known_keys=known_keys,
-                screen_mode="landscape",
+                screen_mode=screen_mode,
             )
             result.attempts.append(f"xml-root: {msg}")
             if ok:
@@ -1050,9 +1063,8 @@ def _display_bounds(screen_mode: str = "landscape") -> tuple[int, int, int, int]
     try:
         from .window_layout import detect_display_info, resolve_layout_mode
         display = detect_display_info()
-        if str(screen_mode or "").strip().lower() == "portrait":
-            screen_mode = "landscape"
-        resolved = resolve_layout_mode(display.width, display.height, screen_mode)
+        mode = str(screen_mode or "landscape").strip().lower()
+        resolved = resolve_layout_mode(display.width, display.height, mode)
         return (0, 0, int(resolved.normalized_width), int(resolved.normalized_height))
     except Exception:  # noqa: BLE001
         return (0, 0, 99999, 99999)
@@ -1278,7 +1290,8 @@ def apply_window_layout(
     Returns one :class:`ApplyResult` per rect.  Never raises.  Never prints.
     """
     mode = str(screen_mode or "landscape").strip().lower()
-    mode = "landscape"
+    if mode not in ("landscape", "portrait"):
+        mode = "landscape"
     caps = _capability_probes()
     _log.debug("apply_window_layout caps=%s", caps)
 

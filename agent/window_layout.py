@@ -574,17 +574,30 @@ PORTRAIT_ABSOLUTE_MIN_H: int = 180
 
 
 def normalize_display_for_screen_mode(width: int, height: int, screen_mode: str) -> tuple[int, int]:
-    """Return logical dimensions for the Landscape-only runtime."""
+    """Return logical W×H for the configured layout coordinate space."""
     w = max(1, int(width))
     h = max(1, int(height))
+    mode = str(screen_mode or "landscape").strip().lower()
+    if mode == "portrait":
+        if w > h:
+            w, h = h, w
+        return w, h
+    if h > w:
+        w, h = h, w
     return w, h
 
 
 def resolve_layout_mode(width: int, height: int, screen_mode: str) -> LayoutModeResolution:
-    """Resolve layout mode from config; Android rotation only informs coordinates."""
+    """Resolve layout mode from config; Android rotation informs raw dimensions only."""
     raw_w = max(1, int(width))
     raw_h = max(1, int(height))
-    configured = "landscape"
+    configured = str(screen_mode or "landscape").strip().lower()
+    if configured == "auto":
+        from .resize_mode import resolve_runtime_screen_mode
+
+        configured, _ = resolve_runtime_screen_mode(configured="auto")
+    if configured not in ("landscape", "portrait"):
+        configured = "landscape"
     norm_w, norm_h = normalize_display_for_screen_mode(raw_w, raw_h, configured)
     return LayoutModeResolution(
         configured_screen_mode=configured,
@@ -758,7 +771,9 @@ def _release_grid_rects(
     pkgs = [p for p in packages]
     if not pkgs:
         return []
-    configured_mode = "landscape"
+    configured_mode = str(mode or "landscape").strip().lower()
+    if configured_mode not in ("landscape", "portrait"):
+        configured_mode = "landscape"
     mode_resolution = resolve_layout_mode(display_w, display_h, configured_mode)
     W, H = mode_resolution.normalized_width, mode_resolution.normalized_height
     orientation = mode_resolution.android_orientation
@@ -785,9 +800,14 @@ def _release_grid_rects(
         "[DENG_REJOIN_LAYOUT_ORIENTATION] orientation=%s screen_w=%d screen_h=%d",
         orientation, W, H,
     )
-    cols, rows = 3, 3
-    slot_order = LANDSCAPE_SLOT_RULES.get(len(pkgs), LANDSCAPE_SLOT_RULES[9])
-    mode_label = "landscape"
+    if configured_mode == "portrait":
+        cols, rows = 2, 5
+        slot_order = PORTRAIT_SLOT_RULES.get(len(pkgs), PORTRAIT_SLOT_RULES[10])
+        mode_label = "portrait"
+    else:
+        cols, rows = 3, 3
+        slot_order = LANDSCAPE_SLOT_RULES.get(len(pkgs), LANDSCAPE_SLOT_RULES[9])
+        mode_label = "landscape"
     left_end = configured_left_end
     px0 = left_end
     py0 = max(0, top_inset)
@@ -807,7 +827,10 @@ def _release_grid_rects(
     pane_h = max(_MIN_WIN_H * rows, py1 - py0)
     cell_w = max(_MIN_WIN_W, pane_w // cols)
     cell_h = max(_MIN_WIN_H, pane_h // rows)
-    win_h = max(_MIN_WIN_H, min(cell_h, int(cell_w / LANDSCAPE_MIN_RATIO)))
+    if mode_label == "portrait":
+        win_h = max(_MIN_WIN_H, min(cell_h, py1 - py0))
+    else:
+        win_h = max(_MIN_WIN_H, min(cell_h, int(cell_w / LANDSCAPE_MIN_RATIO)))
     roblox_area_label = "right_50"
     roblox_grid_area = (px0, py0, px1, py1)
     _log.info(
@@ -1109,7 +1132,9 @@ def _apply_layout_keys_to_root(
     Returns the number of keys created/modified.
     """
     values = _values_from_rect(rect)
-    mode = "landscape"
+    mode = str(screen_mode or "landscape").strip().lower()
+    if mode not in ("landscape", "portrait"):
+        mode = "landscape"
     changed = 0
 
     # 1. Legacy compat: update old "current_window" mapping if present (string/int)
