@@ -51,7 +51,7 @@ class TestResizeIntegration(unittest.TestCase):
             trace_path = Path(tmp) / "resize-debug.jsonl"
             with mock.patch.object(resize_trace, "DATA_DIR", Path(tmp)), \
                  mock.patch.object(resize_trace, "TRACE_PATH", trace_path), \
-                 mock.patch("agent.resize_engine.detect_effective_resize_mode", return_value=fake_mode), \
+                 mock.patch("agent.resize_engine.resolve_runtime_screen_mode", return_value=("landscape", fake_mode)), \
                  mock.patch("agent.resize_engine.calculate_resize_grid", return_value=([rect], {
                      "screen_width": 1920, "screen_height": 1080, "columns": 2, "rows": 1,
                      "left_offset": 0, "top_margin": 25, "side_margin": 0, "bottom_margin": 0,

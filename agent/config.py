@@ -53,8 +53,8 @@ class ConfigError(ValueError):
 SELECTED_PACKAGE_MODES = {"single", "multiple"}
 WEBHOOK_MODES = {"edit", "new_post", "none"}
 AUTO_RESIZE_MODES = {"off", "auto", "preview"}
-SCREEN_MODES = {"landscape"}
-DEFAULT_SCREEN_MODE = "landscape"
+SCREEN_MODES = {"landscape", "portrait", "auto"}
+DEFAULT_SCREEN_MODE = "auto"
 PRIVATE_URL_MODES = {"global", "separate"}
 DEFAULT_PRIVATE_URL_MODE = "global"
 
@@ -115,6 +115,7 @@ def default_config() -> dict[str, Any]:
         },
         "selected_package_mode": "single",
         "screen_mode": DEFAULT_SCREEN_MODE,
+        "screen_mode_auto_migrated_v1": False,
         "portrait_auto_density_fix": True,
         "portrait_previous_density": "",
         "launch_mode": "app",
@@ -569,8 +570,13 @@ def _as_int(name: str, value: Any, minimum: int | None = None, maximum: int | No
 
 
 def validate_screen_mode(value: Any) -> str:
-    """Normalize all public/runtime configs to Landscape-only for this release."""
-    return DEFAULT_SCREEN_MODE
+    """Normalize screen mode to auto, portrait, or landscape."""
+    mode = str(value or DEFAULT_SCREEN_MODE).strip().lower()
+    if mode in ("potrait", "portait"):
+        mode = "portrait"
+    if mode not in SCREEN_MODES:
+        return DEFAULT_SCREEN_MODE
+    return mode
 
 
 def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool = True) -> dict[str, Any]:
@@ -621,7 +627,12 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if len(active_entries) > 1:
         selected_package_mode = "multiple"
     merged["selected_package_mode"] = selected_package_mode
-    merged["screen_mode"] = DEFAULT_SCREEN_MODE
+    mode = validate_screen_mode(merged.get("screen_mode", DEFAULT_SCREEN_MODE))
+    if not _as_bool(merged.get("screen_mode_auto_migrated_v1")):
+        if mode == "landscape":
+            mode = "auto"
+        merged["screen_mode_auto_migrated_v1"] = True
+    merged["screen_mode"] = mode
     merged["portrait_auto_density_fix"] = _as_bool(merged.get("portrait_auto_density_fix", True))
     merged["portrait_previous_density"] = str(merged.get("portrait_previous_density") or "")
     pd_default = default_config()["package_detection"]

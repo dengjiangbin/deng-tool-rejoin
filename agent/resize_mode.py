@@ -127,6 +127,8 @@ def detect_effective_resize_mode(
     home_landscape_wm_portrait_conflict = bool(
         wm_portrait and (home_landscape or logical_landscape or focus_landscape or rot_bucket == "landscape")
     )
+    if logical_portrait and not home_landscape:
+        home_landscape_wm_portrait_conflict = False
 
     conflicts: list[str] = []
     votes_landscape = 0
@@ -219,3 +221,35 @@ def detect_effective_resize_mode(
             "launcher_package": launcher_pkg,
         },
     }
+
+
+def resolve_runtime_screen_mode(
+    *,
+    configured: str = "auto",
+    previous_mode: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Return ``(portrait|landscape, mode_info)`` for orientation lock and resize."""
+    cfg_mode = str(configured or "auto").strip().lower()
+    if cfg_mode in ("potrait", "portait"):
+        cfg_mode = "portrait"
+
+    info = detect_effective_resize_mode(previous_mode=previous_mode)
+
+    if cfg_mode == "portrait":
+        return "portrait", {
+            **info,
+            "mode": "PORTRAIT",
+            "confidence": "HIGH",
+            "basis": "config screen_mode=portrait",
+        }
+    if cfg_mode == "landscape":
+        return "landscape", {
+            **info,
+            "mode": "LANDSCAPE",
+            "confidence": "HIGH",
+            "basis": "config screen_mode=landscape",
+        }
+
+    detected = str(info.get("mode") or "PORTRAIT").upper()
+    runtime = "portrait" if detected == "PORTRAIT" else "landscape"
+    return runtime, info

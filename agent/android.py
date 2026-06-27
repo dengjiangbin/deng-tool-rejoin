@@ -530,6 +530,128 @@ def _parse_home_bounds_from_activity(text: str, launcher_package: str) -> tuple[
     return None
 
 
+def _find_task_id_for_package(package: str) -> int | None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return None
+    try:
+        res = run_android_command(["dumpsys", "activity", "activities"], timeout=8, prefer_root=True)
+        if res.ok and res.stdout:
+            for match in re.finditer(r"TaskRecord\{[^}]*?#(\d+)[^}]*?A=([\w.]+)", res.stdout):
+                if match.group(2) == pkg:
+                    return int(match.group(1))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _find_stack_id_for_package(package: str) -> int | None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return None
+    try:
+        res = run_android_command(["dumpsys", "activity", "activities"], timeout=8, prefer_root=True)
+        if not res.ok or not res.stdout:
+            return None
+        text = res.stdout
+        for match in re.finditer(
+            r"TaskRecord\{[^}]*?#(\d+)[^}]*?A=([\w.]+)[^}]*?StackId=(\d+)",
+            text,
+        ):
+            if match.group(2) == pkg:
+                return int(match.group(3))
+        blocks = re.split(r"\n(?=Stack #\d+:)", text)
+        for blk in blocks:
+            head = blk.split("\n", 1)[0]
+            sm = re.match(r"Stack #(\d+)", head)
+            if sm and pkg in blk:
+                return int(sm.group(1))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _fix_launcher_letterboxing(
+    *,
+    display: dict[str, object],
+    launcher_package: str,
+    root_info: RootInfo | None = None,
+) -> list[str]:
+    """Expand portrait-shaped launcher bounds to full landscape display."""
+    applied: list[str] = []
+    dw = int(display.get("width") or 0)
+    dh = int(display.get("height") or 0)
+    if dw <= dh or dw <= 0 or dh <= 0:
+        return applied
+
+    home = run_android_command(
+        [
+            "am", "start", "-a", "android.intent.action.MAIN",
+            "-c", "android.intent.category.HOME",
+        ],
+        timeout=8,
+        prefer_root=False,
+    )
+    applied.append(f"home_relaunch rc={home.returncode}")
+    time.sleep(0.35)
+
+    overscan = run_android_command(["wm", "overscan", "reset"], timeout=6, prefer_root=True)
+    applied.append(f"wm overscan reset rc={overscan.returncode}")
+
+    bounds = f"0,0,{dw},{dh}"
+    stack_id = _find_stack_id_for_package(launcher_package)
+    task_id = _find_task_id_for_package(launcher_package)
+    if stack_id is not None:
+        stack_res = run_android_command(
+            ["am", "stack", "resize", str(stack_id), bounds],
+            timeout=8,
+            prefer_root=bool(root_info and root_info.available),
+        )
+        applied.append(f"am stack resize {stack_id} rc={stack_res.returncode}")
+    if task_id is not None:
+        task_res = run_android_command(
+            ["am", "task", "resize", str(task_id), bounds],
+            timeout=8,
+            prefer_root=bool(root_info and root_info.available),
+        )
+        applied.append(f"am task resize {task_id} rc={task_res.returncode}")
+        wm_task = run_android_command(
+            ["wm", "task", "resize", str(task_id), bounds],
+            timeout=8,
+            prefer_root=bool(root_info and root_info.available),
+        )
+        applied.append(f"wm task resize {task_id} rc={wm_task.returncode}")
+
+    # Some Huawei launchers stay portrait at rotation=1; try reverse landscape.
+    launcher_bounds = get_home_launcher_bounds(launcher_package)
+    lb = launcher_bounds.get("bounds")
+    if isinstance(lb, list) and len(lb) == 4:
+        bw = max(0, int(lb[2]) - int(lb[0]))
+        bh = max(0, int(lb[3]) - int(lb[1]))
+        if bw > 0 and bh > bw:
+            alt = run_android_command(
+                ["settings", "put", "system", "user_rotation", "3"],
+                timeout=6,
+                prefer_root=bool(root_info and root_info.available),
+            )
+            applied.append(f"user_rotation=3 rc={alt.returncode}")
+            time.sleep(0.25)
+            run_android_command(
+                ["settings", "put", "system", "user_rotation", "1"],
+                timeout=6,
+                prefer_root=bool(root_info and root_info.available),
+            )
+            applied.append("user_rotation=1")
+            time.sleep(0.25)
+            if stack_id is not None:
+                run_android_command(
+                    ["am", "stack", "resize", str(stack_id), bounds],
+                    timeout=8,
+                    prefer_root=bool(root_info and root_info.available),
+                )
+    return applied
+
+
 def get_home_launcher_bounds(launcher_package: str | None = None) -> dict[str, object]:
     pkg = launcher_package or get_home_launcher_package()
     res = run_android_command(["dumpsys", "activity", "activities"], timeout=8, prefer_root=True)
@@ -541,36 +663,73 @@ def get_home_launcher_bounds(launcher_package: str | None = None) -> dict[str, o
     }
 
 
+def restore_display_defaults(*, portrait: bool = True) -> dict[str, object]:
+    """Undo DENG Rejoin display overrides and restore normal Android UI.
+
+    Resets wm size/density/overscan, disables fix-to-user-rotation, and
+    re-enables auto-rotate.  Safe to run from Termux when the home screen
+    shows portrait UI pillarboxed inside landscape (black side bars).
+    """
+    root = detect_root()
+    prefer_root = bool(root.available)
+    applied: list[dict[str, object]] = []
+    steps: list[tuple[list[str], str]] = [
+        (["wm", "size", "reset"], "wm_size_reset"),
+        (["wm", "density", "reset"], "wm_density_reset"),
+        (["wm", "overscan", "reset"], "wm_overscan_reset"),
+        (["settings", "put", "system", "accelerometer_rotation", "1"], "auto_rotate_on"),
+        (["cmd", "window", "set-fix-to-user-rotation", "disabled"], "fix_rotation_off"),
+        (["cmd", "window", "set-user-rotation", "free"], "rotation_free"),
+    ]
+    if portrait:
+        steps.append((["settings", "put", "system", "user_rotation", "0"], "portrait"))
+    for cmd, label in steps:
+        res = run_android_command(cmd, timeout=8, prefer_root=prefer_root)
+        applied.append({
+            "step": label,
+            "cmd": " ".join(cmd),
+            "ok": res.ok,
+            "returncode": res.returncode,
+        })
+    time.sleep(0.35)
+    return {
+        "success": all(bool(a.get("ok")) for a in applied),
+        "applied": applied,
+        "display": get_display_orientation_state(),
+        "wm_size": get_wm_size(),
+        "rotation": get_rotation_settings(),
+    }
+
+
 def enforce_landscape_home_state(*, phase: str = "before_start", screen_mode_config: str = "landscape") -> dict[str, object]:
-    """Keep display/home in real landscape without resizing launcher/home tasks."""
+    """Report display/home state; apply soft rotation only when needed.
+
+    Does NOT run ``wm size`` overrides or launcher stack/task resize tricks.
+    Those caused portrait home screens pillarboxed inside forced landscape
+    (black side bars) on many devices.
+    """
     before_display = get_display_orientation_state()
-    before_wm = get_wm_size()
+    wm_state = get_wm_size()
     density = get_wm_density()
     rotation = get_rotation_settings()
     correction_applied: list[str] = []
-    root = detect_root()
 
-    if str(screen_mode_config or "").lower() != "landscape":
-        screen_mode_config = "landscape"
+    target = str(screen_mode_config or "auto").strip().lower()
+    if target not in ("landscape", "portrait"):
+        from .resize_mode import resolve_runtime_screen_mode
 
-    if before_display.get("orientation") != "landscape":
+        target, _ = resolve_runtime_screen_mode(configured=target)
+
+    display = before_display
+    if before_display.get("orientation") != target:
+        root = detect_root()
         correction_applied.extend(
-            r.get("cmd", "") for r in _apply_user_rotation("landscape", root_info=root) if r.get("cmd")
+            r.get("cmd", "")
+            for r in _apply_user_rotation(target, root_info=root, strict=False)
+            if r.get("cmd")
         )
         time.sleep(0.3)
-
-    display = get_display_orientation_state()
-    wm_state = before_wm
-    if display.get("orientation") == "landscape" and before_wm.get("orientation") == "portrait":
-        reset = run_android_command(["wm", "size", "reset"], timeout=8, prefer_root=True)
-        correction_applied.append("wm size reset")
-        if not reset.ok and int(display.get("width") or 0) > int(display.get("height") or 0):
-            width = int(display.get("width") or 0)
-            height = int(display.get("height") or 0)
-            set_res = run_android_command(["wm", "size", f"{width}x{height}"], timeout=8, prefer_root=True)
-            correction_applied.append(f"wm size {width}x{height} rc={set_res.returncode}")
-        time.sleep(0.2)
-        wm_state = get_wm_size()
+        display = get_display_orientation_state()
 
     launcher = get_home_launcher_package()
     launcher_bounds = get_home_launcher_bounds(launcher)
@@ -595,8 +754,8 @@ def enforce_landscape_home_state(*, phase: str = "before_start", screen_mode_con
             "rotation": display.get("rotation", ""),
             "orientation": display.get("orientation", "unknown"),
         },
-        "final_layout_mode": "landscape",
-        "screen_mode_config": screen_mode_config,
+        "final_layout_mode": target,
+        "screen_mode_config": target,
         "correction_applied": correction_applied,
         "launcher_bounds": launcher_bounds,
         "black_bar_suspected": "yes" if black_bar_suspected else "no",
@@ -608,15 +767,26 @@ def _rotation_for_screen_mode(screen_mode: str) -> int:
     return 0 if mode == "portrait" else 1
 
 
-def _apply_user_rotation(screen_mode: str, *, root_info: RootInfo | None = None) -> list[dict[str, object]]:
-    """Apply Android user rotation lock for the requested mode."""
+def _apply_user_rotation(
+    screen_mode: str,
+    *,
+    root_info: RootInfo | None = None,
+    strict: bool = False,
+) -> list[dict[str, object]]:
+    """Apply Android user rotation lock for the requested mode.
+
+    ``strict=False`` (default) locks rotation for Roblox layout but does NOT
+    enable ``set-fix-to-user-rotation`` — that global fix breaks launchers and
+    leaves portrait home UI pillarboxed with black side bars.
+    """
     rotation = _rotation_for_screen_mode(screen_mode)
     commands = [
         ["settings", "put", "system", "accelerometer_rotation", "0"],
         ["settings", "put", "system", "user_rotation", str(rotation)],
         ["cmd", "window", "set-user-rotation", "lock", str(rotation)],
-        ["cmd", "window", "set-fix-to-user-rotation", "enabled"],
     ]
+    if strict:
+        commands.append(["cmd", "window", "set-fix-to-user-rotation", "enabled"])
     results: list[dict[str, object]] = []
     for cmd in commands:
         res = run_android_command(cmd, timeout=8, prefer_root=bool(root_info and root_info.available))
@@ -642,7 +812,11 @@ def enforce_screen_orientation(
     third-party orientation controller keeps overriding the selected mode, only
     that controller candidate is force-stopped, then rotation is applied again.
     """
-    requested = "landscape"
+    requested = str(screen_mode or "auto").strip().lower()
+    if requested not in ("landscape", "portrait"):
+        from .resize_mode import resolve_runtime_screen_mode
+
+        requested, _ = resolve_runtime_screen_mode(configured=requested)
     protected = set(str(p).strip() for p in (protected_packages or []) if str(p).strip())
     protected.add("com.termux")
     root_info = detect_root()

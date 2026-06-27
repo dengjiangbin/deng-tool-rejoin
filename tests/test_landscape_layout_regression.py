@@ -5,6 +5,7 @@ from unittest import mock
 
 from agent import window_layout
 from agent import commands
+from agent.resize_engine import ResizePipelineResult
 
 
 class TestLandscapeLayoutRegression(unittest.TestCase):
@@ -39,41 +40,31 @@ class TestLandscapeLayoutRegression(unittest.TestCase):
         ]
         self.assertEqual([(r.left, r.top) for r in rects], expected_positions)
 
-    def test_start_layout_forces_landscape_when_old_config_says_portrait(self) -> None:
+    def test_start_layout_keeps_portrait_when_device_is_portrait(self) -> None:
         cfg = {
-            "screen_mode": "portrait",
+            "screen_mode": "auto",
             "roblox_packages": [{"package": "pkg1", "enabled": True}, {"package": "pkg2", "enabled": True}],
         }
         entries = [{"package": "pkg1", "enabled": True}, {"package": "pkg2", "enabled": True}]
-        captured: list[str] = []
+        rect = window_layout.WindowRect("pkg1", 0, 25, 720, 1280)
 
-        class _Display:
-            width = 1280
-            height = 720
-            density = 320
+        pipeline = ResizePipelineResult(
+            ok=True,
+            mode="PORTRAIT",
+            confidence="HIGH",
+            basis="logical display height exceeds width",
+            signals={"wm_size_raw": "1080x1920"},
+            layout={"screen_width": 1080, "screen_height": 1920, "columns": 1, "rows": 2},
+            rects=[rect],
+            summary={"resized": 1, "already_correct": 0, "skipped": 0, "failed": 0},
+        )
 
-        with mock.patch("agent.commands.window_layout.detect_display_info", return_value=_Display()), \
-             mock.patch("agent.commands.window_layout.calculate_split_layout") as calc, \
-             mock.patch("agent.commands.window_layout.layout_exclusion_reason", return_value=""), \
-             mock.patch("agent.commands.window_layout.detect_layout_orientation", return_value="landscape"), \
-             mock.patch("agent.commands.window_layout._detect_status_bar_height", return_value=25), \
-             mock.patch("agent.window_apply.apply_window_layout") as apply, \
+        with mock.patch("agent.resize_engine.run_resize_pipeline", return_value=pipeline), \
              mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
              mock.patch("agent.commands.android.detect_root", return_value=mock.Mock(available=False, tool=None)):
-            calc.side_effect = lambda packages, width, height, **kwargs: (
-                captured.append(kwargs.get("screen_mode")) or [
-                    window_layout.WindowRect(pkg, 640 + i * 100, 25, 720 + i * 100, 225)
-                    for i, pkg in enumerate(packages)
-                ]
-            )
-            apply.return_value = [
-                mock.Mock(desired=window_layout.WindowRect("pkg1", 640, 25, 720, 225), pre_write_ok=True, pre_write_method="mock", status="ok", attempts=[]),
-                mock.Mock(desired=window_layout.WindowRect("pkg2", 740, 25, 820, 225), pre_write_ok=True, pre_write_method="mock", status="ok", attempts=[]),
-            ]
             out_cfg, _ = commands._prepare_automatic_layout(cfg, entries)
 
-        self.assertEqual(out_cfg["screen_mode"], "landscape")
-        self.assertEqual(captured, ["landscape"])
+        self.assertEqual(out_cfg["screen_mode"], "portrait")
 
 
 if __name__ == "__main__":

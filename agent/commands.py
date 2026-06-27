@@ -1673,17 +1673,21 @@ def _enforce_configured_screen_mode(
     protected_packages: list[str] | None = None,
     phase: str = "before_start",
 ) -> dict[str, Any]:
-    """Apply the release's Landscape-only runtime orientation."""
+    """Detect or honor configured screen mode, then lock orientation before layout."""
     result: dict[str, Any] = {}
     try:
         from .logger import configure_logging, log_event
+        from .resize_mode import resolve_runtime_screen_mode
 
         cfg = config_data or {}
-        mode = DEFAULT_SCREEN_MODE
-        cfg["screen_mode"] = DEFAULT_SCREEN_MODE
+        mode, mode_info = resolve_runtime_screen_mode(
+            configured=str(cfg.get("screen_mode") or "auto"),
+            previous_mode=cfg.get("last_resize_mode"),
+        )
+        cfg["screen_mode"] = mode
         landscape_state = android.enforce_landscape_home_state(
             phase=phase,
-            screen_mode_config=DEFAULT_SCREEN_MODE,
+            screen_mode_config=mode,
         )
         protected = list(protected_packages or [])
         if not protected:
@@ -1692,6 +1696,7 @@ def _enforce_configured_screen_mode(
             except Exception:  # noqa: BLE001
                 protected = []
         result = android.enforce_screen_orientation(mode, protected_packages=protected)
+        result["resize_mode"] = mode_info
         log_event(
             configure_logging(),
             "info",
@@ -1716,8 +1721,8 @@ def _enforce_configured_screen_mode(
             user_rotation=landscape_state.get("user_rotation", ""),
             accelerometer_rotation=landscape_state.get("accelerometer_rotation", ""),
                 display_rect=json.dumps(landscape_state.get("display_rect", {}), sort_keys=True),
-            final_layout_mode=landscape_state.get("final_layout_mode", "landscape"),
-            screen_mode_config=landscape_state.get("screen_mode_config", DEFAULT_SCREEN_MODE),
+            final_layout_mode=landscape_state.get("final_layout_mode", mode),
+            screen_mode_config=landscape_state.get("screen_mode_config", mode),
                 correction_applied=json.dumps(landscape_state.get("correction_applied", []), sort_keys=True),
                 launcher_bounds=json.dumps(landscape_state.get("launcher_bounds", {}), sort_keys=True),
             black_bar_suspected=landscape_state.get("black_bar_suspected", "no"),
@@ -1730,7 +1735,7 @@ def _enforce_configured_screen_mode(
                 configure_logging(),
                 "info",
                 "[DENG_REJOIN_ORIENTATION_ENFORCE]",
-                requested=DEFAULT_SCREEN_MODE,
+                requested=mode,
                 actual_before="unknown",
                 actual_after="unknown",
                 root_available="false",
@@ -5450,8 +5455,15 @@ def _verify_layout_post_launch(
     out: dict[str, bool] = {}
     diag_rows: list[dict[str, Any]] = []
     try:
-        _screen_mode = DEFAULT_SCREEN_MODE
-        cfg["screen_mode"] = DEFAULT_SCREEN_MODE
+        _screen_mode = str(cfg.get("screen_mode") or "auto").lower()
+        if _screen_mode not in ("landscape", "portrait"):
+            from .resize_mode import resolve_runtime_screen_mode
+
+            _screen_mode, _ = resolve_runtime_screen_mode(
+                configured=_screen_mode,
+                previous_mode=cfg.get("last_resize_mode"),
+            )
+        cfg["screen_mode"] = _screen_mode
         try:
             _display_state = android.get_display_orientation_state()
         except Exception:  # noqa: BLE001
@@ -5750,7 +5762,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     _start_session_id = f"start-{int(time.time() * 1000)}-{os.getpid()}"
     previous_crash_notice = _previous_start_crash_notice()
     _start_session = StartSessionLogger(_start_session_id)
-    _start_screen_mode = DEFAULT_SCREEN_MODE
+    _start_screen_mode = "auto"
     # Silence all internal loggers so warnings/errors go to file, never stdout.
     from .logger import silence_public_loggers
     silence_public_loggers()
@@ -5822,13 +5834,13 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg = load_config()
         _start_session.mark("config_load_done")
         cfg = _ensure_install_id_saved(cfg)
-        _start_screen_mode = DEFAULT_SCREEN_MODE
-        cfg["screen_mode"] = DEFAULT_SCREEN_MODE
         try:
             from .build_info import collect_version_info
             _version_info = collect_version_info()
         except Exception:  # noqa: BLE001
             _version_info = {}
+        _enforce_configured_screen_mode(cfg, phase="before_start")
+        _start_screen_mode = str(cfg.get("screen_mode") or "auto")
         safe_io.set_crash_context(
             phase="starting",
             session_id=_start_session_id,
@@ -5838,7 +5850,6 @@ def cmd_start(args: argparse.Namespace) -> int:
             artifact_sha=_version_info.get("artifact_sha256_short", ""),
             build_probe_id=_version_info.get("probe_id", ""),
         )
-        _enforce_configured_screen_mode(cfg, phase="before_start")
         _enforce_termux_left_layout(cfg)
         if previous_crash_notice:
             try:
@@ -6244,7 +6255,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _sup_sub_boot["health_check_interval_seconds"] = max(10, _hci_boot)
         _live_cfg_boot["supervisor"] = _sup_sub_boot
         _live_cfg_boot["start_session_id"] = _start_session_id
-        _live_cfg_boot["screen_mode"] = _start_screen_mode
+        _live_cfg_boot["screen_mode"] = str(cfg.get("screen_mode") or _start_screen_mode)
         runtime_entries_boot = _ensure_presence_auth_for_entries(runtime_entries, cfg)
         _boot_status = {e["package"]: _STATUS_READY for e in entries}
         _supervisor = WatchdogSupervisor(
@@ -6363,7 +6374,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         try:
             _home_landscape_state = android.enforce_landscape_home_state(
                 phase="after_start",
-                screen_mode_config=DEFAULT_SCREEN_MODE,
+                screen_mode_config=str(cfg.get("screen_mode") or "auto"),
             )
             from .logger import log_event as _log_event
             _log_event(
@@ -6376,8 +6387,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 user_rotation=_home_landscape_state.get("user_rotation", ""),
                 accelerometer_rotation=_home_landscape_state.get("accelerometer_rotation", ""),
                 display_rect=json.dumps(_home_landscape_state.get("display_rect", {}), sort_keys=True),
-                final_layout_mode=_home_landscape_state.get("final_layout_mode", "landscape"),
-                screen_mode_config=_home_landscape_state.get("screen_mode_config", DEFAULT_SCREEN_MODE),
+                final_layout_mode=_home_landscape_state.get("final_layout_mode", cfg.get("screen_mode", "auto")),
+                screen_mode_config=_home_landscape_state.get("screen_mode_config", cfg.get("screen_mode", "auto")),
                 correction_applied=json.dumps(_home_landscape_state.get("correction_applied", []), sort_keys=True),
                 launcher_bounds=json.dumps(_home_landscape_state.get("launcher_bounds", {}), sort_keys=True),
                 black_bar_suspected=_home_landscape_state.get("black_bar_suspected", "no"),

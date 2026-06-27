@@ -10,7 +10,7 @@ from typing import Any
 from . import android
 from .package_identity import get_package_identity
 from .resize_grid import calculate_resize_grid, validate_grid_bounds
-from .resize_mode import detect_effective_resize_mode
+from .resize_mode import detect_effective_resize_mode, resolve_runtime_screen_mode
 from .resize_packages import get_trusted_resize_packages
 from .resize_trace import append_resize_event
 from .resize_xml import safe_write_resize_bounds
@@ -98,8 +98,11 @@ def run_resize_pipeline(
             trigger=trigger,
         )
 
-    mode_info = detect_effective_resize_mode(previous_mode=cfg.get("last_resize_mode"))
-    mode = str(mode_info.get("mode") or "LANDSCAPE")
+    runtime_mode, mode_info = resolve_runtime_screen_mode(
+        configured=str(cfg.get("screen_mode") or "auto"),
+        previous_mode=cfg.get("last_resize_mode"),
+    )
+    mode = "PORTRAIT" if runtime_mode == "portrait" else "LANDSCAPE"
     norm = mode_info.get("signals", {}).get("physical_size_normalized", {})
     major = int(norm.get("major") or 0)
     minor = int(norm.get("minor") or 0)

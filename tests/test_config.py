@@ -196,16 +196,29 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(validated["private_url_mode"], "global")
         self.assertEqual(validated["private_server_url"], cfg["launch_url"])
 
-    def test_default_screen_mode_is_landscape(self):
+    def test_default_screen_mode_is_auto(self):
         cfg = default_config()
         validated = validate_config(cfg)
-        self.assertEqual(validated["screen_mode"], "landscape")
+        self.assertEqual(validated["screen_mode"], "auto")
 
-    def test_old_portrait_config_migrates_to_landscape_only_runtime(self):
+    def test_legacy_forced_landscape_migrates_to_auto_once(self):
+        cfg = default_config()
+        cfg["screen_mode"] = "landscape"
+        validated = validate_config(cfg)
+        self.assertEqual(validated["screen_mode"], "auto")
+        self.assertTrue(validated["screen_mode_auto_migrated_v1"])
+
+        cfg2 = dict(validated)
+        cfg2["screen_mode"] = "landscape"
+        validated2 = validate_config(cfg2)
+        self.assertEqual(validated2["screen_mode"], "landscape")
+
+    def test_portrait_config_is_preserved(self):
         cfg = default_config()
         cfg["screen_mode"] = "portrait"
+        cfg["screen_mode_auto_migrated_v1"] = True
         validated = validate_config(cfg)
-        self.assertEqual(validated["screen_mode"], "landscape")
+        self.assertEqual(validated["screen_mode"], "portrait")
 
     def test_portrait_density_guard_defaults_without_applying_density(self):
         cfg = default_config()
@@ -214,11 +227,18 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(validated["portrait_previous_density"], "")
 
     def test_screen_mode_allowed_values(self):
-        for value in ("landscape", "portrait", "potrait"):
+        for value, expected in (
+            ("landscape", "landscape"),
+            ("portrait", "portrait"),
+            ("auto", "auto"),
+            ("potrait", "portrait"),
+        ):
             cfg = default_config()
             cfg["screen_mode"] = value
+            if value in ("landscape", "portrait"):
+                cfg["screen_mode_auto_migrated_v1"] = True
             validated = validate_config(cfg)
-            self.assertEqual(validated["screen_mode"], "landscape")
+            self.assertEqual(validated["screen_mode"], expected, msg=value)
 
     def test_private_url_global_mode_uses_global_url_and_ignores_package_url(self):
         cfg = default_config()

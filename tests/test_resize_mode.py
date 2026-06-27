@@ -95,5 +95,26 @@ class TestDetectEffectiveResizeMode(unittest.TestCase):
         self.assertEqual(r2["confidence"], "LOW")
 
 
+class TestResolveRuntimeScreenMode(unittest.TestCase):
+    def test_auto_uses_detected_portrait(self):
+        with mock.patch(
+            "agent.resize_mode.detect_effective_resize_mode",
+            return_value={"mode": "PORTRAIT", "confidence": "HIGH", "basis": "test", "signals": {}},
+        ):
+            mode, info = resize_mode.resolve_runtime_screen_mode(configured="auto")
+        self.assertEqual(mode, "portrait")
+        self.assertEqual(info["mode"], "PORTRAIT")
+
+    def test_config_portrait_overrides_detected_landscape(self):
+        with mock.patch(
+            "agent.resize_mode.detect_effective_resize_mode",
+            return_value={"mode": "LANDSCAPE", "confidence": "HIGH", "basis": "test", "signals": {}},
+        ):
+            mode, info = resize_mode.resolve_runtime_screen_mode(configured="portrait")
+        self.assertEqual(mode, "portrait")
+        self.assertEqual(info["mode"], "PORTRAIT")
+        self.assertIn("config", info["basis"])
+
+
 if __name__ == "__main__":
     unittest.main()

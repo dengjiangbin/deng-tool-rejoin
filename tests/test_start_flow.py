@@ -209,7 +209,7 @@ class StartTableUxTests(unittest.TestCase):
         lowered_keys = " ".join(cfg.keys()).lower()
         self.assertNotIn("executor", lowered_keys)
         self.assertNotIn("auto_execute_scripts", cfg)
-        self.assertEqual(cfg["screen_mode"], "landscape")
+        self.assertEqual(cfg["screen_mode"], "auto")
         forbidden_keys = {
             "script_injection",
             "executor",
