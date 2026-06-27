@@ -125,7 +125,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz",
-    "artifact_sha256": "b51b768a4cb35dd64b41a6455f0fca5f0a87c9b801ab07358f8b968719716aca",
+    "artifact_sha256": "ac42ac6c56edd2b505fdc33bdd4121827929ee4de5c0bfd23595f20404dd321e",
     "installer_endpoint": "/install/v1.3.0",
     "notes": "Public stable release: portrait pb99 window resize, online detection timing, and portrait Start layout fixes.",
     "enabled": true
@@ -143,6 +143,6 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "cbdcf1ae58980caf7ff3a641708c1d115f2532467c5f4ecd12363c11ada162da"
+    "artifact_sha256": "75ac08fad6fc320ea36105add7447003c18cb9468d330bff0bef1a67c52e6165"
   }
 ]
