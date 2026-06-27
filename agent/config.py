@@ -134,6 +134,7 @@ def default_config() -> dict[str, Any]:
         "snapshot_temp_path": "",
         "auto_resize_enabled": False,
         "auto_resize_mode": "off",
+        "resize_left_offset_percent": 0.0,
         "window_gap_px": 8,
         "last_layout_preview": [],
         "first_setup_completed": False,
@@ -749,6 +750,12 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["backoff_min_seconds"] = _as_int("backoff_min_seconds", merged.get("backoff_min_seconds"), MIN_BACKOFF_SECONDS)
     merged["backoff_max_seconds"] = _as_int("backoff_max_seconds", merged.get("backoff_max_seconds"), MIN_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS)
     merged["window_gap_px"] = _as_int("window_gap_px", merged.get("window_gap_px"), 0)
+    try:
+        merged["resize_left_offset_percent"] = max(
+            0.0, min(90.0, float(merged.get("resize_left_offset_percent", 0.0)))
+        )
+    except (TypeError, ValueError):
+        merged["resize_left_offset_percent"] = 0.0
     merged["snapshot_max_age_seconds"] = _as_int("snapshot_max_age_seconds", merged.get("snapshot_max_age_seconds"), 30)
     if merged["backoff_max_seconds"] < merged["backoff_min_seconds"]:
         raise ConfigError("backoff_max_seconds must be greater than or equal to backoff_min_seconds")

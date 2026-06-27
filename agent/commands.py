@@ -4329,37 +4329,38 @@ def cmd_first_setup(args: argparse.Namespace) -> int:
 
 
 _LAYOUT_RESET_INSTRUCTIONS = """
-Layout Recovery — Restoring Normal Orientation
-===============================================
+Display Recovery — Fix sideways / black-bar home screen
+=======================================================
 
-If your Termux terminal or screen is sideways after a layout operation:
+If your home screen shows portrait UI squeezed in the middle with black
+bars on the sides, or everything looks forced landscape:
 
-Method 1 — Rotate the phone back manually:
-  Rotate your physical device to portrait and lock portrait mode in Settings.
+Method 1 — One command (Termux, recommended):
+  deng-rejoin doctor reset
 
-Method 2 — Android Settings:
-  Settings → Display → Auto-rotate → turn OFF, then set Portrait.
-
-Method 3 — Quick Settings tile:
-  Swipe down the notification shade and tap the Auto-Rotate toggle.
-
-Method 4 — ADB (from a PC):
-  adb shell settings put system user_rotation 0
-
-Method 5 — Inside Termux:
+Method 2 — Manual Termux commands:
+  wm size reset
+  wm density reset
+  wm overscan reset
+  settings put system accelerometer_rotation 1
+  cmd window set-fix-to-user-rotation disabled
+  cmd window set-user-rotation free
   settings put system user_rotation 0
 
-Important:
-  DENG Tool: Rejoin never issues global rotation commands.
-  If Termux appears sideways, the likely cause is App Cloner applying
-  a window position that forces landscape mode on your device.
-  The window layout only writes to the Roblox app clone preferences,
-  NOT to Termux or system UI.
+Method 3 — Android Settings:
+  Settings → Display → turn Auto-rotate ON, then rotate phone to portrait.
 
-After restoring orientation:
-  1. Restart Termux.
-  2. Run: deng-rejoin
-  3. If the issue recurs, disable layout in config (auto_resize_enabled = false).
+Method 4 — ADB (from a PC):
+  adb shell wm size reset
+  adb shell wm density reset
+  adb shell settings put system accelerometer_rotation 1
+  adb shell cmd window set-fix-to-user-rotation disabled
+  adb shell settings put system user_rotation 0
+
+After restoring:
+  1. Press Home — launcher should fill the screen normally.
+  2. Restart Termux if the terminal is still sideways.
+  3. Run deng-rejoin start again — Roblox windows stay landscape; home UI is no longer forced.
 """.strip()
 
 
@@ -4689,6 +4690,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         return _cmd_doctor_root_state(cfg)
 
     if getattr(args, "layout_reset", False):
+        if android.is_termux():
+            try:
+                restore_result = android.restore_display_defaults(portrait=True)
+                print("Display restore applied on this device.")
+                for step in restore_result.get("applied", []):
+                    label = step.get("step", "?")
+                    ok = bool(step.get("ok"))
+                    print(f"  {label}: {'OK' if ok else 'FAIL'}")
+                display = restore_result.get("display", {})
+                if isinstance(display, dict):
+                    print(
+                        f"  orientation: {display.get('orientation', 'unknown')} "
+                        f"({display.get('width', 0)}x{display.get('height', 0)})"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                print(f"Display restore error: {exc}")
         print(_LAYOUT_RESET_INSTRUCTIONS)
         return 0
 
@@ -5183,135 +5200,76 @@ def _prepare_automatic_layout(
     from .logger import configure_logging
     _layout_log = configure_logging()
     try:
-        packages = [entry["package"] for entry in entries]
-        n        = len(packages)
+        from .resize_engine import run_resize_pipeline
 
-        # Compute layout rectangles
-        try:
-            display = window_layout.detect_display_info()
-        except Exception:  # noqa: BLE001
-            display = window_layout.DisplayInfo(width=1080, height=1920, density=420)
+        pipeline = run_resize_pipeline(cfg, entries, trigger="startup", force=True)
+        if pipeline.skipped and pipeline.skipped_reason == "no trusted packages":
+            cfg["_layout_abort_reason"] = "resize skipped: no trusted packages"
+            return cfg, "resize skipped: no trusted packages"
 
-        # Use the full physical screen width for the package grid (probe
-        # p-cf20e97a18: packages were confined to right 33% because
-        # left_fraction=0.50 reserved the left half THEN lte6 skipped col0
-        # of that half, leaving only cols 1+2 of the right 640px).  With
-        # left_fraction=0.0 the grid spans the full display width; lte6 keeps
-        # col0 naturally empty for Termux, giving packages 2/3 of the screen.
-        _dock_frac = 0.0
-        _screen_mode = DEFAULT_SCREEN_MODE
-        cfg["screen_mode"] = DEFAULT_SCREEN_MODE
-        if cfg.get("last_layout_mode") and cfg.get("last_layout_mode") != _screen_mode:
-            cfg.pop("last_layout_preview", None)
-            cfg.pop("_layout_rects", None)
-        from .logger import log_event as _log_event
-        filtered_packages = []
-        for p in packages:
-            reason = window_layout.layout_exclusion_reason(p)
-            excluded = bool(reason)
-            _log_event(
-                _layout_log,
-                "info",
-                "[DENG_REJOIN_LAYOUT_EXCLUSION]",
-                package=p,
-                reason=reason or "selected_package",
-                excluded=str(excluded).lower(),
-            )
-            if not excluded:
-                filtered_packages.append(p)
-        rects = window_layout.calculate_split_layout(
-            filtered_packages,
-            display.width, display.height,
-            termux_log_fraction=_dock_frac,
-            screen_mode=_screen_mode,
-        )
+        packages = [r.package for r in pipeline.rects]
+        n = len(packages)
+        rects = pipeline.rects
+        _screen_mode = str(pipeline.mode or DEFAULT_SCREEN_MODE).lower()
+        cfg["screen_mode"] = _screen_mode
+
+        display_w = int(pipeline.layout.get("screen_width") or 0)
+        display_h = int(pipeline.layout.get("screen_height") or 0)
+        if display_w <= 0 or display_h <= 0:
+            try:
+                display = window_layout.detect_display_info()
+                display_w, display_h = display.width, display.height
+            except Exception:  # noqa: BLE001
+                display_w, display_h = 1080, 1920
+
         cfg.pop("_layout_abort_reason", None)
         cfg.pop("_layout_abort_mode", None)
-        # Derive Termux dock fraction from the actual package bounds so that
-        # _enforce_termux_left_layout (called later in cmd_start) minimises
-        # Termux to exactly the empty col0 area rather than a hard-coded 50%.
-        if rects and display.width > 0:
-            _termux_frac = min(r.left for r in rects) / display.width
-        else:
-            _termux_frac = 0.0
-        cfg["termux_dock_fraction"] = _termux_frac
+        _termux_frac = float(cfg.get("termux_dock_fraction") or 0.0)
 
-        # ── release grid probe — emitted at INFO so it lands in probe
-        try:
-            from . import window_layout as _wl
-            _orient = _wl.detect_layout_orientation(display.width, display.height)
-            _sb_h   = _wl._detect_status_bar_height()
-            _left_end = min(r.left for r in rects) if rects else 0
-            _cols, _rows = 3, 3
-            _rule = getattr(_wl, "LANDSCAPE_SLOT_RULES", {}).get(
-                len(filtered_packages),
-                (1, 2, 3, 4, 5, 6, 7, 8, 9),
-            )
-            _slot_order = ",".join(str(x) if x else "empty" for x in _rule)
-            _landscape_rule = f"count_{len(filtered_packages)}_3x3"
-            _pane_w = max(160, display.width - _left_end)
-            _usable_h = max(90, display.height - _sb_h)
-            _cell_w = max(160, _pane_w // _cols)
-            _cell_h = max(90, _usable_h // _rows)
-            _layout_log.info(
-                "[DENG_REJOIN_SCREEN_MODE] configured=%s detected_orientation=%s applied_mode=%s root_available=%s",
-                _screen_mode, _orient, _screen_mode, str(android.detect_root().available).lower(),
-            )
-            _layout_log.info(
-                "[DENG_REJOIN_SPLIT_LAYOUT] screen_w=%d screen_h=%d termux_area=left_col0 "
-                "roblox_area=%s termux_desired=%s termux_actual=%s "
-                "roblox_grid_area=%s full_width_used=true",
-                display.width,
-                display.height,
-                "right_cols1_plus",
-                (0, 0, _left_end, display.height),
-                "",
-                (0, _sb_h, display.width, display.height),
-            )
-            _layout_log.info(
-                "[DENG_REJOIN_LANDSCAPE_SLOT_MAP] package_count=%d rule=%s grid=3x3 "
-                "slot_map=%s roblox_grid_area=%s bounds=%s",
-                len(filtered_packages),
-                _landscape_rule,
-                _slot_order,
-                (0, _sb_h, display.width, display.height),
-                [(r.left, r.top, r.right, r.bottom) for r in rects],
-            )
-            _layout_log.info(
-                "[DENG_REJOIN_LAYOUT_GRID] mode=%s package_count=%d grid=%dx%d slot_order=%s "
-                "top_inset=%d screen_w=%d screen_h=%d termux_bounds=%s package_bounds=%s",
-                _screen_mode,
-                len(filtered_packages),
-                _cols,
-                _rows,
-                _slot_order,
-                _sb_h,
-                display.width,
-                display.height,
-                (0, 0, _left_end, display.height),
-                [(r.left, r.top, r.right, r.bottom) for r in rects],
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        from .logger import log_event as _log_event
+        _log_event(
+            _layout_log,
+            "info",
+            "[DENG_REJOIN_RESIZE_MODE]",
+            mode=pipeline.mode,
+            confidence=pipeline.confidence,
+            basis=pipeline.basis,
+            home_landscape_wm_portrait_conflict=str(
+                bool(pipeline.signals.get("home_landscape_wm_portrait_conflict"))
+            ).lower(),
+            wm_size_raw=str(pipeline.signals.get("wm_size_raw") or ""),
+            logical_size=str(pipeline.signals.get("logical_size") or ""),
+        )
+        _log_event(
+            _layout_log,
+            "info",
+            "[DENG_REJOIN_RESIZE_LAYOUT]",
+            screen_w=display_w,
+            screen_h=display_h,
+            columns=int(pipeline.layout.get("columns") or 0),
+            rows=int(pipeline.layout.get("rows") or 0),
+            left_offset=int(pipeline.layout.get("left_offset") or 0),
+            package_count=n,
+            summary=json.dumps(pipeline.summary, sort_keys=True),
+        )
 
         # ── [DENG_REJOIN_LAYOUT_BOUNDS] — per-package desired bounds + overlap check
         try:
+            _cols = max(1, int(pipeline.layout.get("columns") or 1))
             _seen_bounds: list[tuple[int, int, int, int]] = []
             for _bi, _r in enumerate(rects):
                 _slot = _bi
-                _row = _slot // max(1, _cols)
-                _col = _slot % max(1, _cols)
+                _row = _slot // _cols
+                _col = _slot % _cols
                 _overlap = any(
                     not (_r.right <= _o[0] or _o[2] <= _r.left or
                          _r.bottom <= _o[1] or _o[3] <= _r.top)
                     for _o in _seen_bounds
                 )
-                _duplicate = (_r.left, _r.top, _r.right, _r.bottom) in _seen_bounds
                 _seen_bounds.append((_r.left, _r.top, _r.right, _r.bottom))
                 _layout_log.info(
                     "[DENG_REJOIN_LAYOUT_BOUNDS] package=%s index=%d slot=%d row=%d col=%d"
-                    " desired_x=%d desired_y=%d desired_w=%d desired_h=%d"
-                    " actual_before=pending actual_after=pending overlap_detected=%s",
+                    " desired_x=%d desired_y=%d desired_w=%d desired_h=%d overlap_detected=%s",
                     _r.package, _bi, _slot, _row, _col,
                     _r.left, _r.top, _r.win_w, _r.win_h,
                     "true" if _overlap else "false",
@@ -5320,8 +5278,6 @@ def _prepare_automatic_layout(
             pass
 
         try:
-            cfg["last_layout_mode"] = _screen_mode
-            cfg["last_layout_preview"] = [r.as_dict() for r in rects]
             save_config(cfg)
         except Exception:  # noqa: BLE001
             pass
@@ -5341,29 +5297,16 @@ def _prepare_automatic_layout(
         except Exception as exc:  # noqa: BLE001
             _layout_log.debug("layout-key discovery error (non-fatal): %s", exc)
 
-        # ── Pre-launch apply: write XML + force-stop so prefs are honored
-        # ── on the imminent relaunch (cmd_start will issue the launches).
-        try:
-            from . import window_apply
-            results = window_apply.apply_window_layout(
-                rects,
-                force_stop_before=True,    # MUST force-stop so prefs reload
-                relaunch_after=False,
-                verify_after=False,        # verification deferred to post-launch
-                retries=0,
-                screen_mode=_screen_mode,
+        for row in pipeline.packages:
+            _layout_log.debug(
+                "pre-launch resize: %s status=%s reason=%s backup=%s",
+                row.get("package"),
+                row.get("status"),
+                row.get("reason"),
+                row.get("backup_created"),
             )
-            for r in results:
-                _layout_log.debug(
-                    "pre-launch apply: %s ok=%s method=%s status=%s attempts=%s",
-                    r.package, r.pre_write_ok, r.pre_write_method, r.status,
-                    "; ".join(r.attempts),
-                )
-            cfg["_layout_rects"] = [r.desired.as_dict() for r in results]
-        except Exception as exc:  # noqa: BLE001
-            _layout_log.debug("pre-launch apply error (non-fatal): %s", exc)
 
-        return cfg, f"layout_prepared n={n}"
+        return cfg, f"layout_prepared n={n} mode={pipeline.mode}"
     except Exception as exc:  # noqa: BLE001
         _layout_log.debug("Layout error (non-fatal): %s", exc)
         return cfg, "layout_error"
@@ -5554,14 +5497,11 @@ def _verify_layout_post_launch(
                 except (KeyError, TypeError, ValueError):
                     continue
         if not rects:
-            display = window_layout.detect_display_info()
-            _dock_frac2 = float(cfg.get("termux_dock_fraction", 0.0) or 0.0)
-            rects = window_layout.calculate_split_layout(
-                [e["package"] for e in entries if not window_layout._is_layout_excluded(e["package"])],
-                display.width, display.height,
-                termux_log_fraction=_dock_frac2,
-                screen_mode=_screen_mode,
-            )
+            from .resize_engine import run_resize_pipeline
+
+            pipeline = run_resize_pipeline(cfg, entries, trigger="auto", force=False)
+            rects = pipeline.rects
+            _screen_mode = str(pipeline.mode or DEFAULT_SCREEN_MODE).lower()
         from . import window_apply
         results = window_apply.apply_window_layout(
             rects,
@@ -6292,6 +6232,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             STATUS_LAUNCHING as _STATUS_LAUNCHING,
             STATUS_ONLINE as _STATUS_ONLINE,
             STATUS_PENDING as _STATUS_PENDING,
+            STATUS_READY as _STATUS_READY,
             STATUS_WAITING as _STATUS_WAITING,
         )
 
@@ -6305,7 +6246,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_cfg_boot["start_session_id"] = _start_session_id
         _live_cfg_boot["screen_mode"] = _start_screen_mode
         runtime_entries_boot = _ensure_presence_auth_for_entries(runtime_entries, cfg)
-        _boot_status = {e["package"]: _STATUS_PENDING for e in entries}
+        _boot_status = {e["package"]: _STATUS_READY for e in entries}
         _supervisor = WatchdogSupervisor(
             runtime_entries_boot, _live_cfg_boot, initial_status=_boot_status
         )
@@ -6321,8 +6262,14 @@ def cmd_start(args: argparse.Namespace) -> int:
             render_callback=None,
         )
         _start_session.mark("watchdog_daemon_started", package_count=len(entries))
+        try:
+            from .termux_session import ensure_termux_session_alive as _ensure_termux_alive
+
+            _ensure_termux_alive(cfg)
+        except Exception:  # noqa: BLE001
+            pass
         for _boot_entry in entries:
-            phase[_boot_entry["package"]] = _STATUS_PENDING
+            phase[_boot_entry["package"]] = "Ready"
 
         # ── PHASE 2: staggered launching (30s between packages) ───────────────
         launch_ok: dict[str, bool] = {}
@@ -6337,7 +6284,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             runtime_entry = runtime_entry_by_pkg.get(package, entry)
             launch_attempted[package] = True
             for later in entries[index:]:
-                phase[later["package"]] = "Pending"
+                phase[later["package"]] = "Ready"
             phase[package] = "Launching"
             _supervisor.mark_package_launched(package)
             _render_phase("Launching clone...")
@@ -6738,9 +6685,18 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_session.mark("supervisor_loop")
             import time as _monitor_time
             _dashboard_interval = WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS
+            _termux_keepalive_at = 0.0
             while not _supervisor.stop_event.is_set():
                 _render_started = _monitor_time.monotonic()
                 _live_dashboard()
+                if (_monitor_time.monotonic() - _termux_keepalive_at) >= 1800.0:
+                    try:
+                        from .termux_session import ensure_termux_session_alive as _ensure_termux_alive
+
+                        _ensure_termux_alive(cfg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    _termux_keepalive_at = _monitor_time.monotonic()
                 _sleep_for = max(0.0, _dashboard_interval - (_monitor_time.monotonic() - _render_started))
                 if _supervisor.stop_event.wait(_sleep_for):
                     break
@@ -6802,6 +6758,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         _release_start_lock(_shutdown_reason)
         _transition_lifecycle("STOPPED", _shutdown_reason)
         _start_session.finish(_shutdown_reason)
+        try:
+            from .termux_session import release_termux_wake_lock as _release_termux_wake
+
+            _release_termux_wake()
+        except Exception:  # noqa: BLE001
+            pass
         # Real-device evidence (probe ``p-47fa33562a``): on Termux, Python
         # finalization after a supervisor stop sometimes segfaults inside
         # libc cleanup (atexit handlers / threading shutdown / file-handle
@@ -7087,6 +7049,12 @@ def cmd_discover_layout_keys(args: argparse.Namespace) -> int:
 
 def cmd_stop(args: argparse.Namespace) -> int:
     print_banner(use_color=not args.no_color)
+    try:
+        from .termux_session import release_termux_wake_lock
+
+        release_termux_wake_lock()
+    except Exception:  # noqa: BLE001
+        pass
     stopped, message = stop_running_agent(PID_PATH, LOCK_PATH)
     print(message)
     return 0 if stopped or "not running" in message or "stale" in message else 1

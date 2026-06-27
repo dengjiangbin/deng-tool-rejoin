@@ -1323,13 +1323,19 @@ def collect_probe(
         pkg = str(entry.get("package") or "").strip()
         if not pkg:
             continue
-        pkg_block: dict[str, Any] = {}
-        pkg_block["process"] = _capture_process(pkg, errors)
-        pkg_block["dumpsys"] = _capture_dumpsys_for_package(pkg, errors)
-        pkg_block["portrait_input_readback"] = _capture_portrait_input_readback(pkg, errors)
-        pkg_block["shared_prefs"] = _capture_shared_prefs(pkg, errors)
-        pkg_block["presence"] = _capture_presence(entry, errors)
-        pkgs[pkg] = pkg_block
+        if include_heavy or mode == "full":
+            pkg_block: dict[str, Any] = {}
+            pkg_block["process"] = _capture_process(pkg, errors)
+            pkg_block["dumpsys"] = _capture_dumpsys_for_package(pkg, errors)
+            pkg_block["portrait_input_readback"] = _capture_portrait_input_readback(pkg, errors)
+            pkg_block["shared_prefs"] = _capture_shared_prefs(pkg, errors)
+            pkg_block["presence"] = _capture_presence(entry, errors)
+            pkgs[pkg] = pkg_block
+        else:
+            pkgs[pkg] = {
+                "skipped": True,
+                "reason": "summary mode; see resize_debug and lifecycle fields",
+            }
     out["packages"] = pkgs
     out["log_tail"] = _capture_log_tail(errors)
     out["logs"] = _capture_all_logs(errors)
@@ -1347,6 +1353,12 @@ def collect_probe(
     except Exception as exc:  # noqa: BLE001
         out["package_lifecycle_username"] = {"error": str(exc)[:120]}
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
+    try:
+        from .resize_trace import build_resize_debug_from_event, read_latest_resize_event
+
+        out["resize_debug"] = build_resize_debug_from_event(read_latest_resize_event())
+    except Exception as exc:  # noqa: BLE001
+        out["resize_debug"] = {"error": str(exc)[:120]}
     out["rjn_style_detection"] = _capture_rjn_style_detection(errors)
     try:
         from .launch_relaunch_trace import probe_snapshot as launch_probe_snapshot
@@ -1364,16 +1376,22 @@ def collect_probe(
                 pkg_row = next(iter(pkgs.values()), {})
         current_state = str((pkg_row or {}).get("state") or lr.get("last_launch_state") or "")
         online_confirmed = bool((pkg_row or {}).get("is_online_confirmed"))
-        dead_internal = (
-            (pkg_row or {}).get("launch_failed_reason")
-            or (pkg_row or {}).get("decision")
-            or ""
-        )
+        dead_detected = current_state in {"DEAD", "FAILED", "DISCONNECTED", "Disconnected", "Join Failed"}
+        dead_internal = ""
+        if dead_detected:
+            dead_internal = str(
+                (pkg_row or {}).get("last_transition_reason")
+                or (pkg_row or {}).get("launch_failed_reason")
+                or (pkg_row or {}).get("last_dead_reason")
+                or ""
+            )
         from .lifecycle_reasons import format_user_friendly_dead_reason
 
-        dead_friendly = (pkg_row or {}).get("reason_user_friendly") or format_user_friendly_dead_reason(
-            str(dead_internal)
-        )
+        dead_friendly = ""
+        if dead_detected:
+            dead_friendly = (pkg_row or {}).get("reason_user_friendly") or format_user_friendly_dead_reason(
+                dead_internal
+            )
         webhook_dbg = out.get("webhook_debug") if isinstance(out.get("webhook_debug"), dict) else {}
         out["rjn_detection_only"] = {
             "uid_map_ready": bool((rjn_inner or {}).get("uid_map")),
@@ -1435,7 +1453,7 @@ def collect_probe(
             "process_exists": bool((pkg_row or {}).get("process_exists")),
             "pids": (pkg_row or {}).get("pids") or [],
             "last_process_check_at": (pkg_row or {}).get("last_process_check_at"),
-            "dead_detected": current_state in {"DEAD", "FAILED", "DISCONNECTED"},
+            "dead_detected": dead_detected,
             "dead_reason_internal": dead_internal,
             "dead_reason_user_friendly": dead_friendly,
         }
@@ -1487,26 +1505,26 @@ def collect_probe(
         errors.append({"step": "package_menu_diagnostics", "error": str(exc)[:200]})
         out["package_menu_diagnostics"] = []
 
-    # ── Third-party tool discovery: the "observe what works" loop ─────────
-    # Find any other launcher / multi-clone / window-manager / Kaeru-style
-    # tool the user has installed.  Capture its shared_prefs, declared
-    # permissions, and granted app-ops so we can copy whatever technique
-    # makes their freeform resize actually stick on this exact device.
-    out["installed_packages"] = _capture_installed_packages(errors)
-    out["third_party_evidence"] = _capture_kaeru_evidence(
-        out["installed_packages"], errors,
-    )
-    out["appops"] = _capture_appops(
-        out["third_party_evidence"].get("targets", []) or [],
-        errors,
-    )
-    # Termux's own prefs — Kaeru may set window/dock state on Termux too.
-    out["termux_shared_prefs"] = _capture_termux_prefs(errors)
-    # System-property snapshot — OEM freeform-window flags live here.
-    out["getprop"] = _capture_getprop(errors)
-    # Full (non-package-filtered) dumpsys for window/activity/surface state.
-    # This is what we use to see the EXACT bounds Kaeru achieved.
-    out["dumpsys_global"] = _capture_dumpsys_global(errors)
+    # ── Third-party / global dumpsys — full probe only (noisy for resize proof)
+    if include_heavy or mode == "full":
+        out["installed_packages"] = _capture_installed_packages(errors)
+        out["third_party_evidence"] = _capture_kaeru_evidence(
+            out["installed_packages"], errors,
+        )
+        out["appops"] = _capture_appops(
+            out["third_party_evidence"].get("targets", []) or [],
+            errors,
+        )
+        out["termux_shared_prefs"] = _capture_termux_prefs(errors)
+        out["getprop"] = _capture_getprop(errors)
+        out["dumpsys_global"] = _capture_dumpsys_global(errors)
+    else:
+        out["installed_packages"] = {"skipped": True, "reason": "summary mode"}
+        out["third_party_evidence"] = {"skipped": True, "reason": "summary mode"}
+        out["appops"] = {"skipped": True, "reason": "summary mode"}
+        out["termux_shared_prefs"] = {"skipped": True, "reason": "summary mode"}
+        out["getprop"] = {"skipped": True, "reason": "summary mode"}
+        out["dumpsys_global"] = {"skipped": True, "reason": "summary mode"}
     # Recent logcat — `startActivity ... mode=freeform bounds=[...]` lives
     # here so we see the actual API calls Kaeru made.
     out["logcat"] = _capture_logcat(errors)
@@ -1618,6 +1636,9 @@ _PROBE_DROP_ORDER: tuple[str, ...] = (
 _PROBE_PINNED_FIELDS = frozenset({
     "latest_crash_log", "installed_build", "wrapper",
     "last_start_diagnostics", "start_crash_state", "last_failing_command", "webhook_debug",
+    "rjn_detection_only", "online_detection", "decision", "state_machine",
+    "dead_detection", "launch_relaunch", "relaunch", "account_dead_webhook",
+    "resize_debug",
 })
 
 
