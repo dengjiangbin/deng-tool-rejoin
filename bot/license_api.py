@@ -201,9 +201,9 @@ _RATE_LIMIT_MAX: int = 10          # requests per window per IP
 _license_check_cache: dict[str, tuple[float, str, dict]] = {}
 _license_check_cache_lock = threading.Lock()
 try:
-    _LICENSE_CHECK_CACHE_TTL: float = float(os.environ.get("LICENSE_CHECK_CACHE_TTL_SECONDS", "45") or 45)
+    _LICENSE_CHECK_CACHE_TTL: float = float(os.environ.get("LICENSE_CHECK_CACHE_TTL_SECONDS", "60") or 60)
 except (TypeError, ValueError):
-    _LICENSE_CHECK_CACHE_TTL = 45.0
+    _LICENSE_CHECK_CACHE_TTL = 60.0
 _LICENSE_CHECK_CACHE_MAX: int = 20000
 
 # Bootstrap sessions — issued when serving GET /install/dev/main after HMAC gate.

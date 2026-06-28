@@ -1697,7 +1697,22 @@ class SupabaseLicenseStore(BaseLicenseStore):
             raise RuntimeError(
                 "supabase-py is not installed. Run: pip install supabase"
             ) from exc
-        self._client = create_client(url, key)
+        # Hard ceiling on every PostgREST request so a slow/stuck DB can never
+        # hang a license operation forever and leak a connection (the failure mode
+        # that exhausted the pool and took key generation down). 30s is a backstop
+        # well below Postgres statement_timeout (~125s); healthy queries are <1s.
+        try:
+            timeout_s = int(os.environ.get("SUPABASE_POSTGREST_TIMEOUT_SECONDS", "30") or 30)
+        except (TypeError, ValueError):
+            timeout_s = 30
+        try:
+            from supabase import ClientOptions
+            self._client = create_client(
+                url, key, options=ClientOptions(postgrest_client_timeout=timeout_s)
+            )
+        except Exception:
+            # Older supabase-py without ClientOptions support — fall back safely.
+            self._client = create_client(url, key)
 
     # ── User helpers ──────────────────────────────────────────────────────────
 
