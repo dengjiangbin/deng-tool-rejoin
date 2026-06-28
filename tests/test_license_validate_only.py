@@ -399,7 +399,13 @@ class TestStartupClientGate(unittest.TestCase):
         self.assertEqual(check_calls, 1)
         mock_bind.assert_not_called()
 
-    def test_offline_grace_blocked_without_session_validation(self) -> None:
+    def test_offline_grace_applies_on_cold_start_for_cached_active(self) -> None:
+        # Complaint #1 (2026-06-28): a returning active user was locked out by a
+        # transient license-check timeout during a server/Supabase outage because
+        # offline grace ALSO required an in-process successful check
+        # (``_license_session_validated``), which is always False on a fresh
+        # launch. Offline grace must now apply on a cold start whenever the cached
+        # license is active and within the grace window.
         cfg = default_config()
         lic = cfg.setdefault("license", {})
         lic["key"] = "DENG-2222-3333-4444-5555"
@@ -413,6 +419,25 @@ class TestStartupClientGate(unittest.TestCase):
              patch("agent.commands._is_interactive", return_value=False), \
              patch("agent.commands._remote_license_run_check", return_value=("server_unavailable", "down")), \
              patch("agent.commands._license_should_offline_grace", return_value=True):
+            ok = commands._ensure_remote_license_menu_loop(cfg, _args(), False)
+        self.assertTrue(ok)
+
+    def test_offline_grace_never_applies_to_freshly_typed_key(self) -> None:
+        # A brand-new manually-entered key must NOT ride offline grace: it has
+        # never been verified by the server, so a transient failure must drop the
+        # user back to the failure menu (here non-interactive → blocked).
+        cfg = default_config()
+        # No cached key → the gate prompts for a fresh key (manual entry).
+        commands._license_session_validated = False
+        prompts = iter(["DENG-9999-8888-7777-6666"])
+
+        with patch("agent.commands.load_config", return_value=default_config()), \
+             patch("agent.commands.save_config", side_effect=lambda x: x), \
+             patch("agent.commands._ensure_install_id_saved", side_effect=lambda x: x), \
+             patch("agent.commands._is_interactive", return_value=True), \
+             patch("agent.commands._remote_license_run_bind", return_value=("server_unavailable", "down")), \
+             patch("agent.commands._license_should_offline_grace", return_value=True), \
+             patch("agent.commands.safe_io.read_interactive_line", side_effect=lambda *a, **k: next(prompts, "0")):
             ok = commands._ensure_remote_license_menu_loop(cfg, _args(), False)
         self.assertFalse(ok)
 

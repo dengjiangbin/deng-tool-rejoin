@@ -166,12 +166,29 @@ def read_interactive_line(
 
 
 def _write_prompt(prompt: str) -> None:
+    """Write a prompt exactly ONCE to the user's terminal.
+
+    Previously this wrote to BOTH ``sys.stdout`` and ``/dev/tty``. On Termux the
+    two are normally the same terminal, so every prompt was echoed twice — e.g.
+    ``Choose [1/0]: Choose [1/0]:`` / ``Enter license key: Enter license key:``.
+    We now write to stdout, and only fall back to ``/dev/tty`` when stdout is NOT
+    a TTY (i.e. redirected), so the prompt still reaches the real terminal in
+    that edge case without doubling in the common case.
+    """
+    wrote_stdout = False
+    try:
+        stdout_is_tty = bool(getattr(sys.stdout, "isatty", lambda: False)())
+    except Exception:  # noqa: BLE001
+        stdout_is_tty = False
     try:
         sys.stdout.write(prompt)
         sys.stdout.flush()
+        wrote_stdout = True
     except Exception:  # noqa: BLE001
-        pass
-    if os.name != "nt":
+        wrote_stdout = False
+    # Only mirror to /dev/tty when stdout did not already reach the terminal
+    # (stdout failed, or stdout is redirected to a file/pipe, not the TTY).
+    if os.name != "nt" and (not wrote_stdout or not stdout_is_tty):
         try:
             with open("/dev/tty", "w", encoding="utf-8", errors="replace") as tty_out:
                 tty_out.write(prompt)

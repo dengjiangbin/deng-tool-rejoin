@@ -1272,9 +1272,22 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 pass
             return True
 
+        # Offline grace: a transient failure (license check timed out / server
+        # unavailable) must never lock out a user whose license was confirmed
+        # active recently. This now applies on a COLD START too — previously it
+        # ALSO required ``_license_session_validated`` (a successful check earlier
+        # in THIS process run), which is always False right after launch, so a
+        # returning active user who restarted the tool during a license-server /
+        # Supabase outage was wrongly dropped to the failure menu. ``_license_
+        # should_offline_grace`` already gates this safely: it only returns True
+        # when the cached ``last_status`` is ``active`` and within the 30-day
+        # grace window (transient failures never overwrite that cache; definitive
+        # answers like revoked/expired do). We never grant grace for a freshly-
+        # typed key (``manual_key_entry``): a brand-new key must be verified by
+        # the server before we trust it.
         if (
             result in _LICENSE_TRANSIENT_RESULTS
-            and _license_session_validated
+            and not manual_key_entry
             and _license_should_offline_grace(lic)
         ):
             return True

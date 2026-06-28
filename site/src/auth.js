@@ -8,8 +8,16 @@
 const crypto  = require('crypto');
 const axios   = require('axios');
 const supabase = require('./db');
+const { withSupabaseTimeout } = require('./upstreamTimeout');
 const { resolveDiscordRedirectUri, oauthReturnPublicBase, LEGACY_PUBLIC_HOST, CANONICAL_PUBLIC_HOST } = require('./publicDomain');
 const oauthStateStore = require('./oauthStateStore');
+
+// Login must never hang on a slow/unreachable Supabase. Each query below is
+// raced against this timeout (it ALSO aborts the underlying request); on timeout
+// withSupabaseTimeout throws "<label> upstream request timeout", which
+// isTransientDbError() matches, so the caller falls back to a Discord-only
+// session and the user still gets in instead of seeing an auth timeout.
+const AUTH_SUPABASE_TIMEOUT_MS = Number(process.env.AUTH_SUPABASE_TIMEOUT_MS || 6000);
 
 const DISCORD_HTTP_TIMEOUT_MS = Number(process.env.DISCORD_OAUTH_HTTP_TIMEOUT_MS || 12000);
 
@@ -278,63 +286,83 @@ async function upsertDiscordUser(discordUser, _tokens, options = {}) {
 
   try {
     // Check if user already exists by discord_user_id
-    const { data: existing } = await supabase
-      .from('site_users')
-      .select('*')
-      .eq('discord_user_id', discordUser.id)
-      .maybeSingle();
+    const { data: existing } = await withSupabaseTimeout(
+      supabase
+        .from('site_users')
+        .select('*')
+        .eq('discord_user_id', discordUser.id)
+        .maybeSingle(),
+      'auth/upsertDiscordUser/select',
+      AUTH_SUPABASE_TIMEOUT_MS,
+    );
 
     if (existing) {
-      const { data, error } = await supabase
-        .from('site_users')
-        .update({
-          discord_username:     discordUser.username,
-          discord_avatar:       discordUser.avatar || null,
-          discord_access_token: null,
-          discord_refresh_token:null,
-          last_login_at:        now,
-        })
-        .eq('id', existing.id)
-        .select()
-        .single();
+      const { data, error } = await withSupabaseTimeout(
+        supabase
+          .from('site_users')
+          .update({
+            discord_username:     discordUser.username,
+            discord_avatar:       discordUser.avatar || null,
+            discord_access_token: null,
+            discord_refresh_token:null,
+            last_login_at:        now,
+          })
+          .eq('id', existing.id)
+          .select()
+          .single(),
+        'auth/upsertDiscordUser/update',
+        AUTH_SUPABASE_TIMEOUT_MS,
+      );
       if (error) throw new Error(`DB update failed: ${error.message}`);
       return data;
     }
 
     // New user — email is optional (scope is identify only)
-    const { data, error } = await supabase
-      .from('site_users')
-      .insert({
-        discord_user_id:      discordUser.id,
-        discord_username:     discordUser.username,
-        discord_avatar:       discordUser.avatar || null,
-        discord_access_token: null,
-        discord_refresh_token:null,
-        email:                discordUser.email || null,
-        last_login_at:        now,
-      })
-      .select()
-      .single();
+    const { data, error } = await withSupabaseTimeout(
+      supabase
+        .from('site_users')
+        .insert({
+          discord_user_id:      discordUser.id,
+          discord_username:     discordUser.username,
+          discord_avatar:       discordUser.avatar || null,
+          discord_access_token: null,
+          discord_refresh_token:null,
+          email:                discordUser.email || null,
+          last_login_at:        now,
+        })
+        .select()
+        .single(),
+      'auth/upsertDiscordUser/insert',
+      AUTH_SUPABASE_TIMEOUT_MS,
+    );
     if (error) {
       if (isDuplicateDiscordUserError(error)) {
-        const { data: raced } = await supabase
-          .from('site_users')
-          .select('*')
-          .eq('discord_user_id', discordUser.id)
-          .maybeSingle();
-        if (raced) {
-          const { data: updated, error: updateErr } = await supabase
+        const { data: raced } = await withSupabaseTimeout(
+          supabase
             .from('site_users')
-            .update({
-              discord_username:     discordUser.username,
-              discord_avatar:       discordUser.avatar || null,
-              discord_access_token: null,
-              discord_refresh_token:null,
-              last_login_at:        now,
-            })
-            .eq('id', raced.id)
-            .select()
-            .single();
+            .select('*')
+            .eq('discord_user_id', discordUser.id)
+            .maybeSingle(),
+          'auth/upsertDiscordUser/raced-select',
+          AUTH_SUPABASE_TIMEOUT_MS,
+        );
+        if (raced) {
+          const { data: updated, error: updateErr } = await withSupabaseTimeout(
+            supabase
+              .from('site_users')
+              .update({
+                discord_username:     discordUser.username,
+                discord_avatar:       discordUser.avatar || null,
+                discord_access_token: null,
+                discord_refresh_token:null,
+                last_login_at:        now,
+              })
+              .eq('id', raced.id)
+              .select()
+              .single(),
+            'auth/upsertDiscordUser/raced-update',
+            AUTH_SUPABASE_TIMEOUT_MS,
+          );
           if (updateErr) throw new Error(`DB update failed: ${updateErr.message}`);
           return updated;
         }
