@@ -11,10 +11,14 @@ const {
   handleTrackerReadHealth,
 } = require('./src/trackerReadProxy');
 const {
+  createPortalFallbackProxy,
+  shouldProxyToPortal,
+} = require('./src/portalFallbackProxy');
+const {
   startStabilitySnapshotLoop,
   getCachedStabilityJson,
 } = require('./src/stabilitySnapshot');
-const { listenWithReclaim } = require('./src/reclaimPort');
+const { listenWithReclaim, preBindReclaimSingleOwner } = require('./src/reclaimPort');
 const { sendHealthz } = require('./src/healthz');
 const { wrapHttpHandler } = require('./src/requestAccessLog');
 
@@ -76,12 +80,18 @@ const server = require('http').createServer(wrapHttpHandler('deng-tracker-site',
   if (process.env.TRACKER_READ_PROXY !== '0' && shouldProxyTrackerRead(req)) {
     return createTrackerReadProxy()(req, res);
   }
+  // Portal-owned paths (/license, /dashboard, /stats, /download …) forwarded to
+  // 8790 so a missing Cloudflare path rule can never 404 a portal page.
+  if (process.env.PORTAL_FALLBACK_PROXY !== '0' && shouldProxyToPortal(req)) {
+    return createPortalFallbackProxy()(req, res);
+  }
   app(req, res);
 }, (req) => {
   const pathOnly = String(req.url || '').split('?')[0];
   let lane = 'tracker-site';
   if (shouldProxyTrackerUpload(req)) lane = 'upload-proxy';
   else if (shouldProxyTrackerRead(req)) lane = 'read-proxy';
+  else if (shouldProxyToPortal(req)) lane = 'portal-proxy';
   return { lane, path: pathOnly };
 }));
 
@@ -90,6 +100,17 @@ server.keepAliveTimeout = parseInt(process.env.TOOL_SITE_KEEPALIVE_MS || '5000',
 server.headersTimeout = parseInt(process.env.TOOL_SITE_HEADERS_TIMEOUT_MS || '10000', 10);
 server.maxRequestsPerSocket = 0;
 
+// 8791 is single-owner. Live-session flush is best-effort (also persisted on a
+// periodic maintenance loop), so a stuck orphan that crash-loops this PM2 child
+// is far more harmful than skipping one flush. Deterministically clear any stale
+// node listener BEFORE binding to kill the bind-loop at the source.
+try {
+  const killed = preBindReclaimSingleOwner(PORT, '[deng-tracker-site]');
+  if (killed > 0) {
+    const waitUntil = Date.now() + 1200;
+    while (Date.now() < waitUntil) { /* brief pre-listen spin, startup only */ }
+  }
+} catch (_) { /* best effort */ }
 listenWithReclaim(server, PORT, HOST, '[deng-tracker-site]', {
   pm2AppName: 'deng-tracker-site',
   reclaimAfterMs: parseInt(process.env.TOOL_SITE_RECLAIM_AFTER_MS || '9000', 10),

@@ -352,4 +352,41 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
   start();
 }
 
-module.exports = { findListenerPids, describeProcess, killPid, reclaimPort, listenWithReclaim, probeHealthy, getPm2AppPid };
+/**
+ * Deterministic pre-bind reclaim for a SINGLE-OWNER port.
+ *
+ * Each tracker PM2 service owns exactly one port. The health-gated reclaim above
+ * is intentionally cautious to avoid killing a healthy sibling during a graceful
+ * hand-off, but that caution let a half-alive orphan (answers /health slowly,
+ * but never frees the port) survive forever and crash-loop the PM2 child 256x.
+ *
+ * For a port with exactly one legitimate owner and NO critical in-process flush
+ * (the read API serves from a RAM cache), the safe + reliable behaviour is:
+ * before listening, kill ANY node listener on the port that is not us. No health
+ * probe, no defer. Returns the number of holders killed.
+ */
+function preBindReclaimSingleOwner(port, logPrefix, opts = {}) {
+  const _findListenerPids = opts._findListenerPids || findListenerPids;
+  const _describeProcess = opts._describeProcess || describeProcess;
+  const _killPid = opts._killPid || killPid;
+  const platform = opts._platform || process.platform;
+  if (platform !== 'win32') return 0;
+  const selfPid = opts._selfPid != null ? opts._selfPid : process.pid;
+  let killed = 0;
+  let pids;
+  try { pids = _findListenerPids(port); } catch (_) { return 0; }
+  for (const pid of pids) {
+    if (pid === selfPid) continue;
+    const info = _describeProcess(pid);
+    const isNode = info && /node\.exe/i.test(info.name || '');
+    if (!isNode) {
+      console.warn('%s pre-bind: port %d held by non-node pid %d (%s) — NOT killing', logPrefix, port, pid, (info && info.name) || '?');
+      continue;
+    }
+    console.warn('%s pre-bind: reclaiming port %d from node pid %d (single-owner port)', logPrefix, port, pid);
+    if (_killPid(pid)) killed += 1;
+  }
+  return killed;
+}
+
+module.exports = { findListenerPids, describeProcess, killPid, reclaimPort, listenWithReclaim, probeHealthy, getPm2AppPid, preBindReclaimSingleOwner };

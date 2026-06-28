@@ -168,7 +168,18 @@ if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 // is still retrying — overlapping children, one of which binds and detaches
 // from PM2's tracked process (the orphan-on-restart symptom). Bounded < 10s,
 // a child either binds during a normal restart race or exits for one clean respawn.
-const { listenWithReclaim } = require('./src/reclaimPort');
+const { listenWithReclaim, preBindReclaimSingleOwner } = require('./src/reclaimPort');
+// 8792 is single-owner. If a stale node listener still holds the port at startup
+// the new instance cannot accept uploads anyway, and any in-flight data on a
+// stuck orphan is already lost — so deterministically reclaim before binding to
+// stop the crash-loop instead of waiting out the health-gated path.
+try {
+  const killed = preBindReclaimSingleOwner(PORT, '[deng-tracker-ingest]');
+  if (killed > 0) {
+    const waitUntil = Date.now() + 1200;
+    while (Date.now() < waitUntil) { /* brief pre-listen spin, startup only */ }
+  }
+} catch (_) { /* best effort */ }
 listenWithReclaim(server, PORT, HOST, '[deng-tracker-ingest]', {
   pm2AppName: 'deng-tracker-ingest',
   // reclaimAfterMs > PM2 kill_timeout (8000ms): never reclaim a sibling that is

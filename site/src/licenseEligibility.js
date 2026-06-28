@@ -54,6 +54,7 @@ async function getLicenseGenerationEligibility({
   discordUserId = '',
   siteUserId = '',
   skipProviderCheck = false,
+  skipMarkExpired = false,
 } = {}) {
   const nowIso = new Date().toISOString();
   const queryFilters = {
@@ -64,10 +65,17 @@ async function getLicenseGenerationEligibility({
     max_key_policy: 'license_key_limits scope user|global',
   };
 
-  await withUpstreamTimeout(
-    licenseService.markExpiredUnredeemedKeys({ discordUserId, siteUserId }),
-    'licenseEligibility/markExpiredUnredeemedKeys',
-  );
+  // markExpiredUnredeemedKeys is a write-path maintenance op. On the pure DISPLAY
+  // path we skip it — expiry is still reflected live because isActiveLicense /
+  // classifyLicenseLifecycle compute expiry from timestamps in memory. The actual
+  // key-generation eligibility check keeps it (skipMarkExpired=false) so the DB
+  // status stays authoritative when it matters.
+  if (!skipMarkExpired) {
+    await withUpstreamTimeout(
+      licenseService.markExpiredUnredeemedKeys({ discordUserId, siteUserId }),
+      'licenseEligibility/markExpiredUnredeemedKeys',
+    );
+  }
   const rows = await withUpstreamTimeout(
     licenseService.getPortalUserLicenses({
       discordUserId,

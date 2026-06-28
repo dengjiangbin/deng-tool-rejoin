@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const supabase = require('./db');
-const { withUpstreamTimeout } = require('./upstreamTimeout');
+const { withUpstreamTimeout, withSupabaseTimeout } = require('./upstreamTimeout');
 const { decryptLicenseKeyCiphertext, encryptLicenseKeyPlaintext } = require('./licenseCrypto');
 const { formatWibTimestamp } = require('./licenseFormat');
 
@@ -448,15 +448,22 @@ function deviceStatus(row) {
 
 async function fetchByKeyId(table, columns, keyIds, field = 'key_id') {
   if (!keyIds.length) return [];
-  const { data, error } = await supabase.from(table).select(columns).in(field, keyIds);
-  if (error) return [];
-  return data || [];
+  try {
+    const { data, error } = await withSupabaseTimeout(
+      supabase.from(table).select(columns).in(field, keyIds),
+      `licenseService/fetchByKeyId/${table}`,
+    );
+    if (error) return [];
+    return data || [];
+  } catch (_) {
+    return [];
+  }
 }
 
 async function fetchLicenseRowsByOwner(owner, limit) {
   const normalized = String(owner || '').trim();
   if (!normalized) return [];
-  let { data: keys, error } = await withUpstreamTimeout(
+  let { data: keys, error } = await withSupabaseTimeout(
     supabase
       .from('license_keys')
       .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id, key_ciphertext, key_export_available')
@@ -466,7 +473,7 @@ async function fetchLicenseRowsByOwner(owner, limit) {
     'licenseService/fetchLicenseRowsByOwner',
   );
   if (error && missingColumn(error)) {
-    const retry = await withUpstreamTimeout(
+    const retry = await withSupabaseTimeout(
       supabase
         .from('license_keys')
         .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id')
@@ -488,7 +495,7 @@ async function fetchLicenseRowsByOwner(owner, limit) {
 async function fetchLicenseRowsBySiteUser(siteUserId, limit) {
   const normalized = String(siteUserId || '').trim();
   if (!normalized) return [];
-  let { data: keys, error } = await withUpstreamTimeout(
+  let { data: keys, error } = await withSupabaseTimeout(
     supabase
       .from('license_keys')
       .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id, key_ciphertext, key_export_available')
@@ -573,7 +580,37 @@ async function getUserLicenses(discordUserId, { limit = 20 } = {}) {
   return hydrateLicenseRows(await fetchLicenseRowsByOwner(owner, limit), owner);
 }
 
+// Short-TTL cache for the portal license fan-out. A single /license render (plus
+// the eligibility poll) calls this 4–6× through markExpired / eligibility /
+// loadHistory / findActiveUnredeemed, each doing 3 Supabase reads + a hydrate
+// (device_bindings + ad_challenges). That was ~20 cross-region round-trips per
+// page load → multi-second /license. Collapsing repeats within a few seconds
+// keeps display correct (expiry is still computed live in isActiveLicense) while
+// making the page fast. Invalidated on any key mutation for the owner.
+const PORTAL_LICENSE_CACHE_TTL_MS = Number(process.env.LICENSE_PORTAL_CACHE_TTL_MS || 8000);
+const portalLicenseCache = new Map(); // key -> { at, rows }
+
+function portalCacheKey(discordUserId, siteUserId, limit) {
+  return `${String(discordUserId || '').trim()}|${String(siteUserId || '').trim()}|${limit}`;
+}
+
+function invalidatePortalUserLicenses(discordUserId = '', siteUserId = '') {
+  const d = String(discordUserId || '').trim();
+  const s = String(siteUserId || '').trim();
+  for (const key of portalLicenseCache.keys()) {
+    const [kd, ks] = key.split('|');
+    if ((d && kd === d) || (s && ks === s)) portalLicenseCache.delete(key);
+  }
+}
+
 async function getPortalUserLicenses({ discordUserId = '', siteUserId = '', limit = 20 } = {}) {
+  const cacheKey = portalCacheKey(discordUserId, siteUserId, limit);
+  if (PORTAL_LICENSE_CACHE_TTL_MS > 0) {
+    const cached = portalLicenseCache.get(cacheKey);
+    if (cached && (Date.now() - cached.at) < PORTAL_LICENSE_CACHE_TTL_MS) {
+      return cached.rows;
+    }
+  }
   const owners = [
     String(discordUserId || '').trim(),
     siteUserId ? `site:${siteUserId}` : '',
@@ -583,7 +620,11 @@ async function getPortalUserLicenses({ discordUserId = '', siteUserId = '', limi
     fetchLicenseRowsBySiteUser(siteUserId, limit),
   ]);
   const rows = uniqueRows(rowSets.flat()).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-  return hydrateLicenseRows(rows.slice(0, limit), discordUserId || siteUserId);
+  const hydrated = await hydrateLicenseRows(rows.slice(0, limit), discordUserId || siteUserId);
+  if (PORTAL_LICENSE_CACHE_TTL_MS > 0) {
+    portalLicenseCache.set(cacheKey, { at: Date.now(), rows: hydrated });
+  }
+  return hydrated;
 }
 
 function isUnusedLicense(row) {
@@ -930,6 +971,7 @@ module.exports = {
   formatLicenseStatus,
   getActiveUserLicenses,
   getPortalUserLicenses,
+  invalidatePortalUserLicenses,
   getPublicStats,
   getUserLicenses,
   getUserLicenseStats,

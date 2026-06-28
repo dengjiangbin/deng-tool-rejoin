@@ -1114,6 +1114,9 @@ async function handleProviderComplete(req, res, provider) {
     }
 
     console.log('[unlock/%s/complete] status=success referer_host=%s', selected, refererHost);
+    try {
+      licenseService.invalidatePortalUserLicenses(discordOwnerId(req), req.session.user && req.session.user.id);
+    } catch (_) { /* cache invalidation is best-effort */ }
     req.session.generatedKey = key;
     req.session.generatedKeyAt = Date.now();
     delete req.session.pendingChallenge;
@@ -1401,11 +1404,15 @@ router.get('/stats', requireLogin, repairSiteUser, (req, res) => {
 
 router.get('/api/license/eligibility', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
-      discordUserId: discordOwnerId(req),
-      siteUserId: req.session.user.id,
-      skipProviderCheck: true,
-    });
+    const eligibility = await withUpstreamTimeout(
+      licenseEligibility.getLicenseGenerationEligibility({
+        discordUserId: discordOwnerId(req),
+        siteUserId: req.session.user.id,
+        skipProviderCheck: true,
+        skipMarkExpired: true,
+      }),
+      'routes/api/license/eligibility',
+    );
     return res.json(eligibility);
   } catch (err) {
     console.error('[api/license/eligibility]', err.message || err);
@@ -1469,22 +1476,32 @@ router.get('/admin/license/debug-user', requireSiteAdmin, handleAdminLicenseDebu
 
 router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false });
+    // loadHistory and eligibility are independent reads. Run them concurrently so
+    // a slow/unreachable Supabase costs ONE timeout window, not the sum of both
+    // (the difference between a ~4s degraded render and a ~24s stall). Each path
+    // degrades to a safe default on timeout/error so the page always renders.
+    const [history, eligibility] = await Promise.all([
+      withUpstreamTimeout(
+        loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false }),
+        'routes/license/loadHistory',
+      ).catch(() => []),
+      withUpstreamTimeout(
+        licenseEligibility.getLicenseGenerationEligibility({
+          discordUserId: discordOwnerId(req),
+          siteUserId: req.session.user.id,
+          skipProviderCheck: true,
+          skipMarkExpired: true,
+        }),
+        'routes/license/getLicenseGenerationEligibility',
+      ).catch(() => ({
+        canGenerate: true,
+        blockReason: null,
+        activeUnredeemedCount: 0,
+        remainingSeconds: 0,
+        cooldownUntil: null,
+      })),
+    ]);
     const activeHistory = licenseService.filterActiveLicenses(history);
-    const eligibility = await withUpstreamTimeout(
-      licenseEligibility.getLicenseGenerationEligibility({
-        discordUserId: discordOwnerId(req),
-        siteUserId: req.session.user.id,
-        skipProviderCheck: true,
-      }),
-      'routes/license/getLicenseGenerationEligibility',
-    ).catch(() => ({
-      canGenerate: true,
-      blockReason: null,
-      activeUnredeemedCount: 0,
-      remainingSeconds: 0,
-      cooldownUntil: null,
-    }));
     const cooldown = {
       allowed: eligibility.blockReason !== 'cooldown_active',
       secondsLeft: eligibility.blockReason === 'cooldown_active' ? eligibility.remainingSeconds : 0,

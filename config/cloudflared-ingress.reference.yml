@@ -40,6 +40,23 @@ ingress:
   - hostname: aio.deng.my.id
     path: ^/api/aio/auth
     service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/dashboard
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/download
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/stats
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/app
+    service: http://127.0.0.1:8790
+
+  # NOTE: 8791 (tracker site / catch-all) ALSO forwards any portal-owned path
+  # (/license,/dashboard,/download,/stats,/app,/api/license,/api/key,/api/unlock)
+  # to 8790 via portalFallbackProxy. So even if a path rule above is missing from
+  # the token-managed dashboard, the portal page still resolves instead of 404.
 
   # ── Tracker upload ingest (8792) ───────────────────────────────────────
   - hostname: aio.deng.my.id

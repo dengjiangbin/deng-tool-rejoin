@@ -29,7 +29,7 @@
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "OAUTH_STATE_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\oauth-states",
         "TOOL_SITE_ASSET_VERSION": "PORTAL_8790_SPLIT_2026_06_28",
-        "PORTAL_UPSTREAM_TIMEOUT_MS": "8000",
+        "PORTAL_UPSTREAM_TIMEOUT_MS": "4500",
         "GIT_COMMIT": "3387a06"
       }
     }

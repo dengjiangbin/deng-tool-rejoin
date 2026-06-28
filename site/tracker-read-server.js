@@ -31,7 +31,18 @@ server.headersTimeout = parseInt(process.env.TRACKER_READ_HEADERS_TIMEOUT_MS || 
 server.maxRequestsPerSocket = 0;
 if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 
-const { listenWithReclaim } = require('./src/reclaimPort');
+const { listenWithReclaim, preBindReclaimSingleOwner } = require('./src/reclaimPort');
+// 8793 has exactly one owner and no critical in-process flush (reads come from a
+// RAM cache). Deterministically clear any stale node listener BEFORE binding so a
+// half-alive orphan can never crash-loop this PM2 child (the 256-restart bug).
+try {
+  const killed = preBindReclaimSingleOwner(PORT, '[deng-tracker-read]');
+  if (killed > 0) {
+    // Give Windows a moment to release the socket after the orphan dies.
+    const waitUntil = Date.now() + 1200;
+    while (Date.now() < waitUntil) { /* brief spin; startup only, pre-listen */ }
+  }
+} catch (_) { /* best effort */ }
 listenWithReclaim(server, PORT, HOST, '[deng-tracker-read]', {
   pm2AppName: 'deng-tracker-read',
   reclaimAfterMs: parseInt(process.env.TRACKER_READ_RECLAIM_AFTER_MS || '9000', 10),

@@ -198,6 +198,10 @@ function handleTrackerReadHealth(_req, res, options = {}) {
 
 function shouldProxyTrackerRead(req) {
   if (!req || (req.method !== 'GET' && req.method !== 'HEAD')) return false;
+  // Loop breaker: a request that already came FROM the read server's fallback
+  // (8793 → 8791) must never be proxied BACK to 8793, or a cold cache produces a
+  // 8793→8791→8793 amplification storm that saturates the read lane.
+  if (req.headers && req.headers['x-deng-read-fallback'] === '1') return false;
   const pathOnly = String(req.url || '').split('?')[0];
   if (isTrackerReadHealthPath(pathOnly)) return false;
   for (const prefix of READ_PROXY_PREFIXES) {
