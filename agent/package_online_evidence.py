@@ -425,6 +425,8 @@ def detect_live_disconnect(
     root_info: Any = None,
 ) -> tuple[str | None, str | None]:
     """Return (internal_reason, matched_text) when idle/disconnect UI or logcat is present."""
+    from .roblox_disconnect_reasons import internal_reason_for_disconnect_code, parse_roblox_error_code
+
     scan = collect_online_evidence(package, root_info=root_info)
     decision = evaluate_online_confirmed(scan)
     if not decision.is_disconnected:
@@ -434,11 +436,23 @@ def detect_live_disconnect(
     if scan.disconnected_text_detected and (
         "278" in text or "idle" in text or "being idle" in text
     ):
-        return "idle_disconnect_278", matched
+        return internal_reason_for_disconnect_code(278), matched
+    code = parse_roblox_error_code(matched or "")
+    if code is not None:
+        return internal_reason_for_disconnect_code(code), matched
     if scan.disconnected_text_detected:
         return "ui_disconnect", matched
     if scan.logcat_disconnect_detected:
-        return "logcat_disconnect", matched
+        try:
+            from .roblox_health import analyze_disconnect_signals
+
+            ev = analyze_disconnect_signals(package)
+            if ev and ev.snippet:
+                code = parse_roblox_error_code(ev.snippet)
+                return internal_reason_for_disconnect_code(code), ev.snippet
+        except Exception:  # noqa: BLE001
+            pass
+        return internal_reason_for_disconnect_code(None), matched
     return "ui_disconnect", matched
 
 

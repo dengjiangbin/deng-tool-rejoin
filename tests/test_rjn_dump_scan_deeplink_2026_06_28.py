@@ -78,7 +78,7 @@ class DumpScanDisconnectTests(unittest.TestCase):
         with patch.object(mon, "_dump_pkg_logcat", return_value=[line]):
             mon._scan_logcat_dump(pkg, time.time())
         self.assertEqual(row.internal_state, STATE_DISCONNECTED)
-        self.assertEqual(row.last_transition_reason, "logcat_disconnect")
+        self.assertEqual(row.last_transition_reason, "disconnect_code_285")
         self.assertEqual(row.last_disconnect_code, 285)
 
     def test_dump_reconnect_after_kick_reconfirms_online(self) -> None:

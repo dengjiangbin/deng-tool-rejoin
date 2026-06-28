@@ -37,6 +37,8 @@ class RobloxExpectedTarget:
     expected_root_place_id: int | None = None
     expected_universe_id: int | None = None
     expected_private_code: str = ""
+    # Share-link type from URL (Server, ExperienceInvite, …) — used for resolve-link API.
+    expected_share_type: str = ""
 
     @property
     def has_game_target(self) -> bool:
@@ -191,16 +193,18 @@ def parse_expected_target_from_url(
 ) -> RobloxExpectedTarget:
     """Extract verifiable target hints from a Roblox launch/private-server URL.
 
-    Share links often expose only an opaque private code. Legacy game URLs and
-    some deep links expose a placeId. Root-place and universe ids can be passed
-    explicitly by config when known; missing fields are valid and mean partial
-    verification only.
+    Parses roblox:// and https:// forms aligned with roblox-deeplink-parser:
+    experiences/start, navigation/share_links, navigation/game_details, games/{id},
+    games/start, legacy privateServerLinkCode/linkCode/accessCode/gameInstanceId, etc.
+    Share links often expose only an opaque private code; place/universe may be filled
+    later via :func:`agent.roblox_target_resolver.enrich_expected_target`.
     """
     raw = str(url or "").strip()
     place_id = _int_or_none(expected_place_id)
     root_place_id = _int_or_none(expected_root_place_id)
     universe_id = _int_or_none(expected_universe_id)
     private_code = ""
+    share_type = ""
     if not raw:
         return RobloxExpectedTarget(
             original_url="",
@@ -211,6 +215,8 @@ def parse_expected_target_from_url(
     try:
         parsed = urlparse(raw)
         params = dict(parse_qsl(parsed.query or "", keep_blank_values=True))
+        share_type = str(params.get("type") or params.get("linkType") or "").strip()
+
         for key in (
             "privateServerLinkCode",
             "linkCode",
@@ -222,12 +228,11 @@ def parse_expected_target_from_url(
                 private_code = str(params[key]).strip()
                 break
 
-        if place_id is None:
-            for key in ("placeId", "placeid", "rootPlaceId", "rootplaceid"):
-                parsed_place = _int_or_none(params.get(key))
-                if parsed_place is not None:
-                    place_id = parsed_place
-                    break
+        for key in ("placeId", "placeid", "rootPlaceId", "rootplaceid", "gameId"):
+            parsed_place = _int_or_none(params.get(key))
+            if parsed_place is not None:
+                place_id = parsed_place
+                break
 
         path = (parsed.path or "").rstrip("/")
         if place_id is None:
@@ -235,21 +240,46 @@ def parse_expected_target_from_url(
             if match:
                 place_id = int(match.group(1))
 
-        if parsed.scheme.lower() == "roblox" and place_id is None:
-            # Some accepted deep links are shaped like:
-            #   roblox://placeId=123&privateServerLinkCode=abc
+        scheme = parsed.scheme.lower()
+        netloc = (parsed.netloc or "").lower()
+        if scheme == "roblox":
             haystack = raw
-            match = re.search(r"(?:^|[/?&])placeId=(\d+)", haystack, re.IGNORECASE)
-            if match:
-                place_id = int(match.group(1))
+            if place_id is None:
+                match = re.search(r"(?:^|[/?&])placeId=(\d+)", haystack, re.IGNORECASE)
+                if match:
+                    place_id = int(match.group(1))
             if not private_code:
                 match = re.search(
-                    r"(?:^|[/?&])(privateServerLinkCode|linkCode|gameInstanceId|code)=([^&]+)",
+                    r"(?:^|[/?&])(privateServerLinkCode|linkCode|gameInstanceId|accessCode|code)=([^&]+)",
                     haystack,
                     re.IGNORECASE,
                 )
                 if match:
                     private_code = match.group(2).strip()
+            if not share_type:
+                match = re.search(r"(?:^|[/?&])type=([^&]+)", haystack, re.IGNORECASE)
+                if match:
+                    share_type = match.group(1).strip()
+            # roblox://navigation/share_links/Server/CODE path form
+            if not private_code and "share_links" in haystack.lower():
+                match = re.search(
+                    r"share_links/(?:[^/?&]+/)?([A-Za-z0-9_\-]{4,})",
+                    haystack,
+                    re.IGNORECASE,
+                )
+                if match:
+                    private_code = match.group(1).strip()
+            # roblox://navigation/game_details?gameId=…
+            if place_id is None and "game_details" in haystack.lower():
+                match = re.search(r"(?:^|[/?&])gameId=(\d+)", haystack, re.IGNORECASE)
+                if match:
+                    place_id = int(match.group(1))
+
+        if path in ("/share", "/share-links") and not share_type:
+            share_type = str(params.get("type") or "Server").strip() or "Server"
+
+        if root_place_id is None and place_id is not None:
+            root_place_id = place_id
     except Exception:  # noqa: BLE001
         pass
     return RobloxExpectedTarget(
@@ -258,6 +288,7 @@ def parse_expected_target_from_url(
         expected_root_place_id=root_place_id,
         expected_universe_id=universe_id,
         expected_private_code=private_code[:256],
+        expected_share_type=share_type[:64],
     )
 
 

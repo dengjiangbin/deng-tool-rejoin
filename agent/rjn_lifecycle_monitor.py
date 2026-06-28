@@ -17,6 +17,7 @@ from typing import Any
 
 from . import android
 from .constants import DATA_DIR
+from .roblox_disconnect_reasons import internal_reason_for_disconnect_code
 
 WATCHED_PHRASES = (
     "gamejoinloadtime",
@@ -210,6 +211,7 @@ class PackageRjnState:
     expected_root_place_id: int = 0
     expected_universe_id: int = 0
     expected_private_code_hash: str = ""
+    expected_share_type: str = ""
     observed_place_id: int = 0
     observed_root_place_id: int = 0
     observed_universe_id: int = 0
@@ -840,6 +842,7 @@ class RjnLifecycleMonitor:
         root_place_id: object = None,
         universe_id: object = None,
         private_code: object = None,
+        share_type: object = None,
     ) -> None:
         """Record the configured ("expected") server identity for Wrong-Server
         detection. Only public placeIds and a *salted hash* of the private/share
@@ -863,6 +866,31 @@ class RjnLifecycleMonitor:
             row.expected_root_place_id = _as_id(root_place_id)
             row.expected_universe_id = _as_id(universe_id)
             row.expected_private_code_hash = _hash_code(private_code)
+            row.expected_share_type = str(share_type or "").strip()[:64]
+
+    def set_observed_from_presence(self, package: str, presence: Any, at: float | None = None) -> None:
+        """Feed Roblox Presence API place/universe ids as observed join identity."""
+        pkg = str(package or "").strip()
+        if not pkg or presence is None:
+            return
+        seen_at = float(at or time.time())
+        with self._lock:
+            row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
+            changed = False
+            for attr, val in (
+                ("observed_place_id", getattr(presence, "place_id", None)),
+                ("observed_root_place_id", getattr(presence, "root_place_id", None)),
+                ("observed_universe_id", getattr(presence, "universe_id", None)),
+            ):
+                try:
+                    ival = int(val) if val not in (None, "", 0) else 0
+                except (TypeError, ValueError):
+                    ival = 0
+                if ival > 0 and getattr(row, attr) != ival:
+                    setattr(row, attr, ival)
+                    changed = True
+            if changed:
+                self._maybe_flag_wrong_server(pkg, seen_at)
 
     def _has_expected_target(self, row: PackageRjnState) -> bool:
         return bool(
@@ -1123,9 +1151,13 @@ class RjnLifecycleMonitor:
         row.last_with_reason_at = max(row.last_with_reason_at, latest_disc_epoch)
         row.disconnect_prompt_text = _sanitize_line(latest_disc_line)
         reason = (
-            "idle_disconnect_278"
-            if latest_disc_idle
-            else ("logcat_disconnect" if latest_disc_code else "logcat_with_reason")
+            internal_reason_for_disconnect_code(latest_disc_code)
+            if latest_disc_code
+            else (
+                "idle_disconnect_278"
+                if latest_disc_idle
+                else "logcat_with_reason"
+            )
         )
         if row.internal_state != STATE_DISCONNECTED or row.last_transition_reason != reason:
             self._transition(pkg, STATE_DISCONNECTED, reason, at=latest_disc_epoch, offline=True)
@@ -1165,8 +1197,9 @@ class RjnLifecycleMonitor:
                     row.last_disconnect_code = int(code_match.group(1))
                 except (TypeError, ValueError):
                     row.last_disconnect_code = 0
-                if row.last_disconnect_code == 278:
-                    transition_reason = "idle_disconnect_278"
+                from .roblox_disconnect_reasons import internal_reason_for_disconnect_code as _irc
+
+                transition_reason = _irc(row.last_disconnect_code)
             self._transition(
                 pkg,
                 STATE_DISCONNECTED,
@@ -1177,13 +1210,14 @@ class RjnLifecycleMonitor:
             event.action_taken = "DISCONNECTED"
         elif phrase == "idle_disconnect_278":
             row.last_with_reason_at = at
+            row.last_disconnect_code = 278
             prompt = getattr(event, "raw_line_sanitized", "") if event is not None else ""
             if prompt:
                 row.disconnect_prompt_text = str(prompt)[:240]
             self._transition(
                 pkg,
                 STATE_DISCONNECTED,
-                "idle_disconnect_278",
+                internal_reason_for_disconnect_code(278),
                 at=at,
                 offline=True,
             )
@@ -1481,6 +1515,8 @@ class RjnLifecycleMonitor:
             return "process_missing"
         if row.last_transition_reason == "wrong_server":
             return "wrong_server"
+        if row.last_transition_reason and row.last_transition_reason.startswith("disconnect_code_"):
+            return row.last_transition_reason
         if row.last_with_reason_at and row.last_with_reason_at >= row.last_positive_online_evidence_at:
             if row.last_transition_reason == "idle_disconnect_278":
                 return "idle_disconnect_278"

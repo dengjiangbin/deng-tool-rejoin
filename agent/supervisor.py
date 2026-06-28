@@ -1383,6 +1383,13 @@ class WatchdogSupervisor:
                     expected_root_place_id=e.get("expected_root_place_id") or self.cfg.get("expected_root_place_id"),
                     expected_universe_id=e.get("expected_universe_id") or self.cfg.get("expected_universe_id"),
                 )
+                try:
+                    from .roblox_target_resolver import enrich_expected_target
+
+                    cookie = str(e.get("roblox_cookie") or self.cfg.get("roblox_cookie") or "").strip() or None
+                    target = enrich_expected_target(target, cookie=cookie)
+                except Exception:  # noqa: BLE001
+                    pass
                 self._presence_expected_targets[pkg] = target
                 # Feed the configured target into the logcat detector so it can flag
                 # "Wrong Server" when the client provably joins a different placeId.
@@ -1395,6 +1402,7 @@ class WatchdogSupervisor:
                         root_place_id=target.expected_root_place_id,
                         universe_id=target.expected_universe_id,
                         private_code=target.expected_private_code,
+                        share_type=target.expected_share_type,
                     )
                 except Exception:  # noqa: BLE001
                     pass
@@ -2713,6 +2721,46 @@ class WatchdogSupervisor:
             pass
         return ev
 
+    def _try_presence_target_verification(self, pkg: str, ev: Any) -> Any:
+        """Roblox Presence API ground-truth for wrong-server (place/universe mismatch)."""
+        if self._package_awaiting_first_open(pkg):
+            return ev
+        target = self._presence_expected_targets.get(pkg)
+        if target is None:
+            return ev
+        has_expectation = bool(getattr(target, "has_game_target", False)) or bool(
+            getattr(target, "expected_private_code", "")
+        )
+        if not has_expectation:
+            return ev
+        if not ev.process_exists:
+            return ev
+        try:
+            presence = self._fetch_presence(pkg)
+        except Exception:  # noqa: BLE001
+            return ev
+        if presence is None or not getattr(presence, "is_in_game", False):
+            return ev
+        try:
+            from .roblox_target_resolver import presence_matches_target
+
+            matched, _detail = presence_matches_target(presence, target)
+            if matched:
+                try:
+                    self._rjn_monitor.set_observed_from_presence(pkg, presence)
+                except Exception:  # noqa: BLE001
+                    pass
+                return ev
+            self._rjn_monitor.apply_disconnect(
+                pkg,
+                time.time(),
+                reason="wrong_server",
+                matched_text="Wrong Server (presence target mismatch)",
+            )
+            return self._rjn_monitor.evaluate_package(pkg)
+        except Exception:  # noqa: BLE001
+            return ev
+
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
         """Merge rjn detection with supervisor launch/relaunch state (detection only)."""
         from .rjn_lifecycle_monitor import (
@@ -2729,6 +2777,7 @@ class WatchdogSupervisor:
             return STATUS_READY, detail
         ev = self._rjn_monitor.evaluate_package(pkg)
         ev = self._try_online_evidence_fallback(pkg, ev)
+        ev = self._try_presence_target_verification(pkg, ev)
         current = str(self.status_map.get(pkg) or "").strip()
         detail = dict(ev.detail)
         reason = str(detail.get("reason") or ev.reason)
@@ -3370,8 +3419,10 @@ class WatchdogSupervisor:
         url_configured = url_context.get("url_mode") == "private_url"
 
         if state in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED}:
-            if pkg in self._relaunch_inflight:
-                return False
+            # Never let a stale relaunch-inflight flag block recovery for a fresh
+            # disconnect/dead signal (probe p-9c18ae51bc: 278 detected but no relaunch).
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
             if not self._reserve_recovery_launch_attempt(pkg):
                 remaining = self._recovery_throttle_remaining(pkg)
                 if remaining > 0:

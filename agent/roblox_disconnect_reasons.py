@@ -101,12 +101,44 @@ def format_error_code_reason(
     return f"Error Code: {code}"
 
 
+def internal_reason_for_disconnect_code(code: int | None) -> str:
+    """Map a parsed Roblox disconnect reason code to a stable internal lifecycle key.
+
+    Every code in the Roblox disconnect range (200–599) gets its own key so recovery
+    treats idle kicks, kicks, connection loss, server full, etc. uniformly — not only
+    Error 278. Codes outside that range fall back to generic logcat disconnect keys."""
+    try:
+        n = int(code)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "logcat_disconnect"
+    if n == 278:
+        return "idle_disconnect_278"
+    if 200 <= n <= 599:
+        return f"disconnect_code_{n}"
+    return "logcat_disconnect"
+
+
 def format_lifecycle_dead_reason(
     internal_key: str,
     matched_text: str | None = None,
 ) -> str:
     """Best webhook Reason string: error-code prompt when known, else friendly fallback."""
     from .lifecycle_reasons import format_user_friendly_dead_reason
+
+    key = str(internal_key or "").strip()
+    if key.startswith("disconnect_code_"):
+        try:
+            code = int(key.split("_", 2)[2])
+        except (IndexError, TypeError, ValueError):
+            code = None
+        coded = format_error_code_reason(matched_text, internal_key=key)
+        if coded:
+            return coded
+        if code is not None:
+            prompt = ROBLOX_ERROR_CODE_PROMPTS.get(code, "")
+            if prompt:
+                return f"Error Code: {code} {prompt}"
+            return f"Error Code: {code}"
 
     coded = format_error_code_reason(matched_text, internal_key=internal_key)
     if coded:
