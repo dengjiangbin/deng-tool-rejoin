@@ -10,7 +10,21 @@ const { signChallenge, verifyChallenge, sha256, randomHex } = require('./crypto'
 const { generateDengKey } = require('./keyGen');
 const { encryptLicenseKeyPlaintext, decryptLicenseKeyCiphertext } = require('./licenseCrypto');
 const licenseService = require('./licenseService');
+const { withSupabaseTimeout, licenseUserQueryTimeoutMs } = require('./upstreamTimeout');
 const crypto = require('crypto');
+
+// Key-generation DB calls were raw `await supabase...` with NO timeout. During a
+// Supabase pool-saturation incident each one blocked for the full Postgres
+// statement_timeout (~125s observed on /unlock/.../complete), holding a PostgREST
+// connection the entire time. A burst of generation attempts then leaked enough
+// connections to exhaust the pool and make EVERY query (even key history) time
+// out. Wrapping these in withSupabaseTimeout aborts the request on timeout so the
+// connection is released immediately — generation still succeeds on a healthy or
+// merely-slow DB, but a truly stuck query fails fast and lets the pool recover
+// instead of taking the whole site down. The user can retry once the DB is back.
+function genDbTimeout() {
+  return licenseUserQueryTimeoutMs();
+}
 
 const COOLDOWN_SECONDS = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS || '60', 10);
 const CHALLENGE_TTL_MS = 30 * 60 * 1000;
@@ -135,39 +149,51 @@ function syntheticLicenseOwnerId(siteUserId) {
 
 async function ensureSyntheticLicenseUser(siteUserId) {
   const syntheticId = syntheticLicenseOwnerId(siteUserId);
-  const { error } = await supabase
-    .from('license_users')
-    .upsert({
-      discord_user_id: syntheticId,
-      discord_username: 'DENG Tool Portal User',
-      max_keys: 999999,
-      is_owner: false,
-      is_blocked: false,
-    }, { onConflict: 'discord_user_id' });
+  const { error } = await withSupabaseTimeout(
+    supabase
+      .from('license_users')
+      .upsert({
+        discord_user_id: syntheticId,
+        discord_username: 'DENG Tool Portal User',
+        max_keys: 999999,
+        is_owner: false,
+        is_blocked: false,
+      }, { onConflict: 'discord_user_id' }),
+    'challenge/ensureSyntheticLicenseUser',
+    genDbTimeout(),
+  );
   if (error) throw new Error(`Portal owner compatibility row failed: ${error.message}`);
   return syntheticId;
 }
 
 async function ensureDiscordLicenseUser(discordUserId) {
   if (!discordUserId) return null;
-  const { data: existing, error: readError } = await supabase
-    .from('license_users')
-    .select('discord_user_id')
-    .eq('discord_user_id', discordUserId)
-    .maybeSingle();
+  const { data: existing, error: readError } = await withSupabaseTimeout(
+    supabase
+      .from('license_users')
+      .select('discord_user_id')
+      .eq('discord_user_id', discordUserId)
+      .maybeSingle(),
+    'challenge/ensureDiscordLicenseUser/select',
+    genDbTimeout(),
+  );
 
   if (readError) throw new Error(`Discord owner lookup failed: ${readError.message}`);
   if (existing) return discordUserId;
 
-  const { error } = await supabase
-    .from('license_users')
-    .insert({
-      discord_user_id: discordUserId,
-      discord_username: 'DENG Tool Portal User',
-      max_keys: 999999,
-      is_owner: false,
-      is_blocked: false,
-    });
+  const { error } = await withSupabaseTimeout(
+    supabase
+      .from('license_users')
+      .insert({
+        discord_user_id: discordUserId,
+        discord_username: 'DENG Tool Portal User',
+        max_keys: 999999,
+        is_owner: false,
+        is_blocked: false,
+      }),
+    'challenge/ensureDiscordLicenseUser/insert',
+    genDbTimeout(),
+  );
   if (error && !String(error.message || '').toLowerCase().includes('duplicate')) {
     throw new Error(`Discord owner compatibility row failed: ${error.message}`);
   }
@@ -179,14 +205,22 @@ async function insertLicenseKey(payload, siteUserId, discordUserId) {
     await ensureDiscordLicenseUser(payload.owner_discord_id);
   }
 
-  let { error } = await supabase.from('license_keys').insert(payload);
+  let { error } = await withSupabaseTimeout(
+    supabase.from('license_keys').insert(payload),
+    'challenge/insertLicenseKey',
+    genDbTimeout(),
+  );
   if (!error) return;
 
   if (missingColumn(error, 'key_ciphertext') || missingColumn(error, 'key_export_available')) {
     const retryPayload = { ...payload };
     delete retryPayload.key_ciphertext;
     delete retryPayload.key_export_available;
-    const retryExport = await supabase.from('license_keys').insert(retryPayload);
+    const retryExport = await withSupabaseTimeout(
+      supabase.from('license_keys').insert(retryPayload),
+      'challenge/insertLicenseKey/noExport',
+      genDbTimeout(),
+    );
     error = retryExport.error;
     if (!error) return;
     payload = retryPayload;
@@ -196,7 +230,11 @@ async function insertLicenseKey(payload, siteUserId, discordUserId) {
     const retryPayload = { ...payload };
     delete retryPayload.redeemed_at;
     delete retryPayload.created_by;
-    const retryCompat = await supabase.from('license_keys').insert(retryPayload);
+    const retryCompat = await withSupabaseTimeout(
+      supabase.from('license_keys').insert(retryPayload),
+      'challenge/insertLicenseKey/compat',
+      genDbTimeout(),
+    );
     error = retryCompat.error;
     if (!error) return;
     payload = retryPayload;
@@ -214,7 +252,11 @@ async function insertLicenseKey(payload, siteUserId, discordUserId) {
     fallback.owner_discord_id = await ensureSyntheticLicenseUser(siteUserId);
   }
 
-  const retry = await supabase.from('license_keys').insert(fallback);
+  const retry = await withSupabaseTimeout(
+    supabase.from('license_keys').insert(fallback),
+    'challenge/insertLicenseKey/fallback',
+    genDbTimeout(),
+  );
   if (retry.error) throw retry.error;
 }
 

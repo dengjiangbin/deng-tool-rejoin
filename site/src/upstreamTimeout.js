@@ -9,6 +9,21 @@ function portalUpstreamTimeoutMs() {
   return Number.isFinite(raw) && raw >= 1000 ? raw : 8000;
 }
 
+/**
+ * Timeout for USER-INITIATED license reads/writes (own key history + key
+ * generation eligibility). These are owner-filtered (indexed) queries that the
+ * user explicitly triggered and waits on — when license_keys is bloated/slow they
+ * can spike to ~15-20s but still succeed. The aggressive portal fail-fast
+ * (PORTAL_UPSTREAM_TIMEOUT_MS, ~4.5s) is correct for high-frequency/background
+ * calls like public stats, but applying it here made the user's keys "disappear"
+ * and blocked generation. This is intentionally generous (well under Cloudflare's
+ * ~100s origin limit) so a slow-but-working DB no longer loses the user's data.
+ */
+function licenseUserQueryTimeoutMs() {
+  const raw = Number(process.env.LICENSE_USER_QUERY_TIMEOUT_MS || 25000);
+  return Number.isFinite(raw) && raw >= 1000 ? raw : 25000;
+}
+
 function withUpstreamTimeout(promise, label, ms = portalUpstreamTimeoutMs()) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -52,6 +67,7 @@ function withSupabaseTimeout(builder, label, ms = portalUpstreamTimeoutMs()) {
 
 module.exports = {
   portalUpstreamTimeoutMs,
+  licenseUserQueryTimeoutMs,
   withUpstreamTimeout,
   withSupabaseTimeout,
 };

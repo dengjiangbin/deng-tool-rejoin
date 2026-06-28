@@ -5,7 +5,7 @@
 
 const challenge = require('./challenge');
 const licenseService = require('./licenseService');
-const { withUpstreamTimeout } = require('./upstreamTimeout');
+const { withUpstreamTimeout, licenseUserQueryTimeoutMs } = require('./upstreamTimeout');
 
 const BLOCK_MESSAGES = {
   active_unredeemed_key: 'You already have an active key. Copy it and use it in DENG Tool Rejoin, or wait until it expires.',
@@ -74,6 +74,7 @@ async function getLicenseGenerationEligibility({
     await withUpstreamTimeout(
       licenseService.markExpiredUnredeemedKeys({ discordUserId, siteUserId }),
       'licenseEligibility/markExpiredUnredeemedKeys',
+      licenseUserQueryTimeoutMs(),
     );
   }
   const rows = await withUpstreamTimeout(
@@ -83,6 +84,7 @@ async function getLicenseGenerationEligibility({
       limit: 500,
     }),
     'licenseEligibility/getPortalUserLicenses',
+    licenseUserQueryTimeoutMs(),
   );
 
   const activeUnredeemed = rows.filter(licenseService.isActiveUnredeemedKey);

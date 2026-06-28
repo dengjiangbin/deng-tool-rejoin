@@ -23,7 +23,7 @@ const linkvertise = require('./providers/linkvertise');
 const lootlabs = require('./providers/lootlabs');
 const { signChallenge, verifyChallenge, isStateSecretConfigured } = require('./crypto');
 const { canonicalPublicUrl, requestHost } = require('./publicDomain');
-const { withUpstreamTimeout } = require('./upstreamTimeout');
+const { withUpstreamTimeout, licenseUserQueryTimeoutMs } = require('./upstreamTimeout');
 const { buildClearSessionCookieOptions } = require('./sessionCookieConfig');
 
 const router = express.Router();
@@ -694,9 +694,14 @@ async function loadHistory(siteUserId, limit = 20, fallbackDiscordUserId = '', {
     'routes/loadHistory/site_users',
   ).catch(() => ({ data: null }));
   const owner = data?.discord_user_id || fallbackDiscordUserId;
+  // The user's own key history must tolerate a slow-but-working license_keys
+  // (owner-filtered, indexed). The aggressive portal fail-fast made this return
+  // [] during slow windows → the user's keys "disappeared". Use the generous
+  // user-query timeout so the data loads instead of vanishing.
   const rows = await withUpstreamTimeout(
     licenseService.getPortalUserLicenses({ discordUserId: owner, siteUserId, limit }),
     'routes/loadHistory/getPortalUserLicenses',
+    licenseUserQueryTimeoutMs(),
   ).catch(() => []);
   return activeOnly ? licenseService.filterActiveLicenses(rows) : rows;
 }
@@ -1412,6 +1417,7 @@ router.get('/api/license/eligibility', requireLogin, repairSiteUser, async (req,
         skipMarkExpired: true,
       }),
       'routes/api/license/eligibility',
+      licenseUserQueryTimeoutMs(),
     );
     return res.json(eligibility);
   } catch (err) {
@@ -1484,6 +1490,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       withUpstreamTimeout(
         loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false }),
         'routes/license/loadHistory',
+        licenseUserQueryTimeoutMs(),
       ).catch(() => []),
       withUpstreamTimeout(
         licenseEligibility.getLicenseGenerationEligibility({
@@ -1493,6 +1500,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
           skipMarkExpired: true,
         }),
         'routes/license/getLicenseGenerationEligibility',
+        licenseUserQueryTimeoutMs(),
       ).catch(() => ({
         canGenerate: true,
         blockReason: null,
@@ -1514,6 +1522,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
           siteUserId: req.session.user.id,
         }),
         'routes/license/findActiveUnredeemedKey',
+        licenseUserQueryTimeoutMs(),
       ).catch(() => null)
       : null;
     const recoveredExistingKey = req.session.recoveredExistingKey || null;

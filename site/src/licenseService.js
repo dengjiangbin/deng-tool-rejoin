@@ -2,14 +2,35 @@
 
 const crypto = require('crypto');
 const supabase = require('./db');
-const { withUpstreamTimeout, withSupabaseTimeout } = require('./upstreamTimeout');
+const { withUpstreamTimeout, withSupabaseTimeout, licenseUserQueryTimeoutMs } = require('./upstreamTimeout');
 const { decryptLicenseKeyCiphertext, encryptLicenseKeyPlaintext } = require('./licenseCrypto');
 const { formatWibTimestamp } = require('./licenseFormat');
 
 const FULL_KEY_UNAVAILABLE = 'Full key unavailable for this old key';
 const KEY_RE = /^DENG-([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})$/i;
-const PUBLIC_STATS_CACHE_MS = 10_000;
+// Homepage public stats aggregate FULL-TABLE scans of license_keys (+ 3 other
+// tables). On a large/bloated license_keys those scans take 15-170s. A 10s TTL
+// meant every 10s a NEW scan fired while prior ones were still running, piling
+// up dozens of concurrent multi-minute scans that starved the fast owner-filtered
+// queries — which is what made key generation fail and key history "disappear".
+// Now: a long TTL + single-flight (only one refresh at a time) + stale-while-
+// revalidate (serve the last payload instantly and refresh in the background),
+// so the heavy scan runs at most once every few minutes and never blocks a user.
+const PUBLIC_STATS_CACHE_MS = Number(process.env.PUBLIC_STATS_CACHE_MS || 300_000);
 let publicStatsCache = null;
+let publicStatsInFlight = null;
+
+// Per-source circuit breaker. When a public-stats source scan (especially the
+// heavy full-table license_keys scan) times out, we stop re-launching it for a
+// cooldown window. This is critical during a Supabase pool-saturation incident:
+// each failed scan can keep running ~120s server-side holding a connection, so
+// hammering it on every homepage hit pins the whole PostgREST pool and makes
+// EVERY query (including key generation) time out. During cooldown we reuse the
+// last-known rows for that source instead, keeping the homepage numbers stable
+// and the connection pool free for user-facing license operations.
+const PUBLIC_STATS_SOURCE_COOLDOWN_MS = Number(process.env.PUBLIC_STATS_SOURCE_COOLDOWN_MS || 120_000);
+const publicStatsSourceCooldownUntil = new Map(); // table -> epoch ms
+const publicStatsLastSourceRows = new Map(); // table -> last successful rows
 
 const DEFAULT_GLOBAL_MAX_KEYS = 2;
 const DEFAULT_GLOBAL_MAX_PANEL = 1;
@@ -199,16 +220,44 @@ const PUBLIC_STATS_FALLBACK_COLUMNS = '*';
 
 async function selectPublicStatsRows(table) {
   const columns = PUBLIC_STATS_COLUMNS[table];
+
+  // Circuit breaker: if this source recently timed out, don't relaunch the heavy
+  // scan — reuse the last-known rows (or empty) so we stop pinning DB connections.
+  const cooldownUntil = publicStatsSourceCooldownUntil.get(table) || 0;
+  if (Date.now() < cooldownUntil) {
+    return publicStatsLastSourceRows.get(table) || [];
+  }
+
+  const tripBreaker = (reason) => {
+    publicStatsSourceCooldownUntil.set(table, Date.now() + PUBLIC_STATS_SOURCE_COOLDOWN_MS);
+    console.warn(
+      '[public-stats] source=%s timed out (%s); cooling down %dms, serving last-known rows',
+      table,
+      reason,
+      PUBLIC_STATS_SOURCE_COOLDOWN_MS,
+    );
+  };
+
   // Abort-capable timeout: during a Supabase/PostgREST outage these selects
   // would otherwise hang the request (observed 25s+), which makes the homepage
   // Platform Stats spin/stay empty. Fail fast instead so the route can serve
   // last-known cached values or a quick 503.
-  const first = await withSupabaseTimeout(
-    supabase.from(table).select(columns || '*'),
-    `public-stats/select/${table}`,
-  );
+  let first;
+  try {
+    first = await withSupabaseTimeout(
+      supabase.from(table).select(columns || '*'),
+      `public-stats/select/${table}`,
+    );
+  } catch (err) {
+    // Timeout (withSupabaseTimeout throws). Trip the breaker and reuse last-known.
+    tripBreaker(err?.message || 'timeout');
+    if (publicStatsLastSourceRows.has(table)) return publicStatsLastSourceRows.get(table);
+    throw err;
+  }
   if (!first.error) {
-    return Array.isArray(first.data) ? first.data : [];
+    const rows = Array.isArray(first.data) ? first.data : [];
+    publicStatsLastSourceRows.set(table, rows);
+    return rows;
   }
 
   console.warn(
@@ -217,19 +266,29 @@ async function selectPublicStatsRows(table) {
     first.error?.message || first.error || 'unknown',
   );
 
-  const fallback = await withSupabaseTimeout(
-    supabase.from(table).select(PUBLIC_STATS_FALLBACK_COLUMNS),
-    `public-stats/fallback/${table}`,
-  );
+  let fallback;
+  try {
+    fallback = await withSupabaseTimeout(
+      supabase.from(table).select(PUBLIC_STATS_FALLBACK_COLUMNS),
+      `public-stats/fallback/${table}`,
+    );
+  } catch (err) {
+    tripBreaker(err?.message || 'timeout');
+    if (publicStatsLastSourceRows.has(table)) return publicStatsLastSourceRows.get(table);
+    throw err;
+  }
   if (fallback.error) {
     console.error(
       '[public-stats] fallback SELECT also failed for table=%s message=%s',
       table,
       fallback.error?.message || fallback.error || 'unknown',
     );
+    if (publicStatsLastSourceRows.has(table)) return publicStatsLastSourceRows.get(table);
     throw serviceError('public_stats_unavailable', 'Public stats are unavailable.', 503);
   }
-  return Array.isArray(fallback.data) ? fallback.data : [];
+  const rows = Array.isArray(fallback.data) ? fallback.data : [];
+  publicStatsLastSourceRows.set(table, rows);
+  return rows;
 }
 
 function buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers }) {
@@ -327,26 +386,64 @@ function buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers }) {
   };
 }
 
+async function refreshPublicStats(now) {
+  // allSettled so one slow/failing source (typically the heavy license_keys
+  // scan) cannot blank the whole homepage. A rejected source falls back to its
+  // last-known rows (kept by selectPublicStatsRows) or [] on first cold start.
+  const tables = ['license_keys', 'device_bindings', 'license_users', 'site_users'];
+  const settled = await Promise.allSettled(tables.map((t) => selectPublicStatsRows(t)));
+  const pick = (i, table) => {
+    const r = settled[i];
+    if (r.status === 'fulfilled') return r.value;
+    return publicStatsLastSourceRows.get(table) || [];
+  };
+  // If EVERY source failed and we have no prior cache at all, surface the error
+  // (→ 503) rather than caching an all-zero payload as if it were real.
+  const allFailed = settled.every((r) => r.status === 'rejected');
+  if (allFailed && !publicStatsCache) {
+    const firstErr = settled.find((r) => r.status === 'rejected');
+    throw (firstErr && firstErr.reason) || serviceError('public_stats_unavailable', 'Public stats are unavailable.', 503);
+  }
+  const keys = pick(0, 'license_keys');
+  const bindings = pick(1, 'device_bindings');
+  const licenseUsers = pick(2, 'license_users');
+  const siteUsers = pick(3, 'site_users');
+  const built = buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers });
+  const { _internalSources, ...payload } = built;
+  publicStatsCache = { cachedAt: now, payload, sources: _internalSources };
+  return payload;
+}
+
 async function getPublicStats({ now = Date.now(), forceRefresh = false } = {}) {
-  if (!forceRefresh && publicStatsCache && now - publicStatsCache.cachedAt < PUBLIC_STATS_CACHE_MS) {
+  const fresh = publicStatsCache && (now - publicStatsCache.cachedAt < PUBLIC_STATS_CACHE_MS);
+  if (!forceRefresh && fresh) {
     return publicStatsCache.payload;
   }
+
+  // Single-flight: collapse all concurrent refreshes onto ONE in-flight scan so
+  // we never pile up multiple full-table scans of license_keys at once.
+  if (!publicStatsInFlight) {
+    publicStatsInFlight = refreshPublicStats(now)
+      .catch((err) => {
+        // Re-throw so awaiters can decide; cleared in finally.
+        throw err;
+      })
+      .finally(() => { publicStatsInFlight = null; });
+  }
+  const refresh = publicStatsInFlight;
+
+  // Stale-while-revalidate: if we already have ANY cached payload, return it
+  // immediately and let the refresh complete in the background. The user never
+  // waits on the heavy scan, and the homepage keeps showing the last numbers.
+  if (!forceRefresh && publicStatsCache && publicStatsCache.payload) {
+    refresh.catch(() => { /* background refresh failure is non-fatal */ });
+    return publicStatsCache.payload;
+  }
+
+  // Cold start (no cache yet) or forced refresh: we must await the scan.
   try {
-    const [keys, bindings, licenseUsers, siteUsers] = await Promise.all([
-      selectPublicStatsRows('license_keys'),
-      selectPublicStatsRows('device_bindings'),
-      selectPublicStatsRows('license_users'),
-      selectPublicStatsRows('site_users'),
-    ]);
-    const built = buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers });
-    const { _internalSources, ...payload } = built;
-    publicStatsCache = { cachedAt: now, payload, sources: _internalSources };
-    return payload;
+    return await refresh;
   } catch (err) {
-    // Supabase/PostgREST outage. Serve the last-known-good payload (even if
-    // older than the normal TTL) so the homepage Platform Stats keep showing
-    // the previous numbers instead of going blank. Only surface the error
-    // (→ 503) when we have never successfully fetched stats this process.
     if (publicStatsCache && publicStatsCache.payload) {
       return publicStatsCache.payload;
     }
@@ -356,6 +453,9 @@ async function getPublicStats({ now = Date.now(), forceRefresh = false } = {}) {
 
 function clearPublicStatsCache() {
   publicStatsCache = null;
+  publicStatsInFlight = null;
+  publicStatsSourceCooldownUntil.clear();
+  publicStatsLastSourceRows.clear();
 }
 
 function peekPublicStatsCache() {
@@ -473,6 +573,7 @@ async function fetchByKeyId(table, columns, keyIds, field = 'key_id') {
     const { data, error } = await withSupabaseTimeout(
       supabase.from(table).select(columns).in(field, keyIds),
       `licenseService/fetchByKeyId/${table}`,
+      licenseUserQueryTimeoutMs(),
     );
     if (error) return [];
     return data || [];
@@ -492,6 +593,7 @@ async function fetchLicenseRowsByOwner(owner, limit) {
       .order('created_at', { ascending: false })
       .limit(limit),
     'licenseService/fetchLicenseRowsByOwner',
+    licenseUserQueryTimeoutMs(),
   );
   if (error && missingColumn(error)) {
     const retry = await withSupabaseTimeout(
@@ -502,6 +604,7 @@ async function fetchLicenseRowsByOwner(owner, limit) {
         .order('created_at', { ascending: false })
         .limit(limit),
       'licenseService/fetchLicenseRowsByOwner',
+      licenseUserQueryTimeoutMs(),
     );
     keys = retry.data;
     error = retry.error;
@@ -524,6 +627,7 @@ async function fetchLicenseRowsBySiteUser(siteUserId, limit) {
       .order('created_at', { ascending: false })
       .limit(limit),
     'licenseService/fetchLicenseRowsBySiteUser',
+    licenseUserQueryTimeoutMs(),
   );
   if (error && missingColumn(error)) return [];
   if (error) {
