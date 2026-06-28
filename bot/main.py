@@ -91,8 +91,11 @@ async def _build_and_run(token: str) -> None:
     async def on_ready() -> None:
         log.info("Logged in as %s (id=%s)", bot.user, bot.user.id)
 
-        # Restore persistent views so buttons work after restart
-        await cog.restore_persistent_views()
+        # Restore persistent views so buttons work after restart. This is a
+        # background, self-retrying task (restoration needs a sometimes-slow
+        # Supabase read) so it neither blocks on_ready nor the gateway heartbeat,
+        # and it self-heals the moment the store responds.
+        cog.schedule_persistent_view_restore()
 
         # NOTE: This bot is GUILD-ONLY. Global command sync is intentionally
         # disabled here. Commands are registered once via:
@@ -102,10 +105,18 @@ async def _build_and_run(token: str) -> None:
             "managed by deploy_commands.py (guild-only policy)."
         )
 
-        # Write initial health snapshot and start heartbeat loop
+        # Write initial health snapshot and start heartbeat loop.
+        #
+        # on_ready fires on EVERY gateway (re)connect, not just the first. The
+        # old code spawned a brand-new _health_loop task on every reconnect, so
+        # a single reconnect storm piled up dozens of concurrent loops each
+        # hammering the DB probe — which starved the loop further. Start it
+        # exactly once and reuse the task across reconnects.
         cmds_loaded = len(bot.tree.get_commands()) if hasattr(bot, 'tree') else 0
         _write_health(bot, discord_ready=True, db_ok=True, commands_loaded=cmds_loaded)
-        asyncio.create_task(_health_loop(bot, store))
+        existing = getattr(bot, "_deng_health_task", None)
+        if existing is None or existing.done():
+            bot._deng_health_task = asyncio.create_task(_health_loop(bot, store))
 
     @bot.event
     async def on_error(event: str, *args: object, **kwargs: object) -> None:
@@ -181,11 +192,23 @@ async def _health_loop(bot: commands.Bot, store: object) -> None:
         try:
             db_ok = True
             try:
-                # Lightweight DB check — just probe the users table
+                # Lightweight DB check — just probe the users table.
+                #
+                # CRITICAL: the supabase/postgrest client is SYNCHRONOUS and
+                # blocks the calling thread until the HTTP round-trip finishes.
+                # Calling it directly on the event loop froze the entire bot
+                # (and the Discord gateway heartbeat) whenever Supabase was slow
+                # or unreachable — the gateway then dropped the connection, which
+                # made the rejoin panel go dead. Run the blocking probe in a
+                # worker thread with a hard timeout so the event loop is never
+                # blocked; a failed/slow probe only flips db_ok, it never stalls
+                # the heartbeat.
                 if hasattr(store, '_client'):
-                    store._client.table("license_users").select("id").limit(1).execute()
+                    def _probe_db() -> None:
+                        store._client.table("license_users").select("id").limit(1).execute()
+                    await asyncio.wait_for(asyncio.to_thread(_probe_db), timeout=10)
                 elif hasattr(store, '_load'):
-                    store._load()
+                    await asyncio.wait_for(asyncio.to_thread(store._load), timeout=10)
             except Exception:  # noqa: BLE001
                 db_ok = False
             _write_health(

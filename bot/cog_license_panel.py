@@ -14,6 +14,7 @@ Button handlers
   Generate Key   (Discord link button -> https://aio.deng.my.id/license)
   Key Stats      (custom_id = "license_panel:key_stats")
   Select Version (custom_id = "license_panel:select_version")
+  Guide          (Discord link button -> guide thread)
 
 Removed features (Reset HWID, Redeem Key) are handled gracefully on old,
 already-posted panel messages via RemovedFeatureView.
@@ -23,6 +24,7 @@ All button flows are EPHEMERAL.  The panel embed itself is public (pinned-style)
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -47,6 +49,7 @@ from agent.license_panel import (
     REMOVED_BUTTON_REDEEM,
     REMOVED_BUTTON_RESET_HWID,
     SLASH_GROUP,
+    build_guide_thread_url,
     build_key_list_response,
     build_not_owner_response,
     build_panel_embed,
@@ -133,6 +136,13 @@ def _embed_from_payload(
     """Convert builder payload dict → discord.Embed (no logo on replies by default)."""
     embed_dict = dict(payload["embed"])
     apply_branding_to_embed_dict(embed_dict, include_thumbnail=include_thumbnail)
+    return discord.Embed.from_dict(embed_dict)
+
+
+def _build_public_panel_embed() -> discord.Embed:
+    """Persistent public panel embed — always includes the DENG logo thumbnail."""
+    embed_dict = build_panel_embed()
+    apply_branding_to_embed_dict(embed_dict, include_thumbnail=True)
     return discord.Embed.from_dict(embed_dict)
 
 
@@ -484,7 +494,7 @@ class PanelView(discord.ui.View):
         self._move_generate_button_first()
 
     def _move_generate_button_first(self) -> None:
-        """discord.py decorator buttons are added before __init__; put the link first."""
+        """discord.py decorator buttons are added before __init__; pin link buttons first/last."""
         generate = discord.ui.Button(
             style=discord.ButtonStyle.link,
             label="Generate Key",
@@ -492,11 +502,22 @@ class PanelView(discord.ui.View):
             url="https://aio.deng.my.id/license",
             row=0,
         )
-        existing = [child for child in self.children if getattr(child, "label", "") != "Generate Key"]
+        guide = discord.ui.Button(
+            style=discord.ButtonStyle.link,
+            label="Guide",
+            emoji="\U0001f4d6",
+            url=build_guide_thread_url(),
+            row=0,
+        )
+        existing = [
+            child for child in self.children
+            if getattr(child, "label", "") not in ("Generate Key", "Guide")
+        ]
         self.clear_items()
         self.add_item(generate)
         for child in existing:
             self.add_item(child)
+        self.add_item(guide)
 
     # ── Key Stats ─────────────────────────────────────────────────────────────
 
@@ -557,6 +578,14 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
     def __init__(self, bot: commands.Bot, store: BaseLicenseStore) -> None:
         self.bot = bot
         self._store = store
+
+        # Persistent-view restoration state. Restoration needs a (sometimes very
+        # slow) Supabase read; we track which guilds are already restored so a
+        # background retry can finish the rest without re-doing successes or
+        # registering duplicate views.
+        self._restored_guild_ids: set[str] = set()
+        self._removed_feature_view_added = False
+        self._restore_task: "asyncio.Task | None" = None
 
         self._panel_group = app_commands.Group(
             name=SLASH_GROUP,
@@ -678,8 +707,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
             await interaction.response.defer(ephemeral=True)
 
-            embed_dict = build_panel_embed()
-            embed = discord.Embed.from_dict(embed_dict)
+            embed = _build_public_panel_embed()
             view = PanelView(store)
             msg = await channel.send(embed=embed, view=view)
 
@@ -747,8 +775,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 )
                 return
 
-            embed_dict = build_panel_embed()
-            embed = discord.Embed.from_dict(embed_dict)
+            embed = _build_public_panel_embed()
             view = PanelView(store)
             await msg.edit(embed=embed, view=view)
             bot.add_view(view, message_id=msg.id)
@@ -1026,21 +1053,80 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
     # ── Persistent view restoration ───────────────────────────────────────────
 
-    async def restore_persistent_views(self) -> None:
+    def schedule_persistent_view_restore(self) -> None:
+        """Start the (idempotent) background restore-with-retry task once.
+
+        Safe to call from every ``on_ready`` (which fires on every gateway
+        reconnect): a single task is kept alive and reused, so reconnect storms
+        never pile up duplicate restore loops.
+        """
+        existing = self._restore_task
+        if existing is not None and not existing.done():
+            return
+        self._restore_task = asyncio.create_task(self._restore_persistent_views_with_retry())
+
+    async def _restore_persistent_views_with_retry(self) -> None:
+        """Keep restoring panel views in the background until all guilds succeed.
+
+        Restoration depends on a Supabase read that can be slow or briefly
+        unreachable. Rather than give up after a single pass (which left the
+        panel buttons dead until the next reconnect), retry with backoff so the
+        views attach automatically the moment the store responds — without ever
+        blocking the event loop / Discord heartbeat.
+        """
+        delays = [5, 10, 20, 30, 60, 60, 120, 120, 300]
+        attempt = 0
+        while True:
+            pending = await self.restore_persistent_views()
+            if pending <= 0:
+                if attempt:
+                    log.info("All persistent panel views restored after %d retr%s.",
+                             attempt, "y" if attempt == 1 else "ies")
+                return
+            delay = delays[min(attempt, len(delays) - 1)]
+            attempt += 1
+            log.warning(
+                "Persistent panel view restore incomplete (%d guild(s) pending); "
+                "retrying in %ds (attempt %d).",
+                pending, delay, attempt,
+            )
+            await asyncio.sleep(delay)
+
+    async def restore_persistent_views(self) -> int:
         """Re-attach PanelView for every guild so buttons survive restarts.
 
         Also registers a global :class:`RemovedFeatureView` so that clicks on the
         legacy Reset HWID / Redeem Key buttons of OLD already-posted panels respond
         with a clean "This feature has been removed." notice instead of failing.
+
+        Idempotent: guilds already restored are skipped, so it is safe to call
+        repeatedly (the background retry relies on this). Returns the number of
+        guilds whose views could NOT be restored on this pass (0 == all done).
         """
         # Global catch-view for removed buttons on old panel messages (no message_id
         # → matches the legacy custom_ids on any message that still carries them).
-        self.bot.add_view(RemovedFeatureView())
+        # Add exactly once — re-adding on every retry/reconnect would duplicate it.
+        if not self._removed_feature_view_added:
+            self.bot.add_view(RemovedFeatureView())
+            self._removed_feature_view_added = True
 
+        pending = 0
         for guild in self.bot.guilds:
+            guild_id = str(guild.id)
+            if guild_id in self._restored_guild_ids:
+                continue
             try:
-                cfg = self._store.get_panel_config(str(guild.id))
+                # get_panel_config is a SYNCHRONOUS store call (blocking Supabase
+                # round-trip). on_ready runs on the event loop and fires on every
+                # gateway reconnect, so calling it inline blocked the Discord
+                # heartbeat per-guild whenever Supabase was slow — a key reason
+                # the panel went dead. Run it in a worker thread with a timeout.
+                cfg = await asyncio.wait_for(
+                    asyncio.to_thread(self._store.get_panel_config, guild_id),
+                    timeout=15,
+                )
             except Exception as exc:
+                pending += 1
                 log.warning(
                     "Could not read panel config for guild %s (store error: %s). "
                     "If using Supabase, apply the migration first.",
@@ -1049,6 +1135,9 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 )
                 continue
             if not cfg or not cfg.get("message_id"):
+                # No panel configured for this guild — nothing to restore, and it
+                # is not a failure, so mark it done to stop retrying.
+                self._restored_guild_ids.add(guild_id)
                 continue
             try:
                 msg_id = int(cfg["message_id"])
@@ -1058,8 +1147,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 if channel is not None:
                     try:
                         msg = await channel.fetch_message(msg_id)
-                        embed_dict = build_panel_embed()
-                        await msg.edit(embed=discord.Embed.from_dict(embed_dict), view=view)
+                        await msg.edit(embed=_build_public_panel_embed(), view=view)
                         log.info(
                             "Refreshed persistent panel message: guild=%s message=%s",
                             guild.id,
@@ -1072,14 +1160,20 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                             msg_id,
                             exc,
                         )
+                # add_view succeeded → buttons are live for this guild even if the
+                # cosmetic message refresh above failed. Mark done so we stop
+                # retrying it.
+                self._restored_guild_ids.add(guild_id)
                 log.info(
                     "Restored persistent panel view: guild=%s message=%s",
                     guild.id,
                     msg_id,
                 )
             except (ValueError, TypeError) as exc:
+                pending += 1
                 log.warning(
                     "Could not restore panel view for guild %s: %s",
                     guild.id,
                     exc,
                 )
+        return pending
