@@ -5,7 +5,9 @@ Source of truth for package ONLINE_CONFIRMED, disconnect, force-close, and runti
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import subprocess
 import threading
@@ -27,7 +29,34 @@ WATCHED_PHRASES = (
 DEFAULT_LAUNCH_WATCHDOG_SECONDS = 120.0
 PROCESS_MISSING_CONFIRM = 2
 DISCONNECT_SCAN_INTERVAL_SECONDS = 5.0
+# When the logcat stream is healthy it catches "Sending disconnect with reason"
+# (e.g. 278) instantly, so the slow dumpsys/uiautomator disconnect scan only needs
+# to run as an occasional safety net. While the stream is fresh for a package,
+# throttle that heavy scan to this cadence instead of running it every round — this
+# is the main fix for the ~8s/package, ~38s/round latency seen in probe
+# p-daee3387a8 that delayed acting on other packages' disconnects/force-closes.
+STREAM_FRESH_DISCONNECT_SKIP_SECONDS = 40.0
+HEAVY_DISCONNECT_FALLBACK_INTERVAL_SECONDS = 60.0
 LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS = 20.0
+
+# ── Authoritative full-dump scan (issue p-9c18ae51bc) ────────────────────────
+# The live "logcat -v uid" stream catches the disconnect line instantly *while it
+# is flowing*, but on a chatty device the reader can stall over a long run, and
+# the small periodic poll (-t 400) gets buried in GC/shader spam, so a real idle
+# kick ("Sending disconnect with reason: 278") was detected by a fresh probe yet
+# the live recovery never fired. To make detection robust ("use dump logcat for
+# full potential"), every round we also run a wide, PID-scoped `logcat -d` dump
+# and parse the most-recent disconnect-reason / idle / join-identity lines
+# directly, with device-local timestamps so we only act on events newer than the
+# last online proof. This is independent of the stream, so a stalled reader can
+# no longer swallow a disconnect, and it re-asserts each round so the watchdog
+# reliably acts. PID-scoped dumps are cheap (<1s) unlike the dumpsys/uiautomator
+# UI scan, so this does not regress the round latency fixed earlier.
+DUMP_SCAN_MIN_INTERVAL_SECONDS = float(os.environ.get("DENG_REJOIN_DUMP_SCAN_INTERVAL", "3.0"))
+DUMP_TAIL_LINES = int(os.environ.get("DENG_REJOIN_DUMP_TAIL_LINES", "4000"))
+DUMP_MAX_PIDS = 4
+DUMP_SCAN_ENABLED = os.environ.get("DENG_REJOIN_DISABLE_DUMP_SCAN", "").strip() not in {"1", "true", "yes"}
+WRONG_SERVER_ANCHOR_ENABLED = os.environ.get("DENG_REJOIN_WRONG_SERVER_ANCHOR", "1").strip() in {"1", "true", "yes"}
 
 _UID_OPTIONAL_ONLINE_SOURCES = frozenset({
     "presence_in_experience",
@@ -62,10 +91,44 @@ _LOGCAT_UID_RE = re.compile(r"uid=(\d+)")
 _GAME_JOIN_RE = re.compile(r"gamejoinloadtime", re.I)
 _DO_TELEPORT_RE = re.compile(r"doTeleport", re.I)
 _WITH_REASON_RE = re.compile(r"with reason", re.I)
+# Authoritative Roblox network disconnect line: "Sending disconnect with reason: <code>".
+_DISCONNECT_REASON_CODE_RE = re.compile(r"with\s+reason:?\s*(\d+)", re.I)
 _IDLE_DISCONNECT_RE = re.compile(
     r"(disconnected for being idle|Error Code:\s*278|idle\s+\d+\s+minutes|You were disconnected.*idle)",
     re.I,
 )
+# Observed joined-server identity extracted from Roblox join logcat lines. placeIds
+# are public (not secret), so they are safe to compare/store. The negative
+# lookbehind keeps the generic placeId pattern from matching inside "rootPlaceId".
+_ROOT_PLACE_ID_RE = re.compile(r"root\s*place\s*id[\"']?\s*[:=]\s*\"?(\d{3,})", re.I)
+_PLACE_ID_RE = re.compile(r"(?<![a-z])place\s*id[\"']?\s*[:=]\s*\"?(\d{3,})", re.I)
+_UNIVERSE_ID_RE = re.compile(r"universe\s*id[\"']?\s*[:=]\s*\"?(\d{3,})", re.I)
+# Lines worth scanning for a placeId (join/launch only) — avoids matching random ids.
+_JOIN_IDENTITY_HINT_RE = re.compile(
+    r"(placeId|rootPlaceId|universeId|GameJoin|PlaceLauncher|JoinGame|joinScript|"
+    r"ActivityProtocolLaunch|share_links|robloxApp://|roblox://)",
+    re.I,
+)
+# Private-server / share / deep-link code (used for Wrong-Server when the
+# configured link only carries an opaque code, no placeId). Compared as a salted
+# hash only — the raw code is NEVER stored or uploaded.
+_PRIVATE_CODE_RE = re.compile(
+    r"(?:privateServerLinkCode|linkCode|accessCode|gameInstanceId|[?&]code)=([A-Za-z0-9_\-]{4,})",
+    re.I,
+)
+# logcat threadtime prefix: "MM-DD HH:MM:SS.mmm". Used to order dumped lines
+# against wall-clock online evidence (the agent runs on the same device, so
+# logcat local time and time.time() share the same clock).
+_LOGCAT_TS_PREFIX_RE = re.compile(
+    r"^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})"
+)
+
+
+def _hash_code(code: object) -> str:
+    text = str(code or "").strip()
+    if not text:
+        return ""
+    return hashlib.sha1(text.encode("utf-8", "ignore")).hexdigest()[:16]
 _POSITIVE_ONLINE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("gamejoinloadtime", re.compile(r"gamejoinloadtime", re.I)),
     (
@@ -137,6 +200,33 @@ class PackageRjnState:
     last_dead_reason: str = ""
     last_disconnect_scan_at: float = 0.0
     disconnect_prompt_text: str = ""
+    # Last numeric Roblox disconnect reason code parsed from the FLog::Network line
+    # ("Sending disconnect with reason: <code>"). 0 = none seen.
+    last_disconnect_code: int = 0
+    # Wrong-server detection: configured ("expected") target derived from the
+    # private-server/game URL vs the server the client actually joined ("observed",
+    # parsed from join logcat). placeIds are public, so safe to store/compare.
+    expected_place_id: int = 0
+    expected_root_place_id: int = 0
+    expected_universe_id: int = 0
+    expected_private_code_hash: str = ""
+    observed_place_id: int = 0
+    observed_root_place_id: int = 0
+    observed_universe_id: int = 0
+    observed_private_code_hash: str = ""
+    # Session anchor for the no-config / share-code-only case: the FIRST game
+    # identity the client joins after a launch is treated as the configured
+    # target, so a later join to a DIFFERENT game (user moved to another link)
+    # can be flagged as Wrong Server even when the configured URL exposes no
+    # placeId. Reset on every (re)launch so each session re-anchors cleanly.
+    anchor_place_id: int = 0
+    anchor_root_place_id: int = 0
+    anchor_universe_id: int = 0
+    anchor_set: bool = False
+    last_wrong_server_at: float = 0.0
+    # Authoritative full-dump scan bookkeeping.
+    last_dump_scan_at: float = 0.0
+    last_dump_disconnect_epoch: float = 0.0
     # Diagnostic: freshness + sample of EVERY UID-matched logcat line (not just
     # watched phrases). A GL-rendered disconnect (e.g. Error 278) is invisible to
     # the UI scan and may not match any watched phrase, but the process keeps
@@ -542,6 +632,25 @@ class RjnLifecycleMonitor:
                 _diag_row.recent_uid_lines.append({"at": seen_at, "line": _sanitize_line(line)})
                 if len(_diag_row.recent_uid_lines) > 14:
                     del _diag_row.recent_uid_lines[:-14]
+            # Capture the joined-server identity (public placeIds only) from join
+            # logcat so it can be compared against the configured target ("Wrong
+            # Server"). Runs on the RAW line; only non-secret numeric ids are kept.
+            if _JOIN_IDENTITY_HINT_RE.search(line):
+                if self._capture_observed_identity(pkg, line, seen_at):
+                    # Wrong server flagged from this very line — do not let the same
+                    # join line re-confirm ONLINE below.
+                    wrong_event = LogcatEvent(
+                        package=pkg,
+                        uid=effective_uid,
+                        phrase="wrong_server",
+                        raw_line_sanitized=_sanitize_line(line),
+                        seen_at=seen_at,
+                    )
+                    wrong_event.action_taken = self._states[pkg].internal_state
+                    self._recent_events.append(wrong_event)
+                    if len(self._recent_events) > 128:
+                        self._recent_events = self._recent_events[-128:]
+                    return
             phrase = ""
             if _WITH_REASON_RE.search(line):
                 phrase = "with reason"
@@ -705,6 +814,170 @@ class RjnLifecycleMonitor:
     def _was_ever_online_confirmed(self, row: PackageRjnState) -> bool:
         return row.last_positive_online_evidence_at > 0
 
+    @property
+    def logcat_stream_alive(self) -> bool:
+        return bool(getattr(self, "_logcat_stream_alive", False))
+
+    def stream_fresh_for(self, package: str, max_age_seconds: float) -> bool:
+        """True when the logcat stream is alive AND it recently emitted a line for
+        this package's UID. When fresh, the stream itself reliably catches the
+        Roblox "Sending disconnect with reason" line, so the slow dumpsys/uiautomator
+        fallback can be skipped to keep the watchdog round fast."""
+        if not getattr(self, "_logcat_stream_alive", False):
+            return False
+        pkg = str(package or "").strip()
+        with self._lock:
+            row = self._states.get(pkg)
+            if row is None or row.last_uid_line_at <= 0:
+                return False
+            return (time.time() - row.last_uid_line_at) <= float(max_age_seconds)
+
+    def set_expected_target(
+        self,
+        package: str,
+        *,
+        place_id: object = None,
+        root_place_id: object = None,
+        universe_id: object = None,
+        private_code: object = None,
+    ) -> None:
+        """Record the configured ("expected") server identity for Wrong-Server
+        detection. Only public placeIds and a *salted hash* of the private/share
+        code are stored — the raw share/private code is never kept or uploaded. A
+        0/None/"" value means "unknown" and disables comparison for that field
+        (fail-safe: never flags Wrong Server without a known expectation)."""
+        pkg = str(package or "").strip()
+        if not pkg:
+            return
+
+        def _as_id(value: object) -> int:
+            try:
+                ival = int(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return 0
+            return ival if ival > 0 else 0
+
+        with self._lock:
+            row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
+            row.expected_place_id = _as_id(place_id)
+            row.expected_root_place_id = _as_id(root_place_id)
+            row.expected_universe_id = _as_id(universe_id)
+            row.expected_private_code_hash = _hash_code(private_code)
+
+    def _has_expected_target(self, row: PackageRjnState) -> bool:
+        return bool(
+            row.expected_place_id
+            or row.expected_root_place_id
+            or row.expected_universe_id
+            or row.expected_private_code_hash
+        )
+
+    def _capture_observed_identity(self, pkg: str, raw_line: str, at: float) -> bool:
+        """Extract the actually-joined placeId/rootPlaceId/universeId from a join
+        logcat line and (when it mismatches the configured target) flag Wrong
+        Server. Caller holds the lock. Only public numeric ids are read. Returns
+        True when this line triggered a Wrong-Server disconnect."""
+        row = self._states.get(pkg)
+        if row is None:
+            return False
+        changed = False
+        m = _ROOT_PLACE_ID_RE.search(raw_line)
+        if m:
+            try:
+                val = int(m.group(1))
+                if val > 0 and val != row.observed_root_place_id:
+                    row.observed_root_place_id = val
+                    changed = True
+            except (TypeError, ValueError):
+                pass
+        m = _PLACE_ID_RE.search(raw_line)
+        if m:
+            try:
+                val = int(m.group(1))
+                if val > 0 and val != row.observed_place_id:
+                    row.observed_place_id = val
+                    changed = True
+            except (TypeError, ValueError):
+                pass
+        m = _UNIVERSE_ID_RE.search(raw_line)
+        if m:
+            try:
+                val = int(m.group(1))
+                if val > 0 and val != row.observed_universe_id:
+                    row.observed_universe_id = val
+                    changed = True
+            except (TypeError, ValueError):
+                pass
+        m = _PRIVATE_CODE_RE.search(raw_line)
+        if m:
+            code_hash = _hash_code(m.group(1))
+            if code_hash and code_hash != row.observed_private_code_hash:
+                row.observed_private_code_hash = code_hash
+                changed = True
+        if not changed:
+            return False
+        # Session anchor: the first joined game identity after a launch is the
+        # configured target. Pin it (only when nothing was configured) so a later
+        # join to a different game can still be flagged. Pinning the legit first
+        # join must never itself flag Wrong Server.
+        if (
+            WRONG_SERVER_ANCHOR_ENABLED
+            and not row.anchor_set
+            and not self._has_expected_target(row)
+            and (row.observed_universe_id or row.observed_root_place_id or row.observed_place_id)
+        ):
+            row.anchor_universe_id = row.observed_universe_id
+            row.anchor_root_place_id = row.observed_root_place_id
+            row.anchor_place_id = row.observed_place_id
+            row.anchor_set = True
+            return False
+        return self._maybe_flag_wrong_server(pkg, at)
+
+    def _maybe_flag_wrong_server(self, pkg: str, at: float) -> bool:
+        """Transition to DISCONNECTED (reason ``wrong_server``) when the joined
+        server identity provably differs from the configured target. Fail-safe:
+        only fires when BOTH an expected and an observed id of the same kind are
+        known and they differ. Never fires on missing/partial data."""
+        row = self._states.get(pkg)
+        if row is None:
+            return False
+        pairs = (
+            # Configured ("expected") target vs observed.
+            (row.expected_place_id, row.observed_place_id),
+            (row.expected_root_place_id, row.observed_root_place_id),
+            (row.expected_universe_id, row.observed_universe_id),
+            # Session anchor (first join of this session) vs observed — catches a
+            # move to a different game when the configured link had no placeId.
+            (row.anchor_universe_id, row.observed_universe_id),
+            (row.anchor_root_place_id, row.observed_root_place_id),
+            (row.anchor_place_id, row.observed_place_id),
+        )
+        mismatch = any(
+            expected > 0 and observed > 0 and expected != observed
+            for expected, observed in pairs
+        )
+        code_mismatch = bool(
+            row.expected_private_code_hash
+            and row.observed_private_code_hash
+            and row.expected_private_code_hash != row.observed_private_code_hash
+        )
+        if not (mismatch or code_mismatch):
+            return False
+        # Debounce: do not re-flag the same wrong server repeatedly between rounds.
+        if row.last_wrong_server_at and (at - row.last_wrong_server_at) < 30.0:
+            return False
+        row.last_wrong_server_at = at
+        row.last_with_reason_at = at
+        row.disconnect_prompt_text = "Wrong Server"
+        self._transition(
+            pkg,
+            STATE_DISCONNECTED,
+            "wrong_server",
+            at=at,
+            offline=True,
+        )
+        return True
+
     def _try_confirm_launch_online(self, pkg: str, now: float) -> bool:
         """Best-effort in-game proof during launch before watchdog marks join failed."""
         try:
@@ -723,6 +996,139 @@ class RjnLifecycleMonitor:
         except Exception as exc:  # noqa: BLE001
             self._detector_errors.append(f"launch_online_fallback:{exc}"[:120])
         return False
+
+    def _logcat_line_epoch(self, line: str, now: float) -> float:
+        """Device-local epoch for a threadtime logcat line. The agent and logcat
+        share the device clock, so this is directly comparable to time.time()."""
+        m = _LOGCAT_TS_PREFIX_RE.match(line)
+        if not m:
+            return now
+        mo, da, hh, mm, ss, ms = (int(g) for g in m.groups())
+        lt = time.localtime(now)
+        year = lt.tm_year
+        # Year boundary: a December line read in early January belongs to last year.
+        if mo == 12 and lt.tm_mon == 1:
+            year -= 1
+        try:
+            base = time.mktime((year, mo, da, hh, mm, ss, 0, 0, -1))
+        except (ValueError, OverflowError):
+            return now
+        return base + (ms / 1000.0)
+
+    def _dump_pkg_logcat(self, pids: list[str]) -> list[str]:
+        """Wide, PID-scoped `logcat -d` dump (pre-attributed, cheap)."""
+        lines: list[str] = []
+        for pid in pids[:DUMP_MAX_PIDS]:
+            pid_s = str(pid or "").strip()
+            if not pid_s:
+                continue
+            try:
+                res = android.run_command(
+                    ["logcat", "-d", "--pid", pid_s, "-t", str(DUMP_TAIL_LINES)],
+                    timeout=8,
+                )
+                if res.ok and res.stdout:
+                    lines.extend(res.stdout.splitlines())
+            except Exception as exc:  # noqa: BLE001
+                self._detector_errors.append(f"dump_scan:{exc}"[:120])
+                if len(self._detector_errors) > 16:
+                    self._detector_errors = self._detector_errors[-16:]
+        return lines
+
+    def _scan_logcat_dump(self, pkg: str, now: float) -> None:
+        """Authoritative full-dump disconnect + identity scan. Caller holds lock.
+
+        Parses the most-recent disconnect-reason / idle / join-identity lines from
+        a wide PID-scoped dump, ordered by device timestamp, and only acts on a
+        disconnect that is newer than the last online proof (so a reconnect after
+        the kick is respected). This runs even while the live stream looks fresh
+        (the process keeps emitting heartbeats after an idle kick, which used to
+        throttle the old fallback), so a stalled/lossy stream can no longer
+        swallow a 278/disconnect."""
+        if not DUMP_SCAN_ENABLED:
+            return
+        row = self._states.get(pkg)
+        if row is None:
+            return
+        if (now - row.last_dump_scan_at) < DUMP_SCAN_MIN_INTERVAL_SECONDS:
+            return
+        row.last_dump_scan_at = now
+        pids = [str(p).strip() for p in (row.pids or []) if str(p).strip()]
+        if not pids:
+            return
+        lines = self._dump_pkg_logcat(pids)
+        if not lines:
+            return
+
+        latest_disc_epoch = 0.0
+        latest_disc_code = 0
+        latest_disc_idle = False
+        latest_disc_line = ""
+        latest_online_epoch = 0.0
+        latest_ident_epoch = 0.0
+        latest_ident_line = ""
+
+        for line in lines:
+            if _GAME_JOIN_RE.search(line):
+                ep = self._logcat_line_epoch(line, now)
+                if ep >= latest_online_epoch:
+                    latest_online_epoch = ep
+                continue
+            if _WITH_REASON_RE.search(line) or _IDLE_DISCONNECT_RE.search(line):
+                ep = self._logcat_line_epoch(line, now)
+                if ep >= latest_disc_epoch:
+                    latest_disc_epoch = ep
+                    latest_disc_line = line
+                    cm = _DISCONNECT_REASON_CODE_RE.search(line)
+                    latest_disc_code = int(cm.group(1)) if cm else 0
+                    latest_disc_idle = bool(
+                        _IDLE_DISCONNECT_RE.search(line) or latest_disc_code == 278
+                    )
+                continue
+            if _JOIN_IDENTITY_HINT_RE.search(line):
+                ep = self._logcat_line_epoch(line, now)
+                if ep >= latest_ident_epoch:
+                    latest_ident_epoch = ep
+                    latest_ident_line = line
+
+        # Wrong-Server / deeplink: process the most recent join-identity line. If
+        # it flags Wrong Server the package is already DISCONNECTED — stop here.
+        if latest_ident_line:
+            if self._capture_observed_identity(pkg, latest_ident_line, latest_ident_epoch or now):
+                return
+
+        online_anchor = max(row.last_positive_online_evidence_at, row.launch_started_at)
+        # Reconnected after the kick: the latest join proof is newer than the
+        # latest disconnect — re-confirm online (also self-heals a stalled stream).
+        if (
+            latest_online_epoch > 0
+            and latest_online_epoch > latest_disc_epoch
+            and latest_online_epoch >= online_anchor
+        ):
+            if row.internal_state != STATE_ONLINE_CONFIRMED:
+                self._confirm_online_evidence(pkg, latest_online_epoch, source="gamejoinloadtime")
+            return
+
+        if latest_disc_epoch <= 0:
+            return
+        # Only a disconnect that happened after the last online proof / this
+        # launch is actionable (ignore stale pre-launch kicks).
+        if latest_disc_epoch < online_anchor:
+            return
+        # De-dupe: do not re-fire on the same already-handled disconnect line.
+        if latest_disc_epoch <= row.last_dump_disconnect_epoch:
+            return
+        row.last_dump_disconnect_epoch = latest_disc_epoch
+        row.last_disconnect_code = latest_disc_code or row.last_disconnect_code
+        row.last_with_reason_at = max(row.last_with_reason_at, latest_disc_epoch)
+        row.disconnect_prompt_text = _sanitize_line(latest_disc_line)
+        reason = (
+            "idle_disconnect_278"
+            if latest_disc_idle
+            else ("logcat_disconnect" if latest_disc_code else "logcat_with_reason")
+        )
+        if row.internal_state != STATE_DISCONNECTED or row.last_transition_reason != reason:
+            self._transition(pkg, STATE_DISCONNECTED, reason, at=latest_disc_epoch, offline=True)
 
     def _detect_live_disconnect(self, package: str) -> tuple[str | None, str | None]:
         try:
@@ -747,10 +1153,24 @@ class RjnLifecycleMonitor:
             prompt = getattr(event, "raw_line_sanitized", "") if event is not None else ""
             if prompt:
                 row.disconnect_prompt_text = str(prompt)[:240]
+            # Parse the authoritative numeric disconnect code (e.g. 278 = idle) so
+            # the user-facing reason shows the real "Error Code: N" text and a 278
+            # idle kick is classified correctly.
+            code_match = _DISCONNECT_REASON_CODE_RE.search(
+                getattr(event, "raw_line_sanitized", "") or ""
+            )
+            transition_reason = "logcat_with_reason"
+            if code_match:
+                try:
+                    row.last_disconnect_code = int(code_match.group(1))
+                except (TypeError, ValueError):
+                    row.last_disconnect_code = 0
+                if row.last_disconnect_code == 278:
+                    transition_reason = "idle_disconnect_278"
             self._transition(
                 pkg,
                 STATE_DISCONNECTED,
-                "logcat_with_reason",
+                transition_reason,
                 at=at,
                 offline=True,
             )
@@ -788,6 +1208,17 @@ class RjnLifecycleMonitor:
             row.watchdog_active = True
             row.launch_failed_reason = ""
             row.relaunching = bool(relaunch)
+            # Fresh session: re-anchor Wrong-Server detection and let a new
+            # post-launch disconnect be acted on again.
+            row.observed_place_id = 0
+            row.observed_root_place_id = 0
+            row.observed_universe_id = 0
+            row.observed_private_code_hash = ""
+            row.anchor_place_id = 0
+            row.anchor_root_place_id = 0
+            row.anchor_universe_id = 0
+            row.anchor_set = False
+            row.last_dump_disconnect_epoch = 0.0
             if relaunch:
                 row.internal_state = STATE_RELAUNCHING
                 row.last_transition_at = now
@@ -890,8 +1321,22 @@ class RjnLifecycleMonitor:
             else:
                 row.process_missing_streak = 0
                 row.force_close_detected = False
+                # Authoritative full-dump scan: catches a disconnect/idle kick or a
+                # move to a different game even when the live stream stalled or the
+                # log spam buried the line. Runs every round (cheap, PID-scoped)
+                # and is throttled internally.
+                self._scan_logcat_dump(pkg, now)
+                stream_fresh = (
+                    self._logcat_stream_alive
+                    and row.last_uid_line_at > 0
+                    and (now - row.last_uid_line_at) <= STREAM_FRESH_DISCONNECT_SKIP_SECONDS
+                )
+                heavy_due = (
+                    now - row.last_disconnect_scan_at
+                ) >= HEAVY_DISCONNECT_FALLBACK_INTERVAL_SECONDS
                 if (
                     row.internal_state in {STATE_ONLINE_CONFIRMED, STATE_TELEPORTING}
+                    and (not stream_fresh or heavy_due)
                     and now - row.last_disconnect_scan_at >= DISCONNECT_SCAN_INTERVAL_SECONDS
                 ):
                     row.last_disconnect_scan_at = now
@@ -974,11 +1419,23 @@ class RjnLifecycleMonitor:
                 "last_gamejoinloadtime_at": row.last_gamejoinloadtime_at or "",
                 "last_positive_online_evidence_at": row.last_positive_online_evidence_at or "",
                 "last_with_reason_at": row.last_with_reason_at or "",
+                "disconnect_code": row.last_disconnect_code or "",
                 "launch_failed_reason": row.launch_failed_reason or "",
                 "reason_internal": row.last_transition_reason or row.launch_failed_reason or reason,
                 "reason_user_friendly": reason_user_friendly,
                 "disconnect_prompt_text": row.disconnect_prompt_text or "",
                 "matched_disconnect_text": row.disconnect_prompt_text or "",
+                "last_uid_line_at": row.last_uid_line_at or "",
+                "logcat_stream_alive": str(bool(getattr(self, "_logcat_stream_alive", False))).lower(),
+                "expected_place_id": row.expected_place_id or "",
+                "observed_place_id": row.observed_place_id or "",
+                "expected_root_place_id": row.expected_root_place_id or "",
+                "observed_root_place_id": row.observed_root_place_id or "",
+                "observed_universe_id": row.observed_universe_id or "",
+                "anchor_place_id": row.anchor_place_id or "",
+                "expected_private_code_set": str(bool(row.expected_private_code_hash)).lower(),
+                "observed_private_code_set": str(bool(row.observed_private_code_hash)).lower(),
+                "wrong_server": str(row.last_transition_reason == "wrong_server").lower(),
                 "why_still_launching": (
                     reason
                     if internal in {STATE_LAUNCHING, STATE_RELAUNCHING} and not is_online
@@ -1022,6 +1479,8 @@ class RjnLifecycleMonitor:
             return f"online because UID-matched {src} and process exists"
         if row.force_close_detected or "process_missing" in failed:
             return "process_missing"
+        if row.last_transition_reason == "wrong_server":
+            return "wrong_server"
         if row.last_with_reason_at and row.last_with_reason_at >= row.last_positive_online_evidence_at:
             if row.last_transition_reason == "idle_disconnect_278":
                 return "idle_disconnect_278"
@@ -1064,6 +1523,17 @@ class RjnLifecycleMonitor:
                     "last_gamejoinloadtime_at": row.last_gamejoinloadtime_at or None,
                     "last_doteleport_at": row.last_doteleport_at or None,
                     "last_with_reason_at": row.last_with_reason_at or None,
+                    "disconnect_code": row.last_disconnect_code or None,
+                    "expected_place_id": row.expected_place_id or None,
+                    "observed_place_id": row.observed_place_id or None,
+                    "expected_root_place_id": row.expected_root_place_id or None,
+                    "observed_root_place_id": row.observed_root_place_id or None,
+                    "observed_universe_id": row.observed_universe_id or None,
+                    "anchor_place_id": row.anchor_place_id or None,
+                    "anchor_set": row.anchor_set,
+                    "expected_private_code_set": bool(row.expected_private_code_hash),
+                    "observed_private_code_set": bool(row.observed_private_code_hash),
+                    "wrong_server_detected": row.last_transition_reason == "wrong_server",
                     "last_logcat_event_at": row.last_logcat_event_at or None,
                     "launch_started_at": row.launch_started_at or None,
                     "launch_watchdog_active": row.watchdog_active,

@@ -10,7 +10,14 @@ from . import android
 from .config import validate_package_name
 
 # (regex, reason) — only use when regex matches; keep patterns conservative.
+# NOTE: The authoritative Roblox client disconnect line is logged by FLog::Network
+# as ``Sending disconnect with reason: <code>`` (e.g. 278 idle). The older rules
+# only matched the GL-rendered "Error Code: 278" dialog text, which never appears
+# in logcat, so 278/idle disconnects went undetected on this path (probe
+# p-daee3387a8). Match the real network line and the numeric reason code.
 _LOGCAT_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(?:Sending\s+)?disconnect\s+with\s+reason:?\s*278\b", re.I), "idle_disconnect"),
+    (re.compile(r"(?:Sending\s+)?disconnect\s+with\s+reason:?\s*\d+", re.I), "disconnected"),
     (re.compile(r"\b(connection lost|disconnected from|lost connection|network error)\b", re.I), "disconnected"),
     (re.compile(r"\b(disconnected for being idle|Error Code:\s*278|idle\s+\d+\s+minutes)\b", re.I), "idle_disconnect"),
     (re.compile(r"\b(server shut|shutting down|server closed|you were kicked)\b", re.I), "server_shutdown"),

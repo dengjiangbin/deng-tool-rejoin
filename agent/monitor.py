@@ -90,6 +90,7 @@ def check_package_health(config_data: dict[str, Any], package: str) -> HealthRes
 
     if disconnect_ev and disconnect_ev.category in (
         "disconnected",
+        "idle_disconnect",
         "server_shutdown",
         "private_server_refresh",
     ):

@@ -6,10 +6,14 @@ _USER_FRIENDLY: dict[str, str] = {
     "launch_watchdog_timeout": "Roblox did not finish joining the server in time",
     "with_reason": "Roblox disconnected or kicked the account",
     "logcat_with_reason": "Roblox disconnected or kicked the account",
+    "idle_disconnect_278": "Roblox disconnected for being idle (Error 278)",
+    "ui_disconnect": "Roblox disconnected or kicked the account",
+    "logcat_disconnect": "Roblox disconnected or kicked the account",
     "process_missing": "Roblox was closed or force-stopped",
     "force_close": "Roblox was closed or force-stopped",
     "package_force_stopped": "Roblox was force-stopped",
     "game_crash": "Roblox crashed",
+    "wrong_server": "Wrong Server (joined a different server than the configured link)",
     "private_server_launch_failed": "Could not open the private server link",
     "no_gamejoinloadtime": "Roblox opened but did not finish joining the server",
     "no_online_confirmation": "Roblox opened but could not be confirmed inside the game",
@@ -34,6 +38,8 @@ def format_user_friendly_dead_reason(reason: str) -> str:
     key = normalize_internal_reason(text)
     if key in _USER_FRIENDLY:
         return _USER_FRIENDLY[key]
+    if "wrong_server" in key or "wrong_game" in key or "target_mismatch" in key:
+        return _USER_FRIENDLY["wrong_server"]
     if "with_reason" in key or "disconnect" in key:
         return _USER_FRIENDLY["logcat_with_reason"]
     if "process_missing" in key or "force" in key and "stop" in key:

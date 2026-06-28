@@ -1377,12 +1377,27 @@ class WatchdogSupervisor:
             self._presence_cookies[pkg] = cookie or None
             try:
                 from .url_utils import parse_expected_target_from_url
-                self._presence_expected_targets[pkg] = parse_expected_target_from_url(
+                target = parse_expected_target_from_url(
                     effective_private_server_url(e, self.cfg),
                     expected_place_id=e.get("expected_place_id") or self.cfg.get("expected_place_id"),
                     expected_root_place_id=e.get("expected_root_place_id") or self.cfg.get("expected_root_place_id"),
                     expected_universe_id=e.get("expected_universe_id") or self.cfg.get("expected_universe_id"),
                 )
+                self._presence_expected_targets[pkg] = target
+                # Feed the configured target into the logcat detector so it can flag
+                # "Wrong Server" when the client provably joins a different placeId.
+                # Only fires when the configured link/config yields a known placeId;
+                # share-code-only links leave this unknown (fail-safe, never flags).
+                try:
+                    self._rjn_monitor.set_expected_target(
+                        pkg,
+                        place_id=target.expected_place_id,
+                        root_place_id=target.expected_root_place_id,
+                        universe_id=target.expected_universe_id,
+                        private_code=target.expected_private_code,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             except Exception:  # noqa: BLE001
                 self._presence_expected_targets[pkg] = None
 
@@ -2579,6 +2594,36 @@ class WatchdogSupervisor:
 
         return (time.time() - row.launch_started_at) >= float(LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS)
 
+    # Per-package wall-clock gate for the slow dumpsys/uiautomator disconnect scan.
+    # The authoritative Roblox "Sending disconnect with reason: <code>" line is
+    # caught instantly by the logcat stream (probe p-daee3387a8), so the ~8s
+    # fallback scan no longer needs to run every round. Running it every round was
+    # the dominant cost (~8s/package → ~38s round) that delayed acting on OTHER
+    # packages' disconnects and force-closes. Skip it while the stream is fresh;
+    # keep it as a slow safety net for a genuinely stalled/broken stream.
+    HEAVY_DISCONNECT_SCAN_SECONDS: float = 60.0
+    HEAVY_DISCONNECT_STREAM_FRESH_SECONDS: float = 40.0
+
+    def _heavy_disconnect_scan_due(self, pkg: str) -> bool:
+        try:
+            stream_fresh = self._rjn_monitor.stream_fresh_for(
+                pkg, self.HEAVY_DISCONNECT_STREAM_FRESH_SECONDS
+            )
+        except Exception:  # noqa: BLE001
+            stream_fresh = False
+        cache = getattr(self, "_last_heavy_disconnect_scan", None)
+        if cache is None:
+            cache = {}
+            self._last_heavy_disconnect_scan = cache
+        now = time.monotonic()
+        last = cache.get(pkg, 0.0)
+        # While the stream is healthy for this package, trust it and only run the
+        # heavy scan on a slow cadence. When the stream is stale, scan every round.
+        if stream_fresh and (now - last) < self.HEAVY_DISCONNECT_SCAN_SECONDS:
+            return False
+        cache[pkg] = now
+        return True
+
     def _try_online_evidence_fallback(
         self, pkg: str, ev: Any
     ) -> Any:
@@ -2587,7 +2632,7 @@ class WatchdogSupervisor:
             return ev
         if not self._fallback_online_allowed(pkg):
             return ev
-        if ev.process_exists:
+        if ev.process_exists and self._heavy_disconnect_scan_due(pkg):
             try:
                 from .package_online_evidence import detect_live_disconnect
 
