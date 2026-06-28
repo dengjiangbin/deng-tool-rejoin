@@ -52,7 +52,11 @@ function isRecoverableFsError(err) {
 
 const server = require('http').createServer((req, res) => {
   const pathOnly = String(req.url || '').split('?')[0];
-  if (req.method === 'GET' && pathOnly === '/health') {
+  if (req.method === 'GET' && (pathOnly === '/healthz' || pathOnly === '/health')) {
+    if (pathOnly === '/healthz') {
+      const { sendHealthz } = require('./src/healthz');
+      return sendHealthz(res, 'deng-tracker-ingest', PORT);
+    }
     res.writeHead(200, {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-store',
@@ -68,6 +72,77 @@ const server = require('http').createServer((req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(getCachedStabilityJson());
+    return;
+  }
+  if (
+    req.method === 'GET'
+    && (pathOnly === '/api/fishit-tracker/read-health' || pathOnly === '/api/tracker/read-health')
+  ) {
+    const readPort = parseInt(process.env.TRACKER_READ_PORT || '8793', 10);
+    const readHost = process.env.TRACKER_READ_HOST || '127.0.0.1';
+    const probeMs = Number(process.env.TRACKER_READ_HEALTH_PROBE_MS || 2500);
+    const started = Date.now();
+    const proxyReq = require('http').request({
+      host: readHost,
+      port: readPort,
+      method: 'GET',
+      path: '/health',
+      headers: { connection: 'close', 'x-deng-via-ingest-fallback': '1' },
+      timeout: probeMs,
+    }, (proxyRes) => {
+      let body = '';
+      proxyRes.setEncoding('utf8');
+      proxyRes.on('data', (chunk) => { body += chunk; });
+      proxyRes.on('end', () => {
+        let upstream = null;
+        try { upstream = JSON.parse(body); } catch (_) { upstream = null; }
+        const ok = proxyRes.statusCode === 200 && upstream && upstream.status === 'ok';
+        res.writeHead(ok ? 200 : 503, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'x-deng-tracker-read-route': 'ingest-light-probe',
+        });
+        res.end(JSON.stringify({
+          status: ok ? 'ok' : 'degraded',
+          service: 'deng-tracker-ingest',
+          probe: 'tracker-read-health',
+          probeMs: Date.now() - started,
+          upstreamStatus: proxyRes.statusCode,
+          upstream: upstream
+            ? { status: upstream.status, service: upstream.service, port: upstream.port }
+            : null,
+          timestamp: new Date().toISOString(),
+        }));
+      });
+    });
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) {
+        res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({
+          status: 'degraded',
+          service: 'deng-tracker-ingest',
+          probe: 'tracker-read-health',
+          error: 'tracker_read_health_probe_timeout',
+          probeMs: Date.now() - started,
+          timestamp: new Date().toISOString(),
+        }));
+      }
+    });
+    proxyReq.on('error', () => {
+      if (!res.headersSent) {
+        res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({
+          status: 'degraded',
+          service: 'deng-tracker-ingest',
+          probe: 'tracker-read-health',
+          error: 'tracker_read_unavailable',
+          probeMs: Date.now() - started,
+          timestamp: new Date().toISOString(),
+        }));
+      }
+    });
+    proxyReq.end();
     return;
   }
   if (req.method === 'POST' && !isTrackerUploadPath(req.method, pathOnly)) {

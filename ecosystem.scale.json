@@ -18,7 +18,8 @@
         "TRACKER_READ_HOST": "127.0.0.1",
         "TRACKER_READ_PORT": "8793",
         "TRACKER_READ_FALLBACK": "1",
-        "TRACKER_READ_CACHE_REFRESH_MS": "1000",
+        "TRACKER_READ_CACHE_REFRESH_MS": "2500",
+        "TRACKER_READ_WARM_BATCH": "60",
         "TRACKER_READ_FALLBACK_TIMEOUT_MS": "2500",
         "TOOL_SITE_HOST": "127.0.0.1",
         "TOOL_SITE_PORT": "8791",
@@ -55,7 +56,7 @@
         "TRACKER_WORKER_METRICS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\tracker_worker_metrics.json",
         "TRACKER_WORKER_TICK_MS": "400",
         "TRACKER_WORKER_REFRESH_MS": "45000",
-        "TRACKER_WORKER_MAX_PER_TICK": "120",
+        "TRACKER_WORKER_MAX_PER_TICK": "100",
         "TRACKER_WORKER_CONCURRENCY": "6"
       }
     }

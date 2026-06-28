@@ -14,11 +14,18 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const app = require('./src/trackerReadApp');
+const { sendHealthz } = require('./src/healthz');
 
 const HOST = process.env.TRACKER_READ_HOST || '127.0.0.1';
 const PORT = parseInt(process.env.TRACKER_READ_PORT || '8793', 10);
 
-const server = require('http').createServer(app);
+const server = require('http').createServer((req, res) => {
+  const pathOnly = String(req.url || '').split('?')[0];
+  if (req.method === 'GET' && pathOnly === '/healthz') {
+    return sendHealthz(res, 'deng-tracker-read', PORT);
+  }
+  app(req, res);
+});
 server.keepAliveTimeout = parseInt(process.env.TRACKER_READ_KEEPALIVE_MS || '61000', 10);
 server.headersTimeout = parseInt(process.env.TRACKER_READ_HEADERS_TIMEOUT_MS || '65000', 10);
 server.maxRequestsPerSocket = 0;
@@ -27,11 +34,12 @@ if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 const { listenWithReclaim } = require('./src/reclaimPort');
 listenWithReclaim(server, PORT, HOST, '[deng-tracker-read]', {
   pm2AppName: 'deng-tracker-read',
-  // reclaimAfterMs > PM2 kill_timeout (8000ms): never reclaim a sibling that is
-  // still gracefully shutting down on restart (avoids the mutual-kill loop).
   reclaimAfterMs: parseInt(process.env.TRACKER_READ_RECLAIM_AFTER_MS || '9000', 10),
   retryDelayMs: parseInt(process.env.TRACKER_READ_LISTEN_RETRY_DELAY_MS || '400', 10),
   maxMs: parseInt(process.env.TRACKER_READ_LISTEN_RETRY_MAX_MS || '22000', 10),
+  onListening: () => {
+    if (typeof app.startCache === 'function') app.startCache();
+  },
 });
 
 let readShuttingDown = false;

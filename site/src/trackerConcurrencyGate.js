@@ -262,8 +262,21 @@ function wrapTrackerUpload(label, handler) {
   return function trackerUploadEntry(req, res) {
     const lag = getLagMs();
     const busyLagMs = Number(process.env.TRACKER_UPLOAD_BUSY_LAG_MS || 8000);
+    const hardShedMs = Number(process.env.TRACKER_UPLOAD_HARD_SHED_MS || 3500);
     if (isFastLaneUpload(req)) {
       return handler(req, res);
+    }
+    // Under extreme lag, reject new heavy inventory work immediately so the
+    // ingest event loop can drain and /health + tunnel keepalives stay alive.
+    if (lag >= hardShedMs) {
+      shedEvents += 1;
+      return res.status(503).json({
+        ok: false,
+        error: 'tracker_ingest_busy',
+        retryable: true,
+        lagMs: Math.round(lag),
+        route: String(req.headers['x-deng-tracker-route'] || 'direct-ingest'),
+      });
     }
     if (lag >= busyLagMs) {
       req.trackerDeferEnrichment = true;

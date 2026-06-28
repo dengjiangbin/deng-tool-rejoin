@@ -4,7 +4,6 @@
  * Mounted before protected routers so `/` and `/login` are never intercepted.
  */
 const express = require('express');
-const { safeReturnPath } = require('./auth');
 
 const router = express.Router();
 
@@ -41,20 +40,23 @@ router.get('/', (req, res) => {
   });
 });
 
-router.get('/login', (req, res) => {
-  const returnPath = safeReturnPath(req.query.return || req.query.next);
-  const apkEmbed = req.query.apk === '1' || req.query.apk === 'true';
-  if (req.session.user) {
-    const dest = apkEmbed ? '/tracker?apk=1' : (returnPath || '/tracker');
-    return res.redirect(dest);
-  }
-  if (returnPath) req.session.authReturnTo = returnPath;
-  return sendPublicPage(res, 'login', {
-    title: 'Sign In - DENG All In One',
-    authReturnTo: returnPath || '',
-    apkEmbed,
-    bodyClass: 'auth-layout',
+if (process.env.SITE_APP_MODE !== 'portal') {
+  const { safeReturnPath } = require('./auth');
+  router.get('/login', (req, res) => {
+    const returnPath = safeReturnPath(req.query.return || req.query.next);
+    const apkEmbed = req.query.apk === '1' || req.query.apk === 'true';
+    if (req.session.user) {
+      const dest = apkEmbed ? '/tracker?apk=1' : (returnPath || '/tracker');
+      return res.redirect(dest);
+    }
+    if (returnPath) req.session.authReturnTo = returnPath;
+    return sendPublicPage(res, 'login', {
+      title: 'Sign In - DENG All In One',
+      authReturnTo: returnPath || '',
+      apkEmbed,
+      bodyClass: 'auth-layout',
+    });
   });
-});
+}
 
 module.exports = router;

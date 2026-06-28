@@ -29,6 +29,13 @@ const app = require('./src/app');
 const { isStateSecretConfigured } = require('./src/crypto');
 const { createTrackerUploadProxy, shouldProxyTrackerUpload } = require('./src/trackerUploadProxy');
 const {
+  createTrackerReadProxy,
+  shouldProxyTrackerRead,
+  isTrackerReadHealthPath,
+  handleTrackerReadHealth,
+} = require('./src/trackerReadProxy');
+const { isPortalPriorityPath } = require('./src/portalPriorityPaths');
+const {
   startStabilitySnapshotLoop,
   getCachedStabilityJson,
 } = require('./src/stabilitySnapshot');
@@ -92,10 +99,23 @@ const server = require('http').createServer((req, res) => {
   if (process.env.TRACKER_UPLOAD_PROXY !== '0' && shouldProxyTrackerUpload(req)) {
     return createTrackerUploadProxy()(req, res);
   }
+  // License, ad-unlock completion, and login must not queue behind tracker polls.
+  if (isPortalPriorityPath(pathOnly, req.method)) {
+    return app(req, res);
+  }
+  if (process.env.TRACKER_READ_PROXY !== '0' && isTrackerReadHealthPath(pathOnly)) {
+    return handleTrackerReadHealth(req, res);
+  }
+  if (process.env.TRACKER_READ_PROXY !== '0' && shouldProxyTrackerRead(req)) {
+    return createTrackerReadProxy()(req, res);
+  }
   app(req, res);
 });
 
 if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
+server.keepAliveTimeout = parseInt(process.env.TOOL_SITE_KEEPALIVE_MS || '5000', 10);
+server.headersTimeout = parseInt(process.env.TOOL_SITE_HEADERS_TIMEOUT_MS || '10000', 10);
+server.maxRequestsPerSocket = 0;
 
 // EADDRINUSE retry — keep the window shorter than PM2's listen_timeout so a
 // restarted instance racing the previous process's port release retries and

@@ -1,0 +1,37 @@
+{
+  "apps": [
+    {
+      "name": "deng-portal-license",
+      "script": "portal-server.js",
+      "cwd": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site",
+      "interpreter": "node",
+      "watch": false,
+      "autorestart": true,
+      "max_restarts": 15,
+      "restart_delay": 3000,
+      "kill_timeout": 8000,
+      "listen_timeout": 90000,
+      "wait_ready": true,
+      "max_memory_restart": "768M",
+      "env": {
+        "NODE_ENV": "production",
+        "SITE_APP_MODE": "portal",
+        "PORTAL_MODE": "1",
+        "PORTAL_HOST": "127.0.0.1",
+        "PORTAL_PORT": "8790",
+        "TRACKER_WEB_MODE": "0",
+        "SKIP_TRACKER_UPLOAD_ROUTES": "1",
+        "TOOL_SITE_SESSION_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
+        "TOOL_SITE_PUBLIC_URL": "https://aio.deng.my.id",
+        "TOOL_SITE_INTERNAL_URL": "https://tool.deng.my.id",
+        "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
+        "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
+        "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
+        "OAUTH_STATE_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\oauth-states",
+        "TOOL_SITE_ASSET_VERSION": "PORTAL_8790_SPLIT_2026_06_28",
+        "PORTAL_UPSTREAM_TIMEOUT_MS": "8000",
+        "GIT_COMMIT": "3387a06"
+      }
+    }
+  ]
+}

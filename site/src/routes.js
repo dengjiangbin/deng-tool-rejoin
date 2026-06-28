@@ -23,6 +23,7 @@ const linkvertise = require('./providers/linkvertise');
 const lootlabs = require('./providers/lootlabs');
 const { signChallenge, verifyChallenge, isStateSecretConfigured } = require('./crypto');
 const { canonicalPublicUrl, requestHost } = require('./publicDomain');
+const { withUpstreamTimeout } = require('./upstreamTimeout');
 const { buildClearSessionCookieOptions } = require('./sessionCookieConfig');
 
 const router = express.Router();
@@ -420,7 +421,10 @@ function providerRedirectUrl(providerCfg, returnToken) {
 
 async function repairSiteUser(req, _res, next) {
   try {
-    await ensureRealSiteUser(req);
+    await withUpstreamTimeout(
+      ensureRealSiteUser(req),
+      'routes/repairSiteUser/ensureRealSiteUser',
+    );
   } catch (err) {
     const code = codeFromError(err, 'SITE_USER_UPSERT_FAILED');
     logSafeError('site_user/repair', code, err);
@@ -681,13 +685,19 @@ function summarizeHistory(history) {
 }
 
 async function loadHistory(siteUserId, limit = 20, fallbackDiscordUserId = '', { activeOnly = true } = {}) {
-  const { data } = await supabase
-    .from('site_users')
-    .select('discord_user_id')
-    .eq('id', siteUserId)
-    .maybeSingle();
+  const { data } = await withUpstreamTimeout(
+    supabase
+      .from('site_users')
+      .select('discord_user_id')
+      .eq('id', siteUserId)
+      .maybeSingle(),
+    'routes/loadHistory/site_users',
+  ).catch(() => ({ data: null }));
   const owner = data?.discord_user_id || fallbackDiscordUserId;
-  const rows = await licenseService.getPortalUserLicenses({ discordUserId: owner, siteUserId, limit });
+  const rows = await withUpstreamTimeout(
+    licenseService.getPortalUserLicenses({ discordUserId: owner, siteUserId, limit }),
+    'routes/loadHistory/getPortalUserLicenses',
+  ).catch(() => []);
   return activeOnly ? licenseService.filterActiveLicenses(rows) : rows;
 }
 
@@ -1461,21 +1471,33 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false });
     const activeHistory = licenseService.filterActiveLicenses(history);
-    const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
-      discordUserId: discordOwnerId(req),
-      siteUserId: req.session.user.id,
-      skipProviderCheck: true,
-    });
+    const eligibility = await withUpstreamTimeout(
+      licenseEligibility.getLicenseGenerationEligibility({
+        discordUserId: discordOwnerId(req),
+        siteUserId: req.session.user.id,
+        skipProviderCheck: true,
+      }),
+      'routes/license/getLicenseGenerationEligibility',
+    ).catch(() => ({
+      canGenerate: true,
+      blockReason: null,
+      activeUnredeemedCount: 0,
+      remainingSeconds: 0,
+      cooldownUntil: null,
+    }));
     const cooldown = {
       allowed: eligibility.blockReason !== 'cooldown_active',
       secondsLeft: eligibility.blockReason === 'cooldown_active' ? eligibility.remainingSeconds : 0,
       cooldownUntil: eligibility.cooldownUntil,
     };
     const existingUnused = eligibility.activeUnredeemedCount > 0
-      ? await licenseService.findActiveUnredeemedKey({
-        discordUserId: discordOwnerId(req),
-        siteUserId: req.session.user.id,
-      })
+      ? await withUpstreamTimeout(
+        licenseService.findActiveUnredeemedKey({
+          discordUserId: discordOwnerId(req),
+          siteUserId: req.session.user.id,
+        }),
+        'routes/license/findActiveUnredeemedKey',
+      ).catch(() => null)
       : null;
     const recoveredExistingKey = req.session.recoveredExistingKey || null;
     delete req.session.recoveredExistingKey;

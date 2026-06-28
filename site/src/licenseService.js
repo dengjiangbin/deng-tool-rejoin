@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const supabase = require('./db');
+const { withUpstreamTimeout } = require('./upstreamTimeout');
 const { decryptLicenseKeyCiphertext, encryptLicenseKeyPlaintext } = require('./licenseCrypto');
 const { formatWibTimestamp } = require('./licenseFormat');
 
@@ -455,19 +456,25 @@ async function fetchByKeyId(table, columns, keyIds, field = 'key_id') {
 async function fetchLicenseRowsByOwner(owner, limit) {
   const normalized = String(owner || '').trim();
   if (!normalized) return [];
-  let { data: keys, error } = await supabase
-    .from('license_keys')
-    .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id, key_ciphertext, key_export_available')
-    .eq('owner_discord_id', normalized)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error && missingColumn(error)) {
-    const retry = await supabase
+  let { data: keys, error } = await withUpstreamTimeout(
+    supabase
       .from('license_keys')
-      .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id')
+      .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id, key_ciphertext, key_export_available')
       .eq('owner_discord_id', normalized)
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .limit(limit),
+    'licenseService/fetchLicenseRowsByOwner',
+  );
+  if (error && missingColumn(error)) {
+    const retry = await withUpstreamTimeout(
+      supabase
+        .from('license_keys')
+        .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id')
+        .eq('owner_discord_id', normalized)
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      'licenseService/fetchLicenseRowsByOwner',
+    );
     keys = retry.data;
     error = retry.error;
   }
@@ -481,12 +488,15 @@ async function fetchLicenseRowsByOwner(owner, limit) {
 async function fetchLicenseRowsBySiteUser(siteUserId, limit) {
   const normalized = String(siteUserId || '').trim();
   if (!normalized) return [];
-  let { data: keys, error } = await supabase
-    .from('license_keys')
-    .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id, key_ciphertext, key_export_available')
-    .eq('site_user_id', normalized)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+  let { data: keys, error } = await withUpstreamTimeout(
+    supabase
+      .from('license_keys')
+      .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id, key_ciphertext, key_export_available')
+      .eq('site_user_id', normalized)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    'licenseService/fetchLicenseRowsBySiteUser',
+  );
   if (error && missingColumn(error)) return [];
   if (error) {
     console.error('[licenseService/fetchLicenseRowsBySiteUser]', error.message || error);

@@ -1,20 +1,47 @@
-# Reference Cloudflare Tunnel ingress for DENG production.
+# Reference Cloudflare Tunnel ingress for DENG production (8790 portal / 8791 tracker site / 8792 ingest / 8793 read).
 # Token-managed tunnels: apply equivalent path rules in Zero Trust → Networks → Tunnels
 # → [your tunnel] → Public Hostname (path rules must appear BEFORE catch-all hostname rules).
 #
-# IMPORTANT: Only POST upload paths go to ingest (8792). GET reads (get-backpack, images,
-# assets) must stay on web (8791) — see site/src/trackerUploadPaths.js.
-#
-# Validate locally (reference only — does not affect token tunnel until applied in dashboard):
+# Validate locally (reference only):
 #   cloudflared tunnel ingress validate --config config/cloudflared-ingress.reference.yml
-#
-# Test routing:
-#   cloudflared tunnel ingress rule --config config/cloudflared-ingress.reference.yml https://aio.deng.my.id/api/fishit-tracker/update-backpack
-#   cloudflared tunnel ingress rule --config config/cloudflared-ingress.reference.yml https://aio.deng.my.id/api/tracker/get-backpack/denghub2
-#   cloudflared tunnel ingress rule --config config/cloudflared-ingress.reference.yml https://aio.deng.my.id/login
 
 ingress:
-  # aio.deng.my.id — tracker POST uploads only (8792)
+  # ── Portal / license / auth (8790) ─────────────────────────────────────
+  - hostname: aio.deng.my.id
+    path: ^/license
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/unlock
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/key
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/login
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/logout
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/auth
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/mobile-auth
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/api/key
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/api/license
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/api/unlock
+    service: http://127.0.0.1:8790
+  - hostname: aio.deng.my.id
+    path: ^/api/aio/auth
+    service: http://127.0.0.1:8790
+
+  # ── Tracker upload ingest (8792) ───────────────────────────────────────
   - hostname: aio.deng.my.id
     path: ^/api/fishit-tracker/update-backpack$
     service: http://127.0.0.1:8792
@@ -22,31 +49,61 @@ ingress:
     path: ^/api/fish-it-tracker/update-backpack$
     service: http://127.0.0.1:8792
   - hostname: aio.deng.my.id
+    path: ^/api/fishit-tracker/
+    service: http://127.0.0.1:8792
+  - hostname: aio.deng.my.id
     path: ^/api/tracker/update-backpack
     service: http://127.0.0.1:8792
   - hostname: aio.deng.my.id
     path: ^/api/tracker/update-catalog
     service: http://127.0.0.1:8792
+
+  # ── Tracker read API (8793) ────────────────────────────────────────────
+  - hostname: aio.deng.my.id
+    path: ^/api/tracker/get-backpack
+    service: http://127.0.0.1:8793
+  - hostname: aio.deng.my.id
+    path: ^/api/tracker/latest
+    service: http://127.0.0.1:8793
+  - hostname: aio.deng.my.id
+    path: ^/api/tracker/snapshot
+    service: http://127.0.0.1:8793
+  - hostname: aio.deng.my.id
+    path: ^/api/fishit-tracker/get-backpack
+    service: http://127.0.0.1:8793
+  - hostname: aio.deng.my.id
+    path: ^/api/fishit-tracker/latest
+    service: http://127.0.0.1:8793
+  - hostname: aio.deng.my.id
+    path: ^/api/fishit-tracker/snapshot
+    service: http://127.0.0.1:8793
+  - hostname: aio.deng.my.id
+    path: ^/api/tracker/read-health$
+    service: http://127.0.0.1:8793
+  - hostname: aio.deng.my.id
+    path: ^/api/fishit-tracker/read-health$
+    service: http://127.0.0.1:8793
+
+  # ── Tracker frontend + homepage (8791) ─────────────────────────────────
+  - hostname: aio.deng.my.id
+    path: ^/tracker
+    service: http://127.0.0.1:8791
   - hostname: aio.deng.my.id
     service: http://127.0.0.1:8791
 
-  # tool.deng.my.id — tracker POST uploads only (8792), rest web (8791)
+  # tool.deng.my.id — legacy host (uploads 8792, reads 8793, rest 8791)
   - hostname: tool.deng.my.id
     path: ^/api/fishit-tracker/update-backpack$
     service: http://127.0.0.1:8792
   - hostname: tool.deng.my.id
-    path: ^/api/fish-it-tracker/update-backpack$
-    service: http://127.0.0.1:8792
-  - hostname: tool.deng.my.id
     path: ^/api/tracker/update-backpack
     service: http://127.0.0.1:8792
   - hostname: tool.deng.my.id
-    path: ^/api/tracker/update-catalog
-    service: http://127.0.0.1:8792
+    path: ^/api/tracker/get-backpack
+    service: http://127.0.0.1:8793
   - hostname: tool.deng.my.id
     service: http://127.0.0.1:8791
 
-  # control panel
   - hostname: cp.deng.my.id
     service: http://127.0.0.1:3099
 

@@ -168,7 +168,11 @@ app.use('/', require('./oauthRoutes'));
 
 app.use((req, _res, next) => {
   if (isSessionlessPath(req.path, req.method) || !req.session) return next();
-  if (!req.session.csrfToken) {
+  const authenticated = Boolean(
+    req.session.user || req.session.site_user_id || req.session.discord_user_id,
+  );
+  // Avoid writing a disk session file on every anonymous GET (homepage/login scans).
+  if (!req.session.csrfToken && (authenticated || req.method !== 'GET')) {
     req.session.csrfToken = require('crypto').randomBytes(32).toString('hex');
   }
   next();

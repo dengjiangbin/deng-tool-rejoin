@@ -204,6 +204,7 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
   const maxReclaims = opts.maxReclaims != null ? opts.maxReclaims : 3;
   const pm2AppName = opts.pm2AppName || process.env.name || '';
   const _getPm2AppPid = (name) => getPm2AppPid(name, opts);
+  const onListening = typeof opts.onListening === 'function' ? opts.onListening : null;
 
   // Health gate is injectable for tests; production probes the real /health.
   const _probeHealthy = opts._probeHealthy || probeHealthy;
@@ -230,6 +231,11 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
     originalHolders = null;
     warmSpare = false;
     console.log(`${logPrefix} Listening on http://${host}:${port}`);
+    if (onListening) {
+      try { onListening(); } catch (err) {
+        console.warn(`${logPrefix} onListening hook failed:`, err && err.message ? err.message : err);
+      }
+    }
     if (typeof process.send === 'function') {
       try { process.send('ready'); } catch (_) { /* not under PM2 */ }
     }
@@ -258,22 +264,31 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
         const holderPids = findListenerPids(port).filter((p) => p !== process.pid);
         const pm2Pid = _getPm2AppPid(pm2AppName);
 
-        // PM2 duplicate spawn: if another fork is the tracked pid, stand down.
-        if (pm2Pid && pm2Pid !== process.pid && pm2Pid !== holderPids[0]) {
-          console.warn(`${logPrefix} duplicate PM2 fork (tracked pid ${pm2Pid}) — exiting so singleton can bind ${port}`);
+        // PM2 duplicate spawn: stand down ONLY when the tracked pid already owns the port.
+        if (pm2Pid && pm2Pid !== process.pid && holderPids.includes(pm2Pid)) {
+          console.warn(`${logPrefix} duplicate PM2 fork (tracked pid ${pm2Pid} holds ${port}) — exiting`);
           process.exit(0);
           return;
         }
 
         if (healthy) {
-          // PM2-authoritative child: a healthy holder that is NOT us is an orphan
-          // (PM2 only tracks one pid). Reclaim after the graceful-release window.
-          if (pm2Pid === process.pid && holderPids.length > 0 && waitedMs >= reclaimAfterMs) {
+          const pm2Managed = Boolean(pm2AppName && String(process.env.name || '') === pm2AppName);
+          const weArePm2Child = pm2Pid === process.pid || (!pm2Pid && pm2Managed);
+          const holderIsUntrackedOrphan = (
+            weArePm2Child
+            && holderPids.length > 0
+            && holderPids.every((p) => p !== process.pid)
+            && (pm2Pid == null || !holderPids.includes(pm2Pid))
+          );
+
+          // PM2's child must reclaim a healthy-but-untracked orphan left from a
+          // prior crash (common on Windows). onlyPids: originalHolders ensures we
+          // never kill a freshly-spawned sibling that grabbed the port mid-wait.
+          if (holderIsUntrackedOrphan && waitedMs >= reclaimAfterMs && originalHolders && originalHolders.size > 0) {
             reclaims += 1;
-            const orphanSet = new Set(holderPids);
-            const r = reclaimPort(port, logPrefix, { onlyPids: orphanSet });
+            const r = reclaimPort(port, logPrefix, { onlyPids: originalHolders });
             if (r.reclaimed) {
-              console.warn(`${logPrefix} reclaimed ${port} from PM2 orphan pid(s) %j (healthy but untracked) — rebinding`, r.killedPids);
+              console.warn(`${logPrefix} reclaimed ${port} from untracked orphan pid(s) %j — rebinding`, r.killedPids);
               retryStartedAt = 0;
               originalHolders = null;
               warmSpare = false;
@@ -281,13 +296,26 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
             retrySoon(retryDelayMs);
             return;
           }
-          // Graceful restart hand-off: sibling still shutting down — warm spare.
+
+          // Another PM2-managed instance already owns the port — stand down.
+          if (holderPids.length > 0 && holderPids.every((p) => p !== process.pid)) {
+            if (!warmSpare) {
+              warmSpare = true;
+              console.warn(
+                `${logPrefix} ${port} held by healthy peer pid(s) %j — standing down (no kill)`,
+                holderPids,
+              );
+            }
+            if (waitedMs >= Math.min(maxMs, 3000)) {
+              process.exit(0);
+              return;
+            }
+            retrySoon(Math.max(retryDelayMs, 1000));
+            return;
+          }
           if (!warmSpare) {
             warmSpare = true;
             console.warn(`${logPrefix} ${port} is held by a HEALTHY instance — standing by as warm spare (will NOT kill it; binds the instant it frees)`);
-            if (typeof process.send === 'function') {
-              try { process.send('ready'); } catch (_) { /* not under PM2 */ }
-            }
           }
           retryStartedAt = nowMs;
           originalHolders = null;
@@ -308,8 +336,9 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
       return;
     }
 
-    // A warm spare never exits — it waits out a healthy holder indefinitely.
-    if (waitedMs <= maxMs || warmSpare) {
+    // Warm spare stands down after maxMs instead of spinning forever without
+    // sending PM2 ready (which drove listen_timeout restarts).
+    if (waitedMs <= maxMs || (warmSpare && waitedMs <= maxMs + 5000)) {
       if (!warmSpare) {
         console.warn(`${logPrefix} ${port} busy, retrying bind in ${retryDelayMs}ms (waited ${waitedMs}ms)`);
       }

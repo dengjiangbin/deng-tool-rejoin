@@ -578,7 +578,24 @@ router.use((req, _res, next) => {
   next();
 });
 
-router.use(repairInventorySessionMiddleware);
+function isTrackerRouterScope(path) {
+  const p = String(path || '');
+  return p === '/tracker'
+    || p.startsWith('/tracker/')
+    || p === '/inventory'
+    || p.startsWith('/inventory/')
+    || p === '/fishit-tracker'
+    || p.startsWith('/fishit-tracker/')
+    || p.startsWith('/api/inventory/')
+    || p.startsWith('/api/tracker/')
+    || p.startsWith('/api/fishit-tracker/')
+    || p === '/tracker.lua';
+}
+
+router.use((req, _res, next) => {
+  if (!isTrackerRouterScope(req.path || '')) return next();
+  return repairInventorySessionMiddleware(req, _res, next);
+});
 
 router.use('/api/inventory', (req, res, next) => {
   const assetUrls = inventoryAssets.inventoryAssetUrls();
@@ -754,6 +771,13 @@ const liveTrackDB = {};
 if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1') {
   const hydrateLiveSessions = () => {
     try {
+      // Website lane (8791) proxies tracker reads/uploads to dedicated services.
+      // Loading 1300+ full session shards here blocks the event loop for 10s+,
+      // blows PM2 listen_timeout, and produces orphan 8791 holders (crash loop).
+      if (process.env.SKIP_TRACKER_UPLOAD_ROUTES === '1' && process.env.TRACKER_INGEST_MODE !== '1') {
+        console.log('[fishit-tracker] website lane: skipping full session hydrate (presence snapshot for stats)');
+        return;
+      }
       // Website lane (8791) must not rebuild/persist the canonical catalog — ingest
       // owns writes and competing persist causes EBUSY on shared shard files.
       if (process.env.TRACKER_INGEST_MODE !== '1' && process.env.SKIP_TRACKER_UPLOAD_ROUTES !== '1') {
@@ -937,14 +961,14 @@ function reinforceStatusFromLane(key, laneResult, online, nowIso) {
 }
 
 /** Persist heartbeat-critical session fields; sync shard write so worker/read converge within one tick. */
-function persistSessionHeartbeat(key) {
+function persistSessionHeartbeat(key, options = {}) {
   if (!key || key.startsWith('uid:')) return;
   const data = liveTrackDB[key];
   if (!data) return;
   try {
     sessionStore.saveSession(key, data, liveTrackDB);
     if (process.env.TRACKER_INGEST_MODE === '1') {
-      sessionStore.flushSessionImmediate(key, data);
+      sessionStore.flushSessionImmediate(key, data, { full: options.full === true });
     } else {
       sessionStore.schedulePriorityFlush();
     }
@@ -3388,6 +3412,7 @@ async function enrichDashboardFishCardImages(cards, baseUrl) {
 
 async function handleTrackerDashboard(req, res) {
   res.set(NO_STORE_HEADERS);
+  ensureSummarySessionsFromDisk();
   const queryStartedAt = Date.now();
   const includeDebug = trackerPerf.isDebugRequest(req);
   try {
@@ -3545,6 +3570,7 @@ router.get('/api/inventory/dashboard', requireInventoryApiAuth, handleTrackerDas
 async function handleTrackerSummary(req, res) {
   res.set(NO_STORE_HEADERS);
   try {
+    ensureSummarySessionsFromDisk();
     const trackedAccounts = await inventoryTrackedAccounts.listTrackedAccounts(req.inventoryOwnerDiscordId);
     const summary = buildTrackerAccountSummary(trackedAccounts, liveTrackDB, {
       serverNowMs: Date.now(),
@@ -4534,7 +4560,7 @@ function handleUpdateBackpack(req, res) {
       const lsLaneResult = stampReportIdentity(key, 'leaderstats', body, now);
       reinforceStatusFromLane(key, lsLaneResult, online, now);
       scheduleAioTrackerCacheRefresh(key);
-      persistSessionHeartbeat(key);
+      persistSessionHeartbeat(key, { full: true });
       scheduleIngestPostResponseFlush(res);
       responseAccepted = liveTrackDB[key].leaderstatsUploadOk === true;
       const coalesced = req.trackerUploadCoalesced === true;
@@ -5234,7 +5260,7 @@ function handleUpdateBackpack(req, res) {
     const invLaneResult = stampReportIdentity(key, 'inventory', body, now);
     reinforceStatusFromLane(key, invLaneResult, online, now);
     if (hadPlayerStats) stampReportIdentity(key, 'leaderstats', body, now);
-    persistSessionHeartbeat(key);
+    persistSessionHeartbeat(key, { full: true });
     return finishTrackerUploadResponse(req, res, responsePayload, key);
 }
 
@@ -6086,18 +6112,36 @@ function collectPublicFishItTrackerStats() {
 let _publicNetworkStatsCache = null;
 let _publicNetworkStatsCacheAt = 0;
 const PUBLIC_STATS_CACHE_MS = Number(process.env.PUBLIC_TRACKER_STATS_CACHE_MS || 30000);
+let _summaryDiskSyncedAt = 0;
+const SUMMARY_DISK_SYNC_MIN_MS = Number(process.env.TRACKER_SUMMARY_DISK_SYNC_MS || 5000);
+
+function ensureSummarySessionsFromDisk() {
+  const now = Date.now();
+  if (now - _summaryDiskSyncedAt < SUMMARY_DISK_SYNC_MIN_MS) return;
+  _summaryDiskSyncedAt = now;
+  try {
+    sessionStore.reloadIfChanged(liveTrackDB);
+  } catch (_) { /* non-blocking */ }
+}
 
 function collectPublicTrackerNetworkStats() {
   const now = Date.now();
   if (_publicNetworkStatsCache && (now - _publicNetworkStatsCacheAt) < PUBLIC_STATS_CACHE_MS) {
     return _publicNetworkStatsCache;
   }
-  syncLiveTrackFromDisk();
-  const canonical = computeCanonicalTrackerUsers(liveTrackDB);
+  // Presence sidecars carry fresh heartbeat truth without loading 1300+ full shards.
+  let statsDb = liveTrackDB;
+  try {
+    const snapshot = sessionStore.buildPublicStatsSessionSnapshot();
+    if (snapshot && typeof snapshot === 'object' && Object.keys(snapshot).length > 0) {
+      statsDb = snapshot;
+    }
+  } catch (_) { /* fall back to in-memory */ }
+  const canonical = computeCanonicalTrackerUsers(statsDb);
   const registeredTrackedCount = inventoryTrackedAccounts.countRegisteredTrackedUsernamesSync();
   const trackedUsernames = Math.max(registeredTrackedCount, canonical.currentBuildUniqueUsers);
   let inventoriesSynced = 0;
-  for (const [key, data] of Object.entries(liveTrackDB)) {
+  for (const [key, data] of Object.entries(statsDb)) {
     if (key.startsWith('uid:')) continue;
     if (!data || typeof data !== 'object') continue;
     if (Number(data.lastGoodPublicFishCount) > 0

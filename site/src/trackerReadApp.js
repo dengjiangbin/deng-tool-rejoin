@@ -300,19 +300,59 @@ function withReadContractJson(hit, contract, serverNow) {
 
 function warmLoadCache() {
   const started = Date.now();
-  let rows = [];
+  let metaRows = [];
   try {
-    rows = precomputeStore.getAllRowsForCache();
+    // Metadata-only probe first — never pull every JSON blob synchronously here.
+    // That single query blocked the event loop for 15–20s on 1500+ accounts and
+    // made /health (and the web read-health probe) time out into 502/524.
+    metaRows = precomputeStore.getChangedMetaSince('');
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[read] warm-load failed:', err.message);
     return;
   }
-  for (const row of rows) ingestRow(row);
-  cacheWarmedAt = Date.now();
-  cacheLastRefreshAt = cacheWarmedAt;
-  // eslint-disable-next-line no-console
-  console.log(`[read] warm-loaded ${cacheByKey.size} snapshots in ${Date.now() - started}ms`);
+  const batchSize = Number(process.env.TRACKER_READ_WARM_BATCH || 80);
+  let index = 0;
+  const finish = () => {
+    cacheWarmedAt = Date.now();
+    cacheLastRefreshAt = cacheWarmedAt;
+    // eslint-disable-next-line no-console
+    console.log(`[read] warm-loaded ${cacheByKey.size} snapshots in ${Date.now() - started}ms`);
+  };
+  const ingestBatch = () => {
+    const end = Math.min(index + batchSize, metaRows.length);
+    for (; index < end; index += 1) {
+      const meta = metaRows[index];
+      const key = String(meta.session_key);
+      let full = null;
+      try {
+        full = precomputeStore.getJsonByKey(key);
+      } catch (_) { full = null; }
+      if (full) {
+        ingestRow({
+          session_key: key,
+          user_id: meta.user_id,
+          latest_precomputed_json: full.json,
+          precomputed_hash: meta.precomputed_hash || full.precomputedHash,
+          last_precomputed_at: meta.last_precomputed_at || full.lastPrecomputedAt,
+          presence_json: meta.presence_json,
+        });
+      }
+      if (meta.last_precomputed_at > cacheMaxPrecomputedAt) {
+        cacheMaxPrecomputedAt = meta.last_precomputed_at;
+      }
+    }
+    if (index < metaRows.length) {
+      setImmediate(ingestBatch);
+      return;
+    }
+    finish();
+  };
+  if (!metaRows.length) {
+    finish();
+    return;
+  }
+  setImmediate(ingestBatch);
 }
 
 function refreshCache() {
