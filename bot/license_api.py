@@ -184,6 +184,28 @@ _rate_limit_lock = threading.Lock()
 _RATE_LIMIT_WINDOW: float = 60.0   # seconds
 _RATE_LIMIT_MAX: int = 10          # requests per window per IP
 
+# ── License-check result cache (POSITIVE results only) ────────────────────────
+# /api/license/check + /api/license/heartbeat are by far the highest-volume agent
+# calls, and each ran 2-3 Supabase queries with NO cache. During a key-gen rush
+# (many clients polling at once) that flooded the shared PostgREST connection pool
+# and stalled the whole DB — the exact failure that took key generation + history
+# down. We cache ONLY "active" results for a short TTL, keyed by (key, install_id).
+# On a hit we skip the DB entirely and re-issue a FRESH capability session, so the
+# user gets an instant response and DB load collapses under load.
+#
+# Safety: negatives are NEVER cached, so a user who just redeemed/rebound/fixed
+# HWID sees the change immediately. We also strip "server_now" from cached details
+# so every response still carries a fresh server clock (the source-of-truth time
+# the agent trusts over the device clock). Revocation/expiry latency is bounded by
+# the (short) TTL.
+_license_check_cache: dict[str, tuple[float, str, dict]] = {}
+_license_check_cache_lock = threading.Lock()
+try:
+    _LICENSE_CHECK_CACHE_TTL: float = float(os.environ.get("LICENSE_CHECK_CACHE_TTL_SECONDS", "45") or 45)
+except (TypeError, ValueError):
+    _LICENSE_CHECK_CACHE_TTL = 45.0
+_LICENSE_CHECK_CACHE_MAX: int = 20000
+
 # Bootstrap sessions — issued when serving GET /install/dev/main after HMAC gate.
 _bootstrap_sessions: dict[str, dict] = {}
 _bootstrap_sessions_lock = threading.Lock()
@@ -349,6 +371,48 @@ def _check_rate_limit(remote_addr: str) -> bool:
             oldest_ip = min(_rate_limit, key=lambda ip: min(_rate_limit[ip], default=0))
             _rate_limit.pop(oldest_ip, None)
     return True
+
+
+# ── License-check result cache helpers ────────────────────────────────────────
+
+
+def _license_check_cache_key(raw_key: str, install_id_hash: str) -> str:
+    """Cache identity is (key, device). \x1f is a non-collidable separator."""
+    return hashlib.sha256(f"{raw_key}\x1f{install_id_hash}".encode()).hexdigest()
+
+
+def _license_check_cache_get(cache_key: str) -> tuple[str, dict] | None:
+    """Return (result, details_copy) on a live cache hit, else None."""
+    if _LICENSE_CHECK_CACHE_TTL <= 0:
+        return None
+    now = time.time()
+    with _license_check_cache_lock:
+        entry = _license_check_cache.get(cache_key)
+        if not entry:
+            return None
+        expires_at, result, details = entry
+        if now >= expires_at:
+            _license_check_cache.pop(cache_key, None)
+            return None
+        return result, dict(details)
+
+
+def _license_check_cache_put(cache_key: str, result: str, details: dict) -> None:
+    """Cache a POSITIVE result only. server_now is dropped so each response keeps
+    a fresh server clock."""
+    if _LICENSE_CHECK_CACHE_TTL <= 0:
+        return
+    now = time.time()
+    cached_details = {k: v for k, v in (details or {}).items() if k != "server_now"}
+    with _license_check_cache_lock:
+        if len(_license_check_cache) > _LICENSE_CHECK_CACHE_MAX:
+            # Drop expired first; if still over budget, drop the soonest-expiring.
+            for k in [k for k, v in _license_check_cache.items() if now >= v[0]]:
+                _license_check_cache.pop(k, None)
+            if len(_license_check_cache) > _LICENSE_CHECK_CACHE_MAX:
+                oldest = min(_license_check_cache, key=lambda k: _license_check_cache[k][0])
+                _license_check_cache.pop(oldest, None)
+        _license_check_cache[cache_key] = (now + _LICENSE_CHECK_CACHE_TTL, result, cached_details)
 
 
 # ── Download root + manifest ──────────────────────────────────────────────────
@@ -1424,26 +1488,39 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         )
 
         details: dict = {}
-        try:
-            from agent.license_store import get_default_store
-            store = get_default_store()
-            # SECURITY: validate-only — bind_allowed/manual_entry are ignored.
+        cache_key = _license_check_cache_key(raw_key, install_id_hash)
+        cached = _license_check_cache_get(cache_key)
+        if cached is not None:
+            # Cache hit: skip the DB entirely (this is what keeps the pool free
+            # under a key-gen rush). Session is still issued fresh below.
+            result, details = cached
+            log.info("License result: %s for key %s (cache)", result, _mask_key(raw_key))
+        else:
             try:
-                result = store.validate_existing_binding(
-                    raw_key, install_id_hash, device_model, app_version, device_label,
-                    details=details,
-                )
-            except TypeError:
-                # Older store signature without details out-param.
-                result = store.validate_existing_binding(
-                    raw_key, install_id_hash, device_model, app_version, device_label,
-                )
-        except Exception as exc:  # noqa: BLE001
-            log.error("License check error: %s", exc)
-            payload, status = _build_response("server_unavailable", 500)
-            return respond(payload, status)
+                from agent.license_store import get_default_store
+                store = get_default_store()
+                # SECURITY: validate-only — bind_allowed/manual_entry are ignored.
+                try:
+                    result = store.validate_existing_binding(
+                        raw_key, install_id_hash, device_model, app_version, device_label,
+                        details=details,
+                    )
+                except TypeError:
+                    # Older store signature without details out-param.
+                    result = store.validate_existing_binding(
+                        raw_key, install_id_hash, device_model, app_version, device_label,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.error("License check error: %s", exc)
+                payload, status = _build_response("server_unavailable", 500)
+                return respond(payload, status)
 
-        log.info("License result: %s for key %s", result, _mask_key(raw_key))
+            log.info("License result: %s for key %s", result, _mask_key(raw_key))
+            # Cache POSITIVE results only — negatives must reflect state changes
+            # (redeem / rebind / HWID fix / revoke) on the very next request.
+            if result == "active":
+                _license_check_cache_put(cache_key, result, details)
+
         payload, status = _build_response(result, details=details)
         if result == "active":
             data = json.loads(payload.decode("utf-8"))
