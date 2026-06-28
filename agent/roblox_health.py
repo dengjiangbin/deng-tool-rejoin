@@ -12,6 +12,7 @@ from .config import validate_package_name
 # (regex, reason) — only use when regex matches; keep patterns conservative.
 _LOGCAT_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(connection lost|disconnected from|lost connection|network error)\b", re.I), "disconnected"),
+    (re.compile(r"\b(disconnected for being idle|Error Code:\s*278|idle\s+\d+\s+minutes)\b", re.I), "idle_disconnect"),
     (re.compile(r"\b(server shut|shutting down|server closed|you were kicked)\b", re.I), "server_shutdown"),
     (
         re.compile(r"\b(private server link (code )?refresh|private server expired|private server access)\b", re.I),
@@ -22,6 +23,7 @@ _LOGCAT_RULES: list[tuple[re.Pattern[str], str]] = [
 # dumpsys / activity text (no secrets expected in these fragments)
 _DUMPSYS_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(ErrorActivity|Disconnected|ConnectionError|Reconnect)\b"), "disconnected"),
+    (re.compile(r"\b(disconnected for being idle|Error Code:\s*278|You were disconnected)\b", re.I), "idle_disconnect"),
     (re.compile(r"\b(maintenance|shut\s*down)\b", re.I), "server_shutdown"),
 ]
 
@@ -43,15 +45,37 @@ def _pid_for_package(package: str) -> str | None:
     return None
 
 
+# A GL-rendered disconnect (e.g. Error 278) emits at most one log line and the
+# process keeps running, so the line scrolls out of a tiny window quickly. We read
+# a much wider tail so a disconnect that happened seconds-to-minutes ago is still
+# visible to the 5s periodic scan. (Patterns are unchanged and unambiguous, so a
+# wider window only improves recall — it cannot cause a false disconnect.)
+_LOGCAT_PID_TAIL = 1000
+_LOGCAT_PKG_TAIL = 1500
+
+
 def _brief_logcat_for_pid(pid: str) -> str:
     res = android.run_command(
-        ["logcat", "-d", "-t", "60", "--pid", pid],
-        timeout=5,
+        ["logcat", "-d", "-t", str(_LOGCAT_PID_TAIL), "--pid", pid],
+        timeout=6,
     )
     if res.ok:
-        return res.stdout[-4000:]
-    res2 = android.run_command(["logcat", "-d", "-t", "80"], timeout=5)
-    return res2.stdout[-4000:] if res2.ok else ""
+        return res.stdout[-24000:]
+    res2 = android.run_command(["logcat", "-d", "-t", str(_LOGCAT_PID_TAIL)], timeout=6)
+    return res2.stdout[-24000:] if res2.ok else ""
+
+
+def _brief_logcat_for_package(package: str) -> str:
+    package = validate_package_name(package)
+    res = android.run_command(["logcat", "-d", "-t", str(_LOGCAT_PKG_TAIL)], timeout=7)
+    if not res.ok:
+        return ""
+    lines: list[str] = []
+    for line in res.stdout.splitlines():
+        lower = line.lower()
+        if package in line or "with reason" in lower or "278" in line or "idle" in lower:
+            lines.append(line)
+    return "\n".join(lines[-160:])
 
 
 def _match_rules(text: str, rules: list[tuple[re.Pattern[str], str]]) -> tuple[str | None, str]:
@@ -73,6 +97,10 @@ def analyze_disconnect_signals(package: str) -> UnhealthyEvidence | None:
         cat, snip = _match_rules(log_blob, _LOGCAT_RULES)
         if cat:
             return UnhealthyEvidence(category=cat, source="logcat", snippet=snip)
+    hint_blob = _brief_logcat_for_package(package)
+    cat, snip = _match_rules(hint_blob, _LOGCAT_RULES)
+    if cat:
+        return UnhealthyEvidence(category=cat, source="logcat_hint", snippet=snip)
     # Activity / window (global dumpsys — filter lines mentioning package)
     act = android.run_command(["dumpsys", "activity", "activities"], timeout=6)
     if act.ok:

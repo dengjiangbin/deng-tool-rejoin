@@ -137,6 +137,14 @@ class PackageRjnState:
     last_dead_reason: str = ""
     last_disconnect_scan_at: float = 0.0
     disconnect_prompt_text: str = ""
+    # Diagnostic: freshness + sample of EVERY UID-matched logcat line (not just
+    # watched phrases). A GL-rendered disconnect (e.g. Error 278) is invisible to
+    # the UI scan and may not match any watched phrase, but the process keeps
+    # emitting (or stops emitting) UID-tagged lines. Tracking the last line time
+    # exposes "online but logcat-silent", and the ring buffer lets a probe reveal
+    # what Roblox actually logs around the disconnect so detection can be fixed.
+    last_uid_line_at: float = 0.0
+    recent_uid_lines: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -154,6 +162,13 @@ class PackageEvaluateResult:
 def _sanitize_line(line: str) -> str:
     text = str(line or "")[:240]
     text = re.sub(r"(?i)ROBLOSECURITY[^\s]*", "<masked>", text)
+    # Never leak private-server access codes / share links in a diagnostic upload.
+    text = re.sub(
+        r"(?i)(share\?code=|accessCode=|linkCode=|privateServerLinkCode=|code=)[^\s&\"']+",
+        r"\1<masked>",
+        text,
+    )
+    text = re.sub(r"https?://[^\s\"']+", "<url>", text)
     return text
 
 
@@ -519,6 +534,14 @@ class RjnLifecycleMonitor:
             if uid:
                 self._logcat_last_uid_matched_at = seen_at
             effective_uid = uid or self._uid_map.get(pkg) or ""
+            # Diagnostic-only: record freshness + a small sample of EVERY line we
+            # resolved to this package, even ones that match no watched phrase.
+            _diag_row = self._states.get(pkg)
+            if _diag_row is not None:
+                _diag_row.last_uid_line_at = seen_at
+                _diag_row.recent_uid_lines.append({"at": seen_at, "line": _sanitize_line(line)})
+                if len(_diag_row.recent_uid_lines) > 14:
+                    del _diag_row.recent_uid_lines[:-14]
             phrase = ""
             if _WITH_REASON_RE.search(line):
                 phrase = "with reason"
@@ -1053,6 +1076,11 @@ class RjnLifecycleMonitor:
                     "reason_user_friendly": ev.detail.get("reason_user_friendly") or ev.reason,
                     "failed_checks": list(ev.failed_checks),
                     "is_online_confirmed": ev.is_online_confirmed,
+                    "last_uid_line_at": row.last_uid_line_at or None,
+                    "uid_line_silence_seconds": (
+                        round(now - row.last_uid_line_at, 1) if row.last_uid_line_at else None
+                    ),
+                    "recent_uid_lines": list(row.recent_uid_lines[-14:]),
                 }
             recent = [
                 {

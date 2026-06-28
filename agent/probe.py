@@ -1418,6 +1418,30 @@ def collect_probe(
             "ignored_uid_lines": (rjn_inner or {}).get("ignored_uid_lines") or [],
             "detection_only": True,
         }
+        # Compact per-package logcat diagnostic so it survives payload trimming
+        # (the full rjn_style_detection block is dropped first under size pressure).
+        # This reveals, for each ONLINE-but-not-recovering package, how long the
+        # package's UID has been logcat-silent and a sample of the actual recent
+        # Roblox log lines around the (GL-invisible) disconnect — the ground truth
+        # needed to lock in a precise 278/disconnect detector.
+        try:
+            pkgs_map = (rjn_inner or {}).get("packages") or {}
+            packages_logcat: dict[str, Any] = {}
+            if isinstance(pkgs_map, dict):
+                for _pkg, _row in pkgs_map.items():
+                    if not isinstance(_row, dict):
+                        continue
+                    packages_logcat[_pkg] = {
+                        "state": _row.get("state"),
+                        "is_online_confirmed": _row.get("is_online_confirmed"),
+                        "uid_line_silence_seconds": _row.get("uid_line_silence_seconds"),
+                        "last_uid_line_at": _row.get("last_uid_line_at"),
+                        "last_with_reason_at": _row.get("last_with_reason_at"),
+                        "recent_uid_lines": (_row.get("recent_uid_lines") or [])[-10:],
+                    }
+            out["rjn_detection_only"]["packages_logcat"] = packages_logcat
+        except Exception as exc:  # noqa: BLE001
+            out["rjn_detection_only"]["packages_logcat_error"] = str(exc)[:160]
         out["decision"] = {
             "state": current_state,
             "reason_internal": dead_internal,

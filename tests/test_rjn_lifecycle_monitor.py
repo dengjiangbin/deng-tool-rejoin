@@ -280,5 +280,64 @@ class RjnRecentsNotOnlineTests(unittest.TestCase):
         self.assertIn("no_positive_online_evidence", ev.failed_checks)
 
 
+class RjnLogcatDiagnosticTests(unittest.TestCase):
+    """Self-diagnosing capture: record EVERY UID line (not just watched phrases).
+
+    A GL-rendered idle disconnect (Error 278) is invisible to the UI scan and may
+    match no watched phrase, so the package latches ONLINE forever. This capture
+    surfaces, in a probe, how long the package's UID has been logcat-silent and a
+    sample of the actual Roblox lines — the ground truth needed to fix detection.
+    """
+
+    def _monitor(self) -> RjnLifecycleMonitor:
+        mon = RjnLifecycleMonitor(["com.pkg.diag"])
+        mon._uid_map = {"com.pkg.diag": "12345"}
+        mon._uid_to_package = {"12345": "com.pkg.diag"}
+        mon._monitor_started_at = time.time() - 60
+        return mon
+
+    def test_non_phrase_uid_line_is_recorded(self) -> None:
+        mon = self._monitor()
+        # A perfectly ordinary in-game line that matches no watched phrase.
+        mon._handle_logcat_line("uid=12345 I Roblox  : [FLog::Output] heartbeat tick")
+        row = mon._states["com.pkg.diag"]
+        self.assertGreater(row.last_uid_line_at, 0.0)
+        self.assertEqual(len(row.recent_uid_lines), 1)
+        self.assertIn("heartbeat tick", row.recent_uid_lines[0]["line"])
+
+    def test_recent_uid_lines_are_bounded(self) -> None:
+        mon = self._monitor()
+        for i in range(40):
+            mon._handle_logcat_line(f"uid=12345 I Roblox  : line {i}")
+        row = mon._states["com.pkg.diag"]
+        self.assertLessEqual(len(row.recent_uid_lines), 14)
+
+    def test_unmapped_uid_not_recorded_against_package(self) -> None:
+        mon = self._monitor()
+        mon._handle_logcat_line("uid=99999 I System  : unrelated noise")
+        row = mon._states["com.pkg.diag"]
+        self.assertEqual(row.last_uid_line_at, 0.0)
+        self.assertEqual(len(row.recent_uid_lines), 0)
+
+    def test_probe_snapshot_exposes_silence_and_sample(self) -> None:
+        mon = self._monitor()
+        with patch.object(mon, "_process_check", return_value=(True, ["999"])):
+            mon._handle_logcat_line("uid=12345 I Roblox  : [FLog::Network] some line")
+            snap = mon.probe_snapshot()
+        pkg = snap["packages"]["com.pkg.diag"]
+        self.assertIn("uid_line_silence_seconds", pkg)
+        self.assertIn("recent_uid_lines", pkg)
+        self.assertGreaterEqual(len(pkg["recent_uid_lines"]), 1)
+
+    def test_private_server_code_is_masked_in_sample(self) -> None:
+        mon = self._monitor()
+        mon._handle_logcat_line(
+            "uid=12345 I Roblox  : joining https://www.roblox.com/share?code=SECRET123&type=Server"
+        )
+        row = mon._states["com.pkg.diag"]
+        sample = row.recent_uid_lines[0]["line"]
+        self.assertNotIn("SECRET123", sample)
+
+
 if __name__ == "__main__":
     unittest.main()
