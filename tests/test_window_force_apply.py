@@ -25,6 +25,11 @@ from agent.window_layout import WindowRect
 # ─── freeform_enable ─────────────────────────────────────────────────────────
 
 class TestFreeformEnable(unittest.TestCase):
+    def setUp(self) -> None:
+        # The per-process write guard (root-bound-window mass-close fix) is
+        # module-level; reset it so each test starts from a clean slate.
+        freeform_enable.reset_freeform_session_guard()
+
     def _patch(self, get_return: dict[str, str | None], root_ok: bool = True):
         """Fixture: mock settings get/put and root detection."""
         captured: list[tuple[str, str, str]] = []

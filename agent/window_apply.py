@@ -1581,12 +1581,16 @@ def force_resize_package(package: str, rect: WindowRect) -> tuple[bool, str]:
       3. Read back bounds; return whether they match desired ± 32 px.
 
     Never raises.  Returns ``(ok, detail)``.
+
+    Recovery note (probe p-6c644c4708): this used to call
+    ``setup_freeform_capabilities()`` on every recovery.  That re-wrote the
+    global/secure freeform flags and made WindowManager recreate the whole
+    activity stack — force-closing every app + Termux ("root bound window"
+    mass close).  Freeform is already ensured once at Start (and re-ensured,
+    now session-guarded, by the ``apply_window_layout_silent`` call that
+    precedes this in supervisor recovery), so we only do the per-task resize
+    here and never touch global window settings while clones are live.
     """
-    try:
-        from .freeform_enable import setup_freeform_capabilities
-        setup_freeform_capabilities()
-    except Exception:  # noqa: BLE001
-        pass
     root_info = android.detect_root()
     if not root_info.available or not root_info.tool:
         return False, "no root"

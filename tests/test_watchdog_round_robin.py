@@ -60,8 +60,13 @@ class TestRoundRobinWatchdog(unittest.TestCase):
         self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_SECONDS, 3)
 
     def test_checking_hold_and_tail_constants(self) -> None:
-        self.assertEqual(WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS, 1.0)
-        self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_TAIL_SECONDS, 2.0)
+        # Trimmed (probe p-6c644c4708) so dead/force-close detection is ~3x
+        # faster: real detection is prefetched in parallel, so these are purely
+        # cosmetic per-package pacing sleeps and must stay small.
+        self.assertEqual(WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS, 0.5)
+        self.assertEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_TAIL_SECONDS, 0.6)
+        self.assertLessEqual(WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS, 1.0)
+        self.assertLessEqual(WatchdogSupervisor.PACKAGE_ROUND_ROBIN_TAIL_SECONDS, 2.0)
 
     def test_watchdog_loop_source_uses_round_robin_pause(self) -> None:
         src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
@@ -70,19 +75,21 @@ class TestRoundRobinWatchdog(unittest.TestCase):
         self.assertIn("_interruptible_sleep", src)
         self.assertIn("WATCHDOG_ROUND_ROBIN_PAUSE", src)
 
-    def test_dashboard_render_interval_is_one_second(self) -> None:
-        self.assertEqual(WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS, 1.0)
-        self.assertEqual(
+    def test_dashboard_render_interval_matches_checking_hold(self) -> None:
+        self.assertEqual(WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS, 0.5)
+        # Repaint cadence must stay <= the per-package Checking hold so the
+        # "Checking" tick is always painted at least once per package.
+        self.assertLessEqual(
             WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS,
             WatchdogSupervisor.PACKAGE_CHECKING_HOLD_SECONDS,
         )
 
     def test_watchdog_loop_source_uses_launch_latch(self) -> None:
         src = inspect.getsource(WatchdogSupervisor._run_watchdog_loop)
-        self.assertIn("_all_launches_completed", src)
+        self.assertIn("_watchdog_monitoring_active", src)
         self.assertIn("WATCHDOG_LAUNCH_LATCH", src)
 
-    def test_watchdog_idles_until_launch_latch_released(self) -> None:
+    def test_watchdog_idles_until_first_package_opened(self) -> None:
         sup = WatchdogSupervisor(
             [_entry(_PKG), _entry(_PKG2)],
             _cfg(),
@@ -103,17 +110,18 @@ class TestRoundRobinWatchdog(unittest.TestCase):
             time.sleep(0.15)
             self.assertEqual(
                 detect_calls, [],
-                "watchdog must not check any package before launch latch releases",
+                "watchdog must not check any package before the first package opens",
             )
-            sup.mark_all_launches_completed()
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline and not detect_calls:
+            sup.mark_package_launched(_PKG)
+            deadline = time.monotonic() + 2.5
+            while time.monotonic() < deadline and _PKG not in detect_calls:
                 time.sleep(0.05)
             sup.stop("test")
             if sup._watchdog_thread is not None:
                 sup._watchdog_thread.join(timeout=3.0)
 
-        self.assertTrue(detect_calls, "watchdog must check packages after latch release")
+        self.assertIn(_PKG, detect_calls, "watchdog must check first opened package during stagger")
+        self.assertNotIn(_PKG2, detect_calls, "unopened package must stay skipped during stagger")
 
     def test_sequential_packages_sleep_hold_then_tail(self) -> None:
         sup = WatchdogSupervisor(
@@ -346,6 +354,17 @@ class TestCookieOnlyDetection(unittest.TestCase):
     def test_recovery_gate_does_not_relaunch_while_waiting(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: "Waiting"})
         with patch.object(sup, "_evaluate_package_presence_isolated", return_value="Waiting"), \
+             patch.object(sup, "_deploy_gate_recovery_cycle") as cycle, \
+             patch.object(sup, "_interruptible_sleep", side_effect=lambda _seconds: sup.stop_event.set()), \
+             patch("agent.db.insert_event"):
+            sup._run_blocking_recovery_gate(
+                _PKG, _entry(), package_index=1, package_total=1,
+            )
+        cycle.assert_not_called()
+
+    def test_recovery_gate_does_not_relaunch_while_relaunching(self) -> None:
+        sup = WatchdogSupervisor([_entry()], _cfg(), initial_status={_PKG: "Relaunching"})
+        with patch.object(sup, "_evaluate_package_presence_isolated", return_value="Relaunching"), \
              patch.object(sup, "_deploy_gate_recovery_cycle") as cycle, \
              patch.object(sup, "_interruptible_sleep", side_effect=lambda _seconds: sup.stop_event.set()), \
              patch("agent.db.insert_event"):

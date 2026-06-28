@@ -1200,9 +1200,15 @@ class WatchdogSupervisor:
     LAUNCH_STAGGER_SECONDS: int = 15
 
     # ── Round-robin watchdog: visible Checking hold + tail pause per package ─
+    # These are cosmetic pacing sleeps, NOT detection time: real detection is
+    # prefetched in parallel (_prefetch_package_detection).  They were the main
+    # reason "presence / dead detection" felt slow — a full round (and thus the
+    # 2-evaluation dead confirmation) was gated by ~3s/package.  Cut to ~1.1s/
+    # package (probe p-6c644c4708) so force-close/dead is caught ~3x sooner
+    # while still showing a visible per-package "Checking" tick.
     PACKAGE_ROUND_ROBIN_SECONDS: int = 3
-    PACKAGE_CHECKING_HOLD_SECONDS: float = 1.0
-    PACKAGE_ROUND_ROBIN_TAIL_SECONDS: float = 2.0
+    PACKAGE_CHECKING_HOLD_SECONDS: float = 0.5
+    PACKAGE_ROUND_ROBIN_TAIL_SECONDS: float = 0.6
     PACKAGE_STAGGER_TAIL_SECONDS: float = 0.5
     DEFAULT_DETECTION_WORKER_COUNT: int = 2
 
@@ -1229,7 +1235,7 @@ class WatchdogSupervisor:
     LOADING_GRACE_SECONDS: int = 30
 
     # ── Main-thread dashboard repaint cadence (must be <= Checking hold) ───
-    DASHBOARD_RENDER_INTERVAL_SECONDS: float = 1.0
+    DASHBOARD_RENDER_INTERVAL_SECONDS: float = 0.5
 
     # ── Presence poll must complete within strictly < 15 seconds ────────────
     PRESENCE_POLL_TIMEOUT_SECONDS: int = 14

@@ -35,6 +35,26 @@ from . import android
 
 _log = logging.getLogger("deng.rejoin.freeform_enable")
 
+# ── Root-bound-window mass force-close guard (probe p-6c644c4708) ─────────────
+# Writing the global/secure freeform + force_resizable_activities flags makes
+# WindowManager re-evaluate and RECREATE the whole activity stack.  When this
+# happens while clones are running it force-closes every app — including Termux
+# itself — which is exactly the "after recover dead account it mass force-closes
+# all packages and termux" report.  The bug recurred on EVERY recovery because
+# the secure-namespace mirrors never read back as truthy, so each call re-wrote
+# them and re-triggered the WM stack recreate.
+#
+# These flags are persistent system settings: once set, they survive for the
+# rest of the session.  We therefore write each (namespace, key) at most once
+# per agent process; later calls (Start re-layout, watchdog recovery) become
+# read-only no-ops and never disturb running windows again.
+_SESSION_WRITTEN_KEYS: set[str] = set()
+
+
+def reset_freeform_session_guard() -> None:
+    """Clear the per-process write guard (tests only)."""
+    _SESSION_WRITTEN_KEYS.clear()
+
 # Global settings that unlock freeform window mode and force-resizable apps.
 # Source: AOSP services/core/java/com/android/server/wm/ActivityTaskManagerService
 # (force_resizable_activities, enable_freeform_support) and frameworks/base
@@ -164,9 +184,20 @@ def setup_freeform_capabilities(
         out.root_tool = root.tool
 
     def _try(ns: str, key: str) -> None:
+        marker = f"{ns}:{key}"
         before = _settings_get(ns, key)
         probe = _ProbeResult(key=key, namespace=ns, before=before, after=before)
         if _is_truthy(before):
+            out.already_enabled_keys.append(key)
+            out.probes.append(probe)
+            _SESSION_WRITTEN_KEYS.add(marker)
+            return
+        if marker in _SESSION_WRITTEN_KEYS:
+            # Already written once in this process.  Re-writing this flag would
+            # make WindowManager recreate the activity stack and force-close
+            # every running app + Termux (root-bound-window mass close).  Treat
+            # as satisfied and never touch it again this session.
+            probe.error = "skipped: already applied this session"
             out.already_enabled_keys.append(key)
             out.probes.append(probe)
             return
@@ -176,6 +207,9 @@ def setup_freeform_capabilities(
             out.failed_keys.append(key)
             out.probes.append(probe)
             return
+        # Mark before writing: a single write per process, success or not, so a
+        # rc=0-but-not-truthy OEM build can't re-fire the WM recreate forever.
+        _SESSION_WRITTEN_KEYS.add(marker)
         wrote = _settings_put_root(ns, key, desired_value, root_tool=out.root_tool)
         if not wrote:
             probe.error = "settings put failed"
