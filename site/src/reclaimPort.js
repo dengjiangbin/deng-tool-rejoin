@@ -221,7 +221,14 @@ function listenWithReclaim(server, port, host, logPrefix, opts = {}) {
   // holder is precisely what opened the Cloudflare 502 windows.
   let warmSpare = false;
 
-  function start() { server.listen(port, host); }
+  // A larger listen backlog lets brand-new connections (e.g. /healthz probes and
+  // fresh Cloudflare origin sockets) queue in the kernel and be accepted on the
+  // next loop tick instead of being refused when the event loop is briefly busy
+  // serving many established upload sockets. Opt-in per service via opts.backlog.
+  function start() {
+    if (opts.backlog && Number(opts.backlog) > 0) server.listen(port, host, Number(opts.backlog));
+    else server.listen(port, host);
+  }
   function retrySoon(delay) {
     setTimeout(() => { try { server.close(); } catch (_) { /* not listening */ } start(); }, delay);
   }

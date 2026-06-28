@@ -48,6 +48,21 @@ const UPLOAD_VERBOSE_LOG_LAG_MS = Number(process.env.TRACKER_VERBOSE_LOG_LAG_MS 
 function uploadVerboseLogAllowed() {
   return _uploadLagMs() < UPLOAD_VERBOSE_LOG_LAG_MS;
 }
+
+// Per-upload heartbeat persistence does a SYNCHRONOUS shard/presence disk write
+// for max presence freshness. saveSession() already queues an async batched
+// flush, so under event-loop lag we can skip the extra synchronous write to keep
+// blocking fs I/O off the hot path (so 8792 can still accept() /healthz). Data is
+// NOT lost — it persists via the async flush ~debounce later. Above this lag the
+// synchronous immediate write is deferred to the async path.
+const HEARTBEAT_SYNC_FLUSH_MAX_LAG_MS = Number(
+  process.env.TRACKER_HEARTBEAT_SYNC_FLUSH_MAX_LAG_MS
+  || process.env.TRACKER_EVENT_LOOP_LAG_SHED_MS
+  || 800,
+);
+function heartbeatSyncFlushAllowed() {
+  return _uploadLagMs() <= HEARTBEAT_SYNC_FLUSH_MAX_LAG_MS;
+}
 const { recordUploadRequest } = require('./trackerUploadRequestMetrics');
 const { buildTrackerAccountSummary } = require('./trackerAccountSummary');
 const {
@@ -205,6 +220,14 @@ function buildUploadProofLogFields(body, session, ctx = {}) {
 
 function logTrackerUploadProof(stage, fields) {
   if (!fields || typeof fields !== 'object') return;
+  // Hot-path guard (8792 /healthz protection): on Windows, console.log to the
+  // WinSW stdout pipe is synchronous and blocks the event loop when the pipe
+  // backs up. This proof line fires on every accepted upload, so under burst it
+  // measurably starves the loop and the /healthz accept(). Always keep proof for
+  // REJECTED/failed uploads (audit + 5xx tracing); suppress the high-volume
+  // accepted proof only while the loop is already lagging.
+  const proofAccepted = fields.accepted === true || fields.accepted === 1;
+  if (proofAccepted && !uploadVerboseLogAllowed()) return;
   console.log(
     '[fishit-tracker] upload_proof stage=%s usernameKey=%s discordOwnerId=%s payloadType=%s phase=%s build=%s' +
     ' hasLeaderstatsSnapshot=%s hasFishSnapshot=%s hasStoneSnapshot=%s snapshotComplete=%s inventoryReady=%s' +
@@ -966,9 +989,19 @@ function persistSessionHeartbeat(key, options = {}) {
   const data = liveTrackDB[key];
   if (!data) return;
   try {
+    // saveSession() marks the account dirty and schedules an async batched flush,
+    // so the heartbeat is durable regardless of the branch below.
     sessionStore.saveSession(key, data, liveTrackDB);
     if (process.env.TRACKER_INGEST_MODE === '1') {
-      sessionStore.flushSessionImmediate(key, data, { full: options.full === true });
+      if (heartbeatSyncFlushAllowed()) {
+        // Loop healthy: synchronous immediate write for freshest presence.
+        sessionStore.flushSessionImmediate(key, data, { full: options.full === true });
+      } else {
+        // Loop lagging: defer to the already-scheduled async flush instead of
+        // adding a synchronous fs write to the saturated hot path. Bump it to
+        // priority so worker/read still converge quickly (no data loss).
+        sessionStore.schedulePriorityFlush();
+      }
     } else {
       sessionStore.schedulePriorityFlush();
     }
@@ -4488,12 +4521,16 @@ function handleUpdateBackpack(req, res) {
         rejectReason: uploadRejected ? rejectReason : null,
         ownerBinding: ownerBinding.reason,
       }));
-      // Server-side log.
-      console.log(
-        `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
-        ` userId=${cleanUserId} payloadType=tracker_status accepted=${uploadRejected ? 0 : 1} ok=true` +
-        ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=${online}`
-      );
+      // Server-side log. Always log rejected uploads (tracing); suppress the
+      // per-status success line while the event loop is lagging to keep 8792
+      // /healthz responsive (synchronous stdout pipe write on Windows).
+      if (uploadRejected || uploadVerboseLogAllowed()) {
+        console.log(
+          `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
+          ` userId=${cleanUserId} payloadType=tracker_status accepted=${uploadRejected ? 0 : 1} ok=true` +
+          ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=${online}`
+        );
+      }
       const uploadStatus = uploadAccountStatus.deriveTrackerUploadAccountStatus(liveTrackDB[key], {
         serverNowMs: Date.now(),
         expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
@@ -4564,14 +4601,18 @@ function handleUpdateBackpack(req, res) {
       scheduleIngestPostResponseFlush(res);
       responseAccepted = liveTrackDB[key].leaderstatsUploadOk === true;
       const coalesced = req.trackerUploadCoalesced === true;
-      console.log(
-        '[fishit-tracker] leaderstats_fast_path user=%s sessionKey=%s accepted=%d coalesced=%s responseMs=%d',
-        cleanUser,
-        key,
-        responseAccepted ? 1 : 0,
-        coalesced ? '1' : '0',
-        Date.now() - uploadArrivalAt,
-      );
+      // Always log a not-accepted leaderstats result (tracing); suppress the
+      // accepted fast-path line under event-loop lag to protect 8792 /healthz.
+      if (!responseAccepted || uploadVerboseLogAllowed()) {
+        console.log(
+          '[fishit-tracker] leaderstats_fast_path user=%s sessionKey=%s accepted=%d coalesced=%s responseMs=%d',
+          cleanUser,
+          key,
+          responseAccepted ? 1 : 0,
+          coalesced ? '1' : '0',
+          Date.now() - uploadArrivalAt,
+        );
+      }
       return res.status(202).json({
         ok: true,
         accepted: true,
@@ -5033,6 +5074,11 @@ function handleUpdateBackpack(req, res) {
     const deferredSnapshotSeq = (Number(liveTrackDB[key].deferredSnapshotSeq) || 0) + 1;
     liveTrackDB[key].deferredSnapshotSeq = deferredSnapshotSeq;
 
+    // Heavy per-upload line (serialises the full gate stats via %j on every
+    // inventory upload). This is diagnostic only — rejected/5xx uploads are
+    // already traced by upload_metric — so suppress it whenever the event loop
+    // is lagging to protect 8792 /healthz accept() throughput.
+    if (uploadVerboseLogAllowed()) {
     console.log(
       '[fishit-tracker] upload_persist user=%s sessionKey=%s accepted=%d snapshotComplete=%s' +
       ' fishCount=%d stoneCount=%d totemCount=%d totemQuantity=%d' +
@@ -5058,6 +5104,7 @@ function handleUpdateBackpack(req, res) {
       trackerConcurrencyGate.stats(),
       rawPersistMs,
     );
+    }
     logTrackerUploadProof('inventory_snapshot', buildUploadProofLogFields(body, liveTrackDB[key], {
       usernameKey: key,
       payloadType: payloadType,

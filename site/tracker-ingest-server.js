@@ -1,5 +1,22 @@
 'use strict';
 
+// --- 8792 /healthz protection: non-blocking stdout/stderr ---------------------
+// On Windows, process.stdout/stderr connected to the WinSW capture pipe default
+// to SYNCHRONOUS writes. The ingest emits several diagnostic lines per upload, so
+// whenever the pipe backs up (e.g. WinSW log roll) every console.log BLOCKS the
+// event loop — which is exactly what starved /healthz and accept() (observed
+// eventLoopLagMs > 5000 and connection-refused health probes). Making the handles
+// non-blocking lets writes buffer in-process instead of stalling the loop. Logs
+// are diagnostic only (counters + error/5xx tracing are preserved), so the worst
+// case under extreme backpressure is dropped log lines, never blocked uploads.
+for (const stream of [process.stdout, process.stderr]) {
+  try {
+    if (stream && stream._handle && typeof stream._handle.setBlocking === 'function') {
+      stream._handle.setBlocking(false);
+    }
+  } catch (_) { /* best effort — keep default behaviour if unsupported */ }
+}
+
 require('./src/wmicRuntimeGuard');
 
 const path = require('path');
@@ -182,6 +199,10 @@ try {
 } catch (_) { /* best effort */ }
 listenWithReclaim(server, PORT, HOST, '[deng-tracker-ingest]', {
   pm2AppName: 'deng-tracker-ingest',
+  // Ingest holds 800+ concurrent upload sockets; a deep accept backlog keeps new
+  // /healthz and Cloudflare connections from being refused during loop-busy
+  // spikes (kernel queues them until the next accept tick).
+  backlog: parseInt(process.env.TRACKER_INGEST_LISTEN_BACKLOG || '1024', 10),
   // reclaimAfterMs > PM2 kill_timeout (8000ms): never reclaim a sibling that is
   // still gracefully flushing on restart — that mutual kill was the 8792 loop.
   reclaimAfterMs: parseInt(process.env.TRACKER_INGEST_RECLAIM_AFTER_MS || '9000', 10),

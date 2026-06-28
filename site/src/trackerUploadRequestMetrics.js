@@ -7,6 +7,23 @@ const byRoute = Object.create(null);
 const byPayloadType = Object.create(null);
 let totalCount = 0;
 
+// Hot-path log guard. The per-upload upload_metric line is a synchronous
+// console.log to the WinSW stdout pipe (blocking on Windows under backpressure),
+// so on every upload it adds event-loop lag and can starve 8792 /healthz. We
+// keep the COUNTERS above always (they feed /api/internal/stability), but only
+// emit the per-request line when it carries tracing value (5xx, rejected, or
+// slow) or when the loop is not lagging. 5xx and slow requests are NEVER
+// suppressed so future 502s stay traceable.
+const UPLOAD_METRIC_LOG_LAG_MS = Number(process.env.TRACKER_VERBOSE_LOG_LAG_MS || 1000);
+const UPLOAD_METRIC_SLOW_MS = Number(process.env.TRACKER_UPLOAD_METRIC_SLOW_MS || 750);
+
+function shouldLogUploadMetric(statusCode, durationMs, accepted, lagMs) {
+  if (statusCode >= 500) return true;            // always trace server errors
+  if (!accepted) return true;                    // always trace rejected uploads
+  if (durationMs >= UPLOAD_METRIC_SLOW_MS) return true; // always trace slow uploads
+  return lagMs < UPLOAD_METRIC_LOG_LAG_MS;        // routine success: only when loop healthy
+}
+
 function bucket(map, key) {
   const k = key || 'unknown';
   if (!map[k]) {
@@ -34,6 +51,8 @@ function recordUploadRequest(fields) {
     if (statusCode === 502) row.status502 += 1;
   }
 
+  const lagMs = getLagMs();
+  if (!shouldLogUploadMetric(statusCode, durationMs, accepted, lagMs)) return;
   const queue = trackerConcurrencyGate.stats();
   console.log(
     '[fishit-tracker] upload_metric route=%s payloadType=%s usernameKey=%s contentLength=%s' +
@@ -48,7 +67,7 @@ function recordUploadRequest(fields) {
     fields.rejectReason || '-',
     fields.errorClass || '-',
     queue.queued != null ? queue.queued : '?',
-    Math.round(getLagMs()),
+    Math.round(lagMs),
   );
 }
 
