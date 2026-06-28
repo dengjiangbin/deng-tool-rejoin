@@ -199,7 +199,14 @@ const PUBLIC_STATS_FALLBACK_COLUMNS = '*';
 
 async function selectPublicStatsRows(table) {
   const columns = PUBLIC_STATS_COLUMNS[table];
-  const first = await supabase.from(table).select(columns || '*');
+  // Abort-capable timeout: during a Supabase/PostgREST outage these selects
+  // would otherwise hang the request (observed 25s+), which makes the homepage
+  // Platform Stats spin/stay empty. Fail fast instead so the route can serve
+  // last-known cached values or a quick 503.
+  const first = await withSupabaseTimeout(
+    supabase.from(table).select(columns || '*'),
+    `public-stats/select/${table}`,
+  );
   if (!first.error) {
     return Array.isArray(first.data) ? first.data : [];
   }
@@ -210,7 +217,10 @@ async function selectPublicStatsRows(table) {
     first.error?.message || first.error || 'unknown',
   );
 
-  const fallback = await supabase.from(table).select(PUBLIC_STATS_FALLBACK_COLUMNS);
+  const fallback = await withSupabaseTimeout(
+    supabase.from(table).select(PUBLIC_STATS_FALLBACK_COLUMNS),
+    `public-stats/fallback/${table}`,
+  );
   if (fallback.error) {
     console.error(
       '[public-stats] fallback SELECT also failed for table=%s message=%s',
@@ -321,16 +331,27 @@ async function getPublicStats({ now = Date.now(), forceRefresh = false } = {}) {
   if (!forceRefresh && publicStatsCache && now - publicStatsCache.cachedAt < PUBLIC_STATS_CACHE_MS) {
     return publicStatsCache.payload;
   }
-  const [keys, bindings, licenseUsers, siteUsers] = await Promise.all([
-    selectPublicStatsRows('license_keys'),
-    selectPublicStatsRows('device_bindings'),
-    selectPublicStatsRows('license_users'),
-    selectPublicStatsRows('site_users'),
-  ]);
-  const built = buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers });
-  const { _internalSources, ...payload } = built;
-  publicStatsCache = { cachedAt: now, payload, sources: _internalSources };
-  return payload;
+  try {
+    const [keys, bindings, licenseUsers, siteUsers] = await Promise.all([
+      selectPublicStatsRows('license_keys'),
+      selectPublicStatsRows('device_bindings'),
+      selectPublicStatsRows('license_users'),
+      selectPublicStatsRows('site_users'),
+    ]);
+    const built = buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers });
+    const { _internalSources, ...payload } = built;
+    publicStatsCache = { cachedAt: now, payload, sources: _internalSources };
+    return payload;
+  } catch (err) {
+    // Supabase/PostgREST outage. Serve the last-known-good payload (even if
+    // older than the normal TTL) so the homepage Platform Stats keep showing
+    // the previous numbers instead of going blank. Only surface the error
+    // (→ 503) when we have never successfully fetched stats this process.
+    if (publicStatsCache && publicStatsCache.payload) {
+      return publicStatsCache.payload;
+    }
+    throw err;
+  }
 }
 
 function clearPublicStatsCache() {

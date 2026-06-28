@@ -100,18 +100,25 @@ describe('landing stat sources and layout regression', () => {
     }
   });
 
-  test('landing page keeps Active Devices inside Live Network row', async () => {
+  test('landing page shows Active Devices inside Platform Stats row', async () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
     assert.doesNotMatch(res.text, /Rejoin Tool Stats/);
     assert.match(res.text, /Live Network/);
+    assert.match(res.text, /Platform Stats/);
     assert.match(res.text, /data-home-stat-card="rejoinActiveDevices"/);
     assert.match(res.text, /Rejoin agents active/);
     assert.doesNotMatch(res.text, /data-home-stat-card="activeAgents"/);
     assert.doesNotMatch(res.text, /Tracker Devices Running/);
+    // Active Devices now lives in Platform Stats, not Live Network.
     const liveGridMatch = res.text.match(/data-home-live-stats-grid[\s\S]*?<\/div>\s*<p class="deng-home-stats-empty" data-home-live-stats-empty/);
     assert.ok(liveGridMatch, 'expected Live Network stat grid');
-    assert.match(liveGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
+    assert.doesNotMatch(liveGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
+    const platformGridMatch = res.text.match(/data-home-platform-stats-grid[\s\S]*?<\/div>\s*<p class="deng-home-stats-empty" data-home-platform-stats-empty/);
+    assert.ok(platformGridMatch, 'expected Platform Stats grid');
+    assert.match(platformGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
+    // Redeemed Keys card removed from the homepage.
+    assert.doesNotMatch(platformGridMatch[0], /data-home-stat-card="redeemedKeys"/);
     assert.doesNotMatch(res.text, /data-home-rejoin-stats-grid/);
   });
 

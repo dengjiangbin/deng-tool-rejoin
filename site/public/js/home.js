@@ -250,8 +250,8 @@
     if (publicStats) {
       if (setStat('discordUsers', publicStats.uniqueUsers)) platformVisible += 1;
       if (setStat('generatedKeys', publicStats.generatedKeys)) platformVisible += 1;
-      if (setStat('redeemedKeys', publicStats.redeemedKeys)) platformVisible += 1;
-      if (setSplitDevices(publicStats.activeDevices, publicStats.totalDevices)) liveVisible += 1;
+      // Active Devices now lives in the Platform Stats section.
+      if (setSplitDevices(publicStats.activeDevices, publicStats.totalDevices)) platformVisible += 1;
     }
 
     if (fishitSummary && fishitSummary.available) {

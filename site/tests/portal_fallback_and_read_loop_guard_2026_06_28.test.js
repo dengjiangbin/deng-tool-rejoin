@@ -8,11 +8,22 @@ const { shouldProxyTrackerRead } = require('../src/trackerReadProxy');
 const { preBindReclaimSingleOwner } = require('../src/reclaimPort');
 
 test('portal fallback proxy routes portal-owned paths but never tracker paths', () => {
-  const portalPaths = ['/license', '/dashboard', '/download', '/downloads/x.apk', '/stats', '/app', '/api/license/download', '/api/key/start'];
+  const portalPaths = [
+    '/license', '/dashboard', '/download', '/downloads/x.apk', '/stats', '/app',
+    '/api/license/download', '/api/key/start',
+    // Homepage Platform Stats lives on the portal (8790); the 8791 catch-all
+    // must forward it or the homepage Platform Stats render empty.
+    '/api/public-stats', '/api/public-stats?x=1', '/api/stats/public',
+  ];
   for (const url of portalPaths) {
     assert.strictEqual(shouldProxyToPortal({ url }), true, `expected portal proxy for ${url}`);
   }
-  const trackerPaths = ['/tracker', '/', '/api/tracker/latest/foo', '/api/fishit-tracker/get-backpack/foo', '/css/app.css'];
+  const trackerPaths = [
+    '/tracker', '/', '/api/tracker/latest/foo', '/api/fishit-tracker/get-backpack/foo',
+    '/css/app.css',
+    // The homepage Live Network feed is served by 8791 itself — must NOT proxy.
+    '/api/public/tracker-stats',
+  ];
   for (const url of trackerPaths) {
     assert.strictEqual(shouldProxyToPortal({ url }), false, `expected NO portal proxy for ${url}`);
   }

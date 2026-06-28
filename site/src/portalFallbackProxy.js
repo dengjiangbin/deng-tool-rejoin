@@ -25,6 +25,8 @@ const PORTAL_PREFIXES = [
   '/api/license',
   '/api/key',
   '/api/unlock',
+  '/api/public-stats',   // homepage Platform Stats (owner: portal/8790)
+  '/api/stats/public',   // alias for the same handler
 ];
 
 // Exact paths that must stay on 8791 even though they share a prefix above

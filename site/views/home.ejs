@@ -93,18 +93,6 @@
             <strong class="deng-home-stat-card__value deng-home-stat-card__value--status-green js-count-up" data-home-stat-value="onlineNow" data-count-format="integer" data-count-duration="1200">0</strong>
             <span class="deng-home-stat-card__meta" data-home-stat-meta="onlineNow">Tracked usernames online</span>
           </article>
-          <article class="deng-home-stat-card deng-home-stat-card--compact deng-home-stat-card--status-green" data-home-stat-card="rejoinActiveDevices">
-            <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">Active Devices</span>
-              <span class="deng-home-stat-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect x="4" y="8" width="16" height="12" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
-              </span>
-            </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--split-ratio" aria-label="Active rejoin devices">
-              <span class="deng-home-stat-ratio-active js-count-up" data-home-stat-value="rejoinActiveDevices" data-count-format="integer" data-count-duration="1200">0</span><span class="deng-home-stat-ratio-sep"> / </span><span class="deng-home-stat-ratio-total js-count-up" data-home-stat-value="rejoinTotalDevices" data-count-format="integer" data-count-duration="1200">0</span>
-            </strong>
-            <span class="deng-home-stat-card__meta">Rejoin agents active</span>
-          </article>
         </div>
         <p class="deng-home-stats-empty" data-home-live-stats-empty hidden>No live tracker stats available right now.</p>
       </div>
@@ -134,15 +122,17 @@
             <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="generatedKeys" data-count-format="integer" data-count-duration="1200">0</strong>
             <span class="deng-home-stat-card__meta">Generated license keys</span>
           </article>
-          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="redeemedKeys">
+          <article class="deng-home-stat-card deng-home-stat-card--compact deng-home-stat-card--status-green" data-home-stat-card="rejoinActiveDevices">
             <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">Redeemed Keys</span>
+              <span class="deng-home-stat-card__label">Active Devices</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg>
+                <svg viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect x="4" y="8" width="16" height="12" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="redeemedKeys" data-count-format="integer" data-count-duration="1200">0</strong>
-            <span class="deng-home-stat-card__meta">Activated license keys</span>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--split-ratio" aria-label="Active rejoin devices">
+              <span class="deng-home-stat-ratio-active js-count-up" data-home-stat-value="rejoinActiveDevices" data-count-format="integer" data-count-duration="1200">0</span><span class="deng-home-stat-ratio-sep"> / </span><span class="deng-home-stat-ratio-total js-count-up" data-home-stat-value="rejoinTotalDevices" data-count-format="integer" data-count-duration="1200">0</span>
+            </strong>
+            <span class="deng-home-stat-card__meta">Rejoin agents active</span>
           </article>
         </div>
         <p class="deng-home-stats-empty" data-home-platform-stats-empty hidden>Platform stats unavailable.</p>

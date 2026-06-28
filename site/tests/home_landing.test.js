@@ -123,7 +123,13 @@ describe('public home landing page', () => {
     assert.ok(liveGridMatch, 'expected Live Network stat grid');
     assert.match(liveGridMatch[0], /data-home-stat-card="trackedPlayers"/);
     assert.match(liveGridMatch[0], /data-home-stat-card="onlineNow"/);
-    assert.match(liveGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
+    // Active Devices was moved out of Live Network into Platform Stats.
+    assert.doesNotMatch(liveGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
+    const platformGridMatch = res.text.match(/data-home-platform-stats-grid[\s\S]*?<\/div>\s*<p class="deng-home-stats-empty" data-home-platform-stats-empty/);
+    assert.ok(platformGridMatch, 'expected Platform Stats grid');
+    assert.match(platformGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
+    // Redeemed Keys card was removed from the homepage.
+    assert.doesNotMatch(platformGridMatch[0], /data-home-stat-card="redeemedKeys"/);
     assert.match(res.text, /data-home-stat-card="rejoinActiveDevices"/);
     assert.match(res.text, /data-home-stat-card="caught24Hours"/);
     assert.match(res.text, /data-home-stat-card="ghostfinnRod"/);
