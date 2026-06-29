@@ -116,6 +116,37 @@ class TestRecoveryNoMassForceClose(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(m.call_count, 1)
 
+    def test_reapply_layout_skips_apply_window_layout_silent(self) -> None:
+        """Recovery must not re-run global freeform setup (probe p-e2fe87273b)."""
+        from agent.supervisor import _reapply_layout_for_package
+        from agent.window_layout import WindowRect
+        stored = WindowRect(
+            package="com.moons.litesc",
+            left=0, top=0, right=400, bottom=300,
+        )
+        cfg = {
+            "screen_mode": "landscape",
+            "last_layout_preview": {
+                "rects": [{
+                    "package": "com.moons.litesc",
+                    "left": 0, "top": 0, "right": 400, "bottom": 300,
+                }],
+            },
+        }
+        with mock.patch("agent.supervisor.load_config", return_value=cfg), \
+             mock.patch(
+                 "agent.supervisor._load_stored_rect_for_package",
+                 return_value=stored,
+             ), mock.patch.object(
+                 window_apply, "apply_window_layout_silent",
+             ) as silent_mock, mock.patch.object(
+                 window_apply, "force_resize_package",
+                 return_value=(True, "verified"),
+             ) as resize_mock:
+            _reapply_layout_for_package("com.moons.litesc")
+        silent_mock.assert_not_called()
+        resize_mock.assert_called_once()
+
 
 class TestFasterDeadDetectionCadence(unittest.TestCase):
     """Presence/dead detection sped up by trimming cosmetic per-package sleeps."""

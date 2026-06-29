@@ -70,9 +70,11 @@ def _reapply_layout_for_package(package: str) -> None:
     2. If no stored slot is found (cold supervisor, layout never ran),
        fall back to the 1-package right-pane layout the legacy code
        used.  This keeps single-package installs working.
-    3. Write XML + Set-enable booleans, then trigger a direct (post-
-       launch) resize via root so the relaunched window really lands at
-       the stored bounds.
+    3. Trigger a direct (post-launch) resize via root so the relaunched
+       window lands at the stored bounds.  Never call
+       ``apply_window_layout_silent`` here — that re-runs global freeform
+       setup and mass force-closes every app + Termux (probe p-6c644c4708,
+       p-e2fe87273b).
 
     Never raises.  All details go to the file logger.  Emits
     ``[DENG_REJOIN_REAPPLY_LAYOUT]`` so the slot-preservation fix is
@@ -120,18 +122,8 @@ def _reapply_layout_for_package(package: str) -> None:
         except Exception:  # noqa: BLE001
             pass
 
-        window_apply.apply_window_layout_silent(
-            rects,
-            force_stop_before=False,
-            verify_after=False,
-            retries=0,
-            screen_mode=validate_screen_mode(
-                cfg.get("screen_mode", DEFAULT_SCREEN_MODE)
-            ),
-        )
-        # Direct resize via root, with freeform mode flip.  This is what
-        # actually moves the visible window without waiting for the next
-        # force-stop / relaunch cycle.
+        # Direct resize via root only — never poke global freeform/WM flags
+        # while other clone packages and Termux are still live.
         try:
             ok, detail = window_apply.force_resize_package(package, rects[0])
             _slog.debug(
@@ -2313,6 +2305,31 @@ class WatchdogSupervisor:
         )
         attempt = 0
         now = time.time()
+        try:
+            from . import webhook as lifecycle_webhook
+
+            gate_prev = str(
+                self._prev_state.get(pkg) or self.status_map.get(pkg) or STATUS_ONLINE
+            )
+            pending_state, pending_detail = (
+                lifecycle_webhook.load_package_lifecycle_dead_pending(pkg)
+            )
+            if (
+                pending_state
+                or not lifecycle_webhook.package_lifecycle_dead_already_notified(pkg)
+            ):
+                dead_state = pending_state or STATUS_DISCONNECTED
+                self._maybe_send_package_dead_webhook(
+                    pkg,
+                    entry,
+                    gate_prev,
+                    dead_state,
+                    now,
+                    pending_detail or {},
+                    allow_pending_retry=True,
+                )
+        except Exception:  # noqa: BLE001
+            pass
         while not self.stop_event.is_set():
             self.checking_label = ""
             cb = render_callback or self._render_callback
@@ -3291,11 +3308,27 @@ class WatchdogSupervisor:
     ) -> None:
         from . import webhook as lifecycle_webhook
 
+        definitive = self._definitive_dead_detail(detail)
+        was_online = self._package_was_steady_online(pkg, prev, detail)
+        if state in _ACCOUNT_DEAD_WEBHOOK_STATES:
+            should_arm = (
+                prev == STATUS_ONLINE
+                or (definitive and was_online)
+                or (
+                    definitive
+                    and prev in {
+                        STATUS_RELAUNCHING,
+                        STATUS_REOPENING,
+                        STATUS_LAUNCHING,
+                    }
+                )
+            )
+            if should_arm:
+                lifecycle_webhook.arm_package_lifecycle_dead_episode(pkg)
+
         if lifecycle_webhook.package_lifecycle_dead_already_notified(pkg):
             lifecycle_webhook.clear_package_lifecycle_dead_pending(pkg)
             return
-        if state in _ACCOUNT_DEAD_WEBHOOK_STATES and prev == STATUS_ONLINE:
-            lifecycle_webhook.arm_package_lifecycle_dead_episode(pkg)
         if not allow_pending_retry and not self._should_attempt_package_dead_webhook(
             pkg, prev, state, now, detail
         ):

@@ -821,18 +821,28 @@ class RjnLifecycleMonitor:
         return bool(getattr(self, "_logcat_stream_alive", False))
 
     def stream_fresh_for(self, package: str, max_age_seconds: float) -> bool:
-        """True when the logcat stream is alive AND it recently emitted a line for
-        this package's UID. When fresh, the stream itself reliably catches the
-        Roblox "Sending disconnect with reason" line, so the slow dumpsys/uiautomator
-        fallback can be skipped to keep the watchdog round fast."""
+        """True when the logcat stream is alive AND recently emitted a *watched*
+        phrase for this package (join/disconnect/teleport — not perfdata spam).
+
+        Using ``last_uid_line_at`` alone was wrong: rbx.perfdata / SessionL2 lines
+        keep the stream looking fresh while the client is sitting on a disconnect
+        dialog with no new join line, which suppressed the UI/logcat fallback scan
+        and blocked recovery (probe p-50c74b40d4)."""
         if not getattr(self, "_logcat_stream_alive", False):
             return False
         pkg = str(package or "").strip()
         with self._lock:
             row = self._states.get(pkg)
-            if row is None or row.last_uid_line_at <= 0:
+            if row is None:
                 return False
-            return (time.time() - row.last_uid_line_at) <= float(max_age_seconds)
+            watched_at = max(
+                float(row.last_logcat_event_at or 0.0),
+                float(row.last_with_reason_at or 0.0),
+                float(row.last_gamejoinloadtime_at or 0.0),
+            )
+            if watched_at <= 0:
+                return False
+            return (time.time() - watched_at) <= float(max_age_seconds)
 
     def set_expected_target(
         self,
@@ -1360,11 +1370,7 @@ class RjnLifecycleMonitor:
                 # log spam buried the line. Runs every round (cheap, PID-scoped)
                 # and is throttled internally.
                 self._scan_logcat_dump(pkg, now)
-                stream_fresh = (
-                    self._logcat_stream_alive
-                    and row.last_uid_line_at > 0
-                    and (now - row.last_uid_line_at) <= STREAM_FRESH_DISCONNECT_SKIP_SECONDS
-                )
+                stream_fresh = self.stream_fresh_for(pkg, STREAM_FRESH_DISCONNECT_SKIP_SECONDS)
                 heavy_due = (
                     now - row.last_disconnect_scan_at
                 ) >= HEAVY_DISCONNECT_FALLBACK_INTERVAL_SECONDS

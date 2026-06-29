@@ -158,22 +158,44 @@ class WrongServerTests(unittest.TestCase):
 
 
 class StreamFreshnessGateTests(unittest.TestCase):
-    def test_stream_fresh_requires_alive_and_recent_line(self) -> None:
+    def test_stream_fresh_requires_alive_and_watched_phrase(self) -> None:
         pkg = "com.pkg.fresh"
         mon = RjnLifecycleMonitor([pkg])
         mon._uid_map = {pkg: "10110"}
         mon._uid_to_package = {"10110": pkg}
         mon._monitor_started_at = time.time() - 60
-        # Stream not alive → not fresh.
-        mon._logcat_stream_alive = False
-        mon._handle_logcat_line("uid=10110 I Roblox  : [FLog::Output] tick")
-        self.assertFalse(mon.stream_fresh_for(pkg, 40.0))
-        # Stream alive + recent line → fresh.
         mon._logcat_stream_alive = True
-        self.assertTrue(mon.stream_fresh_for(pkg, 40.0))
-        # Age out the last line → stale.
-        mon._states[pkg].last_uid_line_at = time.time() - 120
+        # Generic perfdata tick updates last_uid_line_at only — must NOT count as fresh.
+        mon._handle_logcat_line(
+            "uid=10110 I rbx.perfdata: perfdata battery AC CHARGING 0uAmps 0mW"
+        )
+        self.assertGreater(mon._states[pkg].last_uid_line_at, 0)
         self.assertFalse(mon.stream_fresh_for(pkg, 40.0))
+        # Watched join phrase → fresh for disconnect-skip purposes.
+        mon._handle_logcat_line("uid=10110 I Roblox  : gamejoinloadtime sid:abc")
+        self.assertTrue(mon.stream_fresh_for(pkg, 40.0))
+        # Age out the last watched event → stale again.
+        mon._states[pkg].last_logcat_event_at = time.time() - 120
+        mon._states[pkg].last_gamejoinloadtime_at = time.time() - 120
+        self.assertFalse(mon.stream_fresh_for(pkg, 40.0))
+
+    def test_perfdata_only_does_not_block_disconnect_scan(self) -> None:
+        pkg = "com.pkg.perfdata"
+        mon = _online_monitor(pkg, "10111")
+        row = mon._states[pkg]
+        row.last_logcat_event_at = time.time() - 120
+        row.last_gamejoinloadtime_at = time.time() - 120
+        row.last_positive_online_evidence_at = time.time() - 120
+        mon._logcat_stream_alive = True
+        mon._handle_logcat_line(
+            "uid=10111 I rbx.perfdata: perfdata battery AC CHARGING 0uAmps 0mW"
+        )
+        self.assertFalse(mon.stream_fresh_for(pkg, 40.0))
+        with patch.object(mon, "_process_check", return_value=(True, ["999"])), \
+             patch.object(mon, "_detect_live_disconnect", return_value=("idle_disconnect_278", "Error Code: 278")) as disc:
+            mon.evaluate_package(pkg)
+        disc.assert_called_once()
+        self.assertEqual(row.internal_state, STATE_DISCONNECTED)
 
 
 class LegacyDisconnectPathTests(unittest.TestCase):

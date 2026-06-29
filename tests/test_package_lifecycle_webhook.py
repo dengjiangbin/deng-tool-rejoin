@@ -45,16 +45,29 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
             package="com.roblox.client",
             username="MainUser",
             runtime_seconds=45.0,
+            dead_reason="Error Code: 278 You were disconnected for being idle",
         )
         embed = payload["embeds"][0]
         self.assertEqual(embed["title"], "Account Dead")
         self.assertEqual(embed["color"], webhook.EMBED_COLOR_RED)
         names = [field["name"] for field in embed["fields"]]
-        self.assertEqual(names, ["Device", "Account", "Username", "Runtime"])
+        self.assertEqual(names, ["Device", "Account", "Username", "Runtime", "Reason"])
         values = {field["name"]: field["value"] for field in embed["fields"]}
         self.assertEqual(values["Account"], "com.roblox.client")
         self.assertEqual(values["Username"], "||MainUser||")
         self.assertEqual(values["Runtime"], "45s")
+        self.assertTrue(str(values["Reason"]).startswith("Error Code: 278"))
+
+    def test_package_dead_embed_includes_runtime_when_missing(self) -> None:
+        payload = webhook.build_package_lifecycle_embed_payload(
+            self._cfg(),
+            event="package_dead",
+            package="com.roblox.client.runtime_missing",
+            username="MainUser",
+            runtime_seconds=None,
+        )
+        values = {field["name"]: field["value"] for field in payload["embeds"][0]["fields"]}
+        self.assertEqual(values["Runtime"], "N/A")
 
     def test_package_recovered_embed_is_green_with_required_fields(self) -> None:
         payload = webhook.build_package_lifecycle_embed_payload(
@@ -143,6 +156,7 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
         self.assertTrue(webhook.package_lifecycle_dead_already_notified("com.roblox.client"))
 
     def test_repeated_dead_loop_does_not_resend_after_mark(self) -> None:
+        webhook.arm_package_lifecycle_dead_episode("com.roblox.client")
         webhook.mark_package_lifecycle_dead_notified("com.roblox.client")
         entry = {"package": "com.roblox.client", "account_username": "MainUser"}
         sup = supervisor.WatchdogSupervisor([entry], self._cfg())
@@ -153,7 +167,7 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
             sup._maybe_send_package_dead_webhook(
                 "com.roblox.client",
                 entry,
-                supervisor.STATUS_ONLINE,
+                supervisor.STATUS_DEAD,
                 supervisor.STATUS_DEAD,
                 0.0,
             )
@@ -174,6 +188,7 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
         send.assert_not_called()
 
     def test_recovered_sends_once_after_dead_and_clears_state(self) -> None:
+        webhook.arm_package_lifecycle_dead_episode("com.roblox.client")
         webhook.mark_package_lifecycle_dead_notified("com.roblox.client")
         self.assertTrue(webhook.package_lifecycle_recover_pending("com.roblox.client"))
         with patch("agent.webhook._discord_json_request", return_value=(True, "webhook HTTP 200", "msg-2")) as request:
@@ -199,6 +214,26 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
                     supervisor.STATUS_ONLINE,
                     supervisor.STATUS_DEAD,
                     0.0,
+                )
+            )
+
+    def test_supervisor_disconnect_bypasses_launch_grace_after_online(self) -> None:
+        entry = {"package": "com.roblox.client", "account_username": "MainUser"}
+        sup = supervisor.WatchdogSupervisor([entry], self._cfg())
+        sup._last_online_ts["com.roblox.client"] = 100.0
+        detail = {
+            "reason_internal": "idle_disconnect_278",
+            "disconnect_prompt_text": "Error Code: 278 You were disconnected for being idle",
+        }
+        with patch.object(sup, "_in_loading_grace", return_value=True), \
+             patch.object(sup, "_in_grace", return_value=True):
+            self.assertTrue(
+                sup._should_notify_package_dead(
+                    "com.roblox.client",
+                    supervisor.STATUS_ONLINE,
+                    supervisor.STATUS_DISCONNECTED,
+                    200.0,
+                    detail,
                 )
             )
 
@@ -229,6 +264,7 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
     def test_supervisor_recovered_only_after_recovery_gate_online(self) -> None:
         entry = {"package": "com.roblox.client", "account_username": "MainUser"}
         sup = supervisor.WatchdogSupervisor([entry], self._cfg())
+        webhook.arm_package_lifecycle_dead_episode("com.roblox.client")
         webhook.mark_package_lifecycle_dead_notified("com.roblox.client")
         with patch("agent.webhook.send_package_lifecycle_alert", return_value=(True, "ok")) as send:
             sup._maybe_send_package_recovered_webhook("com.roblox.client", entry)
@@ -236,6 +272,35 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
         kwargs = send.call_args.kwargs
         self.assertEqual(kwargs["event"], "package_recovered")
         self.assertTrue(webhook.package_lifecycle_recover_pending("com.roblox.client") is False)
+
+    def test_recovered_blocked_for_already_recovered_episode(self) -> None:
+        webhook.arm_package_lifecycle_dead_episode("com.roblox.client")
+        webhook.mark_package_lifecycle_dead_notified("com.roblox.client")
+        webhook.mark_package_lifecycle_recovered("com.roblox.client", username="MainUser")
+        self.assertFalse(webhook.package_lifecycle_recover_pending("com.roblox.client"))
+
+    def test_definitive_disconnect_rearms_dead_webhook_from_relaunching(self) -> None:
+        entry = {"package": "com.roblox.client", "account_username": "MainUser"}
+        sup = supervisor.WatchdogSupervisor([entry], self._cfg())
+        webhook.arm_package_lifecycle_dead_episode("com.roblox.client")
+        webhook.mark_package_lifecycle_dead_notified("com.roblox.client")
+        detail = {
+            "reason_internal": "idle_disconnect_278",
+            "reason_user_friendly": "Error Code: 278 You were disconnected for being idle",
+        }
+        with patch.object(sup, "_in_loading_grace", return_value=False), \
+             patch.object(sup, "_in_grace", return_value=False), \
+             patch("agent.webhook.send_package_lifecycle_alert", return_value=(True, "ok")) as send:
+            sup._maybe_send_package_dead_webhook(
+                "com.roblox.client",
+                entry,
+                supervisor.STATUS_RELAUNCHING,
+                supervisor.STATUS_DISCONNECTED,
+                200.0,
+                detail,
+            )
+        send.assert_called_once()
+        self.assertTrue(webhook.package_lifecycle_dead_already_notified("com.roblox.client"))
 
     def test_periodic_status_still_works_after_lifecycle_send(self) -> None:
         cfg = self._cfg("new_post")

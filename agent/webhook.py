@@ -36,10 +36,29 @@ EMBED_COLOR_YELLOW = 0xFEE75C  # warning / captcha alert
 EMBED_COLOR_ORANGE = 0xE67E22  # starting / preparing
 EMBED_COLOR_GREY   = 0x36393F  # neutral / unknown
 WEBHOOK_USERNAME = "DENG Tool Rejoin"
-WEBHOOK_AVATAR_URL = "https://aio.deng.my.id/public/img/deng-logo.png"
+WEBHOOK_AVATAR_URL_CANDIDATES = (
+    "https://aio.deng.my.id/public/img/deng-logo.png",
+    "https://tool.deng.my.id/public/img/deng-logo.png",
+    "https://rejoin.deng.my.id/public/img/deng-logo.png",
+)
+EMBED_URL_CANDIDATES = (
+    "https://aio.deng.my.id",
+    "https://tool.deng.my.id",
+    "https://rejoin.deng.my.id",
+)
+WEBHOOK_AVATAR_URL = WEBHOOK_AVATAR_URL_CANDIDATES[0]
 EMBED_TITLE = "📊 DENG Tool: Rejoin Status Monitor"
-EMBED_URL = "https://aio.deng.my.id"
+EMBED_URL = EMBED_URL_CANDIDATES[0]
 EMBED_FOOTER_TEXT = "DENG Tool: Rejoin"
+
+
+def webhook_avatar_url() -> str:
+    """Primary avatar URL — prefer rejoin.deng.my.id when aio is unavailable."""
+    return WEBHOOK_AVATAR_URL_CANDIDATES[0]
+
+
+def webhook_embed_url() -> str:
+    return EMBED_URL_CANDIDATES[0]
 
 
 def record_webhook_trace(**fields: Any) -> None:
@@ -327,7 +346,7 @@ def build_alert_embed_payload(
     version = config_data.get("agent_version", "1.0.0")
     return {
         "username": WEBHOOK_USERNAME,
-        "avatar_url": WEBHOOK_AVATAR_URL,
+        "avatar_url": webhook_avatar_url(),
         "allowed_mentions": {"parse": []},
         "embeds": [
             {
@@ -427,6 +446,15 @@ def lifecycle_dead_runtime_seconds(
     alive_raw = row.get("alive_since") if isinstance(row, dict) else None
     if alive_raw is None and fallback_alive_since is not None:
         alive_raw = fallback_alive_since
+    if alive_raw is None:
+        try:
+            from .status_monitor_runtime import load_online_since
+
+            online_since, _runtime_row = load_online_since(pkg)
+            if online_since is not None:
+                alive_raw = online_since
+        except Exception:  # noqa: BLE001
+            pass
     try:
         alive = float(alive_raw)
     except (TypeError, ValueError):
@@ -466,7 +494,91 @@ def package_lifecycle_dead_already_notified(package: str) -> bool:
     if not pkg:
         return True
     row = _load_package_lifecycle_state().get("packages", {}).get(pkg, {})
-    return bool(row.get("dead_notified"))
+    return bool(row.get("dead_notified") and row.get("dead_webhook_confirmed_at"))
+
+
+def arm_package_lifecycle_dead_episode(package: str) -> None:
+    """Start a fresh Online→Dead episode so Account Dead can fire again."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    state = _load_package_lifecycle_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row.update({
+        "dead_active": True,
+        "dead_notified": False,
+        "dead_episode_at": time.time(),
+        "updated_at": time.time(),
+    })
+    row.pop("dead_webhook_confirmed_at", None)
+    row.pop("username_resolution_failed", None)
+    row.pop("username_resolution_failed_at", None)
+    packages[pkg] = row
+    _save_package_lifecycle_state(state)
+
+
+def record_package_lifecycle_dead_pending(
+    package: str,
+    *,
+    state: str = "",
+    detail: dict[str, Any] | None = None,
+) -> None:
+    """Remember a deferred Account Dead webhook (grace/username block)."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    state_obj = _load_package_lifecycle_state()
+    packages = state_obj.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row.update({
+        "dead_pending": True,
+        "dead_pending_at": time.time(),
+        "dead_pending_state": str(state or "").strip(),
+        "dead_pending_detail": dict(detail or {}),
+        "updated_at": time.time(),
+    })
+    packages[pkg] = row
+    _save_package_lifecycle_state(state_obj)
+
+
+def package_lifecycle_dead_pending(package: str) -> bool:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return False
+    row = _load_package_lifecycle_state().get("packages", {}).get(pkg, {})
+    return bool(row.get("dead_pending"))
+
+
+def load_package_lifecycle_dead_pending(
+    package: str,
+) -> tuple[str, dict[str, Any]]:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return "", {}
+    row = _load_package_lifecycle_state().get("packages", {}).get(pkg, {})
+    if not row.get("dead_pending"):
+        return "", {}
+    pending_state = str(row.get("dead_pending_state") or "Dead").strip() or "Dead"
+    pending_detail = row.get("dead_pending_detail")
+    detail = dict(pending_detail) if isinstance(pending_detail, dict) else {}
+    return pending_state, detail
+
+
+def clear_package_lifecycle_dead_pending(package: str) -> None:
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    state_obj = _load_package_lifecycle_state()
+    packages = state_obj.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row.pop("dead_pending", None)
+    row.pop("dead_pending_at", None)
+    row.pop("dead_pending_state", None)
+    row.pop("dead_pending_detail", None)
+    if row:
+        packages[pkg] = row
+        _save_package_lifecycle_state(state_obj)
 
 
 def mark_package_lifecycle_dead_notified(package: str, username: str | None = None) -> None:
@@ -479,9 +591,16 @@ def mark_package_lifecycle_dead_notified(package: str, username: str | None = No
     row.update({
         "dead_notified": True,
         "dead_active": True,
+        "dead_webhook_confirmed_at": time.time(),
         "updated_at": time.time(),
         "username_resolution_failed": False,
     })
+    if not row.get("dead_episode_at"):
+        row["dead_episode_at"] = row["dead_webhook_confirmed_at"]
+    row.pop("dead_pending", None)
+    row.pop("dead_pending_at", None)
+    row.pop("dead_pending_state", None)
+    row.pop("dead_pending_detail", None)
     clean = str(username or "").strip()
     if clean:
         row["last_username"] = clean
@@ -525,7 +644,23 @@ def package_lifecycle_recover_pending(package: str) -> bool:
     if not pkg:
         return False
     row = _load_package_lifecycle_state().get("packages", {}).get(pkg, {})
-    return bool(row.get("dead_active") and row.get("dead_notified"))
+    if not (
+        row.get("dead_active")
+        and row.get("dead_notified")
+        and row.get("dead_webhook_confirmed_at")
+    ):
+        return False
+    dead_episode_at = row.get("dead_episode_at")
+    if dead_episode_at is None:
+        return False
+    recovered_at = row.get("recovered_at")
+    if recovered_at is not None:
+        try:
+            if float(dead_episode_at) <= float(recovered_at):
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def mark_package_lifecycle_recovered(package: str, username: str | None = None) -> None:
@@ -541,6 +676,12 @@ def mark_package_lifecycle_recovered(package: str, username: str | None = None) 
         "username_resolution_failed": False,
         "recovered_at": time.time(),
     }
+    row.pop("dead_webhook_confirmed_at", None)
+    row.pop("dead_episode_at", None)
+    row.pop("dead_pending", None)
+    row.pop("dead_pending_at", None)
+    row.pop("dead_pending_state", None)
+    row.pop("dead_pending_detail", None)
     clean = str(username or "").strip()
     if clean:
         row["last_username"] = clean
@@ -574,12 +715,12 @@ def _resolve_lifecycle_dead_runtime_seconds(
     return lifecycle_dead_runtime_seconds(package)
 
 
-def _lifecycle_runtime_field(runtime_seconds: float | None) -> dict[str, Any] | None:
+def _lifecycle_runtime_field(runtime_seconds: float | None) -> dict[str, Any]:
     from .runtime_format import format_runtime
 
-    display = format_runtime(runtime_seconds)
+    display = format_runtime(runtime_seconds) if runtime_seconds is not None else ""
     if not display:
-        return None
+        display = "N/A"
     return {"name": "Runtime", "value": display[:256], "inline": True}
 
 
@@ -606,18 +747,16 @@ def _lifecycle_embed_fields(
     ]
     normalized = str(event or "").strip().lower()
     if normalized == "package_dead":
-        runtime_field = _lifecycle_runtime_field(
-            _resolve_lifecycle_dead_runtime_seconds(package, runtime_seconds),
+        fields.append(
+            _lifecycle_runtime_field(
+                _resolve_lifecycle_dead_runtime_seconds(package, runtime_seconds),
+            )
         )
-        if runtime_field:
-            fields.append(runtime_field)
         reason_text = str(dead_reason or "").strip()
         if reason_text:
-            from .lifecycle_reasons import format_user_friendly_dead_reason
-
             fields.append({
                 "name": "Reason",
-                "value": format_user_friendly_dead_reason(reason_text)[:256],
+                "value": reason_text[:256],
                 "inline": True,
             })
         ram_text = str(ram_display or "").strip()
@@ -676,7 +815,7 @@ def build_package_lifecycle_embed_payload(
 
     return {
         "username": WEBHOOK_USERNAME,
-        "avatar_url": WEBHOOK_AVATAR_URL,
+        "avatar_url": webhook_avatar_url(),
         "embeds": [{
             "title": title,
             "color": color,
@@ -931,11 +1070,11 @@ def build_status_embed_payload(
 
     return {
         "username": WEBHOOK_USERNAME,
-        "avatar_url": WEBHOOK_AVATAR_URL,
+        "avatar_url": webhook_avatar_url(),
         "allowed_mentions": {"parse": []},
         "embeds": [{
             "title": EMBED_TITLE,
-            "url": EMBED_URL,
+            "url": webhook_embed_url(),
             "description": "",
             "color": color,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1141,7 +1280,7 @@ def _minimal_status_payload(config_data: dict[str, Any], *, event: str, error: s
         fields.append({"name": "⚠️ Payload warning", "value": error[:512], "inline": False})
     return {
         "username": WEBHOOK_USERNAME,
-        "avatar_url": WEBHOOK_AVATAR_URL,
+        "avatar_url": webhook_avatar_url(),
         "allowed_mentions": {"parse": []},
         "embeds": [
             {
@@ -1166,11 +1305,11 @@ def _minimal_status_payload(config_data: dict[str, Any], *, event: str, error: s
         fields.append({"name": "⚠️ Payload warning", "value": error[:512], "inline": False})
     return {
         "username": WEBHOOK_USERNAME,
-        "avatar_url": WEBHOOK_AVATAR_URL,
+        "avatar_url": webhook_avatar_url(),
         "allowed_mentions": {"parse": []},
         "embeds": [{
             "title": EMBED_TITLE,
-            "url": EMBED_URL,
+            "url": webhook_embed_url(),
             "description": "",
             "color": EMBED_COLOR_YELLOW,
             "timestamp": datetime.now(timezone.utc).isoformat(),
