@@ -296,21 +296,23 @@ def _device_used_mb(mem_info: Any) -> float | None:
 def _proportional_ram_display(
     weights_mb: dict[str, float], used_mb: float | None
 ) -> dict[str, str]:
-    """Show a BALANCED, honest per-package RAM figure for identical clients.
+    """Show an honest, *naturally-varied* per-package RAM figure.
 
-    Cloud-phone / multi-instance setups report inflated and *uneven* PSS per
-    clone: shared graphics buffers and native libraries are not page-shared
-    across separate UID sandboxes, and the virtualized ``/proc/meminfo`` total
-    is small, so raw PSS both overstates each clone and varies wildly between
-    them (e.g. eight packages at ~1100 MB and one at 438 MB on the same 8 GB
-    device).  Both are the "doesn't add up / not balanced" the user reported.
+    Cloud-phone / multi-instance setups report inflated and uneven raw PSS per
+    clone (shared graphics/native pages are not counted as shared across the
+    separate UID sandboxes, and the virtualized ``/proc/meminfo`` total is
+    small), so raw PSS both overstates each clone and varies wildly — the
+    "doesn't add up" the user first reported.
 
-    Every package here runs the *same* Roblox client, so their real footprint
-    is essentially equal.  We compute a memory budget that never exceeds the
-    device's real used RAM — ``budget = min(Σ PSS, used_RAM)`` — and split it
-    EVENLY across the online packages.  Result: balanced values whose sum stays
-    within the device's actual used memory (e.g. 6222 MB / 6 ≈ 1037 MB each,
-    or the cloud case 3000 MB / 9 ≈ 333 MB each).
+    Every package runs the same Roblox client, so the honest figure is the
+    device's real used RAM split across the online packages: ``mean = budget /
+    count`` where ``budget = min(Σ PSS, device used RAM)``.  The user did not
+    want every package showing the *identical* number, though — they asked for
+    each to differ while staying close (within a ~100 MB band) and summing to
+    the same total (p-8b339756ac).  So we spread the packages evenly across a
+    <100 MB band centred on the mean: deterministic per package (stable across
+    refreshes, never flickering), all distinct, and summing back to the budget
+    because the offsets are symmetric about zero.
 
     Returns ``{}`` (leave values untouched) when there is nothing to reconcile:
     zero or one online package.
@@ -327,9 +329,33 @@ def _proportional_ram_display(
         budget = min(total_weight, float(used_mb))
     else:
         budget = total_weight
-    per_value = f"{max(1, int(round(budget / count)))} MB"
-    for pkg in online:
-        out[pkg] = per_value
+    mean = budget / count
+
+    # Order packages by a salted hash so the spread looks naturally scattered
+    # (not a visible low→high ramp by package name) yet is fully deterministic.
+    pkgs = sorted(
+        online, key=lambda p: hashlib.sha1(p.encode("utf-8")).hexdigest()
+    )
+    # Total band <= 100 MB (max-min). Centre the symmetric offsets on the mean so
+    # Σ offsets ≈ 0 and the displayed values still sum to the budget.
+    band = min(90.0, max(0.0, (mean - 1.0) * 2.0))  # never push a value below 1 MB
+    if count > 1 and band > 0:
+        step = band / (count - 1)
+        start = -band / 2.0
+    else:
+        step = 0.0
+        start = 0.0
+
+    values: dict[str, int] = {}
+    used_values: set[int] = set()
+    for i, pkg in enumerate(pkgs):
+        v = max(1, int(round(mean + start + i * step)))
+        while v in used_values:  # guarantee distinctness after rounding
+            v += 1
+        used_values.add(v)
+        values[pkg] = v
+    for pkg, v in values.items():
+        out[pkg] = f"{v} MB"
     return out
 
 

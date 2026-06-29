@@ -1242,8 +1242,11 @@ class WatchdogSupervisor:
     # package (probe p-6c644c4708) so force-close/dead is caught ~3x sooner
     # while still showing a visible per-package "Checking" tick.
     PACKAGE_ROUND_ROBIN_SECONDS: int = 3
-    PACKAGE_CHECKING_HOLD_SECONDS: float = 0.5
-    PACKAGE_ROUND_ROBIN_TAIL_SECONDS: float = 0.6
+    # Cosmetic per-package pauses kept minimal so a full round (and therefore the
+    # latency to act on the real-time logcat truth) stays small even on many
+    # clones (p-8b339756ac: aim well under 15s end-to-end).
+    PACKAGE_CHECKING_HOLD_SECONDS: float = 0.2
+    PACKAGE_ROUND_ROBIN_TAIL_SECONDS: float = 0.2
     PACKAGE_STAGGER_TAIL_SECONDS: float = 0.5
     DEFAULT_DETECTION_WORKER_COUNT: int = 3
 
@@ -1255,6 +1258,17 @@ class WatchdogSupervisor:
     # ── Roblox presence API fault shield (429 / 5xx / timeout) ───────────────
     PRESENCE_RATE_LIMIT_BACKOFF_SECONDS: float = 15.0
     PRESENCE_API_FAULT_BACKOFF_SECONDS: float = 15.0
+    # The real-time logcat stream (join placeId + "Sending disconnect with
+    # reason: N" for EVERY error code) is the primary, rate-limit-free source of
+    # truth.  The Roblox Presence API is slow (up to PRESENCE_POLL_TIMEOUT_SECONDS
+    # per call) and rate-limited on a cloud phone running many clones, so calling
+    # it per-package-per-round was the dominant detection latency (probe
+    # p-8b339756ac: ~3 min rounds).  We therefore only consult Presence on this
+    # slow safety-net cadence while the stream is healthy; when the stream is
+    # stale/broken it falls back to per-round.  Tunable via env.
+    PRESENCE_VERIFY_INTERVAL_SECONDS: float = float(
+        os.environ.get("DENG_REJOIN_PRESENCE_VERIFY_INTERVAL_SEC", "60") or "60"
+    )
 
     # ── Lobby transition allowance after loading grace expires ───────────────
     LOBBY_TRANSITION_SECONDS: int = 180
@@ -1370,6 +1384,13 @@ class WatchdogSupervisor:
         # is the matched on-screen text. Cleared when the package confirms online
         # again. Captcha packages hang (no recovery) per user request.
         self._captcha_detected: dict[str, str] = {}
+        # Wall-clock when the captcha overlay was first seen for a package.  Used
+        # to keep STATUS_CAPTCHA sticky over a *stale* online marker: a captcha
+        # emits no disconnect line, so a lingering older gamejoinloadtime would
+        # otherwise keep the package "Online" forever and suppress the Account
+        # Dead webhook (user p-8b339756ac).  Cleared only when a genuinely newer
+        # in-game confirmation arrives (solved + rejoined) or the process dies.
+        self._captcha_detected_at: dict[str, float] = {}
         # In-game Lua push-channel liveness, per package.  ``_push_ever_seen``
         # marks packages whose detector.lua has actually reported (so a setup
         # WITHOUT the detector is fully unaffected); ``_push_last_seen`` is the
@@ -1398,6 +1419,10 @@ class WatchdogSupervisor:
         self._presence_lookup_attempt_at: dict[str, float] = {}
         self._presence_last_detail: dict[str, dict[str, Any]] = {}
         self._presence_expected_targets: dict[str, Any] = {}
+        # Per-package monotonic of the last Presence API verification, so we can
+        # throttle the slow/rate-limited Presence calls while the real-time
+        # logcat stream is healthy (p-8b339756ac).
+        self._last_presence_verify_at: dict[str, float] = {}
         self._presence_rate_limit_until: float = 0.0
         self._watchdog_round_rate_limited: bool = False
         self._lobby_entered_at: dict[str, float] = {}
@@ -2714,6 +2739,28 @@ class WatchdogSupervisor:
         os.environ.get("DENG_REJOIN_HEAVY_DISCONNECT_STREAM_FRESH_SEC", "25") or "25"
     )
 
+    def _presence_verify_due(self, pkg: str) -> bool:
+        """Gate the slow/rate-limited Roblox Presence API.
+
+        While the real-time logcat stream is fresh for this package it IS the
+        source of truth (join placeId + disconnect-reason for every error code),
+        so Presence only runs on the slow ``PRESENCE_VERIFY_INTERVAL_SECONDS``
+        safety-net cadence.  When the stream is stale/broken, Presence runs every
+        round.  This removed the per-round Presence round-trips that dominated
+        the detection latency on multi-clone cloud phones (p-8b339756ac)."""
+        try:
+            stream_fresh = self._rjn_monitor.stream_fresh_for(
+                pkg, self.HEAVY_DISCONNECT_STREAM_FRESH_SECONDS
+            )
+        except Exception:  # noqa: BLE001
+            stream_fresh = False
+        now = time.monotonic()
+        last = self._last_presence_verify_at.get(pkg, 0.0)
+        if stream_fresh and (now - last) < self.PRESENCE_VERIFY_INTERVAL_SECONDS:
+            return False
+        self._last_presence_verify_at[pkg] = now
+        return True
+
     def _heavy_disconnect_scan_due(self, pkg: str) -> bool:
         try:
             stream_fresh = self._rjn_monitor.stream_fresh_for(
@@ -2756,6 +2803,7 @@ class WatchdogSupervisor:
                 captcha_text = detect_live_captcha(pkg)
                 if captcha_text:
                     self._captcha_detected[pkg] = str(captcha_text)[:120]
+                    self._captcha_detected_at.setdefault(pkg, time.time())
                     return ev
                 disconnect_reason, matched = detect_live_disconnect(
                     pkg,
@@ -2786,11 +2834,15 @@ class WatchdogSupervisor:
             return ev
         if not ev.process_exists:
             return ev
+        # Primary online proof is the real-time logcat gamejoinloadtime line.
+        # The rate-limited Presence API is only a throttled fallback so it does
+        # not stall the per-round loop while clients are (re)launching.
         presence = None
-        try:
-            presence = self._fetch_presence(pkg, force_cookie_rescan=True)
-        except Exception:  # noqa: BLE001
-            presence = None
+        if self._presence_verify_due(pkg):
+            try:
+                presence = self._fetch_presence(pkg, force_cookie_rescan=True)
+            except Exception:  # noqa: BLE001
+                presence = None
         if presence is not None and getattr(presence, "is_in_game", False):
             try:
                 self._rjn_monitor.confirm_online_evidence(
@@ -2848,6 +2900,11 @@ class WatchdogSupervisor:
             return ev
         if not ev.process_exists:
             return ev
+        # Wrong-server is caught in real time by the logcat join line's placeId;
+        # only consult the slow/rate-limited Presence API on the safety-net
+        # cadence while the stream is healthy (p-8b339756ac).
+        if not self._presence_verify_due(pkg):
+            return ev
         try:
             presence = self._fetch_presence(pkg)
         except Exception:  # noqa: BLE001
@@ -2873,6 +2930,35 @@ class WatchdogSupervisor:
             return self._rjn_monitor.evaluate_package(pkg)
         except Exception:  # noqa: BLE001
             return ev
+
+    def _captcha_state_held(self, pkg: str, ev: Any) -> bool:
+        """Whether STATUS_CAPTCHA must be held for ``pkg`` this round.
+
+        A captcha overlay produces NO disconnect line, so ``evaluate_package``
+        can keep reporting Online from a stale gamejoinloadtime while the
+        bot-check WebView is on screen.  We therefore keep the captcha sticky
+        until a genuinely newer in-game confirmation arrives (the human solved it
+        and rejoined → the latest positive online-evidence timestamp is newer
+        than when the captcha was first observed) or the process dies."""
+        if pkg not in self._captcha_detected:
+            return False
+        if ev is None or not getattr(ev, "process_exists", False):
+            self._captcha_detected.pop(pkg, None)
+            self._captcha_detected_at.pop(pkg, None)
+            return False
+        seen_at = float(self._captcha_detected_at.get(pkg, 0.0) or 0.0)
+        try:
+            row = self._rjn_monitor._states.get(pkg)
+            last_online_at = float(getattr(row, "last_positive_online_evidence_at", 0.0) or 0.0)
+        except Exception:  # noqa: BLE001
+            last_online_at = 0.0
+        # Solved + rejoined: a fresh online proof timestamped AFTER the captcha
+        # was first seen clears the hang.  A stale (older) marker does not.
+        if last_online_at > seen_at + 1.0:
+            self._captcha_detected.pop(pkg, None)
+            self._captcha_detected_at.pop(pkg, None)
+            return False
+        return True
 
     def _push_fresh(self, pkg: str) -> bool:
         """True when this package's in-game Lua detector reported within the
@@ -2961,6 +3047,7 @@ class WatchdogSupervisor:
             captcha_text = detect_live_captcha(pkg)
             if captcha_text:
                 self._captcha_detected[pkg] = str(captcha_text)[:120]
+                self._captcha_detected_at.setdefault(pkg, time.time())
                 ev.is_online_confirmed = False  # let the caller pick STATUS_CAPTCHA
                 return ev
         except Exception:  # noqa: BLE001
@@ -3040,19 +3127,18 @@ class WatchdogSupervisor:
         # is gone it is a genuine dead/crash, so drop any stale captcha flag.
         if not ev.process_exists:
             self._captcha_detected.pop(pkg, None)
+            self._captcha_detected_at.pop(pkg, None)
 
-        if ev.is_online_confirmed:
-            state = STATUS_ONLINE
-            self._relaunch_inflight.discard(pkg)
-            self._relaunch_verify_until.pop(pkg, None)
-            self._missing_evidence_since.pop(pkg, None)
-            # A confirmed in-game join means any earlier captcha was solved/cleared.
-            self._captcha_detected.pop(pkg, None)
-        elif pkg in self._captcha_detected and ev.process_exists:
-            # Bot-verification overlay is up and the client is still alive: hold a
-            # dedicated Captcha state. Recovery is intentionally skipped for this
-            # state (see _RECOVERY_TRIGGER_STATES), so the package hangs for a
-            # human while we still fire the Account Dead webhook once.
+        # Captcha takes precedence over a possibly-STALE online marker.  A captcha
+        # block emits no disconnect line, so evaluate_package can keep reporting
+        # Online from an older gamejoinloadtime while the bot-check WebView is on
+        # screen.  We hold STATUS_CAPTCHA until a genuinely NEWER in-game proof
+        # arrives (the human solved it and rejoined) — i.e. the latest positive
+        # online evidence is newer than when the captcha was first seen — or the
+        # process dies.  Without this the Account Dead webhook never fired
+        # (user p-8b339756ac).
+        captcha_held = self._captcha_state_held(pkg, ev)
+        if captcha_held:
             state = STATUS_CAPTCHA
             reason = "captcha_verification"
             detail["reason_internal"] = "captcha_verification"
@@ -3060,6 +3146,14 @@ class WatchdogSupervisor:
             detail["matched_disconnect_text"] = self._captcha_detected.get(pkg, "")
             self._relaunch_inflight.discard(pkg)
             self._relaunch_verify_until.pop(pkg, None)
+        elif ev.is_online_confirmed:
+            state = STATUS_ONLINE
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
+            self._missing_evidence_since.pop(pkg, None)
+            # A confirmed in-game join means any earlier captcha was solved/cleared.
+            self._captcha_detected.pop(pkg, None)
+            self._captcha_detected_at.pop(pkg, None)
         elif ev.internal_state == RJN_DISCONNECTED or detail.get("last_with_reason_at"):
             state = STATUS_DISCONNECTED
             reason = str(detail.get("reason_user_friendly") or reason)

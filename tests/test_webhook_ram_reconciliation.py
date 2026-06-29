@@ -31,7 +31,7 @@ class DeviceUsedMbTests(unittest.TestCase):
 
 
 class ProportionalRamTests(unittest.TestCase):
-    def test_inflated_pss_is_normalized_to_used_ram(self) -> None:
+    def test_inflated_pss_is_spread_around_used_ram_mean(self) -> None:
         pss = {
             "p1": 871, "p2": 1024, "p3": 876, "p4": 875, "p5": 1024,
             "p6": 1024, "p7": 891, "p8": 865, "p9": 876,
@@ -40,17 +40,19 @@ class ProportionalRamTests(unittest.TestCase):
         norm = w._proportional_ram_display(pss, used)
         self.assertEqual(len(norm), 9)
         vals = [int(v.split()[0]) for v in norm.values()]
-        # Sum must be ≈ used RAM (within rounding), not the impossible 8326.
-        self.assertAlmostEqual(sum(vals), round(used), delta=15)
-        # Every package now reads a sensible few-hundred-MB share, not ~900 MB.
-        self.assertTrue(all(250 <= v <= 420 for v in vals), vals)
-        # ...and they are BALANCED: identical clients show identical RAM.
-        self.assertEqual(len(set(vals)), 1, vals)
+        # Sum ≈ used RAM (offsets are symmetric about the mean), not 8326.
+        self.assertAlmostEqual(sum(vals), round(used), delta=20)
+        # Centred on used/count ≈ 342, each a sensible few-hundred-MB share.
+        self.assertTrue(all(280 <= v <= 400 for v in vals), vals)
+        # User ask p-8b339756ac: NOT identical — every package differs...
+        self.assertEqual(len(set(vals)), 9, vals)
+        # ...and all stay within a ~100 MB band of each other.
+        self.assertLessEqual(max(vals) - min(vals), 100, vals)
 
-    def test_outlier_is_balanced_when_sum_fits_used_ram(self) -> None:
+    def test_values_are_distinct_within_100mb_band(self) -> None:
         # Screenshot 2: five packages ~1100 MB and one at 438 MB on an 8 GB
-        # device (used ≈ 6636 MB).  Σ PSS (6222) already fits under used, so the
-        # old code left the 438 outlier; now every package is balanced.
+        # device (used ≈ 6636 MB).  No identical numbers, no 438 outlier, all
+        # within 100 MB of each other and summing within device used RAM.
         pss = {
             "p1": 1057, "p2": 1229, "p3": 438, "p4": 1189, "p5": 1148, "p6": 1161,
         }
@@ -58,11 +60,21 @@ class ProportionalRamTests(unittest.TestCase):
         norm = w._proportional_ram_display(pss, used)
         vals = [int(v.split()[0]) for v in norm.values()]
         self.assertEqual(len(vals), 6)
-        self.assertEqual(len(set(vals)), 1, vals)          # balanced
+        self.assertEqual(len(set(vals)), 6, vals)           # all distinct
         self.assertNotIn(438, vals)                         # no more outlier
-        # Each ≈ Σ PSS / 6 ≈ 1037, and Σ never exceeds device used RAM.
-        self.assertTrue(all(950 <= v <= 1100 for v in vals), vals)
+        self.assertLessEqual(max(vals) - min(vals), 100, vals)
+        self.assertTrue(all(980 <= v <= 1095 for v in vals), vals)
         self.assertLessEqual(sum(vals), round(used))
+
+    def test_spread_is_stable_across_calls(self) -> None:
+        # Deterministic: the same inputs must yield the same per-package numbers
+        # every refresh (no flickering).
+        pss = {"a": 900, "b": 900, "c": 900, "d": 900}
+        used = 2000.0
+        first = w._proportional_ram_display(pss, used)
+        second = w._proportional_ram_display(pss, used)
+        self.assertEqual(first, second)
+        self.assertEqual(len(set(first.values())), 4)       # still all distinct
 
     def test_no_weights_or_single_package_returns_empty(self) -> None:
         self.assertEqual(w._proportional_ram_display({}, 3000), {})
