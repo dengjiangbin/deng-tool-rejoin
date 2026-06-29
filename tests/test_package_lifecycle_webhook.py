@@ -266,6 +266,9 @@ class PackageLifecycleWebhookTests(unittest.TestCase):
         sup = supervisor.WatchdogSupervisor([entry], self._cfg())
         webhook.arm_package_lifecycle_dead_episode("com.roblox.client")
         webhook.mark_package_lifecycle_dead_notified("com.roblox.client")
+        # New contract: recovered only fires for a dead episode observed in THIS
+        # session (set when the dead webhook was delivered).
+        sup._session_dead_notified.add("com.roblox.client")
         with patch("agent.webhook.send_package_lifecycle_alert", return_value=(True, "ok")) as send:
             sup._maybe_send_package_recovered_webhook("com.roblox.client", entry)
         send.assert_called_once()

@@ -217,6 +217,15 @@ def _env_float(name: str, default: float) -> float:
 # two missed posts before falling back to the slow scrape path.
 PUSH_HEARTBEAT_FRESH_SECONDS = _env_float("DENG_REJOIN_PUSH_HEARTBEAT_FRESH_SECONDS", 15.0)
 
+# How long the in-game Lua heartbeat may be SILENT — after having streamed for
+# this package — before we treat the client as having left the live server.
+# detector.lua posts every ~5s and keeps posting through a normal teleport gap;
+# when the player is kicked to a GL-rendered error dialog (e.g. HTTP error 529,
+# which dumpsys/uiautomator/logcat cannot see on a background clone) the Lua VM
+# unloads and heartbeats simply stop.  This loss is the only reliable signal for
+# such errors, so after this grace we verify (captcha? presence?) and recover.
+PUSH_HEARTBEAT_LOSS_SECONDS = _env_float("DENG_REJOIN_PUSH_HEARTBEAT_LOSS_SECONDS", 90.0)
+
 # All healthy states — used for legacy _PackageWorker state-machine guards.
 # WatchdogSupervisor never reads _HEALTHY_STATES; only _PackageWorker uses it.
 # STATUS_LOBBY stays in _HEALTHY_STATES for _PackageWorker backward compat.
@@ -1357,6 +1366,19 @@ class WatchdogSupervisor:
         # is the matched on-screen text. Cleared when the package confirms online
         # again. Captcha packages hang (no recovery) per user request.
         self._captcha_detected: dict[str, str] = {}
+        # In-game Lua push-channel liveness, per package.  ``_push_ever_seen``
+        # marks packages whose detector.lua has actually reported (so a setup
+        # WITHOUT the detector is fully unaffected); ``_push_last_seen`` is the
+        # wall-clock of the most recent fresh heartbeat, used to detect that the
+        # client left the live server (heartbeat loss → HTTP 529 / kick / crash).
+        self._push_ever_seen: set[str] = set()
+        self._push_last_seen: dict[str, float] = {}
+        # Packages for which an "Account Dead" webhook was actually delivered in
+        # THIS supervisor session.  "Account Recovered" only fires for these, so
+        # stale persisted dead state from a previous run can never produce a
+        # spurious Recovered on first launch (user report: recovered with no
+        # preceding dead).  Cleared once the recovered webhook is sent.
+        self._session_dead_notified: set[str] = set()
         self._landscape_repair_round: int = 0  # legacy counter; periodic repair disabled
 
         # ── Per-package RAM optimization tracking ─────────────────────────────
@@ -2868,6 +2890,11 @@ class WatchdogSupervisor:
             return ""
         if age > PUSH_HEARTBEAT_FRESH_SECONDS:
             return ""
+        # Record push-channel liveness: this package's detector.lua is active and
+        # just reported.  ``age`` is seconds since receipt, so the actual receipt
+        # time is ``now - age``.  Drives the heartbeat-loss watchdog below.
+        self._push_ever_seen.add(pkg)
+        self._push_last_seen[pkg] = time.time() - max(0.0, age)
         try:
             verdict = self._rjn_monitor.ingest_push_heartbeat(
                 pkg,
@@ -2880,6 +2907,86 @@ class WatchdogSupervisor:
             return str(verdict or "")
         except Exception:  # noqa: BLE001
             return ""
+
+    def _maybe_demote_on_heartbeat_loss(self, pkg: str, ev: Any) -> Any:
+        """Catch GL-rendered kicks (e.g. HTTP error 529) the scrapers cannot see.
+
+        When a package is reported Online SOLELY because of a now-stale in-game
+        Lua heartbeat — the detector streamed for it, then went silent past the
+        loss grace while the process is still alive — the client has left the
+        live server.  dumpsys/uiautomator/logcat cannot read the GL/WebView
+        error dialog on a background clone, so the stopped heartbeat is the only
+        truth.  We then classify before acting:
+
+        * captcha overlay up  → flag Captcha, leave it hanging (NO recovery).
+        * Roblox Presence says still in-game → it was just the script dying;
+          re-confirm Online and reset the grace (never relaunch a healthy
+          client).
+        * otherwise            → Disconnected → normal recovery (relaunch).
+        """
+        try:
+            if ev is None or not ev.is_online_confirmed or not ev.process_exists:
+                return ev
+            if pkg not in self._push_ever_seen:
+                return ev  # detector not in use for this package — unaffected
+            # Only act when the stale heartbeat is the SOLE basis for Online; a
+            # fresher logcat/presence proof changes the source and keeps it up.
+            if str(ev.detail.get("online_evidence_source") or "") != "push_heartbeat":
+                return ev
+            last_seen = float(self._push_last_seen.get(pkg, 0.0) or 0.0)
+            if last_seen <= 0:
+                return ev
+            if (time.time() - last_seen) <= PUSH_HEARTBEAT_LOSS_SECONDS:
+                return ev
+        except Exception:  # noqa: BLE001
+            return ev
+
+        # Heartbeat lost while the process is alive → not in a live server.
+        try:
+            from .package_online_evidence import detect_live_captcha
+
+            captcha_text = detect_live_captcha(pkg)
+            if captcha_text:
+                self._captcha_detected[pkg] = str(captcha_text)[:120]
+                ev.is_online_confirmed = False  # let the caller pick STATUS_CAPTCHA
+                return ev
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Independent in-game confirmation (works for background clones too)
+        # guards against relaunching a healthy client whose executor/script
+        # merely stopped.
+        try:
+            presence = self._fetch_presence(pkg, force_cookie_rescan=True)
+        except Exception:  # noqa: BLE001
+            presence = None
+        if presence is not None and getattr(presence, "is_in_game", False):
+            try:
+                self._rjn_monitor.confirm_online_evidence(
+                    pkg, time.time(), source="presence_in_experience"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            self._push_last_seen[pkg] = time.time()  # reset grace; re-check later
+            return self._rjn_monitor.evaluate_package(pkg)
+
+        log_event(
+            self._logger, "info", "[DENG_REJOIN_PUSH_HEARTBEAT_LOST]",
+            package=pkg,
+            silent_seconds=round(time.time() - last_seen, 1),
+            action="treat_as_disconnected",
+            reason="heartbeat_lost",
+        )
+        try:
+            self._rjn_monitor.apply_disconnect(
+                pkg,
+                time.time(),
+                reason="heartbeat_lost",
+                matched_text="In-game detection heartbeat lost (client left live server)",
+            )
+            return self._rjn_monitor.evaluate_package(pkg)
+        except Exception:  # noqa: BLE001
+            return ev
 
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
         """Merge rjn detection with supervisor launch/relaunch state (detection only)."""
@@ -2903,6 +3010,10 @@ class WatchdogSupervisor:
         ev = self._rjn_monitor.evaluate_package(pkg)
         ev = self._try_online_evidence_fallback(pkg, ev)
         ev = self._try_presence_target_verification(pkg, ev)
+        # A package kept "Online" only by a now-silent in-game heartbeat has left
+        # the live server (HTTP 529 / kick that scrapers can't see) — classify
+        # and demote so recovery (or Captcha-hang) is triggered.
+        ev = self._maybe_demote_on_heartbeat_loss(pkg, ev)
         current = str(self.status_map.get(pkg) or "").strip()
         detail = dict(ev.detail)
         reason = str(detail.get("reason") or ev.reason)
@@ -3523,12 +3634,23 @@ class WatchdogSupervisor:
             if ok:
                 lifecycle_webhook.mark_package_lifecycle_dead_notified(pkg, username=username)
                 lifecycle_webhook.clear_package_lifecycle_dead_pending(pkg)
+                # Arm "Account Recovered" only for a dead episode observed in THIS
+                # session, so stale persisted dead state can't fire a spurious
+                # recovered on a fresh start / first launch.
+                self._session_dead_notified.add(pkg)
         except Exception:  # noqa: BLE001
             pass
 
     def _maybe_send_package_recovered_webhook(self, pkg: str, entry: dict[str, Any]) -> None:
         from . import webhook as lifecycle_webhook
 
+        # Only notify recovery for an account we actually reported Dead in this
+        # running session.  This is the fix for "Account Recovered shows up
+        # without the package being dead first" — leftover dead_notified state
+        # from a previous run no longer triggers a recovered alert on first
+        # launch; recovered fires only after a real in-session dead → relaunch.
+        if pkg not in self._session_dead_notified:
+            return
         if not lifecycle_webhook.package_lifecycle_recover_pending(pkg):
             return
 
@@ -3556,6 +3678,7 @@ class WatchdogSupervisor:
             )
             if ok:
                 lifecycle_webhook.mark_package_lifecycle_recovered(pkg, username=username)
+                self._session_dead_notified.discard(pkg)
         except Exception:  # noqa: BLE001
             pass
 

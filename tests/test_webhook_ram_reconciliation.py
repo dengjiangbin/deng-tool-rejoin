@@ -44,15 +44,31 @@ class ProportionalRamTests(unittest.TestCase):
         self.assertAlmostEqual(sum(vals), round(used), delta=15)
         # Every package now reads a sensible few-hundred-MB share, not ~900 MB.
         self.assertTrue(all(250 <= v <= 420 for v in vals), vals)
+        # ...and they are BALANCED: identical clients show identical RAM.
+        self.assertEqual(len(set(vals)), 1, vals)
 
-    def test_consistent_values_are_left_untouched(self) -> None:
-        # Normal device: PSS already fits in used RAM → no distortion.
-        self.assertEqual(w._proportional_ram_display({"a": 200, "b": 250}, 3000), {})
+    def test_outlier_is_balanced_when_sum_fits_used_ram(self) -> None:
+        # Screenshot 2: five packages ~1100 MB and one at 438 MB on an 8 GB
+        # device (used ≈ 6636 MB).  Σ PSS (6222) already fits under used, so the
+        # old code left the 438 outlier; now every package is balanced.
+        pss = {
+            "p1": 1057, "p2": 1229, "p3": 438, "p4": 1189, "p5": 1148, "p6": 1161,
+        }
+        used = 6636.0
+        norm = w._proportional_ram_display(pss, used)
+        vals = [int(v.split()[0]) for v in norm.values()]
+        self.assertEqual(len(vals), 6)
+        self.assertEqual(len(set(vals)), 1, vals)          # balanced
+        self.assertNotIn(438, vals)                         # no more outlier
+        # Each ≈ Σ PSS / 6 ≈ 1037, and Σ never exceeds device used RAM.
+        self.assertTrue(all(950 <= v <= 1100 for v in vals), vals)
+        self.assertLessEqual(sum(vals), round(used))
 
-    def test_no_weights_or_no_used_returns_empty(self) -> None:
+    def test_no_weights_or_single_package_returns_empty(self) -> None:
         self.assertEqual(w._proportional_ram_display({}, 3000), {})
-        self.assertEqual(w._proportional_ram_display({"a": 900}, None), {})
-        self.assertEqual(w._proportional_ram_display({"a": 0}, 1000), {})
+        self.assertEqual(w._proportional_ram_display({"a": 900}, None), {})  # single → nothing to balance
+        self.assertEqual(w._proportional_ram_display({"a": 900}, 3000), {})  # single → untouched
+        self.assertEqual(w._proportional_ram_display({"a": 0, "b": 0}, 1000), {})
 
 
 class EmbedReconciliationTests(unittest.TestCase):

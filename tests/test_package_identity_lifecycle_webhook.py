@@ -152,6 +152,8 @@ class PackageIdentityLifecycleWebhookTests(unittest.TestCase):
         webhook.mark_package_lifecycle_dead_notified("com.roblox.client", username="MainUser")
         entry = {"package": "com.roblox.client", "account_username": ""}
         sup = supervisor.WatchdogSupervisor([entry], self._cfg())
+        # Recovered only fires for a dead episode observed in this session.
+        sup._session_dead_notified.add("com.roblox.client")
         with patch("agent.webhook._discord_json_request", return_value=(True, "ok", "m2")) as post:
             sup._maybe_send_package_recovered_webhook("com.roblox.client", entry)
         post.assert_called_once()

@@ -9,6 +9,7 @@ _USER_FRIENDLY: dict[str, str] = {
     "idle_disconnect_278": "Roblox disconnected for being idle (Error 278)",
     "ui_disconnect": "Roblox disconnected or kicked the account",
     "logcat_disconnect": "Roblox disconnected or kicked the account",
+    "heartbeat_lost": "Roblox left the live server (in-game detection stopped)",
     "process_missing": "Roblox was closed or force-stopped",
     "force_close": "Roblox was closed or force-stopped",
     "package_force_stopped": "Roblox was force-stopped",

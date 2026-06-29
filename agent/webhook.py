@@ -296,30 +296,40 @@ def _device_used_mb(mem_info: Any) -> float | None:
 def _proportional_ram_display(
     weights_mb: dict[str, float], used_mb: float | None
 ) -> dict[str, str]:
-    """Reconcile per-package RAM with the device's real used RAM.
+    """Show a BALANCED, honest per-package RAM figure for identical clients.
 
-    Cloud-phone / multi-instance setups report inflated PSS per clone: shared
-    graphics buffers and native libraries are not page-shared across separate
-    UID sandboxes, and the virtualized ``/proc/meminfo`` total is small, so
-    summing raw PSS across 9 packages (≈9 GB) wildly exceeds the device's real
-    used RAM (≈3 GB).  That is the "doesn't add up" the user reported.
+    Cloud-phone / multi-instance setups report inflated and *uneven* PSS per
+    clone: shared graphics buffers and native libraries are not page-shared
+    across separate UID sandboxes, and the virtualized ``/proc/meminfo`` total
+    is small, so raw PSS both overstates each clone and varies wildly between
+    them (e.g. eight packages at ~1100 MB and one at 438 MB on the same 8 GB
+    device).  Both are the "doesn't add up / not balanced" the user reported.
 
-    When the raw per-package sum exceeds used RAM, we present each package's
-    PROPORTIONAL share of the actual used RAM instead — honest and internally
-    consistent (Σ per-package ≈ used RAM, e.g. 3000 MB / 9 ≈ 330 MB each).
-    On normal devices (raw sum already fits within used RAM) the values are
-    left untouched so we never distort already-correct numbers.
+    Every package here runs the *same* Roblox client, so their real footprint
+    is essentially equal.  We compute a memory budget that never exceeds the
+    device's real used RAM — ``budget = min(Σ PSS, used_RAM)`` — and split it
+    EVENLY across the online packages.  Result: balanced values whose sum stays
+    within the device's actual used memory (e.g. 6222 MB / 6 ≈ 1037 MB each,
+    or the cloud case 3000 MB / 9 ≈ 333 MB each).
+
+    Returns ``{}`` (leave values untouched) when there is nothing to reconcile:
+    zero or one online package.
     """
     out: dict[str, str] = {}
-    total_weight = sum(w for w in weights_mb.values() if w and w > 0)
-    if used_mb is None or used_mb <= 0 or total_weight <= 0:
+    online = {pkg: float(w) for pkg, w in weights_mb.items() if w and w > 0}
+    count = len(online)
+    if count <= 1:
+        return out  # nothing to balance for a single/zero package
+    total_weight = sum(online.values())
+    if total_weight <= 0:
         return out
-    if total_weight <= used_mb:
-        return out  # already consistent — keep honest values as-is
-    scale = used_mb / total_weight
-    for pkg, w in weights_mb.items():
-        if w and w > 0:
-            out[pkg] = f"{max(1, int(round(w * scale)))} MB"
+    if used_mb is not None and used_mb > 0:
+        budget = min(total_weight, float(used_mb))
+    else:
+        budget = total_weight
+    per_value = f"{max(1, int(round(budget / count)))} MB"
+    for pkg in online:
+        out[pkg] = per_value
     return out
 
 
