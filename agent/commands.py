@@ -922,18 +922,15 @@ def _run_license_isolated_subprocess(
     return _normalize_license_check_result(result, message)
 
 
-def _should_isolate_start_cache_clear() -> bool:
-    """Run Start batch cache clear in a child on Termux (probe p-7dac7cb6c4)."""
-    from .cache_clear_phases import should_isolate_cache_clear
-
-    return should_isolate_cache_clear()
-
-
-def _run_start_batch_cache_clear(packages: list[str]) -> dict[str, str]:
+def _run_start_batch_cache_clear(
+    packages: list[str],
+    *,
+    root_info: android.RootInfo | None = None,
+) -> dict[str, str]:
     """Start prep phase 1: mass cache clear for every selected package."""
     from .cache_clear_phases import run_start_mass_cache_clear
 
-    return run_start_mass_cache_clear(packages)
+    return run_start_mass_cache_clear(packages, root_info=root_info)
 
 
 def _remote_license_isolated(
@@ -6227,7 +6224,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         _set_all_phase_labels("Clear Cache")
         safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
         try:
-            prep_cache = _run_start_batch_cache_clear(package_names)
+            prep_cache = _run_start_batch_cache_clear(
+                package_names,
+                root_info=_prep_root,
+            )
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("start: batch cache clear error: %s", _exc)
             prep_cache = {pkg: "Failed" for pkg in package_names}

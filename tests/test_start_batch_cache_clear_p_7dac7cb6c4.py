@@ -1,9 +1,8 @@
-"""Start/recovery cache clear segfault regression (probes p-7dac7cb6c4, p-f499f7533a)."""
+"""Start/recovery cache clear segfault regression (probes p-7dac7cb6c4, p-f499f7533a, p-7d483f2f27)."""
 
 from __future__ import annotations
 
 import inspect
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -39,48 +38,57 @@ class TestStartBatchCacheClear(unittest.TestCase):
         self.assertEqual(out["com.moons.litesc"], "Cleared")
         self.assertEqual(out["com.moons.litesd"], "Cleared")
 
-    def test_start_mass_cache_clear_runs_one_child_on_termux(self) -> None:
+    def test_start_mass_cache_clear_runs_inline_without_python_child(self) -> None:
         packages = ["com.moons.litesc", "com.moons.litesd"]
-        payload = json.dumps(
-            {"com.moons.litesc": "Cleared", "com.moons.litesd": "Cleared"}
-        ).encode("utf-8")
-        proc = mock.Mock()
-        proc.communicate.return_value = (payload, b"")
-        proc.returncode = 0
-        with mock.patch.object(cache_clear_phases, "should_isolate_cache_clear", return_value=True), \
-             mock.patch("subprocess.Popen", return_value=proc) as popen:
-            out = cache_clear_phases.run_start_mass_cache_clear(packages)
+        root = android.RootInfo(True, "su", "uid=0")
+        with mock.patch.object(
+            android,
+            "clear_packages_cache_mass_batch",
+            return_value={"com.moons.litesc": "Cleared", "com.moons.litesd": "Cleared"},
+        ) as mass, mock.patch.object(cache_clear_phases, "_settle_before_start_cache_clear"), \
+             mock.patch("subprocess.Popen") as popen:
+            out = cache_clear_phases.run_start_mass_cache_clear(
+                packages,
+                root_info=root,
+            )
         self.assertEqual(out, {"com.moons.litesc": "Cleared", "com.moons.litesd": "Cleared"})
-        popen.assert_called_once()
-        self.assertIn("-c", popen.call_args.args[0])
+        mass.assert_called_once_with(packages, root_info=root)
+        popen.assert_not_called()
 
-    def test_run_start_batch_cache_clear_delegates_to_phase1(self) -> None:
+    def test_run_start_batch_cache_clear_passes_root_info(self) -> None:
+        root = android.RootInfo(True, "su", "uid=0")
         with mock.patch.object(
             cache_clear_phases,
             "run_start_mass_cache_clear",
             return_value={"com.moons.litesc": "Cleared"},
         ) as mass:
-            out = commands._run_start_batch_cache_clear(["com.moons.litesc"])
-        mass.assert_called_once_with(["com.moons.litesc"])
+            out = commands._run_start_batch_cache_clear(
+                ["com.moons.litesc"],
+                root_info=root,
+            )
+        mass.assert_called_once_with(["com.moons.litesc"], root_info=root)
         self.assertEqual(out["com.moons.litesc"], "Cleared")
 
-    def test_recovery_cache_clear_runs_one_child_on_termux(self) -> None:
-        payload = json.dumps(
-            {
-                "success": True,
-                "skipped": False,
-                "skipped_reason": "",
-                "method": "recovery_single",
-                "error": "",
-            }
-        ).encode("utf-8")
-        proc = mock.Mock()
-        proc.communicate.return_value = (payload, b"")
-        proc.returncode = 0
-        with mock.patch.object(cache_clear_phases, "should_isolate_cache_clear", return_value=True), \
-             mock.patch("subprocess.Popen", return_value=proc) as popen:
-            out = cache_clear_phases.run_recovery_cache_clear("com.moons.litesc")
-        popen.assert_called_once()
+    def test_recovery_cache_clear_runs_inline_without_python_child(self) -> None:
+        root = android.RootInfo(True, "su", "uid=0")
+        payload = {
+            "success": True,
+            "skipped": False,
+            "skipped_reason": "",
+            "method": "recovery_single",
+            "error": "",
+        }
+        with mock.patch.object(
+            android,
+            "clear_package_cache_recovery",
+            return_value=payload,
+        ) as recovery, mock.patch("subprocess.Popen") as popen:
+            out = cache_clear_phases.run_recovery_cache_clear(
+                "com.moons.litesc",
+                root_info=root,
+            )
+        recovery.assert_called_once_with("com.moons.litesc", root_info=root)
+        popen.assert_not_called()
         self.assertTrue(out.get("success"))
 
     def test_supervisor_dead_recovery_uses_phase2_recovery_clear(self) -> None:
