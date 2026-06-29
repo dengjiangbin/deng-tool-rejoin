@@ -2409,6 +2409,66 @@ def clear_package_cache_for_start(
     return "Failed"
 
 
+def clear_package_cache_safe(
+    package: str,
+    *,
+    root_info: RootInfo | None = None,
+) -> dict[str, object]:
+    """Fast watchdog/recovery cache clear — one root shell, dict for logging."""
+    try:
+        pkg = validate_package_name(package)
+    except ConfigError as exc:
+        return {
+            "success": False,
+            "skipped": True,
+            "skipped_reason": "invalid_package",
+            "method": "fast_start",
+            "error": str(exc)[:120],
+        }
+    info = root_info or detect_root()
+    if not info.available or not info.tool:
+        return {
+            "success": False,
+            "skipped": True,
+            "skipped_reason": "root_unavailable",
+            "method": "fast_start",
+            "error": "",
+        }
+    try:
+        label = clear_package_cache_for_start(pkg, root_tool=str(info.tool))
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "success": False,
+            "skipped": False,
+            "skipped_reason": "",
+            "method": "fast_start",
+            "error": str(exc)[:120],
+        }
+    if label == "Skipped":
+        return {
+            "success": True,
+            "skipped": True,
+            "skipped_reason": "root_unavailable",
+            "method": "fast_start",
+            "error": "",
+        }
+    if label == "Cleared":
+        return {
+            "success": True,
+            "skipped": False,
+            "skipped_reason": "",
+            "method": "fast_start",
+            "error": "",
+        }
+    return {
+        "success": False,
+        "skipped": False,
+        "skipped_reason": "",
+        "method": "fast_start",
+        "error": "clear_failed",
+    }
+
+
 def clear_packages_cache_batch(
     packages: Iterable[str],
     *,

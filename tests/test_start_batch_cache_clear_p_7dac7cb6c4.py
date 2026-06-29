@@ -56,11 +56,9 @@ class TestStartBatchCacheClear(unittest.TestCase):
         self.assertEqual(out["com.moons.litesc"], "Cleared")
         self.assertEqual(out["com.moons.litesd"], "Skipped")
 
-    def test_isolated_batch_cache_clear_runs_in_child_on_termux(self) -> None:
+    def test_isolated_batch_cache_clear_runs_one_child_per_package_on_termux(self) -> None:
         packages = ["com.moons.litesc", "com.moons.litesd"]
-        payload = json.dumps(
-            {"com.moons.litesc": "Cleared", "com.moons.litesd": "Cleared"}
-        ).encode("utf-8")
+        payload = json.dumps({"label": "Cleared"}).encode("utf-8")
         proc = mock.Mock()
         proc.communicate.return_value = (payload, b"")
         proc.returncode = 0
@@ -68,8 +66,8 @@ class TestStartBatchCacheClear(unittest.TestCase):
              mock.patch("subprocess.Popen", return_value=proc) as popen:
             out = commands._start_batch_cache_clear_isolated(packages)
         self.assertEqual(out, {"com.moons.litesc": "Cleared", "com.moons.litesd": "Cleared"})
-        popen.assert_called_once()
-        self.assertIn("-c", popen.call_args.args[0])
+        self.assertEqual(popen.call_count, 2)
+        self.assertIn("-c", popen.call_args_list[0].args[0])
 
     def test_run_start_batch_cache_clear_uses_isolation_on_termux(self) -> None:
         with mock.patch.object(commands, "_should_isolate_start_cache_clear", return_value=True), \
@@ -81,6 +79,15 @@ class TestStartBatchCacheClear(unittest.TestCase):
             out = commands._run_start_batch_cache_clear(["com.moons.litesc"])
         isolated.assert_called_once_with(["com.moons.litesc"])
         self.assertEqual(out["com.moons.litesc"], "Cleared")
+
+    def test_supervisor_dead_recovery_uses_fast_cache_clear_not_verified(self) -> None:
+        from agent.supervisor import WatchdogSupervisor
+
+        src = inspect.getsource(WatchdogSupervisor._handle_state)
+        dead_idx = src.find("[DENG_REJOIN_DEAD_PACKAGE_CACHE_CLEAR]")
+        block = src[max(0, dead_idx - 400):dead_idx]
+        self.assertIn("clear_package_cache_safe", block)
+        self.assertNotIn("clear_package_cache_verified", block)
 
 
 if __name__ == "__main__":

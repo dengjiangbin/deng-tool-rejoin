@@ -3509,7 +3509,7 @@ class WatchdogSupervisor:
                 pass
             self._relaunch_inflight.add(pkg)
             self._set_status(pkg, STATUS_REOPENING)
-            cache_result = android.clear_package_cache_verified(pkg)
+            cache_result = android.clear_package_cache_safe(pkg, root_info=self._root_info)
             log_event(
                 logger, "info", "[DENG_REJOIN_DEAD_PACKAGE_CACHE_CLEAR]",
                 package=pkg,
@@ -3718,7 +3718,7 @@ class WatchdogSupervisor:
         if now - self._ram_last_trim_at.get(pkg, 0.0) >= trim_interval:
             self._ram_last_trim_at[pkg] = now
             try:
-                trim_result = android.clear_package_cache_verified(pkg)
+                trim_result = android.clear_package_cache_safe(pkg, root_info=self._root_info)
                 log_event(
                     logger, "info", "[DENG_REJOIN_RAM_TRIM]",
                     package=pkg,

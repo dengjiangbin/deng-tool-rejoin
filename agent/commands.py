@@ -938,48 +938,56 @@ def _should_isolate_start_cache_clear() -> bool:
     return False
 
 
-def _start_batch_cache_clear_isolated(packages: list[str]) -> dict[str, str]:
-    """Clear all package caches in a child so fork bursts cannot SIGSEGV Start."""
-    import subprocess as _sp  # noqa: PLC0415
-
-    if not packages:
-        return {}
+def _start_cache_clear_agent_parent() -> str:
     try:
         from pathlib import Path as _Path  # noqa: PLC0415
 
-        _agent_parent = str(_Path(__file__).resolve().parent.parent)
+        return str(_Path(__file__).resolve().parent.parent)
     except Exception:  # noqa: BLE001
-        _agent_parent = os.path.expanduser("~/.deng-tool/rejoin")
+        return os.path.expanduser("~/.deng-tool/rejoin")
+
+
+def _start_cache_clear_child_env(agent_parent: str) -> dict[str, str]:
+    env = dict(os.environ)
+    prev_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = agent_parent + (os.pathsep + prev_pp if prev_pp else "")
+    return env
+
+
+def _start_single_package_cache_clear_isolated(package: str) -> str:
+    """Clear one package cache in a child so fork bursts cannot SIGSEGV Start."""
+    import subprocess as _sp  # noqa: PLC0415
+
+    pkg = str(package or "").strip()
+    if not pkg:
+        return "Failed"
+    agent_parent = _start_cache_clear_agent_parent()
     code = (
         "import json, os, sys\n"
-        f"sys.path.insert(0, {_agent_parent!r})\n"
+        f"sys.path.insert(0, {agent_parent!r})\n"
         "_home = os.environ.get('DENG_REJOIN_HOME')\n"
         "if _home and _home not in sys.path:\n"
         "    sys.path.insert(0, _home)\n"
         "from agent import android\n"
-        "pkgs = json.loads(sys.stdin.read())\n"
+        "pkg = json.loads(sys.stdin.read())\n"
         "try:\n"
-        "    out = android.clear_packages_cache_batch(pkgs)\n"
-        "except Exception as exc:\n"
-        "    out = {p: 'Failed' for p in pkgs}\n"
-        "    out['_error'] = str(exc)[:180]\n"
-        "sys.stdout.write(json.dumps(out))\n"
+        "    label = android.clear_packages_cache_batch([pkg]).get(pkg, 'Failed')\n"
+        "except Exception:\n"
+        "    label = 'Failed'\n"
+        "sys.stdout.write(json.dumps({'label': label}))\n"
     )
-    env = dict(os.environ)
-    prev_pp = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = _agent_parent + (os.pathsep + prev_pp if prev_pp else "")
-    timeout = max(120, len(packages) * 50)
+    env = _start_cache_clear_child_env(agent_parent)
     try:
         proc = _sp.Popen(
             [sys.executable, "-c", code],
             stdin=_sp.PIPE,
             stdout=_sp.PIPE,
-            stderr=_sp.PIPE,
+            stderr=_sp.DEVNULL,
             env=env,
         )
-        stdout, stderr = proc.communicate(
-            input=json.dumps(packages).encode("utf-8"),
-            timeout=timeout,
+        stdout, _stderr = proc.communicate(
+            input=json.dumps(pkg).encode("utf-8"),
+            timeout=60,
         )
     except _sp.TimeoutExpired:
         proc.kill()
@@ -987,35 +995,30 @@ def _start_batch_cache_clear_isolated(packages: list[str]) -> dict[str, str]:
             proc.communicate(timeout=5)
         except Exception:  # noqa: BLE001
             pass
-        return {pkg: "Failed" for pkg in packages}
+        return "Failed"
     except OSError:
-        return {pkg: "Failed" for pkg in packages}
+        return "Failed"
 
-    if proc.returncode < 0:
-        return {pkg: "Failed" for pkg in packages}
-    if proc.returncode != 0:
-        return {pkg: "Failed" for pkg in packages}
+    if proc.returncode < 0 or proc.returncode != 0:
+        return "Failed"
     try:
         data = json.loads((stdout or b"").decode("utf-8", errors="replace") or "{}")
     except json.JSONDecodeError:
-        return {pkg: "Failed" for pkg in packages}
+        return "Failed"
     if not isinstance(data, dict):
-        return {pkg: "Failed" for pkg in packages}
-    err = str(data.pop("_error", "") or "").strip()
-    if err:
-        try:
-            from .logger import configure_logging, log_event
+        return "Failed"
+    label = str(data.get("label") or "Failed").strip()
+    return label if label in ("Cleared", "Skipped", "Failed") else "Failed"
 
-            log_event(
-                configure_logging(),
-                "warning",
-                "[DENG_REJOIN_START_BATCH_CACHE_CLEAR]",
-                result="child_error",
-                error=err[:180],
-            )
-        except Exception:  # noqa: BLE001
-            pass
-    return {str(k): str(v) for k, v in data.items()}
+
+def _start_batch_cache_clear_isolated(packages: list[str]) -> dict[str, str]:
+    """Clear each package cache in its own child (probe p-0f0a81a6fe)."""
+    if not packages:
+        return {}
+    results: dict[str, str] = {}
+    for pkg in packages:
+        results[pkg] = _start_single_package_cache_clear_isolated(pkg)
+    return results
 
 
 def _run_start_batch_cache_clear(packages: list[str]) -> dict[str, str]:

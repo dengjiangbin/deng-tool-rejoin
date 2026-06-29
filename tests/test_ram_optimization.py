@@ -213,7 +213,7 @@ class TestRamBelowTarget(unittest.TestCase):
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(600)
             sup._check_ram_optimization(_PKG, _ENTRY, now)
-            mock_android.clear_package_cache_verified.assert_not_called()
+            mock_android.clear_package_cache_safe.assert_not_called()
             mock_android.force_stop_package.assert_not_called()
 
 
@@ -229,11 +229,13 @@ class TestRamTrimTriggered(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(750)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             sup._check_ram_optimization(_PKG, _ENTRY, now)
-            mock_android.clear_package_cache_verified.assert_called_once_with(_PKG)
+            mock_android.clear_package_cache_safe.assert_called_once_with(
+                _PKG, root_info=sup._root_info
+            )
             mock_android.force_stop_package.assert_not_called()
 
 
@@ -249,7 +251,7 @@ class TestRamRestartTriggered(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(950)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch") as mock_launch:
@@ -274,7 +276,7 @@ class TestRamRestartCooldown(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1000)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch") as mock_launch:
@@ -294,7 +296,7 @@ class TestRamRestartBlockedByNhbCooldown(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1000)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch") as mock_launch:
@@ -313,7 +315,7 @@ class TestRamRestartSetsBothCooldowns(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1000)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch") as mock_launch:
@@ -338,11 +340,11 @@ class TestRamAggressiveMode(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(400)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             sup._check_ram_optimization(_PKG, _ENTRY, now)
-            mock_android.clear_package_cache_verified.assert_called_once()
+            mock_android.clear_package_cache_safe.assert_called_once()
 
     def test_normal_mode_does_not_trim_at_400mb(self):
         """With aggressive=False, target=700 MB. RAM=400 MB → no action."""
@@ -353,7 +355,7 @@ class TestRamAggressiveMode(unittest.TestCase):
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(400)
             sup._check_ram_optimization(_PKG, _ENTRY, now)
-            mock_android.clear_package_cache_verified.assert_not_called()
+            mock_android.clear_package_cache_safe.assert_not_called()
 
 
 # ── 13: RAM optimization never force-stops before relaunch ────────────────────
@@ -368,7 +370,7 @@ class TestRamRestartForceStop(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1000)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             mock_android.force_stop_package.side_effect = lambda p: call_order.append("stop")
@@ -399,7 +401,7 @@ class TestRamRestartCounts(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1000)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch", return_value=launch_ok):
@@ -431,7 +433,7 @@ class TestRamRestartClearsOnlineTs(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1000)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch", return_value=True):
@@ -467,7 +469,7 @@ class TestRamTimestampUpdates(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(750)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             sup._check_ram_optimization(_PKG, _ENTRY, now)
@@ -568,7 +570,7 @@ class TestTrimRateLimit(unittest.TestCase):
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(750)
             sup._check_ram_optimization(_PKG, _ENTRY, now)
-            mock_android.clear_package_cache_verified.assert_not_called()
+            mock_android.clear_package_cache_safe.assert_not_called()
 
 
 # ── 33: Multi-package independent cooldowns ───────────────────────────────────
@@ -590,7 +592,7 @@ class TestMultiPackageCooldowns(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1000)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch", return_value=True) as mock_launch:
@@ -607,8 +609,8 @@ class TestMultiPackageCooldowns(unittest.TestCase):
         launch_packages = [c.args[0] for c in mock_launch.call_args_list]
         self.assertNotIn(pkg1, launch_packages)
         self.assertNotIn(pkg2, launch_packages)
-        mock_android.clear_package_cache_verified.assert_any_call(pkg1)
-        mock_android.clear_package_cache_verified.assert_any_call(pkg2)
+        mock_android.clear_package_cache_safe.assert_any_call(pkg1, root_info=sup._root_info)
+        mock_android.clear_package_cache_safe.assert_any_call(pkg2, root_info=sup._root_info)
 
 
 # ── 37: Trim failure does not abort ───────────────────────────────────────────
@@ -622,7 +624,7 @@ class TestTrimFailureSafe(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(750)
-            mock_android.clear_package_cache_verified.side_effect = OSError("permission denied")
+            mock_android.clear_package_cache_safe.side_effect = OSError("permission denied")
             # Should not raise.
             try:
                 sup._check_ram_optimization(_PKG, _ENTRY, now)
@@ -658,7 +660,7 @@ class TestRamCheckZeroRss(unittest.TestCase):
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(0, success=False)
             sup._check_ram_optimization(_PKG, _ENTRY, now)
-            mock_android.clear_package_cache_verified.assert_not_called()
+            mock_android.clear_package_cache_safe.assert_not_called()
             mock_android.force_stop_package.assert_not_called()
 
 
@@ -726,14 +728,16 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
         with patch("agent.supervisor.android") as mock_android:
             # Probe-realistic value: 1.3 GB (≫ 900 MB threshold).
             mock_android.get_package_ram_usage.return_value = _ram_result(1328)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch") as mock_launch:
                 with patch.object(sup, "_set_status") as mock_status:
                     sup._check_ram_optimization(_PKG, _ENTRY, now)
             # Cache trim still runs (non-disruptive).
-            mock_android.clear_package_cache_verified.assert_called_once_with(_PKG)
+            mock_android.clear_package_cache_safe.assert_called_once_with(
+                _PKG, root_info=sup._root_info
+            )
             # NO force-stop, NO relaunch, NO status change.
             mock_android.force_stop_package.assert_not_called()
             mock_launch.assert_not_called()
@@ -747,7 +751,7 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1404)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch("agent.supervisor.log_event") as mock_log:
@@ -770,7 +774,7 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1350)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch") as mock_launch:
@@ -792,7 +796,7 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(1500)
-            mock_android.clear_package_cache_verified.return_value = {
+            mock_android.clear_package_cache_safe.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
             with patch.object(sup, "_do_launch", return_value=True) as mock_launch:
