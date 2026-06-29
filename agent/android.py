@@ -2377,6 +2377,68 @@ def clear_safe_package_cache(package: str) -> str:
     return "Skipped"
 
 
+def clear_package_cache_for_start(
+    package: str,
+    *,
+    root_tool: str,
+) -> str:
+    """Fast Start-time cache clear — one root shell per package, no size verify.
+
+    ``clear_package_cache_verified`` runs many subprocess calls per package
+    (existence probes, ``find|wc`` size checks, retries).  Running that for
+    every clone during Start batch prep caused SIGSEGV on Termux/Python 3.13
+    when clearing cache for all packages (probe ``p-7dac7cb6c4``).
+    """
+    package = validate_package_name(package)
+    paths = [
+        f"/data/user/0/{package}/cache",
+        f"/data/user/0/{package}/code_cache",
+        f"/data/data/{package}/cache",
+        f"/data/data/{package}/code_cache",
+        f"/data/data/{package}/files/tmp",
+    ]
+    quoted = " ".join(shlex.quote(p) for p in paths)
+    sh = (
+        f"for p in {quoted}; do "
+        f'[ -d "$p" ] && find "$p" -mindepth 1 -delete 2>/dev/null; '
+        f"done"
+    )
+    res = run_root_command(["sh", "-c", sh], root_tool=root_tool, timeout=45)
+    if res.ok or res.returncode in (0, 1):
+        return "Cleared"
+    return "Failed"
+
+
+def clear_packages_cache_batch(
+    packages: Iterable[str],
+    *,
+    root_info: RootInfo | None = None,
+) -> dict[str, str]:
+    """Clear safe cache dirs for many packages with one root detect."""
+    info = root_info or detect_root()
+    if not info.available or not info.tool:
+        results: dict[str, str] = {}
+        for raw in packages:
+            try:
+                results[validate_package_name(raw)] = "Skipped"
+            except ConfigError:
+                results[str(raw)] = "Skipped"
+        return results
+    root_tool = str(info.tool)
+    results = {}
+    for raw in packages:
+        try:
+            pkg = validate_package_name(raw)
+        except ConfigError:
+            results[str(raw)] = "Failed"
+            continue
+        try:
+            results[pkg] = clear_package_cache_for_start(pkg, root_tool=root_tool)
+        except Exception:  # noqa: BLE001
+            results[pkg] = "Failed"
+    return results
+
+
 _ROBLOX_CLIENT_SETTINGS_REL = "files/ClientSettings/ClientAppSettings.json"
 
 _FORBIDDEN_GRAPHICS_NAME_PARTS = (

@@ -49,6 +49,14 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         self.assertNotIn("threading.Thread", source)
         self.assertNotIn("Thread(", source)
 
+    def test_start_batch_cache_clear_deferred_render(self) -> None:
+        source = inspect.getsource(commands.cmd_start)
+        batch_idx = source.find("batch_clear_cache_begin")
+        done_idx = source.find("batch_clear_cache_done", batch_idx)
+        block = source[batch_idx:done_idx]
+        self.assertIn("_set_all_phase_labels", block)
+        self.assertNotIn('_set_all_phase("Clear Cache"', block)
+
     def test_live_dashboard_caches_package_ram_polling(self) -> None:
         source = inspect.getsource(commands.cmd_start)
         self.assertIn("get_package_ram_usage", source)

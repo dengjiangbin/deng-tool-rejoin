@@ -922,6 +922,111 @@ def _run_license_isolated_subprocess(
     return _normalize_license_check_result(result, message)
 
 
+def _should_isolate_start_cache_clear() -> bool:
+    """Run Start batch cache clear in a child on Termux (probe p-7dac7cb6c4)."""
+    override = (os.environ.get("DENG_START_CACHE_INLINE") or "").strip().lower()
+    if override in ("1", "true", "yes", "on"):
+        return False
+    if "unittest" in sys.modules and any(
+        "unittest" in a or "pytest" in a or "_test_runner" in a for a in sys.argv[:2]
+    ):
+        return False
+    if os.environ.get("TERMUX_VERSION"):
+        return True
+    if os.environ.get("ANDROID_ROOT") or os.environ.get("ANDROID_DATA"):
+        return True
+    return False
+
+
+def _start_batch_cache_clear_isolated(packages: list[str]) -> dict[str, str]:
+    """Clear all package caches in a child so fork bursts cannot SIGSEGV Start."""
+    import subprocess as _sp  # noqa: PLC0415
+
+    if not packages:
+        return {}
+    try:
+        from pathlib import Path as _Path  # noqa: PLC0415
+
+        _agent_parent = str(_Path(__file__).resolve().parent.parent)
+    except Exception:  # noqa: BLE001
+        _agent_parent = os.path.expanduser("~/.deng-tool/rejoin")
+    code = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {_agent_parent!r})\n"
+        "_home = os.environ.get('DENG_REJOIN_HOME')\n"
+        "if _home and _home not in sys.path:\n"
+        "    sys.path.insert(0, _home)\n"
+        "from agent import android\n"
+        "pkgs = json.loads(sys.stdin.read())\n"
+        "try:\n"
+        "    out = android.clear_packages_cache_batch(pkgs)\n"
+        "except Exception as exc:\n"
+        "    out = {p: 'Failed' for p in pkgs}\n"
+        "    out['_error'] = str(exc)[:180]\n"
+        "sys.stdout.write(json.dumps(out))\n"
+    )
+    env = dict(os.environ)
+    prev_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = _agent_parent + (os.pathsep + prev_pp if prev_pp else "")
+    timeout = max(120, len(packages) * 50)
+    try:
+        proc = _sp.Popen(
+            [sys.executable, "-c", code],
+            stdin=_sp.PIPE,
+            stdout=_sp.PIPE,
+            stderr=_sp.PIPE,
+            env=env,
+        )
+        stdout, stderr = proc.communicate(
+            input=json.dumps(packages).encode("utf-8"),
+            timeout=timeout,
+        )
+    except _sp.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.communicate(timeout=5)
+        except Exception:  # noqa: BLE001
+            pass
+        return {pkg: "Failed" for pkg in packages}
+    except OSError:
+        return {pkg: "Failed" for pkg in packages}
+
+    if proc.returncode < 0:
+        return {pkg: "Failed" for pkg in packages}
+    if proc.returncode != 0:
+        return {pkg: "Failed" for pkg in packages}
+    try:
+        data = json.loads((stdout or b"").decode("utf-8", errors="replace") or "{}")
+    except json.JSONDecodeError:
+        return {pkg: "Failed" for pkg in packages}
+    if not isinstance(data, dict):
+        return {pkg: "Failed" for pkg in packages}
+    err = str(data.pop("_error", "") or "").strip()
+    if err:
+        try:
+            from .logger import configure_logging, log_event
+
+            log_event(
+                configure_logging(),
+                "warning",
+                "[DENG_REJOIN_START_BATCH_CACHE_CLEAR]",
+                result="child_error",
+                error=err[:180],
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {str(k): str(v) for k, v in data.items()}
+
+
+def _run_start_batch_cache_clear(packages: list[str]) -> dict[str, str]:
+    """Start prep: fast safe cache clear for every selected package."""
+    if _should_isolate_start_cache_clear():
+        return _start_batch_cache_clear_isolated(packages)
+    from . import android as _android
+
+    return _android.clear_packages_cache_batch(packages)
+
+
 def _remote_license_isolated(
     cfg: dict[str, Any],
     *,
@@ -6120,6 +6225,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                 phase[pkg] = label
             _render_phase(note)
 
+        def _set_all_phase_labels(label: str) -> None:
+            for pkg in phase:
+                phase[pkg] = label
+
         # 1) "Preparing" — force-stop each configured package individually,
         #    verify it is dead, and clear background apps to free RAM.
         #    Only configured/selected packages are targeted; Termux and
@@ -6204,24 +6313,28 @@ def cmd_start(args: argparse.Namespace) -> int:
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         prep_gfx: dict[str, str] = {}
         prep_cache: dict[str, str] = {}
+        package_names = [entry["package"] for entry in entries]
         _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
-        _set_all_phase("Clear Cache", "Clearing cache for all packages...")
+        _set_all_phase_labels("Clear Cache")
+        safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
+        try:
+            prep_cache = _run_start_batch_cache_clear(package_names)
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("start: batch cache clear error: %s", _exc)
+            prep_cache = {pkg: "Failed" for pkg in package_names}
+        _start_session.mark("batch_low_graphics_begin", package_count=len(entries))
         for entry in entries:
             package = entry["package"]
-            try:
-                _cache_result = android.clear_package_cache_verified(package)
-            except Exception as _exc:  # noqa: BLE001
-                _cache_result = {"success": False, "skipped": False, "error": str(_exc)[:80]}
-            prep_cache[package] = (
-                "Cleared" if _cache_result.get("success")
-                else "Skipped" if _cache_result.get("skipped")
-                else "Failed"
+            low = bool(opt.get("low_graphics_enabled", True)) and bool(
+                entry.get("low_graphics_enabled", True)
             )
-            low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
             try:
-                prep_gfx[package] = android.apply_low_graphics_optimization(package, enabled=low)
+                prep_gfx[package] = android.apply_low_graphics_optimization(
+                    package, enabled=low
+                )
             except Exception:  # noqa: BLE001
                 prep_gfx[package] = "error"
+        _render_phase("Clearing cache for all packages...")
         _start_session.mark("batch_clear_cache_done", package_count=len(entries))
         _start_session.mark("package_preparation_done", package_count=len(entries))
 
