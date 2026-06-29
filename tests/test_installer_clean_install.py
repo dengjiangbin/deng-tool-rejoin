@@ -53,26 +53,35 @@ class CacheBustingTests(unittest.TestCase):
 
     def test_colorful_secure_sections_present(self) -> None:
         s = _script()
+        # Simplified installer output (user request p-1bc476d931): only the
+        # essential progress steps are echoed; the verbose "Verifying.../verified"
+        # spam was removed.  The underlying integrity commands still run (asserted
+        # in test_simplified_output_keeps_integrity_checks).
         for text in (
             "DENG Tool: Rejoin Installer",
             "Version: main-dev",
             "Preparing secure download",
-            "Requesting one-time package token",
-            "Token accepted",
             "Downloading protected package",
             "Package downloaded",
-            "Verifying archive SHA256",
-            "Archive verified",
             "Installing files",
             "Files installed",
-            "Verifying signed manifest",
-            "Verifying runtime integrity",
-            "Manifest signature verified",
-            "Runtime verified",
             "Install complete.",
             "Run: deng-rejoin",
         ):
             self.assertIn(text, s)
+        # The removed verbose verification chatter must NOT reappear.
+        for noise in (
+            "Requesting one-time package token",
+            "Token accepted",
+            "Verifying archive SHA256",
+            "Archive verified",
+            "Verifying signed manifest",
+            "Verifying runtime integrity",
+            "Manifest signature verified",
+            "Runtime verified",
+            "Monitor runtime verified",
+        ):
+            self.assertNotIn(noise, s)
         self.assertIn("\\033[1;96m", s)
         self.assertIn("\\033[1;94m", s)
         self.assertIn("\\033[1;93m", s)
@@ -80,6 +89,14 @@ class CacheBustingTests(unittest.TestCase):
         self.assertIn("\\033[1;91m", s)
         self.assertIn("=" * 30, s)
         self.assertIn("-" * 30, s)
+
+    def test_simplified_output_keeps_integrity_checks(self) -> None:
+        # Even though the progress chatter was trimmed, the actual SHA256 match,
+        # protected-runtime verification, and persistent-worker check must remain.
+        s = _script()
+        self.assertIn('[ "$a" = "$s" ]', s)
+        self.assertIn("manifest or runtime integrity check failed", s)
+        self.assertIn("persistent_worker", s)
 
     def test_no_permanent_package_url_or_token_leak(self) -> None:
         s = _script()

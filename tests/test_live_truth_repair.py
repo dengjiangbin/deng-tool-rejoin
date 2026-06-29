@@ -116,8 +116,9 @@ class InstallerUiTests(unittest.TestCase):
         self.assertEqual(script.count("Version: main-dev"), 1)
         self.assertIn("Preparing secure download", script)
         self.assertIn("Files installed", script)
-        self.assertIn("Manifest signature verified", script)
-        self.assertIn("Runtime verified", script)
+        # Verbose "...verified" chatter was simplified away (p-1bc476d931); the
+        # integrity command itself must still run.
+        self.assertIn("manifest or runtime integrity check failed", script)
         self.assertIn("Install complete.", script)
         self.assertNotIn("100%", script)
         self.assertNotIn("[################", script)

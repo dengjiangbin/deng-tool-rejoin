@@ -178,8 +178,6 @@ def print_top_menu(*, prelude_lines: list[str] | None = None) -> None:
             else:
                 _emit(warning_line(line) if "required" in line.lower() else line)
     _emit()
-    _emit(prompt_prefix("Top Menu"))
-    _emit()
     _emit(menu_number("1", "First Time Setup Config"))
     _emit(menu_number("2", "Setup / Edit Config"))
     _emit(menu_number("3", "Start"))

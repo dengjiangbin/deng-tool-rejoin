@@ -68,7 +68,7 @@ def run_menu(args: argparse.Namespace, handlers: dict[str, Handler]) -> int:
         try:
             print_menu(args, prelude)
             with safe_io.tty_session():
-                choice_raw = safe_io.safe_prompt(f"\n{termux_ui.select_option_prompt()}: ")
+                choice_raw = safe_io.safe_prompt(f"\n{termux_ui.select_option_prompt()} ")
             if choice_raw is None:
                 print("\nGoodbye.")
                 return 0

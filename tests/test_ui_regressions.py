@@ -122,7 +122,8 @@ class LogoColorRegressionTests(unittest.TestCase):
             menu.print_menu(type("Args", (), {"no_color": True})(), [])
         text = out.getvalue()
         self.assertIn("Tool: Rejoin", text)
-        self.assertIn("Top Menu", text)
+        # "Top Menu" header removed per user request (p-1bc476d931).
+        self.assertNotIn("Top Menu", text)
         self.assertIn("First Time Setup Config", text)
 
 

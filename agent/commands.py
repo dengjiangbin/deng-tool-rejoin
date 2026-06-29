@@ -2856,7 +2856,7 @@ def _config_menu_package_loop(draft: dict[str, Any]) -> dict[str, Any]:
             ],
             current_lines=current_lines,
         )
-        _mc = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
+        _mc = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')} ", default="0")
         if _mc is None:
             break
         choice = _mc.strip() or "0"
@@ -3426,7 +3426,7 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
             items,
             current_lines=[current_line],
         )
-        _llc = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
+        _llc = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')} ", default="0")
         if _llc is None:
             break
         choice = _llc.strip() or "0"
@@ -4290,7 +4290,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
     with safe_io.tty_session():
         while True:
             termux_ui.print_config_menu()
-            choice = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
+            choice = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')} ", default="0")
             if choice is None:
                 print("\nNo interactive input was available. Run this command in Termux to edit settings.")
                 print("\nCurrent settings:")

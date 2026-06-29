@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import os
 import signal
 import threading
 import time
@@ -170,6 +171,7 @@ STATUS_FAILED            = "Failed"
 STATUS_UNKNOWN           = "Unknown"
 STATUS_JOIN_FAILED       = "Join Failed"
 STATUS_WRONG_GAME        = "Wrong Game / Wrong Server"
+STATUS_CAPTCHA           = "Captcha"           # Bot-verification block; account hangs, NO recovery
 # Richer state constants for improved UX
 STATUS_LOBBY             = "Lobby"             # App open at home/lobby, no URL join active
 STATUS_IN_SERVER         = "In Server"         # Strong evidence: game experience loaded
@@ -187,6 +189,16 @@ STATUS_DISCONNECTED      = "Disconnected"
 # Presence-confirmed steady states that kick off RAM/runtime metric loops.
 _METRIC_ACTIVE_STATES = frozenset({STATUS_ONLINE})
 _ACCOUNT_DEAD_WEBHOOK_STATES = frozenset({
+    STATUS_DEAD,
+    STATUS_DISCONNECTED,
+    STATUS_JOIN_FAILED,
+    # Captcha fires an "Account Dead" webhook (reason "Captcha Verification") but
+    # is deliberately EXCLUDED from the recovery branch below so the package
+    # hangs for a human (user request p-1bc476d931).
+    STATUS_CAPTCHA,
+})
+# States that the watchdog actively recovers (relaunches).  Captcha is NOT here.
+_RECOVERY_TRIGGER_STATES = frozenset({
     STATUS_DEAD,
     STATUS_DISCONNECTED,
     STATUS_JOIN_FAILED,
@@ -1207,7 +1219,7 @@ class WatchdogSupervisor:
     PACKAGE_CHECKING_HOLD_SECONDS: float = 0.5
     PACKAGE_ROUND_ROBIN_TAIL_SECONDS: float = 0.6
     PACKAGE_STAGGER_TAIL_SECONDS: float = 0.5
-    DEFAULT_DETECTION_WORKER_COUNT: int = 2
+    DEFAULT_DETECTION_WORKER_COUNT: int = 3
 
     # ── Blocking recovery gate: poll interval while fixing one package ───────
     RECOVERY_GATE_POLL_SECONDS: float = 5.0
@@ -1328,6 +1340,10 @@ class WatchdogSupervisor:
         self._relaunch_inflight: set[str] = set()
         self._relaunch_verify_until: dict[str, float] = {}
         self._missing_evidence_since: dict[str, float] = {}
+        # Packages currently showing a captcha / bot-verification overlay. Value
+        # is the matched on-screen text. Cleared when the package confirms online
+        # again. Captcha packages hang (no recovery) per user request.
+        self._captcha_detected: dict[str, str] = {}
         self._landscape_repair_round: int = 0  # legacy counter; periodic repair disabled
 
         # ── Per-package RAM optimization tracking ─────────────────────────────
@@ -1652,7 +1668,9 @@ class WatchdogSupervisor:
             count = int(raw)
         except (TypeError, ValueError):
             count = self.DEFAULT_DETECTION_WORKER_COUNT
-        return max(1, min(count, 3))
+        # Cap raised from 3→6 (user request p-1bc476d931): more parallel
+        # detection workers shorten the per-round latency for large clone counts.
+        return max(1, min(count, 6))
 
     def _round_robin_tail_seconds(self) -> float:
         with self._state_lock:
@@ -2510,6 +2528,7 @@ class WatchdogSupervisor:
             "ui_disconnect",
             "logcat_disconnect",
             "game_crash",
+            "captcha",
         )
         if any(token in reason for token in tokens):
             return True
@@ -2645,8 +2664,16 @@ class WatchdogSupervisor:
     # the dominant cost (~8s/package → ~38s round) that delayed acting on OTHER
     # packages' disconnects and force-closes. Skip it while the stream is fresh;
     # keep it as a slow safety net for a genuinely stalled/broken stream.
-    HEAVY_DISCONNECT_SCAN_SECONDS: float = 60.0
-    HEAVY_DISCONNECT_STREAM_FRESH_SECONDS: float = 40.0
+    # Faster defaults + env overrides (user request p-1bc476d931): the heavy UI
+    # scan is the only path that can ever see a GL/WebView dialog (captcha, HTTP
+    # 529), so its cadence bounds how quickly those are detected.  Lowered 60→30
+    # and 40→25; tune up via env if CPU is a concern on low-end devices.
+    HEAVY_DISCONNECT_SCAN_SECONDS: float = float(
+        os.environ.get("DENG_REJOIN_HEAVY_DISCONNECT_SCAN_SEC", "30") or "30"
+    )
+    HEAVY_DISCONNECT_STREAM_FRESH_SECONDS: float = float(
+        os.environ.get("DENG_REJOIN_HEAVY_DISCONNECT_STREAM_FRESH_SEC", "25") or "25"
+    )
 
     def _heavy_disconnect_scan_due(self, pkg: str) -> bool:
         try:
@@ -2678,8 +2705,19 @@ class WatchdogSupervisor:
             return ev
         if ev.process_exists and self._heavy_disconnect_scan_due(pkg):
             try:
-                from .package_online_evidence import detect_live_disconnect
+                from .package_online_evidence import (
+                    detect_live_captcha,
+                    detect_live_disconnect,
+                )
 
+                # Captcha / bot-verification is checked FIRST: its WebView shows
+                # "Waiting for an available server" which would otherwise look
+                # like a normal disconnect.  A captcha block must NOT recover —
+                # flag it and let the package hang (user request p-1bc476d931).
+                captcha_text = detect_live_captcha(pkg)
+                if captcha_text:
+                    self._captcha_detected[pkg] = str(captcha_text)[:120]
+                    return ev
                 disconnect_reason, matched = detect_live_disconnect(
                     pkg,
                     root_info=getattr(self, "_root_info", None),
@@ -2818,11 +2856,30 @@ class WatchdogSupervisor:
         detail = dict(ev.detail)
         reason = str(detail.get("reason") or ev.reason)
 
+        # A captcha overlay only exists while the client is alive; if the process
+        # is gone it is a genuine dead/crash, so drop any stale captcha flag.
+        if not ev.process_exists:
+            self._captcha_detected.pop(pkg, None)
+
         if ev.is_online_confirmed:
             state = STATUS_ONLINE
             self._relaunch_inflight.discard(pkg)
             self._relaunch_verify_until.pop(pkg, None)
             self._missing_evidence_since.pop(pkg, None)
+            # A confirmed in-game join means any earlier captcha was solved/cleared.
+            self._captcha_detected.pop(pkg, None)
+        elif pkg in self._captcha_detected and ev.process_exists:
+            # Bot-verification overlay is up and the client is still alive: hold a
+            # dedicated Captcha state. Recovery is intentionally skipped for this
+            # state (see _RECOVERY_TRIGGER_STATES), so the package hangs for a
+            # human while we still fire the Account Dead webhook once.
+            state = STATUS_CAPTCHA
+            reason = "captcha_verification"
+            detail["reason_internal"] = "captcha_verification"
+            detail["reason_user_friendly"] = "Captcha Verification"
+            detail["matched_disconnect_text"] = self._captcha_detected.get(pkg, "")
+            self._relaunch_inflight.discard(pkg)
+            self._relaunch_verify_until.pop(pkg, None)
         elif ev.internal_state == RJN_DISCONNECTED or detail.get("last_with_reason_at"):
             state = STATUS_DISCONNECTED
             reason = str(detail.get("reason_user_friendly") or reason)
@@ -3638,6 +3695,15 @@ class WatchdogSupervisor:
         elif state in _METRIC_ACTIVE_STATES:
             self._nhb_since.pop(pkg, None)
             self._clear_recovery_launch_throttle(pkg)
+            # [DENG_REJOIN_NONBLOCKING_RECOVERY] probe p-1bc476d931.
+            # The blocking recovery gate (which used to send the "Account
+            # Recovered" webhook) was removed, orphaning the recovered alert.
+            # Fire it here from the steady-Online branch: the call is a no-op
+            # unless a dead webhook was previously sent for this package
+            # (package_lifecycle_recover_pending), so a normal Online package
+            # never spams it — but a relaunched account that comes back in-game
+            # now correctly notifies recovery.
+            self._maybe_send_package_recovered_webhook(pkg, entry)
             log_event(
                 logger, "info", "[DENG_REJOIN_ONLINE_STABLE]",
                 package=pkg,

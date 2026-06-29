@@ -44,8 +44,7 @@ class LicenseGateMenuTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         text = out.getvalue()
-        # Menu must open
-        self.assertIn("Top Menu", text)
+        # Menu must open ("Top Menu" header removed per user request p-1bc476d931).
         self.assertIn("First Time Setup Config", text)
         self.assertIn("Goodbye.", text)
 
@@ -114,7 +113,8 @@ class LicenseGateMenuTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         text = out.getvalue()
-        self.assertIn("Top Menu", text)
+        # "Top Menu" header removed per user request (p-1bc476d931).
+        self.assertIn("First Time Setup Config", text)
         self.assertIn("Goodbye.", text)
 
     def test_no_args_defaults_to_menu_and_requires_license(self):

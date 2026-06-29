@@ -36,8 +36,12 @@ DISCONNECT_SCAN_INTERVAL_SECONDS = 5.0
 # throttle that heavy scan to this cadence instead of running it every round — this
 # is the main fix for the ~8s/package, ~38s/round latency seen in probe
 # p-daee3387a8 that delayed acting on other packages' disconnects/force-closes.
-STREAM_FRESH_DISCONNECT_SKIP_SECONDS = 40.0
-HEAVY_DISCONNECT_FALLBACK_INTERVAL_SECONDS = 60.0
+STREAM_FRESH_DISCONNECT_SKIP_SECONDS = float(
+    os.environ.get("DENG_REJOIN_STREAM_FRESH_SKIP_SEC", "25") or "25"
+)
+HEAVY_DISCONNECT_FALLBACK_INTERVAL_SECONDS = float(
+    os.environ.get("DENG_REJOIN_HEAVY_FALLBACK_INTERVAL_SEC", "30") or "30"
+)
 LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS = 20.0
 
 # ── Authoritative full-dump scan (issue p-9c18ae51bc) ────────────────────────
@@ -98,6 +102,9 @@ _IDLE_DISCONNECT_RE = re.compile(
     r"(disconnected for being idle|Error Code:\s*278|idle\s+\d+\s+minutes|You were disconnected.*idle)",
     re.I,
 )
+# ANY Roblox error code is a real disconnect, not just 278 (user request
+# p-1bc476d931): e.g. "Error Code: 529" (HTTP error), 524 (timeout), 517.
+_ERROR_CODE_LINE_RE = re.compile(r"Error\s*Code:?\s*(\d+)", re.I)
 # Observed joined-server identity extracted from Roblox join logcat lines. placeIds
 # are public (not secret), so they are safe to compare/store. The negative
 # lookbehind keeps the generic placeId pattern from matching inside "rootPlaceId".
@@ -106,7 +113,7 @@ _PLACE_ID_RE = re.compile(r"(?<![a-z])place\s*id[\"']?\s*[:=]\s*\"?(\d{3,})", re
 _UNIVERSE_ID_RE = re.compile(r"universe\s*id[\"']?\s*[:=]\s*\"?(\d{3,})", re.I)
 # Lines worth scanning for a placeId (join/launch only) — avoids matching random ids.
 _JOIN_IDENTITY_HINT_RE = re.compile(
-    r"(placeId|rootPlaceId|universeId|GameJoin|PlaceLauncher|JoinGame|joinScript|"
+    r"(placeId|rootPlaceId|universeId|jobId|gameId|GameJoin|PlaceLauncher|JoinGame|joinScript|"
     r"ActivityProtocolLaunch|share_links|robloxApp://|roblox://)",
     re.I,
 )
@@ -117,6 +124,18 @@ _PRIVATE_CODE_RE = re.compile(
     r"(?:privateServerLinkCode|linkCode|accessCode|gameInstanceId|[?&]code)=([A-Za-z0-9_\-]{4,})",
     re.I,
 )
+# Joined server-instance id (jobId / gameId) — a standard UUID in Roblox join
+# logcat ("gameId:<guid>", "jobId=<guid>"). This is the server instance the
+# client actually joined; it changes when the player moves to a different server
+# of the same place. Compared as a salted hash only.
+_JOB_ID_RE = re.compile(
+    r"(?:jobId|gameId|game_id|serverId)[\"']?\s*[:=]\s*\"?"
+    r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+    re.I,
+)
+# When set, a change of joined server instance (jobId) away from the first
+# server of the session is treated as Wrong Server for private-server configs.
+WRONG_SERVER_JOBID_ENABLED = os.environ.get("DENG_REJOIN_WRONG_SERVER_JOBID", "1").strip() in {"1", "true", "yes"}
 # logcat threadtime prefix: "MM-DD HH:MM:SS.mmm". Used to order dumped lines
 # against wall-clock online evidence (the agent runs on the same device, so
 # logcat local time and time.time() share the same clock).
@@ -216,6 +235,12 @@ class PackageRjnState:
     observed_root_place_id: int = 0
     observed_universe_id: int = 0
     observed_private_code_hash: str = ""
+    # Joined server-instance identity (Roblox jobId / gameId GUID, the value
+    # TeleportService#GetPlayerPlaceInstanceAsync returns as the instance id).
+    # Stored only as a salted hash. Used to catch "same game, different server"
+    # (user changed server) which placeId/universeId alone cannot see.
+    observed_job_id_hash: str = ""
+    anchor_job_id_hash: str = ""
     # Session anchor for the no-config / share-code-only case: the FIRST game
     # identity the client joins after a launch is treated as the configured
     # target, so a later join to a DIFFERENT game (user moved to another link)
@@ -658,6 +683,11 @@ class RjnLifecycleMonitor:
                 phrase = "with reason"
             elif _IDLE_DISCONNECT_RE.search(line):
                 phrase = "idle_disconnect_278"
+            elif _ERROR_CODE_LINE_RE.search(line):
+                # Any other "Error Code: N" line (e.g. 529 HTTP error) is a real
+                # disconnect → route through the with-reason path which now also
+                # parses the Error-Code form.
+                phrase = "with reason"
             elif _DO_TELEPORT_RE.search(line):
                 phrase = "doTeleport"
             else:
@@ -952,6 +982,19 @@ class RjnLifecycleMonitor:
             if code_hash and code_hash != row.observed_private_code_hash:
                 row.observed_private_code_hash = code_hash
                 changed = True
+        m = _JOB_ID_RE.search(raw_line)
+        if m:
+            job_hash = _hash_code(m.group(1))
+            if job_hash:
+                # Anchor the first server-instance of the session, then detect a
+                # later move to a different server (same game). Always anchor on
+                # first sight so private-server configs (which expose no
+                # comparable placeId) still get a wrong-server signal.
+                if not row.anchor_job_id_hash:
+                    row.anchor_job_id_hash = job_hash
+                if job_hash != row.observed_job_id_hash:
+                    row.observed_job_id_hash = job_hash
+                    changed = True
         if not changed:
             return False
         # Session anchor: the first joined game identity after a launch is the
@@ -970,6 +1013,12 @@ class RjnLifecycleMonitor:
             row.anchor_set = True
             return False
         return self._maybe_flag_wrong_server(pkg, at)
+
+    def _has_expected_private_server(self, row: PackageRjnState) -> bool:
+        return bool(
+            row.expected_private_code_hash
+            or row.expected_share_type.strip().lower() == "server"
+        )
 
     def _maybe_flag_wrong_server(self, pkg: str, at: float) -> bool:
         """Transition to DISCONNECTED (reason ``wrong_server``) when the joined
@@ -999,7 +1048,20 @@ class RjnLifecycleMonitor:
             and row.observed_private_code_hash
             and row.expected_private_code_hash != row.observed_private_code_hash
         )
-        if not (mismatch or code_mismatch):
+        # Server-instance (jobId) change: the player moved to a DIFFERENT server
+        # of the same game.  placeId/universeId stay identical, so only the jobId
+        # exposes it.  Gated to private-server configs (or the no-target anchor
+        # mode) to avoid flagging legitimate matchmaking server hops in public
+        # games (user request p-1bc476d931).
+        job_mismatch = bool(
+            WRONG_SERVER_JOBID_ENABLED
+            and row.anchor_job_id_hash
+            and row.observed_job_id_hash
+            and row.anchor_job_id_hash != row.observed_job_id_hash
+            and (self._has_expected_private_server(row) or row.anchor_set
+                 or not self._has_expected_target(row))
+        )
+        if not (mismatch or code_mismatch or job_mismatch):
             return False
         # Debounce: do not re-flag the same wrong server repeatedly between rounds.
         if row.last_wrong_server_at and (at - row.last_wrong_server_at) < 30.0:
@@ -1112,12 +1174,16 @@ class RjnLifecycleMonitor:
                 if ep >= latest_online_epoch:
                     latest_online_epoch = ep
                 continue
-            if _WITH_REASON_RE.search(line) or _IDLE_DISCONNECT_RE.search(line):
+            if (
+                _WITH_REASON_RE.search(line)
+                or _IDLE_DISCONNECT_RE.search(line)
+                or _ERROR_CODE_LINE_RE.search(line)
+            ):
                 ep = self._logcat_line_epoch(line, now)
                 if ep >= latest_disc_epoch:
                     latest_disc_epoch = ep
                     latest_disc_line = line
-                    cm = _DISCONNECT_REASON_CODE_RE.search(line)
+                    cm = _DISCONNECT_REASON_CODE_RE.search(line) or _ERROR_CODE_LINE_RE.search(line)
                     latest_disc_code = int(cm.group(1)) if cm else 0
                     latest_disc_idle = bool(
                         _IDLE_DISCONNECT_RE.search(line) or latest_disc_code == 278
@@ -1198,9 +1264,8 @@ class RjnLifecycleMonitor:
             # Parse the authoritative numeric disconnect code (e.g. 278 = idle) so
             # the user-facing reason shows the real "Error Code: N" text and a 278
             # idle kick is classified correctly.
-            code_match = _DISCONNECT_REASON_CODE_RE.search(
-                getattr(event, "raw_line_sanitized", "") or ""
-            )
+            _raw = getattr(event, "raw_line_sanitized", "") or ""
+            code_match = _DISCONNECT_REASON_CODE_RE.search(_raw) or _ERROR_CODE_LINE_RE.search(_raw)
             transition_reason = "logcat_with_reason"
             if code_match:
                 try:
@@ -1258,6 +1323,8 @@ class RjnLifecycleMonitor:
             row.observed_root_place_id = 0
             row.observed_universe_id = 0
             row.observed_private_code_hash = ""
+            row.observed_job_id_hash = ""
+            row.anchor_job_id_hash = ""
             row.anchor_place_id = 0
             row.anchor_root_place_id = 0
             row.anchor_universe_id = 0

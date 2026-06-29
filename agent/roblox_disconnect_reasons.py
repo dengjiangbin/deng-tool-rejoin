@@ -27,6 +27,10 @@ ROBLOX_ERROR_CODE_PROMPTS: dict[int, str] = {
     278: "You were disconnected for being idle",
     279: "You were disconnected from the server",
     280: "Lost connection",
+    517: "Server shutting down",
+    522: "Roblox is experiencing connection issues",
+    524: "A timeout was reached",
+    529: "A Http error has occurred",
 }
 
 _ERROR_CODE_RE = re.compile(r"Error\s*Code\s*:?\s*(\d+)", re.I)
@@ -74,11 +78,18 @@ def _prompt_from_matched_text(text: str, code: int | None) -> str:
             if not chunk:
                 continue
             if str(code) in chunk or _ERROR_CODE_RE.search(chunk):
-                cleaned = _ERROR_CODE_RE.sub("", chunk).strip(" :-")
+                cleaned = _ERROR_CODE_RE.sub("", chunk).strip(" :-()")
                 if cleaned:
                     return cleaned[:180]
-    cleaned = _ERROR_CODE_RE.sub("", raw).strip(" :-")
-    return (cleaned or raw)[:180]
+    cleaned = _ERROR_CODE_RE.sub("", raw).strip(" :-()")
+    if cleaned:
+        return cleaned[:180]
+    # Stripping the code left nothing (matched text was just "Error Code: N");
+    # prefer the canonical prompt so the reason is not the doubled
+    # "Error Code: N Error Code: N".
+    if code is not None:
+        return ROBLOX_ERROR_CODE_PROMPTS.get(code, "")
+    return raw[:180]
 
 
 def format_error_code_reason(
@@ -126,6 +137,8 @@ def format_lifecycle_dead_reason(
     from .lifecycle_reasons import format_user_friendly_dead_reason
 
     key = str(internal_key or "").strip()
+    if key == "captcha_verification":
+        return "Captcha Verification"
     if key.startswith("disconnect_code_"):
         try:
             code = int(key.split("_", 2)[2])

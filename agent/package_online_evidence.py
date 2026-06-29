@@ -24,8 +24,13 @@ STATE_RELAUNCHING = "RELAUNCHING"
 _DISCONNECT_UI_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bDisconnected\b", re.I),
     re.compile(r"\bConnection lost\b", re.I),
-    re.compile(r"\bError Code:\s*278\b", re.I),
-    re.compile(r"\bError Code 278\b", re.I),
+    # ALL Roblox error codes are treated as dead, not just 278 (user request
+    # p-1bc476d931).  A generic "Error Code: <n>" / "Error Code <n>" anywhere in
+    # the kick dialog (e.g. 260-280, 517, 524, 529 HTTP error) is a real
+    # disconnect — the numeric code is later parsed by parse_roblox_error_code.
+    re.compile(r"\bError Code:?\s*\d+\b", re.I),
+    re.compile(r"\bA?\s*Http error has occurred\b", re.I),
+    re.compile(r"\bPlease close the client and try again\b", re.I),
     re.compile(r"\bdisconnected for being idle\b", re.I),
     re.compile(r"\bYou were disconnected\b", re.I),
     re.compile(r"\bYou were kicked\b", re.I),
@@ -33,6 +38,21 @@ _DISCONNECT_UI_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bWaiting for an available server\b", re.I),
     re.compile(r"\bReconnect\b", re.I),
     re.compile(r"\bConnectionError\b", re.I),
+]
+
+# Captcha / bot-verification block (user request p-1bc476d931).  Roblox shows an
+# Arkose/FunCaptcha "Verifying you're not a bot" challenge inside a WebView
+# overlay.  This is NOT a normal disconnect and must NOT trigger recovery — the
+# account is flagged Captcha and left hanging for a human.  These phrases are the
+# stable, non-localized strings on that screen.
+_CAPTCHA_UI_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"Verifying you'?re not a bot", re.I),
+    re.compile(r"\bnot a bot\b", re.I),
+    re.compile(r"\bStart Puzzle\b", re.I),
+    re.compile(r"solve this challenge", re.I),
+    re.compile(r"know you are a real person", re.I),
+    re.compile(r"\bFunCaptcha\b", re.I),
+    re.compile(r"\barkose\b", re.I),
 ]
 
 # Conservative idle-kick patterns for full window dumps (avoid generic Reconnect-only hits).
@@ -227,6 +247,16 @@ def _scan_idle_disconnect_text(blob: str) -> tuple[bool, str | None]:
     if not blob:
         return False, None
     for pattern in _IDLE_DISCONNECT_PATTERNS:
+        match = pattern.search(blob)
+        if match:
+            return True, match.group(0)[:120]
+    return False, None
+
+
+def _scan_captcha_text(blob: str) -> tuple[bool, str | None]:
+    if not blob:
+        return False, None
+    for pattern in _CAPTCHA_UI_PATTERNS:
         match = pattern.search(blob)
         if match:
             return True, match.group(0)[:120]
@@ -454,6 +484,42 @@ def detect_live_disconnect(
             pass
         return internal_reason_for_disconnect_code(None), matched
     return "ui_disconnect", matched
+
+
+def detect_live_captcha(package: str) -> str | None:
+    """Return the matched captcha-screen text when a bot-verification overlay is
+    visible, else None.
+
+    The Arkose/FunCaptcha challenge renders inside an Android WebView, so its
+    text is visible to ``uiautomator dump`` / ``dumpsys window`` (unlike the
+    GL-painted in-game surface).  Callers MUST treat a hit as a "let it hang"
+    Captcha state, never as a recoverable disconnect (user request p-1bc476d931).
+    """
+    pkg = validate_package_name(package)
+    blobs: list[str] = []
+    try:
+        win = android.run_command(["dumpsys", "window", "windows"], timeout=6)
+        if win.ok and win.stdout:
+            blobs.append(win.stdout[:64000])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        top = android.run_command(["dumpsys", "activity", "top"], timeout=5)
+        if top.ok and top.stdout:
+            blobs.append(top.stdout[:48000])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        res = android.run_command(["uiautomator", "dump", "/dev/stdout"], timeout=6)
+        if res.ok and res.stdout:
+            blobs.append(res.stdout[:48000])
+    except Exception:  # noqa: BLE001
+        pass
+    for blob in blobs:
+        found, text = _scan_captcha_text(blob)
+        if found:
+            return text
+    return None
 
 
 def capture_package_online_probe(

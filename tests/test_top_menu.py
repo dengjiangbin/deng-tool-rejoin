@@ -58,8 +58,8 @@ class TestTopMenuOutput(unittest.TestCase):
              redirect_stdout(out):
             menu.print_menu(_args(), [])
         text = out.getvalue()
-        self.assertIn("[?]", text)
-        self.assertIn("Top Menu", text)
+        # "Top Menu" header / "[?]" prompt removed per user request (p-1bc476d931).
+        self.assertNotIn("Top Menu", text)
         self.assertIn("First Time Setup Config", text)
         self.assertIn("Setup / Edit Config", text)
         self.assertIn("Start", text)

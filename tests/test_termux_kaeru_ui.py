@@ -114,8 +114,12 @@ class TestMenuPrefixes(unittest.TestCase):
              patch("agent.menu.print_banner"), \
              redirect_stdout(out):
             menu.print_menu(_args(), [])
-        self.assertIn("[?]", out.getvalue())
-        self.assertIn("Top Menu", out.getvalue())
+        # "Top Menu" header removed per user request (p-1bc476d931); the menu
+        # still renders its numbered items.
+        text = out.getvalue()
+        self.assertNotIn("Top Menu", text)
+        self.assertIn("First Time Setup Config", text)
+        self.assertIn("Start", text)
 
     def test_setup_config_prompt_prefix(self) -> None:
         out = io.StringIO()

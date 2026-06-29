@@ -96,6 +96,7 @@ _ACTIVITY_INGAME_FRAGMENTS = (
     "gameclient",
     "experienceactivity",
     "placejoin",
+    "activitynativemain",
 )
 
 # Activity class name fragments → home / lobby
