@@ -68,6 +68,11 @@ _UID_OPTIONAL_ONLINE_SOURCES = frozenset({
     "activity_in_game",
     "online_evidence",
     "logcat_join_hint",
+    # The in-game Lua detector only posts AFTER game.Loaded from inside a live
+    # server, so it is definitive proof of being in-game even on a clone whose
+    # device UID never resolved for log attribution.  Requiring a UID here was
+    # silently keeping such clones from ever flipping Online (p-5d0df79c33).
+    "push_heartbeat",
 })
 
 STATE_STOPPED = "STOPPED"
@@ -251,6 +256,11 @@ class PackageRjnState:
     anchor_universe_id: int = 0
     anchor_set: bool = False
     last_wrong_server_at: float = 0.0
+    # Latches once a provable server/game mismatch is observed.  Keeps the
+    # package in DISCONNECTED even when a later (unchanged) heartbeat for the
+    # SAME wrong server would otherwise re-confirm it Online — that flip/flop
+    # was why a moved package never stayed flagged (p-5d0df79c33).
+    wrong_server_active: bool = False
     # Authoritative full-dump scan bookkeeping.
     last_dump_scan_at: float = 0.0
     last_dump_disconnect_epoch: float = 0.0
@@ -765,13 +775,17 @@ class RjnLifecycleMonitor:
     ) -> None:
         row = self._states[pkg]
         source_norm = str(source or "").strip()
-        if row.launch_started_at > 0:
-            if source_norm != "gamejoinloadtime" and at < row.launch_started_at:
+        # ``gamejoinloadtime`` (logcat join marker) and ``push_heartbeat`` (the
+        # in-game Lua detector, which only fires AFTER game.Loaded) are both
+        # definitive proof the client is in a live server — they are NOT subject
+        # to the launch-window debounce that protects the slow scrape fallbacks
+        # from confirming online prematurely.  Gating push behind the 20s window
+        # was the main cause of "relaunching → online 5 minutes" (p-5d0df79c33).
+        definitive = source_norm in {"gamejoinloadtime", "push_heartbeat"}
+        if row.launch_started_at > 0 and not definitive:
+            if at < row.launch_started_at:
                 return
-            if (
-                source_norm != "gamejoinloadtime"
-                and (at - row.launch_started_at) < LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS
-            ):
+            if (at - row.launch_started_at) < LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS:
                 return
         row.last_logcat_event_at = at
         row.watchdog_active = False
@@ -999,8 +1013,17 @@ class RjnLifecycleMonitor:
                 row.anchor_root_place_id = row.observed_root_place_id
                 row.anchor_place_id = row.observed_place_id
                 row.anchor_set = True
-            elif changed and self._maybe_flag_wrong_server(pkg, seen_at):
-                return "wrong_server"
+            else:
+                # Re-evaluate EVERY heartbeat, not only when the ids changed: a
+                # package that stays in the wrong server keeps sending the same
+                # (unchanged) placeId, and the old "elif changed" gate let the
+                # next heartbeat re-confirm it Online — so a moved package never
+                # stayed flagged.  ``_is_wrong_server_now`` is the pure predicate;
+                # ``_maybe_flag_wrong_server`` performs the (debounced) transition.
+                if self._is_wrong_server_now(row):
+                    self._maybe_flag_wrong_server(pkg, seen_at)
+                    return "wrong_server"
+                row.wrong_server_active = False
             if bool(alive):
                 self._confirm_online_evidence(pkg, seen_at, source="push_heartbeat")
                 return "online"
@@ -1094,14 +1117,12 @@ class RjnLifecycleMonitor:
             or row.expected_share_type.strip().lower() == "server"
         )
 
-    def _maybe_flag_wrong_server(self, pkg: str, at: float) -> bool:
-        """Transition to DISCONNECTED (reason ``wrong_server``) when the joined
-        server identity provably differs from the configured target. Fail-safe:
-        only fires when BOTH an expected and an observed id of the same kind are
-        known and they differ. Never fires on missing/partial data."""
-        row = self._states.get(pkg)
-        if row is None:
-            return False
+    def _is_wrong_server_now(self, row: PackageRjnState) -> bool:
+        """Pure predicate: does the observed server identity provably differ from
+        the configured target / session anchor?  Fail-safe — only True when BOTH
+        an expected/anchor id and an observed id of the same kind are known and
+        they differ.  No side effects (no transition); used both to GATE online
+        re-confirmation and (via ``_maybe_flag_wrong_server``) to TRANSITION."""
         pairs = (
             # Configured ("expected") target vs observed.
             (row.expected_place_id, row.observed_place_id),
@@ -1135,8 +1156,19 @@ class RjnLifecycleMonitor:
             and (self._has_expected_private_server(row) or row.anchor_set
                  or not self._has_expected_target(row))
         )
-        if not (mismatch or code_mismatch or job_mismatch):
+        return bool(mismatch or code_mismatch or job_mismatch)
+
+    def _maybe_flag_wrong_server(self, pkg: str, at: float) -> bool:
+        """Transition to DISCONNECTED (reason ``wrong_server``) when the joined
+        server identity provably differs from the configured target. Fail-safe:
+        only fires when BOTH an expected and an observed id of the same kind are
+        known and they differ. Never fires on missing/partial data."""
+        row = self._states.get(pkg)
+        if row is None:
             return False
+        if not self._is_wrong_server_now(row):
+            return False
+        row.wrong_server_active = True
         # Debounce: do not re-flag the same wrong server repeatedly between rounds.
         if row.last_wrong_server_at and (at - row.last_wrong_server_at) < 30.0:
             return False
@@ -1403,6 +1435,8 @@ class RjnLifecycleMonitor:
             row.anchor_root_place_id = 0
             row.anchor_universe_id = 0
             row.anchor_set = False
+            row.wrong_server_active = False
+            row.last_wrong_server_at = 0.0
             row.last_dump_disconnect_epoch = 0.0
             if relaunch:
                 row.internal_state = STATE_RELAUNCHING
@@ -1435,12 +1469,25 @@ class RjnLifecycleMonitor:
             pass
         return bool(pids), pids
 
-    def evaluate_package(self, package: str) -> PackageEvaluateResult:
+    def evaluate_package(
+        self, package: str, *, fast_push: bool = False
+    ) -> PackageEvaluateResult:
+        """Evaluate one package's lifecycle state.
+
+        ``fast_push`` is set by the supervisor when a *fresh* in-game Lua
+        heartbeat already established the live-server truth (placeId/jobId).  In
+        that case the expensive logcat dump + UI disconnect scan are skipped:
+        the heartbeat is authoritative and a disconnect would show up as the
+        heartbeat going silent (handled by the supervisor's loss watchdog), not
+        as a log line.  This is what keeps a full round in the low single-digit
+        seconds so every transition resolves under ~15s (p-5d0df79c33).
+        """
         pkg = str(package or "").strip()
         now = time.time()
         failed: list[str] = []
         self._ensure_logcat_stream()
-        self._poll_recent_logcat()
+        if not fast_push:
+            self._poll_recent_logcat()
         with self._lock:
             row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
             effective_uid = row.uid or self._uid_map.get(pkg) or ""
@@ -1503,6 +1550,13 @@ class RjnLifecycleMonitor:
                             at=now,
                             offline=True,
                         )
+            elif fast_push:
+                # Fresh in-game heartbeat already proved the live server this
+                # round — skip the 8s/pid logcat dump and the dumpsys/uiautomator
+                # disconnect scan entirely.  A real disconnect manifests as the
+                # heartbeat going silent (supervisor loss watchdog), not a log line.
+                row.process_missing_streak = 0
+                row.force_close_detected = False
             else:
                 row.process_missing_streak = 0
                 row.force_close_detected = False

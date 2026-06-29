@@ -213,18 +213,22 @@ def _env_float(name: str, default: float) -> float:
 
 
 # In-game Lua push-channel: how fresh a heartbeat must be to be trusted as
-# "in this server right now".  detector.lua posts every ~5s, so 15s tolerates
-# two missed posts before falling back to the slow scrape path.
-PUSH_HEARTBEAT_FRESH_SECONDS = _env_float("DENG_REJOIN_PUSH_HEARTBEAT_FRESH_SECONDS", 15.0)
+# "in this server right now".  detector.lua now posts every ~3s, so 9s tolerates
+# two missed posts before falling back to the slow scrape path.  Keeping this
+# tight is what makes the fast path FAST: a fresh heartbeat is authoritative, so
+# the whole dumpsys/uiautomator/logcat scrape + presence network round-trip is
+# skipped entirely (user p-5d0df79c33: detection must trigger in <15s).
+PUSH_HEARTBEAT_FRESH_SECONDS = _env_float("DENG_REJOIN_PUSH_HEARTBEAT_FRESH_SECONDS", 9.0)
 
 # How long the in-game Lua heartbeat may be SILENT — after having streamed for
 # this package — before we treat the client as having left the live server.
-# detector.lua posts every ~5s and keeps posting through a normal teleport gap;
-# when the player is kicked to a GL-rendered error dialog (e.g. HTTP error 529,
-# which dumpsys/uiautomator/logcat cannot see on a background clone) the Lua VM
-# unloads and heartbeats simply stop.  This loss is the only reliable signal for
-# such errors, so after this grace we verify (captcha? presence?) and recover.
-PUSH_HEARTBEAT_LOSS_SECONDS = _env_float("DENG_REJOIN_PUSH_HEARTBEAT_LOSS_SECONDS", 90.0)
+# detector.lua posts every ~3s; 12s == four missed posts.  When the player is
+# kicked to a GL-rendered error dialog (e.g. HTTP error 529 / any error code,
+# which dumpsys/uiautomator/logcat cannot see on a background clone), is teleported
+# to a different game, dies, or crashes, the Lua VM unloads and heartbeats stop.
+# This loss is the only reliable signal for such errors, so after this short grace
+# we verify (captcha? presence?) and recover — keeping dead→relaunch under ~15s.
+PUSH_HEARTBEAT_LOSS_SECONDS = _env_float("DENG_REJOIN_PUSH_HEARTBEAT_LOSS_SECONDS", 12.0)
 
 # All healthy states — used for legacy _PackageWorker state-machine guards.
 # WatchdogSupervisor never reads _HEALTHY_STATES; only _PackageWorker uses it.
@@ -2870,6 +2874,15 @@ class WatchdogSupervisor:
         except Exception:  # noqa: BLE001
             return ev
 
+    def _push_fresh(self, pkg: str) -> bool:
+        """True when this package's in-game Lua detector reported within the
+        freshness window.  When fresh, the heartbeat is authoritative and the
+        whole slow scrape + presence path is skipped (the fast path)."""
+        if pkg not in self._push_ever_seen:
+            return False
+        last = float(self._push_last_seen.get(pkg, 0.0) or 0.0)
+        return last > 0.0 and (time.time() - last) <= PUSH_HEARTBEAT_FRESH_SECONDS
+
     def _ingest_push_heartbeat(self, pkg: str) -> str:
         """Consume the latest in-game Lua push heartbeat for ``pkg`` (if fresh).
 
@@ -3007,13 +3020,18 @@ class WatchdogSupervisor:
         # BEFORE the slow scrape so evaluate_package reflects online / wrong
         # server instantly without dumpsys/uiautomator/logcat work.
         self._ingest_push_heartbeat(pkg)
-        ev = self._rjn_monitor.evaluate_package(pkg)
-        ev = self._try_online_evidence_fallback(pkg, ev)
-        ev = self._try_presence_target_verification(pkg, ev)
-        # A package kept "Online" only by a now-silent in-game heartbeat has left
-        # the live server (HTTP 529 / kick that scrapers can't see) — classify
-        # and demote so recovery (or Captcha-hang) is triggered.
-        ev = self._maybe_demote_on_heartbeat_loss(pkg, ev)
+        fresh_push = self._push_fresh(pkg)
+        ev = self._rjn_monitor.evaluate_package(pkg, fast_push=fresh_push)
+        if not fresh_push:
+            # No trustworthy in-game heartbeat this round → fall back to the slow
+            # scrape + presence ground-truth, and let the heartbeat-loss watchdog
+            # decide if a previously-streaming client has gone silent (529/kick).
+            ev = self._try_online_evidence_fallback(pkg, ev)
+            ev = self._try_presence_target_verification(pkg, ev)
+            # A package kept "Online" only by a now-silent in-game heartbeat has
+            # left the live server (HTTP 529 / kick that scrapers can't see) —
+            # classify and demote so recovery (or Captcha-hang) is triggered.
+            ev = self._maybe_demote_on_heartbeat_loss(pkg, ev)
         current = str(self.status_map.get(pkg) or "").strip()
         detail = dict(ev.detail)
         reason = str(detail.get("reason") or ev.reason)
@@ -4174,9 +4192,15 @@ class WatchdogSupervisor:
                 prev = self._prev_state.get(pkg, self.status_map.get(pkg, ""))
                 error_text = ""
                 launching_eval = self._needs_launching_evaluation(pkg)
+                # A package whose in-game detector is live needs no slow scrape,
+                # so we also skip the cosmetic "Checking" hold + the round-robin
+                # tail pause for it — that is what keeps a full round at a few
+                # seconds even with many clones (p-5d0df79c33: detect < 15s).
+                fast_pkg = self._push_fresh(pkg)
                 self._set_status(pkg, STATUS_CHECKING)
                 _maybe_render(force=True)
-                self._interruptible_sleep(self.PACKAGE_CHECKING_HOLD_SECONDS)
+                if not fast_pkg:
+                    self._interruptible_sleep(self.PACKAGE_CHECKING_HOLD_SECONDS)
                 if pkg in prefetched:
                     state, detail, launching_eval, error_text = prefetched[pkg]
                 else:
@@ -4292,9 +4316,10 @@ class WatchdogSupervisor:
                         package=pkg,
                         next_package_index=(opened_index + 1) if opened_index < monitor_total else 1,
                         checking_hold_sec=self.PACKAGE_CHECKING_HOLD_SECONDS,
-                        tail_pause_sec=self._round_robin_tail_seconds(),
+                        tail_pause_sec=0.0 if fast_pkg else self._round_robin_tail_seconds(),
                     )
-                    self._interruptible_sleep(self._round_robin_tail_seconds())
+                    if not fast_pkg:
+                        self._interruptible_sleep(self._round_robin_tail_seconds())
 
             _counts = {
                 "online":       sum(1 for v in self.status_map.values() if v == STATUS_ONLINE),
