@@ -158,4 +158,21 @@ def stop_running_agent(pid_path: Path = PID_PATH, lock_path: Path = LOCK_PATH, *
             manager.cleanup()
             return True, f"stopped agent PID {pid}"
         time.sleep(0.25)
+
+    # SIGTERM ignored. A confirmed-DENG process that won't exit is almost always
+    # a STALE OLD-BUILD watchdog left over from a previous install (probe
+    # p-70897e1166: PID 22344 kept running pre-fix code — still emitting the
+    # removed RAM_TRIM cache clear — across a reinstall).  Escalate to SIGKILL so
+    # old crashy code can never linger and run cache-clear bursts after Start.
+    sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+    try:
+        os.kill(pid, sigkill)
+    except OSError:
+        pass
+    kill_deadline = time.time() + max(3, timeout // 2)
+    while time.time() < kill_deadline:
+        if not is_process_alive(pid):
+            manager.cleanup()
+            return True, f"force-killed stale agent PID {pid}"
+        time.sleep(0.25)
     return False, f"sent stop signal to PID {pid}, but it still appears alive"

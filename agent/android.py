@@ -2469,86 +2469,26 @@ def clear_package_cache_safe(
     }
 
 
-def _start_mass_cache_paths(package: str) -> list[str]:
-    pkg = validate_package_name(package)
-    return [
-        f"/data/user/0/{pkg}/cache",
-        f"/data/user/0/{pkg}/code_cache",
-        f"/data/data/{pkg}/cache",
-        f"/data/data/{pkg}/code_cache",
-        f"/data/data/{pkg}/files/tmp",
-    ]
-
-
-def _build_start_mass_cache_clear_shell(packages: list[str]) -> str:
-    """Inline root shell: wipe safe cache dirs for every package."""
-    script_parts: list[str] = []
-    for pkg in packages:
-        quoted = " ".join(shlex.quote(p) for p in _start_mass_cache_paths(pkg))
-        script_parts.append(
-            f'for p in {quoted}; do '
-            f'[ -d "$p" ] && rm -rf "$p"/* 2>/dev/null; '
-            f"done"
-        )
-    return "; ".join(script_parts)
-
-
-def _termux_start_mass_cache_script_path() -> Path:
-    from .constants import APP_HOME
-
-    tmp = APP_HOME / "tmp"
-    tmp.mkdir(parents=True, exist_ok=True)
-    return tmp / "deng_start_mass_cache.sh"
-
-
-def write_termux_start_mass_cache_script(
-    packages: list[str],
-    *,
-    root_tool: str,
-) -> Path:
-    """Write mass-cache shell script under APP_HOME/tmp — no subprocess (p-9d6d6a8cc3)."""
-    tool = str(root_tool or "su").strip() or "su"
-    lines = ["#!/system/bin/sh", "umask 077"]
-    for pkg in packages:
-        paths = _start_mass_cache_paths(pkg)
-        quoted = " ".join(shlex.quote(p) for p in paths)
-        inner = f'for p in {quoted}; do [ -d "$p" ] && rm -rf "$p"/* 2>/dev/null; done'
-        lines.append(f"{shlex.quote(tool)} -c {shlex.quote(inner)}")
-        lines.append("sleep 0.2")
-    script_path = _termux_start_mass_cache_script_path()
-    script_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    try:
-        script_path.chmod(0o700)
-    except OSError:
-        pass
-    return script_path
-
-
-def dispatch_termux_start_mass_cache_script(script_path: Path) -> bool:
-    """Launch script via tiny nohup wrapper — never pass huge inline su -c to Popen."""
-    quoted = shlex.quote(str(script_path))
-    shell = f"nohup sh {quoted} </dev/null >/dev/null 2>&1 &"
-    return _iso.spawn_detached(["sh", "-c", shell], lock=subprocess_lock())
-
-
-def clear_packages_cache_mass_batch_termux(
-    packages: list[str],
-    *,
-    root_tool: str,
-) -> dict[str, str]:
-    """Phase-1 Start mass clear — script file + minimal detached nohup (p-9d6d6a8cc3)."""
-    script_path = write_termux_start_mass_cache_script(packages, root_tool=root_tool)
-    ok = dispatch_termux_start_mass_cache_script(script_path)
-    label = "Dispatched" if ok else "Failed"
-    return {pkg: label for pkg in packages}
-
-
 def clear_packages_cache_mass_batch(
     packages: Iterable[str],
     *,
     root_info: RootInfo | None = None,
 ) -> dict[str, str]:
-    """Phase-1 Start mass clear — detached on Termux, inline elsewhere."""
+    """Phase-1 Start mass clear (cache-clear TYPE A) — all selected clones.
+
+    Each package is wiped with **one locked root shell** using the exact same
+    ``find -delete`` primitive (:func:`clear_package_cache_for_start`) that
+    dead-recovery (TYPE B) already runs successfully from the watchdog thread.
+
+    History (probes p-7dac7cb6c4 → p-9d6d6a8cc3 → p-70897e1166): every
+    experimental Start-only variant SIGSEGV'd Termux/Python 3.13 —
+      * one giant combined ``rm -rf "$p"/*`` shell for all 6 clones,
+      * a nested ``python3 -c`` child (the child fork itself crashed the parent),
+      * a detached ``nohup`` script.
+    The per-package ``find -delete`` shell never crashed in recovery, so Start
+    now uses the identical proven path.  No nested Python fork, no detached
+    launcher, no mega-argv.  A failure on one clone never aborts the batch.
+    """
     package_list: list[str] = []
     results: dict[str, str] = {}
     for raw in packages:
@@ -2563,26 +2503,12 @@ def clear_packages_cache_mass_batch(
         for pkg in package_list:
             results.setdefault(pkg, "Skipped")
         return results
-    if is_termux():
-        root_tool = str(info.tool)
-        return clear_packages_cache_mass_batch_termux(package_list, root_tool=root_tool)
-    script_parts: list[str] = []
+    root_tool = str(info.tool)
     for pkg in package_list:
-        quoted = " ".join(shlex.quote(p) for p in _start_mass_cache_paths(pkg))
-        script_parts.append(
-            f'for p in {quoted}; do '
-            f'[ -d "$p" ] && rm -rf "$p"/* 2>/dev/null; '
-            f"done"
-        )
-    sh = "; ".join(script_parts)
-    res = run_root_command(
-        ["sh", "-c", sh],
-        root_tool=str(info.tool),
-        timeout=max(60, len(package_list) * 15),
-    )
-    label = "Cleared" if res.ok or res.returncode in (0, 1) else "Failed"
-    for pkg in package_list:
-        results[pkg] = label
+        try:
+            results[pkg] = clear_package_cache_for_start(pkg, root_tool=root_tool)
+        except Exception:  # noqa: BLE001
+            results[pkg] = "Failed"
     return results
 
 
