@@ -274,6 +274,55 @@ def _format_system_ram(mem_info: Any) -> str | None:
     return f"💾 RAM: {free} free{pct_text}"
 
 
+def _device_used_mb(mem_info: Any) -> float | None:
+    """Device RAM physically in use (MB), derived from the same telemetry the
+    System Stats line shows: ``total_mb - free/available``.  Falls back to
+    ``free_mb`` + ``percent_free`` when total is missing."""
+    if not isinstance(mem_info, dict):
+        return None
+    total = _coerce_float(mem_info.get("total_mb"))
+    free = _memory_mb_value(mem_info.get("free_mb"))
+    if free is None:
+        free = _memory_mb_value(mem_info.get("available_mb"))
+    if total is not None and total > 0 and free is not None:
+        return max(0.0, total - free)
+    pct = _coerce_float(mem_info.get("percent_free"))
+    if free is not None and pct is not None and 0 < pct < 100:
+        total_est = free / (pct / 100.0)
+        return max(0.0, total_est - free)
+    return None
+
+
+def _proportional_ram_display(
+    weights_mb: dict[str, float], used_mb: float | None
+) -> dict[str, str]:
+    """Reconcile per-package RAM with the device's real used RAM.
+
+    Cloud-phone / multi-instance setups report inflated PSS per clone: shared
+    graphics buffers and native libraries are not page-shared across separate
+    UID sandboxes, and the virtualized ``/proc/meminfo`` total is small, so
+    summing raw PSS across 9 packages (≈9 GB) wildly exceeds the device's real
+    used RAM (≈3 GB).  That is the "doesn't add up" the user reported.
+
+    When the raw per-package sum exceeds used RAM, we present each package's
+    PROPORTIONAL share of the actual used RAM instead — honest and internally
+    consistent (Σ per-package ≈ used RAM, e.g. 3000 MB / 9 ≈ 330 MB each).
+    On normal devices (raw sum already fits within used RAM) the values are
+    left untouched so we never distort already-correct numbers.
+    """
+    out: dict[str, str] = {}
+    total_weight = sum(w for w in weights_mb.values() if w and w > 0)
+    if used_mb is None or used_mb <= 0 or total_weight <= 0:
+        return out
+    if total_weight <= used_mb:
+        return out  # already consistent — keep honest values as-is
+    scale = used_mb / total_weight
+    for pkg, w in weights_mb.items():
+        if w and w > 0:
+            out[pkg] = f"{max(1, int(round(w * scale)))} MB"
+    return out
+
+
 def _redact_exception(exc: BaseException) -> str:
     return str(exc).replace("\n", " ")[:200]
 
@@ -1030,6 +1079,27 @@ def build_status_embed_payload(
     ])
 
     snapshot_by_package = {str(row.get("package") or ""): row for row in snapshot}
+
+    # Reconcile per-package RAM with the device's real used RAM so the numbers
+    # add up (cloud-phone PSS inflation makes a naive 9×~900 MB sum impossible
+    # on a 4 GB device).  Weight by each online package's PSS.
+    _used_mb = _device_used_mb(mem_info)
+    _ram_weights: dict[str, float] = {}
+    for _entry in entries:
+        _pkg = _entry["package"]
+        _stats = app_stats.get(_pkg, {})
+        _snap = snapshot_by_package.get(_pkg, {})
+        if not (bool(_stats.get("online")) or str(_snap.get("status") or "") == "Online"):
+            continue
+        _w = _coerce_float(_snap.get("pss_mb"))
+        if not _w or _w <= 0:
+            _w = _memory_mb_value(
+                _stats.get("memory_mb") if "memory_mb" in _stats else _snap.get("ram_mb")
+            )
+        if _w and _w > 0:
+            _ram_weights[_pkg] = float(_w)
+    _ram_normalized = _proportional_ram_display(_ram_weights, _used_mb)
+
     detail_lines: list[str] = []
     for entry in entries:
         pkg = entry["package"]
@@ -1049,6 +1119,8 @@ def build_status_embed_payload(
         if uptime:
             sub.append(f"⏱️ {uptime}")
         memory = _format_memory_mb(stats.get("memory_mb") if "memory_mb" in stats else snap.get("ram_mb"))
+        if _ram_normalized.get(pkg):
+            memory = _ram_normalized[pkg]
         if memory:
             sub.append(f"💾 {memory}")
         cpu = _format_cpu_pct(stats.get("cpu_pct"))
