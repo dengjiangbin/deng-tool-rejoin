@@ -2493,19 +2493,52 @@ def _build_start_mass_cache_clear_shell(packages: list[str]) -> str:
     return "; ".join(script_parts)
 
 
-def clear_packages_cache_mass_batch_fire_and_forget(
+def _termux_start_mass_cache_script_path() -> Path:
+    from .constants import APP_HOME
+
+    tmp = APP_HOME / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    return tmp / "deng_start_mass_cache.sh"
+
+
+def write_termux_start_mass_cache_script(
     packages: list[str],
     *,
-    root_info: RootInfo | None = None,
+    root_tool: str,
+) -> Path:
+    """Write mass-cache shell script under APP_HOME/tmp — no subprocess (p-9d6d6a8cc3)."""
+    tool = str(root_tool or "su").strip() or "su"
+    lines = ["#!/system/bin/sh", "umask 077"]
+    for pkg in packages:
+        paths = _start_mass_cache_paths(pkg)
+        quoted = " ".join(shlex.quote(p) for p in paths)
+        inner = f'for p in {quoted}; do [ -d "$p" ] && rm -rf "$p"/* 2>/dev/null; done'
+        lines.append(f"{shlex.quote(tool)} -c {shlex.quote(inner)}")
+        lines.append("sleep 0.2")
+    script_path = _termux_start_mass_cache_script_path()
+    script_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        script_path.chmod(0o700)
+    except OSError:
+        pass
+    return script_path
+
+
+def dispatch_termux_start_mass_cache_script(script_path: Path) -> bool:
+    """Launch script via tiny nohup wrapper — never pass huge inline su -c to Popen."""
+    quoted = shlex.quote(str(script_path))
+    shell = f"nohup sh {quoted} </dev/null >/dev/null 2>&1 &"
+    return _iso.spawn_detached(["sh", "-c", shell], lock=subprocess_lock())
+
+
+def clear_packages_cache_mass_batch_termux(
+    packages: list[str],
+    *,
+    root_tool: str,
 ) -> dict[str, str]:
-    """Phase-1 Start mass clear — one detached su, zero blocking waits (p-22bfe0518a)."""
-    info = root_info or detect_root()
-    if not info.available or not info.tool:
-        return {pkg: "Skipped" for pkg in packages}
-    root_tool = str(info.tool)
-    inner = _build_start_mass_cache_clear_shell(packages)
-    detached = f"{shlex.quote(root_tool)} -c {shlex.quote(inner)}"
-    ok = _iso.spawn_detached(["sh", "-c", detached])
+    """Phase-1 Start mass clear — script file + minimal detached nohup (p-9d6d6a8cc3)."""
+    script_path = write_termux_start_mass_cache_script(packages, root_tool=root_tool)
+    ok = dispatch_termux_start_mass_cache_script(script_path)
     label = "Dispatched" if ok else "Failed"
     return {pkg: label for pkg in packages}
 
@@ -2531,12 +2564,8 @@ def clear_packages_cache_mass_batch(
             results.setdefault(pkg, "Skipped")
         return results
     if is_termux():
-        dispatched = clear_packages_cache_mass_batch_fire_and_forget(
-            package_list,
-            root_info=info,
-        )
-        results.update(dispatched)
-        return results
+        root_tool = str(info.tool)
+        return clear_packages_cache_mass_batch_termux(package_list, root_tool=root_tool)
     script_parts: list[str] = []
     for pkg in package_list:
         quoted = " ".join(shlex.quote(p) for p in _start_mass_cache_paths(pkg))

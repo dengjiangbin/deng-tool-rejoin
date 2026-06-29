@@ -6221,7 +6221,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         prep_cache: dict[str, str] = {}
         package_names = [entry["package"] for entry in entries]
         _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
-        _set_all_phase_labels("Clear Cache")
         safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
         try:
             prep_cache = _run_start_batch_cache_clear(
@@ -6231,6 +6230,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("start: batch cache clear error: %s", _exc)
             prep_cache = {pkg: "Failed" for pkg in package_names}
+        _set_all_phase_labels("Clear Cache")
         _start_session.mark("batch_low_graphics_begin", package_count=len(entries))
         for entry in entries:
             package = entry["package"]
