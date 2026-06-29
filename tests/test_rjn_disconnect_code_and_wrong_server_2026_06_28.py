@@ -119,7 +119,12 @@ class WrongServerTests(unittest.TestCase):
         self.assertFalse(ev.is_online_confirmed)
         self.assertEqual(row.last_transition_reason, "wrong_server")
         self.assertEqual(row.observed_place_id, 222222222)
-        self.assertIn("wrong server", ev.detail.get("reason_user_friendly", "").lower())
+        # probe p-630c95f7cc #3: wrong-server now reads "Account is not in
+        # configured server" (detection unchanged, reason text only).
+        self.assertEqual(
+            ev.detail.get("reason_user_friendly", "").lower(),
+            "account is not in configured server",
+        )
 
     def test_place_match_stays_online(self) -> None:
         pkg = "com.pkg.right"
@@ -222,7 +227,10 @@ class LegacyDisconnectPathTests(unittest.TestCase):
         self.assertEqual(ev.category, "disconnected")
 
     def test_wrong_server_reason_text(self) -> None:
-        self.assertIn("Wrong Server", format_lifecycle_dead_reason("wrong_server"))
+        self.assertEqual(
+            format_lifecycle_dead_reason("wrong_server"),
+            "Account is not in configured server",
+        )
 
 
 if __name__ == "__main__":

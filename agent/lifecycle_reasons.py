@@ -14,7 +14,7 @@ _USER_FRIENDLY: dict[str, str] = {
     "force_close": "Roblox was closed or force-stopped",
     "package_force_stopped": "Roblox was force-stopped",
     "game_crash": "Roblox crashed",
-    "wrong_server": "Wrong Server (joined a different server than the configured link)",
+    "wrong_server": "Account is not in configured server",
     "private_server_launch_failed": "Could not open the private server link",
     "no_gamejoinloadtime": "Roblox opened but did not finish joining the server",
     "no_online_confirmation": "Roblox opened but could not be confirmed inside the game",

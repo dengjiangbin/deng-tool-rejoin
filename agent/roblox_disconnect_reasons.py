@@ -33,6 +33,14 @@ ROBLOX_ERROR_CODE_PROMPTS: dict[int, str] = {
     529: "A Http error has occurred",
 }
 
+# Codes that should render as a clean human phrase WITHOUT the "Error Code: N"
+# prefix or the raw FLog junk that follows them.  285 is the disconnect Roblox
+# sends when a client leaves the actual map and lingers in the lobby/menu place;
+# the user wants that reported plainly (probe p-630c95f7cc #2).
+CLEAN_DISCONNECT_REASONS: dict[int, str] = {
+    285: "Account stays too long in the lobby",
+}
+
 _ERROR_CODE_RE = re.compile(r"Error\s*Code\s*:?\s*(\d+)", re.I)
 # Roblox FLog::Network line: "Sending disconnect with reason: <code>". The reason
 # code matches the user-facing error code for the 26x/27x/28x disconnect range.
@@ -106,6 +114,8 @@ def format_error_code_reason(
         code = 278
     if code is None:
         return None
+    if code in CLEAN_DISCONNECT_REASONS:
+        return CLEAN_DISCONNECT_REASONS[code]
     prompt = _prompt_from_matched_text(text, code) or ROBLOX_ERROR_CODE_PROMPTS.get(code, "")
     if prompt:
         return f"Error Code: {code} {prompt}"
@@ -144,6 +154,8 @@ def format_lifecycle_dead_reason(
             code = int(key.split("_", 2)[2])
         except (IndexError, TypeError, ValueError):
             code = None
+        if code in CLEAN_DISCONNECT_REASONS:
+            return CLEAN_DISCONNECT_REASONS[code]
         coded = format_error_code_reason(matched_text, internal_key=key)
         if coded:
             return coded

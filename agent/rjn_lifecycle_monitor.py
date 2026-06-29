@@ -71,12 +71,23 @@ DUMP_SCAN_ENABLED = os.environ.get("DENG_REJOIN_DISABLE_DUMP_SCAN", "").strip() 
 # or a freeze whose GL/WebView dialog dumpsys/uiautomator cannot read.  We demote
 # to Disconnected after this grace so recovery fires within ~10-13s, matching the
 # online detection speed the user asked us to match for every other scenario.
-INGAME_HB_LOSS_SECONDS = float(os.environ.get("DENG_REJOIN_INGAME_HB_LOSS_SEC", "10") or "10")
+INGAME_HB_LOSS_SECONDS = float(os.environ.get("DENG_REJOIN_INGAME_HB_LOSS_SEC", "15") or "15")
 INGAME_HB_LOSS_ENABLED = os.environ.get("DENG_REJOIN_DISABLE_INGAME_HB_LOSS", "").strip() not in {
     "1",
     "true",
     "yes",
 }
+# Suppress heartbeat-loss while the device is in (or just out of) a launch storm.
+# While a clone is loading, Android CPU-throttles the OTHER already-online
+# background clones, stretching their in-game heartbeat far past the 2s interval.
+# Demoting then is a FALSE positive (the package is fine, just starved), which the
+# user reported as "2nd-to-last package killed while only loading" — and that
+# false mass-dead is what storms recovery into force-stopping every clone +
+# Termux (the critical kill-all bug).  We hold loss detection for this long after
+# the most recent launch/relaunch of ANY package, then arm it for real kicks.
+INGAME_HB_LOSS_LAUNCH_QUIET_SECONDS = float(
+    os.environ.get("DENG_REJOIN_INGAME_HB_LOSS_LAUNCH_QUIET_SEC", "30") or "30"
+)
 # Parses the heartbeat payload: DENGRJN_HB|placeId|rootPlaceId|universeId|jobId|alive
 _INGAME_HB_RE = re.compile(
     r"DENGRJN_HB\|(\d*)\|(\d*)\|(\d*)\|([^|\s]*)\|([01])"
@@ -406,6 +417,10 @@ class RjnLifecycleMonitor:
         self._pid_map: dict[str, str] = {}
         self._pid_to_package: dict[str, str] = {}
         self._last_pid_refresh_at: float = 0.0
+        # Wall-clock of the most recent launch/relaunch of ANY package. Drives the
+        # global heartbeat-loss launch-quiet window so a launch storm (which
+        # CPU-throttles every online clone's heartbeat) cannot false-demote them.
+        self._last_any_launch_at: float = 0.0
         self._uid_resolutions: dict[str, UidResolution] = {}
         self._recent_events: list[LogcatEvent] = []
         self._monitor_started_at: float = 0.0
@@ -1512,6 +1527,11 @@ class RjnLifecycleMonitor:
         with self._lock:
             row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
             row.launch_started_at = now
+            # Open/refresh the global launch-quiet window: this and every other
+            # online clone gets its heartbeat throttled while this one loads, so
+            # heartbeat-loss must stand down across the whole batch until things
+            # settle (prevents the false-dead → recovery-storm → kill-all chain).
+            self._last_any_launch_at = now
             row.watchdog_active = True
             row.launch_failed_reason = ""
             row.relaunching = bool(relaunch)
@@ -1669,11 +1689,30 @@ class RjnLifecycleMonitor:
                 # WebView state the UI scrapers cannot see on a background clone.
                 # This is the universal "improve the other scenarios" path the
                 # user asked for, matching the ~1s logcat online detection speed.
+                #
+                # It must NOT fire during normal loading, because the heartbeat
+                # legitimately pauses then and demoting would false-kill a healthy
+                # client (probe p-630c95f7cc #1).  We therefore stand down while:
+                #   * this package is still launching/relaunching (watchdog_active),
+                #   * ANY package launched recently (launch storm throttles every
+                #     online clone's heartbeat — global launch-quiet window), or
+                #   * this package just joined / teleported (in-game loading screen
+                #     between places — also lets a wrong-server heartbeat arrive and
+                #     be labelled "not in configured server" instead of generic loss).
+                hb_quiet = self._last_any_launch_at > 0 and (
+                    now - self._last_any_launch_at
+                ) <= INGAME_HB_LOSS_LAUNCH_QUIET_SECONDS
+                load_recent = (
+                    now - max(row.last_gamejoinloadtime_at, row.last_doteleport_at)
+                ) <= INGAME_HB_LOSS_SECONDS
                 if (
                     INGAME_HB_LOSS_ENABLED
                     and row.ingame_hb_ever
                     and row.last_ingame_hb_at > 0
                     and row.internal_state in {STATE_ONLINE_CONFIRMED, STATE_TELEPORTING}
+                    and not row.watchdog_active
+                    and not hb_quiet
+                    and not load_recent
                     and (now - row.last_ingame_hb_at) > INGAME_HB_LOSS_SECONDS
                 ):
                     row.disconnect_prompt_text = (

@@ -26,12 +26,24 @@ class DisconnectCodeReasonTests(unittest.TestCase):
         self.assertEqual(internal_reason_for_disconnect_code(271), "disconnect_code_271")
 
     def test_format_lifecycle_includes_error_code_prompt(self) -> None:
+        # Generic disconnect codes still render as the canonical "Error Code: N ..."
+        text = format_lifecycle_dead_reason(
+            "disconnect_code_268",
+            "Sending disconnect with reason: 268",
+        )
+        self.assertIn("268", text)
+        self.assertIn("Error Code", text)
+
+    def test_code_285_renders_clean_lobby_reason(self) -> None:
+        # probe p-630c95f7cc #2: 285 = left the map / stuck in lobby. The webhook
+        # reason must be the plain phrase, NOT "Error Code: 285 <FLog junk>".
         text = format_lifecycle_dead_reason(
             "disconnect_code_285",
-            "Sending disconnect with reason: 285",
+            "Error Code: 285 928940,b5re230,7 [FLog::Network] Sending disconnect with reason: 285",
         )
-        self.assertIn("285", text)
-        self.assertIn("Error Code", text)
+        self.assertEqual(text, "Account stays too long in the lobby")
+        self.assertNotIn("Error Code", text)
+        self.assertNotIn("285", text)
 
 
 class DeeplinkParseTests(unittest.TestCase):
