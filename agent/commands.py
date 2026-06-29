@@ -489,18 +489,23 @@ def _spawn_monitor_worker(cfg: dict[str, Any]) -> bool:
     creationflags = 0
     if os.name == "nt":
         creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    with MONITOR_LOG_PATH.open("ab") as log_file:
-        proc = subprocess.Popen(
-            [sys.executable, str(script_path), "monitor", "run-worker"],
-            stdin=subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            cwd=str(APP_HOME),
-            env=env,
-            start_new_session=(os.name != "nt"),
-            creationflags=creationflags,
-            shell=False,
-        )
+    # Serialize the interpreter spawn through the global subprocess lock so it
+    # can never fork() concurrently with the watchdog daemon / logcat reader
+    # threads (probe p-3daeae4cbd).  Combined with the entrypoint's vfork
+    # disable, this keeps the heavy ``exec`` of a new Python on the safe path.
+    with android.subprocess_lock():
+        with MONITOR_LOG_PATH.open("ab") as log_file:
+            proc = subprocess.Popen(
+                [sys.executable, str(script_path), "monitor", "run-worker"],
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=str(APP_HOME),
+                env=env,
+                start_new_session=(os.name != "nt"),
+                creationflags=creationflags,
+                shell=False,
+            )
     deadline = time.time() + _MONITOR_WORKER_BOOTSTRAP_SECONDS
     while time.time() < deadline:
         if _monitor_worker_running():

@@ -138,5 +138,69 @@ class StartSegfaultRegressionTests(unittest.TestCase):
             self.assertNotIn("os.system(\"cls\")", combined)
 
 
+class ForkVforkHardeningTests(unittest.TestCase):
+    """probe p-3daeae4cbd: Start reached layout_done then SIGSEGV'd on the next
+    Popen (monitor-bridge interpreter spawn) via vfork.  Force plain fork()."""
+
+    def test_harden_helper_disables_vfork_and_posix_spawn(self) -> None:
+        import subprocess as _sp
+
+        from agent import subprocess_isolated as _iso
+
+        prev_vfork = getattr(_sp, "_USE_VFORK", None)
+        prev_spawn = getattr(_sp, "_USE_POSIX_SPAWN", None)
+        try:
+            if hasattr(_sp, "_USE_VFORK"):
+                _sp._USE_VFORK = True  # type: ignore[attr-defined]
+            if hasattr(_sp, "_USE_POSIX_SPAWN"):
+                _sp._USE_POSIX_SPAWN = True  # type: ignore[attr-defined]
+            _iso.harden_subprocess_for_termux()
+            if hasattr(_sp, "_USE_VFORK"):
+                self.assertFalse(_sp._USE_VFORK)  # type: ignore[attr-defined]
+            if hasattr(_sp, "_USE_POSIX_SPAWN"):
+                self.assertFalse(_sp._USE_POSIX_SPAWN)  # type: ignore[attr-defined]
+        finally:
+            if prev_vfork is not None and hasattr(_sp, "_USE_VFORK"):
+                _sp._USE_VFORK = prev_vfork  # type: ignore[attr-defined]
+            if prev_spawn is not None and hasattr(_sp, "_USE_POSIX_SPAWN"):
+                _sp._USE_POSIX_SPAWN = prev_spawn  # type: ignore[attr-defined]
+
+    def test_harden_is_idempotent_and_safe(self) -> None:
+        from agent import subprocess_isolated as _iso
+
+        # Must not raise when called repeatedly.
+        _iso.harden_subprocess_for_termux()
+        _iso.harden_subprocess_for_termux()
+
+    def test_importing_central_module_applies_hardening(self) -> None:
+        import subprocess as _sp
+
+        # subprocess_isolated calls harden_subprocess_for_termux() at import.
+        import agent.subprocess_isolated  # noqa: F401
+
+        if os.name != "nt" and hasattr(_sp, "_USE_VFORK"):
+            self.assertFalse(_sp._USE_VFORK)  # type: ignore[attr-defined]
+
+    def test_entrypoint_disables_vfork_before_imports(self) -> None:
+        entry = (PROJECT / "agent" / "deng_tool_rejoin.py").read_text(encoding="utf-8")
+        # The disable must run before the agent package is imported.
+        vfork_idx = entry.find("_USE_VFORK = False")
+        import_idx = entry.find("from agent.commands import main")
+        self.assertGreater(vfork_idx, -1)
+        self.assertGreater(import_idx, -1)
+        self.assertLess(vfork_idx, import_idx)
+        self.assertIn("p-3daeae4cbd", entry)
+
+    def test_monitor_worker_spawn_is_serialized(self) -> None:
+        source = inspect.getsource(commands._spawn_monitor_worker)
+        # The interpreter spawn must hold the global subprocess lock so it can
+        # never fork concurrently with the watchdog/logcat threads.
+        lock_idx = source.find("android.subprocess_lock()")
+        popen_idx = source.find("subprocess.Popen(")
+        self.assertGreater(lock_idx, -1)
+        self.assertGreater(popen_idx, -1)
+        self.assertLess(lock_idx, popen_idx)
+
+
 if __name__ == "__main__":
     unittest.main()

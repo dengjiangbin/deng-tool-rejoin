@@ -16,6 +16,54 @@ from typing import Iterable
 _DEFAULT_MAX_STDOUT = 512 * 1024
 _DEFAULT_MAX_STDERR = 128 * 1024
 
+_HARDENED = False
+
+
+def harden_subprocess_for_termux() -> dict[str, bool]:
+    """Force the most crash-resistant ``subprocess`` spawn path on Termux.
+
+    [DENG_REJOIN_SEGFAULT_FIX] probe p-3daeae4cbd (supersedes the cache-clear
+    theory).  Real-device evidence: ``Start`` reaches ``layout_done`` (cache
+    clear + window layout already finished via short ``su -c`` commands) and
+    then SIGSEGVs on the *next* ``subprocess.Popen`` — the monitor-bridge
+    spawn, which ``exec``s a brand-new Python interpreter.  Because that spawn
+    uses ``start_new_session=True`` (and inherits an open log fd), CPython
+    cannot use ``posix_spawn`` and falls back to ``_posixsubprocess.fork_exec``
+    with **``vfork()``** (Python 3.13 default on Linux).  ``vfork()`` shares the
+    parent address space until ``exec``; on Android/bionic + Termux with live
+    background threads (the watchdog daemon + logcat reader) this corrupts the
+    parent and crashes in libc — matching the empty Python crash log noted for
+    the license-check path (commands.py).
+
+    Forcing plain ``fork()`` (``_USE_VFORK = False``) gives every child its own
+    copy-on-write address space, eliminating the vfork corruption.  We also
+    disable ``posix_spawn`` so the behaviour is identical and deterministic for
+    *all* spawns (simple and complex) rather than only the ones that already
+    fell back to ``fork_exec``.  Plain fork is serialized elsewhere through the
+    global subprocess lock, so the multithreaded-fork risk is contained.
+
+    Idempotent and safe on non-POSIX (Windows tests): the attributes simply
+    don't exist there, so we no-op.
+    """
+    global _HARDENED
+    applied = {"use_vfork_disabled": False, "use_posix_spawn_disabled": False}
+    # These module flags are POSIX-only knobs; on Windows they are ignored by
+    # ``subprocess`` (CreateProcess), so setting them is harmless when present.
+    try:
+        if hasattr(subprocess, "_USE_VFORK"):
+            subprocess._USE_VFORK = False  # type: ignore[attr-defined]
+            applied["use_vfork_disabled"] = True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if hasattr(subprocess, "_USE_POSIX_SPAWN"):
+            subprocess._USE_POSIX_SPAWN = False  # type: ignore[attr-defined]
+            applied["use_posix_spawn_disabled"] = True
+    except Exception:  # noqa: BLE001
+        pass
+    _HARDENED = True
+    return applied
+
 
 def _popen_kwargs(*, env: dict[str, str] | None = None) -> dict:
     kwargs: dict = {
@@ -163,3 +211,10 @@ def spawn_detached(
         with lock:
             return _execute()
     return _execute()
+
+
+# Apply the Termux fork-safety hardening as soon as this central subprocess
+# module is imported, so every process that touches the agent (parent Start,
+# the spawned monitor-bridge worker, tests) uses the crash-resistant fork()
+# path before any Popen runs.  No-op on Windows.
+harden_subprocess_for_termux()
