@@ -217,25 +217,20 @@ class TestRamBelowTarget(unittest.TestCase):
             mock_android.force_stop_package.assert_not_called()
 
 
-# ── 5: RAM > target, ≤ restart threshold → trim ──────────────────────────────
+# ── 5: RAM > target, ≤ restart threshold → report only (no cache trim) ─────────
 
 class TestRamTrimTriggered(unittest.TestCase):
 
-    def test_trim_attempted_when_above_target(self):
-        """RAM=750 MB (> target=700), restart_threshold=900 → trim only."""
+    def test_high_ram_below_restart_threshold_does_not_clear_cache(self):
+        """RAM=750 MB (> target=700), restart_threshold=900 → no phase-2 cache clear."""
         sup = _make_supervisor()
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(750)
-            mock_android.clear_package_cache_safe.return_value = {
-                "success": True, "skipped": False, "skipped_reason": "", "error": "",
-            }
             sup._check_ram_optimization(_PKG, _ENTRY, now)
-            mock_android.clear_package_cache_safe.assert_called_once_with(
-                _PKG, root_info=sup._root_info
-            )
+            mock_android.clear_package_cache_safe.assert_not_called()
             mock_android.force_stop_package.assert_not_called()
 
 
@@ -332,19 +327,16 @@ class TestRamRestartSetsBothCooldowns(unittest.TestCase):
 
 class TestRamAggressiveMode(unittest.TestCase):
 
-    def test_aggressive_mode_uses_lower_target(self):
-        """With aggressive=True, target=300 MB. RAM=400 MB triggers trim."""
+    def test_aggressive_mode_does_not_clear_cache(self):
+        """With aggressive=True, target=300 MB. RAM=400 MB still skips cache clear."""
         sup = _make_supervisor({"ram_aggressive_mode": True})
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(400)
-            mock_android.clear_package_cache_safe.return_value = {
-                "success": True, "skipped": False, "skipped_reason": "", "error": "",
-            }
             sup._check_ram_optimization(_PKG, _ENTRY, now)
-            mock_android.clear_package_cache_safe.assert_called_once()
+            mock_android.clear_package_cache_safe.assert_not_called()
 
     def test_normal_mode_does_not_trim_at_400mb(self):
         """With aggressive=False, target=700 MB. RAM=400 MB → no action."""
@@ -609,27 +601,21 @@ class TestMultiPackageCooldowns(unittest.TestCase):
         launch_packages = [c.args[0] for c in mock_launch.call_args_list]
         self.assertNotIn(pkg1, launch_packages)
         self.assertNotIn(pkg2, launch_packages)
-        mock_android.clear_package_cache_safe.assert_any_call(pkg1, root_info=sup._root_info)
-        mock_android.clear_package_cache_safe.assert_any_call(pkg2, root_info=sup._root_info)
+        mock_android.clear_package_cache_safe.assert_not_called()
 
 
 # ── 37: Trim failure does not abort ───────────────────────────────────────────
 
 class TestTrimFailureSafe(unittest.TestCase):
 
-    def test_trim_exception_does_not_crash(self):
+    def test_high_ram_check_does_not_crash_without_cache_trim(self):
         sup = _make_supervisor()
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(750)
-            mock_android.clear_package_cache_safe.side_effect = OSError("permission denied")
-            # Should not raise.
-            try:
-                sup._check_ram_optimization(_PKG, _ENTRY, now)
-            except OSError:
-                self.fail("Trim exception must be caught and not re-raised")
+            sup._check_ram_optimization(_PKG, _ENTRY, now)
 
 
 # ── 38: get_package_ram_usage called with correct args ────────────────────────
@@ -709,8 +695,8 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
           - do not reopen private URL
           - do not force close
 
-    The fix: remove the Online RAM restart path completely.  Cache trim
-    is still allowed because it is non-disruptive.
+    The fix: remove the Online RAM restart path completely.  Cache clear is
+    phase-2 recovery only (p-f499f7533a); watchdog RAM checks are report-only.
     """
 
     def test_default_config_does_not_define_online_ram_restart_opt_in(self):
@@ -734,10 +720,7 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
             with patch.object(sup, "_do_launch") as mock_launch:
                 with patch.object(sup, "_set_status") as mock_status:
                     sup._check_ram_optimization(_PKG, _ENTRY, now)
-            # Cache trim still runs (non-disruptive).
-            mock_android.clear_package_cache_safe.assert_called_once_with(
-                _PKG, root_info=sup._root_info
-            )
+            mock_android.clear_package_cache_safe.assert_not_called()
             # NO force-stop, NO relaunch, NO status change.
             mock_android.force_stop_package.assert_not_called()
             mock_launch.assert_not_called()

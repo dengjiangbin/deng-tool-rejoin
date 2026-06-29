@@ -48,19 +48,20 @@ class AndroidLocalSupervisorTests(unittest.TestCase):
     def test_dead_package_clears_only_target_cache_then_relaunches(self) -> None:
         sup = self._supervisor()
         cache = {"success": True, "method": "root_rm_cache", "error": ""}
-        with patch("agent.android.clear_package_cache_safe", return_value=cache) as clear, \
+        with patch("agent.cache_clear_phases.run_recovery_cache_clear", return_value=cache) as clear, \
              patch.object(sup, "_do_launch", return_value=True), \
              patch("agent.supervisor.log_event"):
             gated = sup._handle_state(PKG, ENTRY, STATUS_DEAD, STATUS_ONLINE, time.time())
         self.assertTrue(gated)
-        clear.assert_called_once_with(PKG, root_info=sup._root_info)
+        clear.assert_called_once()
+        self.assertEqual(clear.call_args.args[0], PKG)
         self.assertNotEqual(clear.call_args.args[0], "com.termux")
         self.assertEqual(sup.status_map[PKG], STATUS_RELAUNCHING)
 
     def test_relaunch_lock_prevents_a_second_targeted_relaunch(self) -> None:
         sup = self._supervisor()
         sup._relaunch_inflight.add(PKG)
-        with patch("agent.android.clear_package_cache_safe") as clear, \
+        with patch("agent.cache_clear_phases.run_recovery_cache_clear") as clear, \
              patch.object(sup, "_do_launch") as launch:
             self.assertFalse(sup._handle_state(PKG, ENTRY, STATUS_DEAD, STATUS_RELAUNCHING, time.time()))
         clear.assert_not_called()

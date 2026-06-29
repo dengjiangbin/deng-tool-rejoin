@@ -2469,6 +2469,64 @@ def clear_package_cache_safe(
     }
 
 
+def clear_packages_cache_mass_batch(
+    packages: Iterable[str],
+    *,
+    root_info: RootInfo | None = None,
+) -> dict[str, str]:
+    """Phase-1 Start mass clear — one root shell for every package (p-f499f7533a)."""
+    package_list: list[str] = []
+    results: dict[str, str] = {}
+    for raw in packages:
+        try:
+            package_list.append(validate_package_name(raw))
+        except ConfigError:
+            results[str(raw)] = "Failed"
+    if not package_list:
+        return results
+    info = root_info or detect_root()
+    if not info.available or not info.tool:
+        for pkg in package_list:
+            results.setdefault(pkg, "Skipped")
+        return results
+    script_parts: list[str] = []
+    for pkg in package_list:
+        paths = [
+            f"/data/user/0/{pkg}/cache",
+            f"/data/user/0/{pkg}/code_cache",
+            f"/data/data/{pkg}/cache",
+            f"/data/data/{pkg}/code_cache",
+            f"/data/data/{pkg}/files/tmp",
+        ]
+        quoted = " ".join(shlex.quote(p) for p in paths)
+        script_parts.append(
+            f'for p in {quoted}; do '
+            f'[ -d "$p" ] && find "$p" -mindepth 1 -delete 2>/dev/null; '
+            f"done"
+        )
+    sh = "; ".join(script_parts)
+    res = run_root_command(
+        ["sh", "-c", sh],
+        root_tool=str(info.tool),
+        timeout=max(60, len(package_list) * 15),
+    )
+    label = "Cleared" if res.ok or res.returncode in (0, 1) else "Failed"
+    for pkg in package_list:
+        results[pkg] = label
+    return results
+
+
+def clear_package_cache_recovery(
+    package: str,
+    *,
+    root_info: RootInfo | None = None,
+) -> dict[str, object]:
+    """Phase-2 recovery clear — one package, one root shell."""
+    result = clear_package_cache_safe(package, root_info=root_info)
+    result["method"] = "recovery_single"
+    return result
+
+
 def clear_packages_cache_batch(
     packages: Iterable[str],
     *,

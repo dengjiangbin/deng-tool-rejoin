@@ -129,7 +129,7 @@ class LaunchingDeadTests(unittest.TestCase):
         sup = WatchdogSupervisor([entry], {"roblox_packages": [entry]})
         with patch.object(sup, "_reserve_recovery_launch_attempt", return_value=True), \
              patch.object(sup, "_do_launch", return_value=True) as launch, \
-             patch("agent.android.clear_package_cache_safe", return_value={"success": True}), \
+             patch("agent.cache_clear_phases.run_recovery_cache_clear", return_value={"success": True}), \
              patch.object(sup._rjn_monitor, "note_launch_watchdog"):
             gate = sup._handle_state(
                 "com.pkg.e",
@@ -163,7 +163,7 @@ class WatchdogFailedTests(unittest.TestCase):
         sup = WatchdogSupervisor([entry], {"roblox_packages": [entry]})
         with patch.object(sup, "_reserve_recovery_launch_attempt", return_value=True), \
              patch.object(sup, "_do_launch", return_value=True), \
-             patch("agent.android.clear_package_cache_safe", return_value={"success": True}), \
+             patch("agent.cache_clear_phases.run_recovery_cache_clear", return_value={"success": True}), \
              patch.object(sup._rjn_monitor, "note_launch_watchdog"):
             gate = sup._handle_state(
                 "com.pkg.g",

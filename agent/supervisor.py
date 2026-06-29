@@ -3509,7 +3509,9 @@ class WatchdogSupervisor:
                 pass
             self._relaunch_inflight.add(pkg)
             self._set_status(pkg, STATUS_REOPENING)
-            cache_result = android.clear_package_cache_safe(pkg, root_info=self._root_info)
+            from .cache_clear_phases import run_recovery_cache_clear
+
+            cache_result = run_recovery_cache_clear(pkg, root_info=self._root_info)
             log_event(
                 logger, "info", "[DENG_REJOIN_DEAD_PACKAGE_CACHE_CLEAR]",
                 package=pkg,
@@ -3661,7 +3663,6 @@ class WatchdogSupervisor:
 
         Probe tags:
           [DENG_REJOIN_RAM_CHECK]
-          [DENG_REJOIN_RAM_TRIM]
           [DENG_REJOIN_RAM_RESTART_SKIPPED]   ← emitted when high RAM is
               reported for an Online package; no kill/relaunch is allowed.
         """
@@ -3714,25 +3715,11 @@ class WatchdogSupervisor:
         if usage_mb <= effective_target:
             return  # RAM is within acceptable range — nothing to do.
 
-        # ── Safe cache trim ───────────────────────────────────────────────────
-        if now - self._ram_last_trim_at.get(pkg, 0.0) >= trim_interval:
-            self._ram_last_trim_at[pkg] = now
-            try:
-                trim_result = android.clear_package_cache_safe(pkg, root_info=self._root_info)
-                log_event(
-                    logger, "info", "[DENG_REJOIN_RAM_TRIM]",
-                    package=pkg,
-                    usage_mb_before=round(usage_mb, 1),
-                    cache_cleared=str(not trim_result.get("skipped", True)).lower(),
-                    skipped=str(trim_result.get("skipped", True)).lower(),
-                    skipped_reason=str(trim_result.get("skipped_reason", "")),
-                    trim_success=str(trim_result.get("success", False)).lower(),
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("RAM trim error (non-fatal): %s", exc)
+        # Cache clear is phase-2 recovery only (p-f499f7533a). High-RAM Online
+        # packages are report-only below — no watchdog cache trim subprocess burst.
 
         if usage_mb <= restart_threshold:
-            return  # Below restart threshold — trim is sufficient.
+            return  # Below restart threshold — nothing else to do.
 
         # ── RAM restart forbidden for Online packages ────────────────────────
         # _check_ram_optimization is only reached from _handle_state when

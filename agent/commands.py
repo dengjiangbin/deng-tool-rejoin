@@ -924,110 +924,16 @@ def _run_license_isolated_subprocess(
 
 def _should_isolate_start_cache_clear() -> bool:
     """Run Start batch cache clear in a child on Termux (probe p-7dac7cb6c4)."""
-    override = (os.environ.get("DENG_START_CACHE_INLINE") or "").strip().lower()
-    if override in ("1", "true", "yes", "on"):
-        return False
-    if "unittest" in sys.modules and any(
-        "unittest" in a or "pytest" in a or "_test_runner" in a for a in sys.argv[:2]
-    ):
-        return False
-    if os.environ.get("TERMUX_VERSION"):
-        return True
-    if os.environ.get("ANDROID_ROOT") or os.environ.get("ANDROID_DATA"):
-        return True
-    return False
+    from .cache_clear_phases import should_isolate_cache_clear
 
-
-def _start_cache_clear_agent_parent() -> str:
-    try:
-        from pathlib import Path as _Path  # noqa: PLC0415
-
-        return str(_Path(__file__).resolve().parent.parent)
-    except Exception:  # noqa: BLE001
-        return os.path.expanduser("~/.deng-tool/rejoin")
-
-
-def _start_cache_clear_child_env(agent_parent: str) -> dict[str, str]:
-    env = dict(os.environ)
-    prev_pp = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = agent_parent + (os.pathsep + prev_pp if prev_pp else "")
-    return env
-
-
-def _start_single_package_cache_clear_isolated(package: str) -> str:
-    """Clear one package cache in a child so fork bursts cannot SIGSEGV Start."""
-    import subprocess as _sp  # noqa: PLC0415
-
-    pkg = str(package or "").strip()
-    if not pkg:
-        return "Failed"
-    agent_parent = _start_cache_clear_agent_parent()
-    code = (
-        "import json, os, sys\n"
-        f"sys.path.insert(0, {agent_parent!r})\n"
-        "_home = os.environ.get('DENG_REJOIN_HOME')\n"
-        "if _home and _home not in sys.path:\n"
-        "    sys.path.insert(0, _home)\n"
-        "from agent import android\n"
-        "pkg = json.loads(sys.stdin.read())\n"
-        "try:\n"
-        "    label = android.clear_packages_cache_batch([pkg]).get(pkg, 'Failed')\n"
-        "except Exception:\n"
-        "    label = 'Failed'\n"
-        "sys.stdout.write(json.dumps({'label': label}))\n"
-    )
-    env = _start_cache_clear_child_env(agent_parent)
-    try:
-        proc = _sp.Popen(
-            [sys.executable, "-c", code],
-            stdin=_sp.PIPE,
-            stdout=_sp.PIPE,
-            stderr=_sp.DEVNULL,
-            env=env,
-        )
-        stdout, _stderr = proc.communicate(
-            input=json.dumps(pkg).encode("utf-8"),
-            timeout=60,
-        )
-    except _sp.TimeoutExpired:
-        proc.kill()
-        try:
-            proc.communicate(timeout=5)
-        except Exception:  # noqa: BLE001
-            pass
-        return "Failed"
-    except OSError:
-        return "Failed"
-
-    if proc.returncode < 0 or proc.returncode != 0:
-        return "Failed"
-    try:
-        data = json.loads((stdout or b"").decode("utf-8", errors="replace") or "{}")
-    except json.JSONDecodeError:
-        return "Failed"
-    if not isinstance(data, dict):
-        return "Failed"
-    label = str(data.get("label") or "Failed").strip()
-    return label if label in ("Cleared", "Skipped", "Failed") else "Failed"
-
-
-def _start_batch_cache_clear_isolated(packages: list[str]) -> dict[str, str]:
-    """Clear each package cache in its own child (probe p-0f0a81a6fe)."""
-    if not packages:
-        return {}
-    results: dict[str, str] = {}
-    for pkg in packages:
-        results[pkg] = _start_single_package_cache_clear_isolated(pkg)
-    return results
+    return should_isolate_cache_clear()
 
 
 def _run_start_batch_cache_clear(packages: list[str]) -> dict[str, str]:
-    """Start prep: fast safe cache clear for every selected package."""
-    if _should_isolate_start_cache_clear():
-        return _start_batch_cache_clear_isolated(packages)
-    from . import android as _android
+    """Start prep phase 1: mass cache clear for every selected package."""
+    from .cache_clear_phases import run_start_mass_cache_clear
 
-    return _android.clear_packages_cache_batch(packages)
+    return run_start_mass_cache_clear(packages)
 
 
 def _remote_license_isolated(
