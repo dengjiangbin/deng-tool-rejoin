@@ -1574,12 +1574,26 @@ class WebhookStatusReporter:
                 self.loop_count += 1
                 self._record(scheduler_running=True, reporter_tick_started=True, last_webhook_tick_at=time.time(), last_send_mode=self.config_data.get("webhook_mode"), last_send_attempt_at=time.time())
                 record_webhook_trace(source="WebhookStatusReporter._run", reporter_tick=True, reporter_tick_started=True, telemetry_build_started=True)
+                per_cpu: dict[str, Any] = {}
                 try:
-                    from . import android
+                    from . import android, android_cpu
                     snapshot = self.supervisor.get_status_snapshot(self.entries)
                     mem = android.get_memory_info()
                     self.config_data["_mem_info"] = mem
-                    self.config_data["_cpu_pct"] = android.get_cpu_usage()
+                    # Real per-package + normalized device CPU (0-100% of total
+                    # capacity), instead of the all-cores toybox sum that showed
+                    # a nonsensical 327% identically on every package.
+                    online_pkgs = [
+                        str(row.get("package") or "")
+                        for row in snapshot
+                        if row.get("status") == "Online"
+                    ]
+                    cpu_info = android_cpu.collect_cpu_usage(online_pkgs)
+                    per_cpu = cpu_info.get("per_package_pct") or {}
+                    device_cpu = cpu_info.get("device_pct")
+                    if device_cpu is None:
+                        device_cpu = android.get_cpu_usage()
+                    self.config_data["_cpu_pct"] = device_cpu
                     self.config_data["_temp_c"] = android.get_temperature()
                     record_webhook_trace(source="WebhookStatusReporter._run", telemetry_build_result="success", telemetry_result="success")
                 except Exception as telemetry_exc:  # telemetry must never suppress delivery
@@ -1590,7 +1604,7 @@ class WebhookStatusReporter:
                     str(row.get("package") or ""): {
                         "online": row.get("status") == "Online",
                         "memory_mb": row.get("ram_mb"),
-                        "cpu_pct": self.config_data["_cpu_pct"],
+                        "cpu_pct": per_cpu.get(str(row.get("package") or "")),
                     }
                     for row in snapshot
                 }
