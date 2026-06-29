@@ -139,7 +139,11 @@ class LaunchingDeadTests(unittest.TestCase):
                 time.time(),
                 detail={"reason_internal": "process_missing"},
             )
-        self.assertTrue(gate)
+        # Non-blocking recovery (probe p-765bbcc3d3): the dead package is
+        # relaunched once but _handle_state returns False so the watchdog
+        # continues its round-robin to the next package instead of halting in a
+        # blocking "Launching" gate.
+        self.assertFalse(gate)
         launch.assert_called_once()
         self.assertEqual(sup.status_map.get("com.pkg.e"), STATUS_RELAUNCHING)
 
@@ -173,7 +177,10 @@ class WatchdogFailedTests(unittest.TestCase):
                 time.time(),
                 detail={"launch_failed_reason": "no_online_confirmation"},
             )
-        self.assertTrue(gate)
+        # Non-blocking recovery (probe p-765bbcc3d3): relaunch dispatched once,
+        # no blocking gate — _handle_state returns False so the round-robin
+        # advances to the next package.
+        self.assertFalse(gate)
         self.assertEqual(sup.status_map.get("com.pkg.g"), STATUS_RELAUNCHING)
 
 

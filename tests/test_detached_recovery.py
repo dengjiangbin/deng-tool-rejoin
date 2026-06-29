@@ -89,5 +89,55 @@ class TestDetachedRecovery(unittest.TestCase):
         self.assertIn("_DETACHED_RECOVERY_REASONS", src)
 
 
+class NonBlockingRecoveryTests(unittest.TestCase):
+    """probe p-765bbcc3d3: recovery must relaunch once and continue round-robin.
+
+    The blocking recovery gate halted the whole round-robin and locked onto a
+    single dead package in a perpetual "Launching" state instead of moving on to
+    the next dead account.  Recovery is now non-blocking: a dead package is
+    relaunched once and the watchdog advances to the next package.
+    """
+
+    def _supervisor(self):
+        entry = {"package": _PKG, "account_username": "MainUser"}
+        cfg = {
+            "device_name": "TestPhone",
+            "webhook_mode": "none",
+            "webhook_enabled": False,
+            "webhook_url": "",
+            "roblox_packages": [entry],
+        }
+        return supervisor.WatchdogSupervisor([entry], cfg), entry
+
+    def test_handle_state_dead_recovery_is_non_blocking(self) -> None:
+        sup, entry = self._supervisor()
+        with patch.object(sup, "_do_launch", return_value=True) as do_launch, \
+             patch(
+                 "agent.cache_clear_phases.run_recovery_cache_clear",
+                 return_value={"success": True, "method": "test", "error": ""},
+             ):
+            result = sup._handle_state(
+                _PKG, entry, supervisor.STATUS_DISCONNECTED,
+                supervisor.STATUS_ONLINE, 0.0,
+            )
+        # No blocking recovery gate: _handle_state returns False so the
+        # watchdog round-robin keeps moving to the next package.
+        self.assertFalse(result)
+        # The dead package is still relaunched exactly once (targeted).
+        do_launch.assert_called_once()
+        self.assertEqual(do_launch.call_args.args[0], _PKG)
+        self.assertEqual(sup.status_map.get(_PKG), supervisor.STATUS_RELAUNCHING)
+
+    def test_watchdog_loop_does_not_enter_blocking_recovery_gate(self) -> None:
+        loop_src = inspect.getsource(supervisor.WatchdogSupervisor._run_watchdog_loop)
+        # The loop must no longer halt the round-robin in the blocking gate.
+        self.assertNotIn("_run_blocking_recovery_gate", loop_src)
+        self.assertIn("[DENG_REJOIN_NONBLOCKING_RECOVERY]", loop_src)
+
+    def test_handle_state_dead_branch_documents_non_blocking(self) -> None:
+        src = inspect.getsource(supervisor.WatchdogSupervisor._handle_state)
+        self.assertIn("[DENG_REJOIN_NONBLOCKING_RECOVERY]", src)
+
+
 if __name__ == "__main__":
     unittest.main()

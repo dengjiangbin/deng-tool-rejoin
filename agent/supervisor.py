@@ -3465,10 +3465,13 @@ class WatchdogSupervisor:
         """Apply recovery action based on current state.
 
         Recovery rules:
-        - Dead        → launch_package_for_current_config
+        - Dead        → launch_package_for_current_config (single targeted relaunch)
         - Online      → update last_online_ts, keep monitoring
 
-        Returns True when a blocking recovery gate should run for this package.
+        Always returns False: recovery is non-blocking (probe p-765bbcc3d3).  A
+        dead package is relaunched once here and the watchdog continues its
+        round-robin to the next package instead of halting in a blocking
+        "Launching" gate.
         """
         logger = self._logger
         url_context = private_url_launch_context(entry, self.cfg)
@@ -3550,7 +3553,19 @@ class WatchdogSupervisor:
                 self._relaunch_inflight.discard(pkg)
                 self._relaunch_verify_until.pop(pkg, None)
             self._post_recovery_memory_flush()
-            return True
+            # [DENG_REJOIN_NONBLOCKING_RECOVERY] probe p-765bbcc3d3.
+            # The dead package has already been relaunched ONCE above (targeted,
+            # single-package).  Do NOT enter the blocking recovery gate: that gate
+            # halted the whole round-robin and locked onto this one package,
+            # repeatedly force-stop/relaunching it in a perpetual "Launching"
+            # state (each freeform relaunch visually disrupted the other clones /
+            # backgrounded Termux) instead of moving on to the next dead account.
+            # Returning False lets the watchdog continue the round-robin: the next
+            # dead package gets its own single relaunch on its turn, and when no
+            # package is dead the watchdog simply keeps monitoring.  Re-launch
+            # throttling (_reserve_recovery_launch_attempt) and loading grace
+            # (_relaunch_verify_until) still prevent relaunch storms.
+            return False
 
         elif state == "__retired_state__":
             if self.status_map.get(pkg) == STATUS_ONLINE:
@@ -3994,36 +4009,31 @@ class WatchdogSupervisor:
                     self._maybe_send_package_dead_webhook(pkg, entry, prev, state, now, detail)
                     _maybe_render(force=True)
 
-                recovery_gate = False
+                # [DENG_REJOIN_NONBLOCKING_RECOVERY] probe p-765bbcc3d3.
+                # _handle_state relaunches a dead package ONCE (targeted) and
+                # always returns False.  We deliberately do NOT halt the
+                # round-robin in a blocking "Launching" gate anymore: after a
+                # dead package is relaunched the loop simply advances to the next
+                # package, so the next dead account is recovered on its turn and
+                # nothing extra happens when no package is dead.
                 if state not in {STATUS_WRONG_GAME, STATUS_UNKNOWN}:
                     if state in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED}:
-                        recovery_gate = self._handle_state(
+                        self._handle_state(
                             pkg, entry, state, prev, now,
                             render_callback=render_callback,
                             detail=detail,
                         )
                     elif state == STATUS_ONLINE:
-                        recovery_gate = self._handle_state(
+                        self._handle_state(
                             pkg, entry, state, prev, now, render_callback=render_callback,
                             detail=detail,
                         )
 
                     if self.status_map.get(pkg) == STATUS_DEAD and state != STATUS_DEAD:
-                        recovery_gate = self._handle_state(
+                        self._handle_state(
                             pkg, entry, STATUS_DEAD, prev, now, render_callback=render_callback,
                             detail=detail,
-                        ) or recovery_gate
-
-                if recovery_gate:
-                    self._run_blocking_recovery_gate(
-                        pkg,
-                        entry,
-                        package_index=opened_index,
-                        package_total=monitor_total,
-                        render_callback=render_callback,
-                    )
-                    _maybe_render()
-                    continue
+                        )
 
                 _maybe_render()
                 if not self.stop_event.is_set():
