@@ -1,8 +1,8 @@
-"""Two-phase cache clear (probes p-f499f7533a, p-7d483f2f27, p-536c439c42).
+"""Two-phase cache clear (probes p-f499f7533a, p-536c439c42, p-22bfe0518a).
 
-Phase 1 — Start prep: mass clear every selected clone via a detached root
-script under ``/data/local/tmp`` so Termux never waits on a heavy ``su`` +
-``find``/``rm`` tree (inline and python-child paths still SIGSEGV'd).
+Phase 1 — Start prep: mass clear every selected clone via a single detached
+``su`` shell on Termux. Termux must never call ``run_root_command`` or poll
+during Start — that still SIGSEGVs after the force-stop burst.
 
 Phase 2 — dead recovery only: clear cache for one target package at a time,
 inline through one locked root shell.
@@ -21,16 +21,25 @@ def _settle_before_start_cache_clear() -> None:
         time.sleep(1.0)
 
 
+def _background_cache_settle_after_dispatch() -> None:
+    """Pure-Python pause so detached wipe can progress before prep continues."""
+    if android.is_termux():
+        time.sleep(2.5)
+
+
 def run_start_mass_cache_clear(
     packages: list[str],
     *,
     root_info: android.RootInfo | None = None,
 ) -> dict[str, str]:
-    """Phase 1: clear all selected packages (detached mass wipe on Termux)."""
+    """Phase 1: fire-and-forget mass clear on Termux, inline elsewhere."""
     if not packages:
         return {}
     _settle_before_start_cache_clear()
-    return android.clear_packages_cache_mass_batch(packages, root_info=root_info)
+    results = android.clear_packages_cache_mass_batch(packages, root_info=root_info)
+    if android.is_termux() and any(v == "Dispatched" for v in results.values()):
+        _background_cache_settle_after_dispatch()
+    return results
 
 
 def run_recovery_cache_clear(

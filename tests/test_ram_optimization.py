@@ -20,10 +20,10 @@ Covers:
   17. RAM optimization does not clear _online_start_ts.
   18. RAM optimization does not set launch grace.
   19. Ram check updates _ram_last_check_at timestamp.
-  20. Trim updates _ram_last_trim_at timestamp.
+  19. Timestamp updates (_ram_last_check_at only; no watchdog cache trim).
   21. config defaults used when keys missing.
   22. RAM check probe tag [DENG_REJOIN_RAM_CHECK] emitted.
-  23. RAM trim probe tag [DENG_REJOIN_RAM_TRIM] emitted.
+  22. High-RAM Online packages never trigger cache clear.
   24. RAM restart-skipped probe tag [DENG_REJOIN_RAM_RESTART_SKIPPED] emitted.
   25. RAM cooldown is ignored because RAM restarts are disabled.
   26. No trim attempt when RAM already ≤ target in normal mode.
@@ -99,7 +99,6 @@ def _make_supervisor(cfg: dict[str, Any] | None = None) -> Any:
         sup._revive_count = {}
         sup._failure_count = {}
         sup._ram_last_check_at = {}
-        sup._ram_last_trim_at = {}
         sup._ram_cooldown_until = {}
         sup._logger = MagicMock()
         sup._root_info = MagicMock()
@@ -454,19 +453,17 @@ class TestRamTimestampUpdates(unittest.TestCase):
 
         self.assertAlmostEqual(sup._ram_last_check_at.get(_PKG, 0), now, delta=0.5)
 
-    def test_last_trim_at_updated_when_trim_runs(self):
+    def test_last_check_at_updated_when_high_ram(self):
         sup = _make_supervisor()
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(750)
-            mock_android.clear_package_cache_safe.return_value = {
-                "success": True, "skipped": False, "skipped_reason": "", "error": "",
-            }
             sup._check_ram_optimization(_PKG, _ENTRY, now)
 
-        self.assertAlmostEqual(sup._ram_last_trim_at.get(_PKG, 0), now, delta=0.5)
+        self.assertAlmostEqual(sup._ram_last_check_at.get(_PKG, 0), now, delta=0.5)
+        mock_android.clear_package_cache_safe.assert_not_called()
 
 
 # ── 21: Config defaults ───────────────────────────────────────────────────────
@@ -553,15 +550,16 @@ class TestHandleStateRouting(unittest.TestCase):
 
 class TestTrimRateLimit(unittest.TestCase):
 
-    def test_trim_not_repeated_within_interval(self):
+    def test_high_ram_check_does_not_clear_cache_within_interval(self):
         sup = _make_supervisor()
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
-        sup._ram_last_trim_at[_PKG] = now - 30  # Last trim 30s ago, interval=120.
+        sup._ram_last_check_at[_PKG] = now - 30  # Last check 30s ago, interval=120.
 
         with patch("agent.supervisor.android") as mock_android:
             mock_android.get_package_ram_usage.return_value = _ram_result(750)
             sup._check_ram_optimization(_PKG, _ENTRY, now)
+            mock_android.get_package_ram_usage.assert_not_called()
             mock_android.clear_package_cache_safe.assert_not_called()
 
 
@@ -766,8 +764,7 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
                 # cooldown gate alone wouldn't be enough.
                 for i in range(30):
                     now = base + i * 200  # > 180 s cooldown
-                    sup._ram_last_check_at.pop(_PKG, None)  # bypass trim rate-limit
-                    sup._ram_last_trim_at.pop(_PKG, None)
+                    sup._ram_last_check_at.pop(_PKG, None)  # bypass check rate-limit
                     sup._check_ram_optimization(_PKG, _ENTRY, now)
                 mock_launch.assert_not_called()
 

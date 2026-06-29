@@ -2469,10 +2469,6 @@ def clear_package_cache_safe(
     }
 
 
-_START_MASS_CACHE_SCRIPT = "/data/local/tmp/deng_start_mass_cache.sh"
-_START_MASS_CACHE_DONE = "/data/local/tmp/deng_start_mass_cache.done"
-
-
 def _start_mass_cache_paths(package: str) -> list[str]:
     pkg = validate_package_name(package)
     return [
@@ -2484,95 +2480,33 @@ def _start_mass_cache_paths(package: str) -> list[str]:
     ]
 
 
-def build_start_mass_cache_clear_script(packages: Iterable[str]) -> str:
-    """Root-owned shell script: wipe safe cache dirs then touch a done marker."""
-    lines = [
-        "#!/system/bin/sh",
-        "umask 077",
-        f"rm -f {shlex.quote(_START_MASS_CACHE_DONE)}",
-    ]
-    for raw in packages:
-        quoted = " ".join(shlex.quote(p) for p in _start_mass_cache_paths(raw))
-        lines.append(
-            f"for p in {quoted}; do "
+def _build_start_mass_cache_clear_shell(packages: list[str]) -> str:
+    """Inline root shell: wipe safe cache dirs for every package."""
+    script_parts: list[str] = []
+    for pkg in packages:
+        quoted = " ".join(shlex.quote(p) for p in _start_mass_cache_paths(pkg))
+        script_parts.append(
+            f'for p in {quoted}; do '
             f'[ -d "$p" ] && rm -rf "$p"/* 2>/dev/null; '
             f"done"
         )
-        lines.append("sleep 0.25")
-    lines.append(f"touch {shlex.quote(_START_MASS_CACHE_DONE)}")
-    return "\n".join(lines) + "\n"
+    return "; ".join(script_parts)
 
 
-def _write_start_mass_cache_clear_script(
-    packages: list[str],
-    *,
-    root_tool: str,
-) -> bool:
-    script = build_start_mass_cache_clear_script(packages)
-    marker = "DENG_REJOIN_MASS_CACHE"
-    write_shell = (
-        "umask 077\n"
-        f"rm -f {shlex.quote(_START_MASS_CACHE_DONE)}\n"
-        f"cat > {shlex.quote(_START_MASS_CACHE_SCRIPT)} <<'{marker}'\n"
-        f"{script}{marker}\n"
-        f"chmod 700 {shlex.quote(_START_MASS_CACHE_SCRIPT)}"
-    )
-    result = run_root_command(
-        ["sh", "-c", write_shell],
-        root_tool=root_tool,
-        timeout=15,
-    )
-    return bool(result.ok)
-
-
-def _dispatch_detached_start_mass_cache_clear(*, root_tool: str) -> bool:
-    """Launch mass cache wipe outside Termux's waited subprocess tree."""
-    tool = str(root_tool or "su").strip() or "su"
-    detached = (
-        f"setsid sh {shlex.quote(_START_MASS_CACHE_SCRIPT)} "
-        "< /dev/null > /dev/null 2>&1 &"
-    )
-    shell = f"{shlex.quote(tool)} -c {shlex.quote(detached)}"
-    return _iso.spawn_detached(["sh", "-c", shell])
-
-
-def _wait_for_start_mass_cache_clear_done(
-    *,
-    root_tool: str,
-    timeout_sec: float,
-) -> bool:
-    deadline = time.time() + max(30.0, float(timeout_sec))
-    while time.time() < deadline:
-        probe = run_root_command(
-            ["test", "-f", _START_MASS_CACHE_DONE],
-            root_tool=root_tool,
-            timeout=5,
-        )
-        if probe.ok:
-            return True
-        time.sleep(0.4)
-    return False
-
-
-def clear_packages_cache_mass_batch_detached(
+def clear_packages_cache_mass_batch_fire_and_forget(
     packages: list[str],
     *,
     root_info: RootInfo | None = None,
 ) -> dict[str, str]:
-    """Phase-1 Start mass clear via detached root script (probe p-536c439c42)."""
+    """Phase-1 Start mass clear — one detached su, zero blocking waits (p-22bfe0518a)."""
     info = root_info or detect_root()
     if not info.available or not info.tool:
         return {pkg: "Skipped" for pkg in packages}
     root_tool = str(info.tool)
-    if not _write_start_mass_cache_clear_script(packages, root_tool=root_tool):
-        return {pkg: "Failed" for pkg in packages}
-    if not _dispatch_detached_start_mass_cache_clear(root_tool=root_tool):
-        return {pkg: "Failed" for pkg in packages}
-    ok = _wait_for_start_mass_cache_clear_done(
-        root_tool=root_tool,
-        timeout_sec=max(120.0, len(packages) * 30.0),
-    )
-    label = "Cleared" if ok else "Failed"
+    inner = _build_start_mass_cache_clear_shell(packages)
+    detached = f"{shlex.quote(root_tool)} -c {shlex.quote(inner)}"
+    ok = _iso.spawn_detached(["sh", "-c", detached])
+    label = "Dispatched" if ok else "Failed"
     return {pkg: label for pkg in packages}
 
 
@@ -2597,11 +2531,11 @@ def clear_packages_cache_mass_batch(
             results.setdefault(pkg, "Skipped")
         return results
     if is_termux():
-        detached = clear_packages_cache_mass_batch_detached(
+        dispatched = clear_packages_cache_mass_batch_fire_and_forget(
             package_list,
             root_info=info,
         )
-        results.update(detached)
+        results.update(dispatched)
         return results
     script_parts: list[str] = []
     for pkg in package_list:

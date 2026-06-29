@@ -1332,7 +1332,6 @@ class WatchdogSupervisor:
 
         # ── Per-package RAM optimization tracking ─────────────────────────────
         self._ram_last_check_at: dict[str, float] = {}   # last RAM measurement ts
-        self._ram_last_trim_at: dict[str, float] = {}    # last cache trim ts
         self._ram_cooldown_until: dict[str, float] = {}  # no RAM restart until this ts
 
         # ── Per-package presence tracking ─────────────────────────────────────
@@ -3643,23 +3642,17 @@ class WatchdogSupervisor:
         now: float,
         render_callback: Any = None,
     ) -> None:
-        """Check per-package RAM usage and apply trim / restart if required.
+        """Check per-package RAM usage and log high-RAM observations only.
 
         Decision ladder (all thresholds from config):
           1. Package must have been Online for at least ram_check_delay_after_online_sec.
           2. Check at most once per ram_trim_interval_sec.
           3. RAM ≤ effective target  →  no action.
-          4. RAM > effective target  →  try safe cache trim (non-disruptive).
+          4. RAM > effective target  →  no cache clear (phase-2 recovery only).
           5. RAM > ram_restart_threshold_mb → log high RAM, but do not stop
              or relaunch an Online package.
 
-        Probe p-52aeb6420f evidence: Roblox uses 1.3–1.4 GB on the SM-N9810
-        (Android 10) so the default 900 MB threshold tripped EVERY package
-        on EVERY cooldown cycle (180 s), force-closing Online-and-in-game
-        packages forever.  Per user spec, Online + in-game packages MUST
-        NOT be relaunched.  The non-disruptive cache trim still fires above
-        the soft target, but high RAM alone never force-stops, relaunches,
-        or reopens the private URL.
+        Watchdog never clears cache during RAM checks — user request p-22bfe0518a.
 
         Probe tags:
           [DENG_REJOIN_RAM_CHECK]
