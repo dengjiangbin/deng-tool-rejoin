@@ -22,7 +22,7 @@ DETECTION_FILENAME = "deng.txt"
 # 3s heartbeat: fast enough that online / wrong-server / dead all resolve well
 # under the 15s target (4 missed posts == 12s loss grace) without spamming the
 # loopback worker (user p-5d0df79c33).
-DEFAULT_HEARTBEAT_INTERVAL = 3
+DEFAULT_HEARTBEAT_INTERVAL = 2
 
 
 def _lua_quote(value: str) -> str:

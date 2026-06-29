@@ -2593,6 +2593,7 @@ class WatchdogSupervisor:
             "logcat_disconnect",
             "game_crash",
             "captcha",
+            "heartbeat_lost",
         )
         if any(token in reason for token in tokens):
             return True

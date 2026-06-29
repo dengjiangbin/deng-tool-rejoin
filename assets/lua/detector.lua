@@ -6,12 +6,22 @@
 
     The injected `deng.txt` bootstrap pins per-package config into
     getgenv().DENG and then loadstrings this script.  While the player is
-    genuinely in a live server this loop POSTs a tiny heartbeat (placeId /
-    jobId / universeId) to the agent's loopback detection worker every few
-    seconds.  When the player dies, disconnects, is kicked, teleports to a
-    different game/server, or hits a captcha (pre-game), the DataModel
-    unloads and the heartbeats stop / change — which is exactly how the
-    watchdog detects "dead", "wrong server", and "recovered" instantly.
+    genuinely in a live server this loop emits a tiny heartbeat (placeId /
+    rootPlaceId / universeId / jobId) every few seconds by TWO channels:
+
+      1. A `print(...)` line tagged "DENGRJN_HB|" — this lands in Android
+         logcat under the package's own PID, which the agent reads via the
+         same PID-scoped `logcat` dump that already detects "online" in ~1s.
+         This is the PRIMARY channel because it works even on cloud-phone
+         clones where the loopback HTTP port is sandboxed/blocked.
+      2. A best-effort HTTP POST to the agent's loopback detection worker
+         (kept as a fallback for environments where loopback is allowed).
+
+    When the player dies, disconnects, is kicked, teleports to a different
+    game/server, or hits a mid-game captcha, the DataModel unloads and BOTH
+    channels stop / change — which is exactly how the watchdog detects
+    "dead", "wrong server", and "recovered" within ~10s (heartbeat-loss),
+    catching GL/WebView error dialogs that dumpsys/uiautomator cannot read.
 
     Everything is pcall-wrapped: this script must never error or interrupt
     the user's own auto-exec scripts.
@@ -52,6 +62,28 @@ local function http_post(body)
     end)
 end
 
+-- PRIMARY channel: a logcat-visible heartbeat line.  `print` from the
+-- executor surfaces in Android logcat as "[FLog::Output] ..." under the
+-- Roblox process PID, so the agent reads it with the same reliable
+-- PID-scoped `logcat` dump it uses for online detection — no loopback port
+-- needed (works on sandboxed cloud-phone clones).  Format is pipe-delimited
+-- and easy to parse:  DENGRJN_HB|placeId|rootPlaceId|universeId|jobId|alive
+local function hb_log(alive)
+    local placeId, universeId, jobId = 0, 0, ""
+    pcall(function() placeId = tonumber(game.PlaceId) or 0 end)
+    pcall(function() universeId = tonumber(game.GameId) or 0 end)
+    pcall(function() jobId = tostring(game.JobId or "") end)
+    pcall(function()
+        print(
+            "DENGRJN_HB|" .. tostring(placeId)
+                .. "|" .. tostring(placeId)
+                .. "|" .. tostring(universeId)
+                .. "|" .. tostring(jobId)
+                .. "|" .. (alive and "1" or "0")
+        )
+    end)
+end
+
 local function send(alive)
     local payload = {
         k = TOKEN,
@@ -84,6 +116,7 @@ while true do
     pcall(function()
         alive = (tonumber(game.PlaceId) or 0) > 0
     end)
+    pcall(hb_log, alive)
     pcall(send, alive)
     pcall(function() task.wait(INTERVAL) end)
 end

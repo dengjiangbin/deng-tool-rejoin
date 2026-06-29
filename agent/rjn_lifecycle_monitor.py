@@ -61,6 +61,26 @@ DUMP_SCAN_MIN_INTERVAL_SECONDS = float(os.environ.get("DENG_REJOIN_DUMP_SCAN_INT
 DUMP_TAIL_LINES = int(os.environ.get("DENG_REJOIN_DUMP_TAIL_LINES", "4000"))
 DUMP_MAX_PIDS = 4
 DUMP_SCAN_ENABLED = os.environ.get("DENG_REJOIN_DISABLE_DUMP_SCAN", "").strip() not in {"1", "true", "yes"}
+
+# ── In-game Lua detector logcat heartbeat-loss (issue p-af27350e40) ───────────
+# detector.lua prints a "DENGRJN_HB|..." line to logcat every ~2s from inside a
+# live server.  The PID-scoped dump above reads it as reliably as it reads the
+# "online" join line (proven on cloud-phone clones, where the loopback HTTP port
+# is sandboxed).  When that heartbeat goes SILENT while the process is still
+# alive, the client has left the live server — a kick, an error code, a captcha,
+# or a freeze whose GL/WebView dialog dumpsys/uiautomator cannot read.  We demote
+# to Disconnected after this grace so recovery fires within ~10-13s, matching the
+# online detection speed the user asked us to match for every other scenario.
+INGAME_HB_LOSS_SECONDS = float(os.environ.get("DENG_REJOIN_INGAME_HB_LOSS_SEC", "10") or "10")
+INGAME_HB_LOSS_ENABLED = os.environ.get("DENG_REJOIN_DISABLE_INGAME_HB_LOSS", "").strip() not in {
+    "1",
+    "true",
+    "yes",
+}
+# Parses the heartbeat payload: DENGRJN_HB|placeId|rootPlaceId|universeId|jobId|alive
+_INGAME_HB_RE = re.compile(
+    r"DENGRJN_HB\|(\d*)\|(\d*)\|(\d*)\|([^|\s]*)\|([01])"
+)
 WRONG_SERVER_ANCHOR_ENABLED = os.environ.get("DENG_REJOIN_WRONG_SERVER_ANCHOR", "1").strip() in {"1", "true", "yes"}
 
 _UID_OPTIONAL_ONLINE_SOURCES = frozenset({
@@ -261,6 +281,13 @@ class PackageRjnState:
     # SAME wrong server would otherwise re-confirm it Online — that flip/flop
     # was why a moved package never stayed flagged (p-5d0df79c33).
     wrong_server_active: bool = False
+    # In-game Lua detector (detector.lua) logcat heartbeat bookkeeping. Once a
+    # heartbeat has EVER been seen for this session the package is enrolled in
+    # heartbeat-loss detection: if the printed "DENGRJN_HB|" line then stops
+    # while the process is alive, the client left the live server (kick / error
+    # code / captcha / freeze) and we demote → Disconnected. Reset every launch.
+    last_ingame_hb_at: float = 0.0
+    ingame_hb_ever: bool = False
     # Authoritative full-dump scan bookkeeping.
     last_dump_scan_at: float = 0.0
     last_dump_disconnect_epoch: float = 0.0
@@ -574,7 +601,18 @@ class RjnLifecycleMonitor:
             self._detector_errors.append(f"logcat_poll:{exc}"[:120])
             return
         for event in events:
-            if event.event == "package_logcat_game_join_loaded":
+            if event.event == "package_logcat_ingame_hb":
+                # In-game Lua detector heartbeat printed to logcat — clone-safe
+                # online proof + identity (and resets the heartbeat-loss grace).
+                # Use the line's DEVICE timestamp (not poll wall-clock) and only
+                # act on a newer beat: this poll re-reads the tail every cycle, so
+                # a stale buffered heartbeat must not refresh the loss grace after
+                # the script has actually stopped.
+                ep = self._logcat_line_epoch(event.line, event.at)
+                row = self._states.get(event.package)
+                if row is None or ep > (row.last_ingame_hb_at + 0.5):
+                    self._ingest_logcat_heartbeat(event.package, event.line, ep)
+            elif event.event == "package_logcat_game_join_loaded":
                 self._confirm_online_evidence(
                     event.package,
                     event.at,
@@ -981,6 +1019,12 @@ class RjnLifecycleMonitor:
 
         with self._lock:
             row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
+            # Enroll this package in heartbeat-loss detection and record liveness
+            # (drives the silence demotion in ``evaluate_package``). Applies to
+            # both the loopback HTTP push and the logcat "DENGRJN_HB|" print.
+            if seen_at > row.last_ingame_hb_at:
+                row.last_ingame_hb_at = seen_at
+            row.ingame_hb_ever = True
             changed = False
             for attr, val in (
                 ("observed_place_id", place_id),
@@ -1028,6 +1072,33 @@ class RjnLifecycleMonitor:
                 self._confirm_online_evidence(pkg, seen_at, source="push_heartbeat")
                 return "online"
         return ""
+
+    def _ingest_logcat_heartbeat(self, pkg: str, raw_line: str, at: float) -> str:
+        """Parse a logcat ``DENGRJN_HB|...`` line and feed it as a heartbeat.
+
+        This is the clone-safe twin of the loopback HTTP push: the in-game Lua
+        detector ``print``s its heartbeat to logcat, the PID-scoped dump (or the
+        live stream) reads it, and we route it through ``ingest_push_heartbeat``
+        so online/wrong-server/heartbeat-loss all behave identically regardless
+        of which channel delivered the beat.  Returns the monitor verdict.
+        """
+        m = _INGAME_HB_RE.search(raw_line or "")
+        if not m:
+            return ""
+        place_id = m.group(1) or 0
+        root_place_id = m.group(2) or 0
+        universe_id = m.group(3) or 0
+        job_id = m.group(4) or ""
+        alive = (m.group(5) or "1") == "1"
+        return self.ingest_push_heartbeat(
+            pkg,
+            alive=alive,
+            place_id=place_id,
+            root_place_id=root_place_id,
+            universe_id=universe_id,
+            job_id=job_id,
+            at=at,
+        )
 
     def _has_expected_target(self, row: PackageRjnState) -> bool:
         return bool(
@@ -1273,8 +1344,16 @@ class RjnLifecycleMonitor:
         latest_online_epoch = 0.0
         latest_ident_epoch = 0.0
         latest_ident_line = ""
+        latest_hb_epoch = 0.0
+        latest_hb_line = ""
 
         for line in lines:
+            if _INGAME_HB_RE.search(line):
+                ep = self._logcat_line_epoch(line, now)
+                if ep >= latest_hb_epoch:
+                    latest_hb_epoch = ep
+                    latest_hb_line = line
+                continue
             if _GAME_JOIN_RE.search(line):
                 ep = self._logcat_line_epoch(line, now)
                 if ep >= latest_online_epoch:
@@ -1300,6 +1379,19 @@ class RjnLifecycleMonitor:
                 if ep >= latest_ident_epoch:
                     latest_ident_epoch = ep
                     latest_ident_line = line
+
+        # In-game Lua detector heartbeat (clone-safe primary signal): the most
+        # recent "DENGRJN_HB|" line carries the live server identity and proves
+        # the client is in a real server right now.  Only act on a GENUINELY NEW
+        # beat (newer than the last one we processed): the wide dump buffer keeps
+        # printing stale heartbeat lines for minutes after the script stops, and
+        # re-ingesting one would falsely re-confirm online and fight the
+        # heartbeat-loss demotion.  A fresh beat confirms online, refreshes the
+        # loss grace, and flags a wrong server (→ already DISCONNECTED, stop).
+        if latest_hb_line and latest_hb_epoch > (row.last_ingame_hb_at + 0.5):
+            verdict = self._ingest_logcat_heartbeat(pkg, latest_hb_line, latest_hb_epoch or now)
+            if verdict == "wrong_server":
+                return
 
         # Wrong-Server / deeplink: process the most recent join-identity line. If
         # it flags Wrong Server the package is already DISCONNECTED — stop here.
@@ -1438,6 +1530,11 @@ class RjnLifecycleMonitor:
             row.wrong_server_active = False
             row.last_wrong_server_at = 0.0
             row.last_dump_disconnect_epoch = 0.0
+            # Fresh session: re-enroll heartbeat-loss only after the new session's
+            # first in-game heartbeat (a stale pre-launch heartbeat must not
+            # instantly demote the relaunched client).
+            row.last_ingame_hb_at = 0.0
+            row.ingame_hb_ever = False
             if relaunch:
                 row.internal_state = STATE_RELAUNCHING
                 row.last_transition_at = now
@@ -1565,6 +1662,30 @@ class RjnLifecycleMonitor:
                 # log spam buried the line. Runs every round (cheap, PID-scoped)
                 # and is throttled internally.
                 self._scan_logcat_dump(pkg, now)
+                # In-game Lua detector heartbeat-loss: once detector.lua has
+                # printed at least one "DENGRJN_HB|" line this session, a silence
+                # past the grace while the process is alive means the client left
+                # the live server (kick / error code / captcha / freeze) — the GL/
+                # WebView state the UI scrapers cannot see on a background clone.
+                # This is the universal "improve the other scenarios" path the
+                # user asked for, matching the ~1s logcat online detection speed.
+                if (
+                    INGAME_HB_LOSS_ENABLED
+                    and row.ingame_hb_ever
+                    and row.last_ingame_hb_at > 0
+                    and row.internal_state in {STATE_ONLINE_CONFIRMED, STATE_TELEPORTING}
+                    and (now - row.last_ingame_hb_at) > INGAME_HB_LOSS_SECONDS
+                ):
+                    row.disconnect_prompt_text = (
+                        "In-game detection heartbeat lost (client left live server)"
+                    )
+                    self._transition(
+                        pkg,
+                        STATE_DISCONNECTED,
+                        "heartbeat_lost",
+                        at=now,
+                        offline=True,
+                    )
                 stream_fresh = self.stream_fresh_for(pkg, STREAM_FRESH_DISCONNECT_SKIP_SECONDS)
                 heavy_due = (
                     now - row.last_disconnect_scan_at

@@ -16,6 +16,12 @@ _LOGCAT_HEADER_RE = re.compile(
 )
 _DO_TELEPORT_RE = re.compile(r"doTeleport", re.IGNORECASE)
 _WITH_REASON_RE = re.compile(r"with reason", re.IGNORECASE)
+# In-game Lua detector (detector.lua) heartbeat printed to logcat. Carries the
+# live server identity so the watchdog can confirm online, detect a wrong
+# server, and — when it goes silent while the process is alive — detect a
+# kick / error code / captcha / freeze the UI scrapers cannot see.
+#   DENGRJN_HB|placeId|rootPlaceId|universeId|jobId|alive
+_INGAME_HB_RE = re.compile(r"DENGRJN_HB\|")
 _IDLE_DISCONNECT_RE = re.compile(
     r"(disconnected for being idle|Error Code:\s*278|idle\s+\d+\s+minutes|You were disconnected.*idle)",
     re.IGNORECASE,
@@ -117,7 +123,9 @@ def _pid_to_package(pid_map: dict[str, str], pid: str) -> str | None:
 
 def _match_line_events(package: str, line: str, now: float) -> list[LogcatPackageEvent]:
     events: list[LogcatPackageEvent] = []
-    if _GAME_JOIN_RE.search(line):
+    if _INGAME_HB_RE.search(line):
+        events.append(LogcatPackageEvent(package, "package_logcat_ingame_hb", line, now))
+    elif _GAME_JOIN_RE.search(line):
         events.append(LogcatPackageEvent(package, "package_logcat_game_join_loaded", line, now))
     elif _WITH_REASON_RE.search(line):
         events.append(LogcatPackageEvent(package, "package_logcat_reason", line, now))
