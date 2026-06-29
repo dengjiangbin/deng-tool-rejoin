@@ -869,6 +869,7 @@ def _direct_resize_via_root(
     root_tool: str,
     *,
     tolerance: int = 32,
+    skip_windowing_mode_flip: bool = False,
 ) -> tuple[bool, str]:
     """Try direct-resize commands and return True only after bounds readback verifies.
 
@@ -876,6 +877,12 @@ def _direct_resize_via_root(
     is wrong or the window stays fullscreen.  We therefore treat a command as
     successful only when ``read_actual_bounds`` confirms the package landed
     within ``tolerance`` px of ``rect``.  Never raises.
+
+    When ``skip_windowing_mode_flip`` is true (single-package recovery while
+    other clones + Termux are live), we never call ``set-task-windowing-mode``
+    or ``am stack move-task``.  Those commands recreate WM state and were the
+    remaining mass-close vector after freeform settings were session-guarded
+    (probe p-f609904dd1, same class as p-52aeb6420f Termux dock bug).
     """
     task_id = _get_task_id(package)
     stack_id = _get_stack_id(package)
@@ -885,25 +892,26 @@ def _direct_resize_via_root(
     bounds_comma = f"{l},{t},{r},{b}"
     bounds_args = [str(l), str(t), str(r), str(b)]
 
-    flipped = False
-    try:
-        res = android.run_root_command(
-            ["cmd", "activity", "set-task-windowing-mode",
-             str(task_id), str(ANDROID10_FREEFORM_WINDOWING_MODE)],
-            root_tool=root_tool, timeout=4,
-        )
-        flipped = bool(res.ok)
-    except Exception:  # noqa: BLE001
-        pass
-    if not flipped:
+    if not skip_windowing_mode_flip:
+        flipped = False
         try:
-            android.run_root_command(
-                ["am", "stack", "move-task", str(task_id),
-                 str(ANDROID10_FREEFORM_WINDOWING_MODE), "true"],
+            res = android.run_root_command(
+                ["cmd", "activity", "set-task-windowing-mode",
+                 str(task_id), str(ANDROID10_FREEFORM_WINDOWING_MODE)],
                 root_tool=root_tool, timeout=4,
             )
+            flipped = bool(res.ok)
         except Exception:  # noqa: BLE001
             pass
+        if not flipped:
+            try:
+                android.run_root_command(
+                    ["am", "stack", "move-task", str(task_id),
+                     str(ANDROID10_FREEFORM_WINDOWING_MODE), "true"],
+                    root_tool=root_tool, timeout=4,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
     new_stack = _get_stack_id(package)
     target_stack = new_stack if new_stack is not None else stack_id
@@ -1571,30 +1579,35 @@ def apply_window_layout_silent(
     return ok, len(results)
 
 
-def force_resize_package(package: str, rect: WindowRect) -> tuple[bool, str]:
+def force_resize_package(
+    package: str,
+    rect: WindowRect,
+    *,
+    skip_windowing_mode_flip: bool = False,
+) -> tuple[bool, str]:
     """One-shot resize for a single package — used during supervisor recovery.
 
     Pipeline:
-      1. Ensure freeform/resizable system settings are on.
-      2. Direct resize via root (cmd activity resize-task / am task resize /
-         am stack resize / wm task resize / windowing-mode flip).
-      3. Read back bounds; return whether they match desired ± 32 px.
+      1. Direct resize via root (cmd activity resize-task / am task resize /
+         am stack resize / wm task resize; optional windowing-mode flip).
+      2. Read back bounds; return whether they match desired ± 32 px.
 
     Never raises.  Returns ``(ok, detail)``.
 
-    Recovery note (probe p-6c644c4708): this used to call
-    ``setup_freeform_capabilities()`` on every recovery.  That re-wrote the
-    global/secure freeform flags and made WindowManager recreate the whole
-    activity stack — force-closing every app + Termux ("root bound window"
-    mass close).  Freeform is already ensured once at Start (and re-ensured,
-    now session-guarded, by the ``apply_window_layout_silent`` call that
-    precedes this in supervisor recovery), so we only do the per-task resize
-    here and never touch global window settings while clones are live.
+    Recovery note (probe p-6c644c4708): never call ``setup_freeform_capabilities``
+    here — global freeform toggles mass-close every live window.  Probe
+    p-f609904dd1: also skip windowing-mode flips during recovery; launch already
+    used ``--windowingMode 5`` and flipping again sends the device home.
     """
     root_info = android.detect_root()
     if not root_info.available or not root_info.tool:
         return False, "no root"
     try:
-        return _direct_resize_via_root(package, rect, root_info.tool)
+        return _direct_resize_via_root(
+            package,
+            rect,
+            root_info.tool,
+            skip_windowing_mode_flip=skip_windowing_mode_flip,
+        )
     except Exception as exc:  # noqa: BLE001
         return False, f"resize error: {exc}"

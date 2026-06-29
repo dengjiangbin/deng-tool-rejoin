@@ -184,12 +184,15 @@ def _wait_for_launch_ready(package: str, cfg: dict[str, Any]) -> dict[str, Any]:
     return last
 
 
-_DETACHED_RECOVERY_REASONS = frozenset({
+RECOVERY_LAUNCH_REASONS = frozenset({
     "recovery_gate_retry",
     "dead_recovery",
     "watchdog_recovery",
     "process_missing",
 })
+
+# Back-compat alias for detached-script gating inside perform_rejoin.
+_DETACHED_RECOVERY_REASONS = RECOVERY_LAUNCH_REASONS
 
 
 def perform_rejoin(

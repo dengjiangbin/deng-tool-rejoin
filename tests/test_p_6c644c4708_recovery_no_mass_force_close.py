@@ -116,6 +116,73 @@ class TestRecoveryNoMassForceClose(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(m.call_count, 1)
 
+    def test_force_resize_package_recovery_skips_windowing_mode_flip(self) -> None:
+        with mock.patch.object(
+            window_apply, "_direct_resize_via_root",
+            return_value=(True, "verified"),
+        ) as m, mock.patch.object(
+            android, "detect_root",
+            return_value=android.RootInfo(True, "su", ""),
+        ):
+            from agent.window_layout import WindowRect
+            window_apply.force_resize_package(
+                "com.example.clone",
+                WindowRect(package="com.example.clone", left=0, top=0, right=400, bottom=300),
+                skip_windowing_mode_flip=True,
+            )
+        _args, kwargs = m.call_args
+        self.assertTrue(kwargs.get("skip_windowing_mode_flip"))
+
+    def test_reapply_layout_uses_recovery_safe_resize(self) -> None:
+        from agent.supervisor import _reapply_layout_for_package
+        from agent.window_layout import WindowRect
+        stored = WindowRect(
+            package="com.moons.litesc",
+            left=0, top=0, right=400, bottom=300,
+        )
+        cfg = {
+            "screen_mode": "landscape",
+            "last_layout_preview": {
+                "rects": [{
+                    "package": "com.moons.litesc",
+                    "left": 0, "top": 0, "right": 400, "bottom": 300,
+                }],
+            },
+        }
+        with mock.patch("agent.supervisor.load_config", return_value=cfg), \
+             mock.patch(
+                 "agent.supervisor._load_stored_rect_for_package",
+                 return_value=stored,
+             ), mock.patch.object(
+                 window_apply, "force_resize_package",
+                 return_value=(True, "verified"),
+             ) as resize_mock:
+            _reapply_layout_for_package("com.moons.litesc")
+        resize_mock.assert_called_once()
+        _args, kwargs = resize_mock.call_args
+        self.assertTrue(kwargs.get("skip_windowing_mode_flip"))
+
+    def test_do_launch_skips_layout_reapply_for_recovery(self) -> None:
+        from agent.supervisor import WatchdogSupervisor
+        sup = WatchdogSupervisor.__new__(WatchdogSupervisor)
+        sup.cfg = {"root_mode_enabled": True}
+        sup._logger = mock.MagicMock()
+        sup.status_map = {}
+        entry = {"package": "com.moons.litesc", "private_server_url": "https://x"}
+        with mock.patch(
+            "agent.supervisor.launch_package_for_current_config",
+            return_value=mock.MagicMock(success=True, error=""),
+        ), mock.patch(
+            "agent.supervisor._reapply_layout_for_package",
+        ) as layout_mock, mock.patch(
+            "agent.supervisor.log_event",
+        ), mock.patch(
+            "agent.launch_relaunch_trace.record_launch_attempt",
+        ):
+            ok = WatchdogSupervisor._do_launch(sup, "com.moons.litesc", entry, "dead_recovery")
+        self.assertTrue(ok)
+        layout_mock.assert_not_called()
+
     def test_reapply_layout_skips_apply_window_layout_silent(self) -> None:
         """Recovery must not re-run global freeform setup (probe p-e2fe87273b)."""
         from agent.supervisor import _reapply_layout_for_package

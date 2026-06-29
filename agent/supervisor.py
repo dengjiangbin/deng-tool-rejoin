@@ -13,7 +13,7 @@ from typing import Any
 from . import android, db
 from .backoff import calculate_backoff_seconds
 from .config import effective_private_server_url, load_config, private_url_launch_context, validate_config
-from .launcher import launch_package_for_current_config, perform_rejoin
+from .launcher import RECOVERY_LAUNCH_REASONS, launch_package_for_current_config, perform_rejoin
 from .lockfile import LockManager
 from .logger import configure_logging, log_event
 from .monitor import check_package_health, check_roblox_health
@@ -123,9 +123,14 @@ def _reapply_layout_for_package(package: str) -> None:
             pass
 
         # Direct resize via root only — never poke global freeform/WM flags
-        # while other clone packages and Termux are still live.
+        # while other clone packages and Termux are still live.  Skip
+        # windowing-mode flips too: launch already used --windowingMode 5 and
+        # set-task-windowing-mode during recovery mass-closes other windows
+        # (probe p-f609904dd1).
         try:
-            ok, detail = window_apply.force_resize_package(package, rects[0])
+            ok, detail = window_apply.force_resize_package(
+                package, rects[0], skip_windowing_mode_flip=True,
+            )
             _slog.debug(
                 "force_resize_package(%s) ok=%s detail=%s",
                 package, ok, detail,
@@ -1865,12 +1870,15 @@ class WatchdogSupervisor:
         logger = self._logger
         if not self._reserve_recovery_launch_attempt(pkg):
             return False
+        url_context = private_url_launch_context(entry, self.cfg)
+        url_configured = url_context.get("url_mode") == "private_url"
         log_event(
             logger,
             "info",
             "[DENG_REJOIN_RECOVERY_GATE_CYCLE]",
             package=pkg,
             action="force_stop_relaunch",
+            private_url_configured=str(url_configured).lower(),
         )
         self._set_status(pkg, STATUS_REOPENING)
         self._mark_launched(pkg)
@@ -1879,21 +1887,33 @@ class WatchdogSupervisor:
                 render_callback()
             except Exception:  # noqa: BLE001
                 pass
-        root_tool = getattr(self._root_info, "tool", None)
-        dispatched = android.dispatch_detached_force_stop_relaunch(
-            pkg,
-            root_tool=root_tool,
-            sleep_seconds=3.5,
-        )
-        if dispatched:
-            log_event(
-                logger,
-                "info",
-                "[DENG_REJOIN_RECOVERY_DETACHED_DISPATCH]",
-                package=pkg,
-                action="root_tmp_script_force_stop_activity",
+        # Detached /data/local/tmp script only does a plain MAIN launch — no
+        # private-server URL.  When a URL is configured, always use the
+        # canonical perform_rejoin path so only THIS package is stopped and
+        # rejoined.  Never use detached dispatch with URL mode (probe
+        # p-f609904dd1).
+        dispatched = False
+        if not url_configured:
+            root_tool = getattr(self._root_info, "tool", None)
+            dispatched = android.dispatch_detached_force_stop_relaunch(
+                pkg,
+                root_tool=root_tool,
+                sleep_seconds=3.5,
             )
-            success = True
+            if dispatched:
+                log_event(
+                    logger,
+                    "info",
+                    "[DENG_REJOIN_RECOVERY_DETACHED_DISPATCH]",
+                    package=pkg,
+                    action="root_tmp_script_force_stop_activity",
+                )
+                success = True
+            else:
+                if self._root_process_running(pkg)[0]:
+                    if self._force_stop_target_package(pkg):
+                        time.sleep(float(self.RECOVERY_FORCE_STOP_BREATH_SECONDS))
+                success = self._do_launch(pkg, entry, "recovery_gate_retry")
         else:
             if self._root_process_running(pkg)[0]:
                 if self._force_stop_target_package(pkg):
@@ -3173,7 +3193,11 @@ class WatchdogSupervisor:
                 elapsed_ms=elapsed_ms,
             )
             if result.success:
-                _reapply_layout_for_package(pkg)
+                # Recovery launch already passes --windowingMode + bounds via
+                # perform_rejoin.  Post-launch resize flips WM state and was
+                # mass-closing Termux + other clones (probe p-f609904dd1).
+                if reason not in RECOVERY_LAUNCH_REASONS:
+                    _reapply_layout_for_package(pkg)
             record_launch_attempt(
                 pkg,
                 action=f"launch_{reason}",

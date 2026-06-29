@@ -80,6 +80,8 @@ class TestDetachedRecovery(unittest.TestCase):
         src = inspect.getsource(supervisor.WatchdogSupervisor._deploy_gate_recovery_cycle)
         self.assertIn("dispatch_detached_force_stop_relaunch", src)
         self.assertIn("[DENG_REJOIN_RECOVERY_DETACHED_DISPATCH]", src)
+        self.assertIn("private_url_configured", src)
+        self.assertIn("not url_configured", src)
 
     def test_perform_rejoin_app_only_recovery_uses_detached_dispatch(self) -> None:
         src = inspect.getsource(launcher.perform_rejoin)
