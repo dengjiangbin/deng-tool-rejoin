@@ -1,4 +1,4 @@
-"""Start/recovery cache clear segfault regression (probes p-7dac7cb6c4, p-f499f7533a, p-7d483f2f27)."""
+"""Start/recovery cache clear segfault regression (probes p-7dac7cb6c4, p-f499f7533a, p-536c439c42)."""
 
 from __future__ import annotations
 
@@ -24,21 +24,41 @@ class TestStartBatchCacheClear(unittest.TestCase):
         self.assertIn("_run_start_batch_cache_clear", block)
         self.assertNotIn("clear_package_cache_verified", block)
 
-    def test_mass_batch_cache_clear_uses_single_root_shell(self) -> None:
+    def test_mass_batch_cache_clear_uses_detached_path_on_termux(self) -> None:
         root = android.RootInfo(True, "su", "uid=0")
         packages = ["com.moons.litesc", "com.moons.litesd"]
-        with mock.patch.object(android, "detect_root", return_value=root), \
+        with mock.patch.object(android, "is_termux", return_value=True), \
+             mock.patch.object(
+                 android,
+                 "clear_packages_cache_mass_batch_detached",
+                 return_value={"com.moons.litesc": "Cleared", "com.moons.litesd": "Cleared"},
+             ) as detached, \
+             mock.patch.object(android, "run_root_command") as root_cmd:
+            out = android.clear_packages_cache_mass_batch(packages, root_info=root)
+        detached.assert_called_once()
+        root_cmd.assert_not_called()
+        self.assertEqual(out["com.moons.litesc"], "Cleared")
+
+    def test_mass_batch_cache_clear_inline_off_termux(self) -> None:
+        root = android.RootInfo(True, "su", "uid=0")
+        packages = ["com.moons.litesc", "com.moons.litesd"]
+        with mock.patch.object(android, "is_termux", return_value=False), \
              mock.patch.object(android, "run_root_command") as root_cmd:
             root_cmd.return_value = android.CommandResult(("su",), 0, "", "")
-            out = android.clear_packages_cache_mass_batch(packages)
+            out = android.clear_packages_cache_mass_batch(packages, root_info=root)
         self.assertEqual(root_cmd.call_count, 1)
         script = root_cmd.call_args.args[0][2]
         self.assertIn("com.moons.litesc", script)
-        self.assertIn("com.moons.litesd", script)
+        self.assertIn("rm -rf", script)
         self.assertEqual(out["com.moons.litesc"], "Cleared")
-        self.assertEqual(out["com.moons.litesd"], "Cleared")
 
-    def test_start_mass_cache_clear_runs_inline_without_python_child(self) -> None:
+    def test_build_mass_cache_script_touches_done_marker(self) -> None:
+        script = android.build_start_mass_cache_clear_script(["com.moons.litesc"])
+        self.assertIn(android._START_MASS_CACHE_DONE, script)
+        self.assertIn("com.moons.litesc", script)
+        self.assertIn("rm -rf", script)
+
+    def test_start_mass_cache_clear_delegates_to_android_mass_batch(self) -> None:
         packages = ["com.moons.litesc", "com.moons.litesd"]
         root = android.RootInfo(True, "su", "uid=0")
         with mock.patch.object(

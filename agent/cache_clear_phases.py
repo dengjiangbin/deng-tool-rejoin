@@ -1,12 +1,11 @@
-"""Two-phase cache clear (probes p-f499f7533a, p-7d483f2f27).
+"""Two-phase cache clear (probes p-f499f7533a, p-7d483f2f27, p-536c439c42).
 
-Phase 1 — Start prep: mass clear every selected clone in one root shell,
-executed inline through :func:`agent.android.run_root_command` (serialized
-subprocess lock).  Spawning a nested ``python3 -c`` child here still
-SIGSEGV'd Termux after the force-stop burst on first-time cache wipes.
+Phase 1 — Start prep: mass clear every selected clone via a detached root
+script under ``/data/local/tmp`` so Termux never waits on a heavy ``su`` +
+``find``/``rm`` tree (inline and python-child paths still SIGSEGV'd).
 
 Phase 2 — dead recovery only: clear cache for one target package at a time,
-also inline (one root shell, same lock).
+inline through one locked root shell.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from . import android
 def _settle_before_start_cache_clear() -> None:
     """Brief pause so fork/exec after force-stop prep is less crash-prone."""
     if android.is_termux():
-        time.sleep(0.75)
+        time.sleep(1.0)
 
 
 def run_start_mass_cache_clear(
@@ -27,7 +26,7 @@ def run_start_mass_cache_clear(
     *,
     root_info: android.RootInfo | None = None,
 ) -> dict[str, str]:
-    """Phase 1: clear all selected packages in one mass root shell."""
+    """Phase 1: clear all selected packages (detached mass wipe on Termux)."""
     if not packages:
         return {}
     _settle_before_start_cache_clear()
