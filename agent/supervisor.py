@@ -204,6 +204,19 @@ _RECOVERY_TRIGGER_STATES = frozenset({
     STATUS_JOIN_FAILED,
 })
 
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "").strip() or default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+# In-game Lua push-channel: how fresh a heartbeat must be to be trusted as
+# "in this server right now".  detector.lua posts every ~5s, so 15s tolerates
+# two missed posts before falling back to the slow scrape path.
+PUSH_HEARTBEAT_FRESH_SECONDS = _env_float("DENG_REJOIN_PUSH_HEARTBEAT_FRESH_SECONDS", 15.0)
+
 # All healthy states — used for legacy _PackageWorker state-machine guards.
 # WatchdogSupervisor never reads _HEALTHY_STATES; only _PackageWorker uses it.
 # STATUS_LOBBY stays in _HEALTHY_STATES for _PackageWorker backward compat.
@@ -2835,6 +2848,39 @@ class WatchdogSupervisor:
         except Exception:  # noqa: BLE001
             return ev
 
+    def _ingest_push_heartbeat(self, pkg: str) -> str:
+        """Consume the latest in-game Lua push heartbeat for ``pkg`` (if fresh).
+
+        Best-effort: returns the monitor verdict (``"online"`` / ``"wrong_server"``
+        / ``""``) and never raises.
+        """
+        try:
+            from . import detection_worker
+
+            hb = detection_worker.get_heartbeat(pkg)
+        except Exception:  # noqa: BLE001
+            return ""
+        if not hb:
+            return ""
+        try:
+            age = float(hb.get("age_seconds", 1e9))
+        except (TypeError, ValueError):
+            return ""
+        if age > PUSH_HEARTBEAT_FRESH_SECONDS:
+            return ""
+        try:
+            verdict = self._rjn_monitor.ingest_push_heartbeat(
+                pkg,
+                alive=bool(hb.get("alive", True)),
+                place_id=hb.get("placeId") or hb.get("place_id") or 0,
+                root_place_id=hb.get("rootPlaceId") or hb.get("root_place_id") or 0,
+                universe_id=hb.get("universeId") or hb.get("gameId") or 0,
+                job_id=hb.get("jobId") or "",
+            )
+            return str(verdict or "")
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
         """Merge rjn detection with supervisor launch/relaunch state (detection only)."""
         from .rjn_lifecycle_monitor import (
@@ -2849,6 +2895,11 @@ class WatchdogSupervisor:
             detail["elapsed_ms"] = int((time.monotonic() - t0) * 1000)
             self._log_state_evidence(pkg, detail, {}, STATUS_READY)
             return STATUS_READY, detail
+        # Fast path: a fresh in-game Lua heartbeat is the strongest, cheapest
+        # truth (placeId/jobId/universeId).  Feed it into the lifecycle monitor
+        # BEFORE the slow scrape so evaluate_package reflects online / wrong
+        # server instantly without dumpsys/uiautomator/logcat work.
+        self._ingest_push_heartbeat(pkg)
         ev = self._rjn_monitor.evaluate_package(pkg)
         ev = self._try_online_evidence_fallback(pkg, ev)
         ev = self._try_presence_target_verification(pkg, ev)
@@ -3873,6 +3924,15 @@ class WatchdogSupervisor:
         display_interval = float(display_interval or self._display_interval or self.DASHBOARD_RENDER_INTERVAL_SECONDS)
 
         logger = self._logger
+        # Bring up the loopback detection worker (in-game Lua push channel) so
+        # the injected deng.txt heartbeats have a receiver.  Idempotent +
+        # best-effort: detection still works via the slow scrape if it fails.
+        try:
+            from . import detection_worker
+
+            detection_worker.start_detection_worker(logger)
+        except Exception:  # noqa: BLE001
+            pass
         log_event(
             logger, "info", "watchdog_supervisor_started",
             packages=self.packages,

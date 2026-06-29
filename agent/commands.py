@@ -4008,6 +4008,28 @@ def _print_auto_execute_inventory(draft: dict[str, Any], *, executor: str = "del
         print("Warning: scripts differ across packages. Use Remove All Scripts to reset.")
 
 
+def _inject_detection_scripts(
+    packages: list[str],
+    *,
+    executor: str = "delta",
+    quiet: bool = False,
+) -> None:
+    """Drop the DENG detection bootstrap (``deng.txt``) next to user scripts.
+
+    Best-effort: a failure (e.g. on a non-Android dev host where the storage
+    path does not exist) must never break the calling flow.
+    """
+    if not packages:
+        return
+    try:
+        results = auto_execute.write_detection_script(list(packages), executor=executor)
+    except Exception:  # noqa: BLE001
+        return
+    ok = sum(1 for r in results if r.get("success"))
+    if ok and not quiet:
+        print(f"[+] Detection script installed ({ok}/{len(results)} package(s)).")
+
+
 def _config_auto_execute_add(draft: dict[str, Any]) -> None:
     packages = _auto_execute_package_names(draft)
     if not packages:
@@ -4017,6 +4039,7 @@ def _config_auto_execute_add(draft: dict[str, Any]) -> None:
     if not executor:
         return
     script_no = 1
+    detection_injected = False
     while True:
         answer = safe_io.safe_prompt(f"Add script #{script_no}? Y/N: ", default="N")
         if answer is None:
@@ -4029,6 +4052,12 @@ def _config_auto_execute_add(draft: dict[str, Any]) -> None:
         filename = auto_execute.next_managed_filename(packages, executor=executor)
         results = auto_execute.write_script_to_packages(packages, script, executor=executor, filename=filename)
         _print_auto_execute_write_results(filename, results)
+        if not detection_injected:
+            # Whenever the user installs their own script we also install our
+            # in-game detection bootstrap so the watchdog gets fast, reliable
+            # truth via the loopback push channel.
+            _inject_detection_scripts(packages, executor=executor)
+            detection_injected = True
         script_no += 1
 
 
@@ -4517,6 +4546,16 @@ def cmd_scan(args: argparse.Namespace) -> int:
         print("Install/open a Roblox clone once, then retry.")
         return 1
     _print_full_discovery_table(candidates, cfg)
+    # Scanning also (re)installs the in-game detection bootstrap into every
+    # configured package so detection works even before the user adds their
+    # own auto-exec script.
+    try:
+        _inject_detection_scripts(
+            auto_execute.configured_package_names(cfg),
+            executor="delta",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return 0
 
 

@@ -932,6 +932,80 @@ class RjnLifecycleMonitor:
             if changed:
                 self._maybe_flag_wrong_server(pkg, seen_at)
 
+    def ingest_push_heartbeat(
+        self,
+        package: str,
+        *,
+        alive: bool,
+        place_id: object = 0,
+        root_place_id: object = 0,
+        universe_id: object = 0,
+        job_id: object = "",
+        at: float | None = None,
+    ) -> str:
+        """Feed an in-game Lua push heartbeat (loopback detection worker).
+
+        A fresh heartbeat is the strongest possible proof the client is really
+        in a live server *and* tells us exactly which server (placeId/jobId/
+        universeId).  We update the observed identity (driving Wrong-Server
+        detection) and, unless that join is the wrong server, confirm online —
+        bypassing the slow dumpsys/uiautomator/logcat scrape entirely.
+
+        Returns ``"wrong_server"``, ``"online"`` or ``""``.
+        """
+        pkg = str(package or "").strip()
+        if not pkg:
+            return ""
+        seen_at = float(at if at is not None else time.time())
+
+        def _as_id(value: object) -> int:
+            try:
+                ival = int(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return 0
+            return ival if ival > 0 else 0
+
+        with self._lock:
+            row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
+            changed = False
+            for attr, val in (
+                ("observed_place_id", place_id),
+                ("observed_root_place_id", root_place_id),
+                ("observed_universe_id", universe_id),
+            ):
+                ival = _as_id(val)
+                if ival > 0 and getattr(row, attr) != ival:
+                    setattr(row, attr, ival)
+                    changed = True
+            jid = str(job_id or "").strip()
+            if jid:
+                job_hash = _hash_code(jid)
+                if job_hash:
+                    if not row.anchor_job_id_hash:
+                        row.anchor_job_id_hash = job_hash
+                    if job_hash != row.observed_job_id_hash:
+                        row.observed_job_id_hash = job_hash
+                        changed = True
+            # First-join anchor for no-target / public configs (mirrors
+            # _capture_observed_identity): pin the legit first server, never
+            # flagging it as wrong.
+            if (
+                WRONG_SERVER_ANCHOR_ENABLED
+                and not row.anchor_set
+                and not self._has_expected_target(row)
+                and (row.observed_universe_id or row.observed_root_place_id or row.observed_place_id)
+            ):
+                row.anchor_universe_id = row.observed_universe_id
+                row.anchor_root_place_id = row.observed_root_place_id
+                row.anchor_place_id = row.observed_place_id
+                row.anchor_set = True
+            elif changed and self._maybe_flag_wrong_server(pkg, seen_at):
+                return "wrong_server"
+            if bool(alive):
+                self._confirm_online_evidence(pkg, seen_at, source="push_heartbeat")
+                return "online"
+        return ""
+
     def _has_expected_target(self, row: PackageRjnState) -> bool:
         return bool(
             row.expected_place_id

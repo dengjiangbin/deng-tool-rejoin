@@ -203,6 +203,99 @@ def write_script_to_packages(
     return results
 
 
+def write_detection_script(
+    packages: Iterable[str],
+    *,
+    executor: str = "delta",
+    storage_root: Path = DEFAULT_ANDROID_STORAGE_ROOT,
+    port: int | None = None,
+    token: str | None = None,
+) -> list[dict[str, Any]]:
+    """Drop the DENG detection bootstrap (``deng.txt``) into each package's
+    autoexecute folder, alongside the user's own scripts.
+
+    Unlike :func:`write_script_to_packages`, this OVERWRITES an existing
+    ``deng.txt`` (the baked-in loopback port/token may legitimately change
+    between sessions).  The content is the obscured loadstring bootstrap built
+    by :mod:`agent.detection_lua`; it is DENG-owned and not part of the
+    user-facing managed-script numbering.
+    """
+    from . import detection_lua
+
+    spec = get_executor(executor)
+    results: list[dict[str, Any]] = []
+    for package in packages:
+        directory = spec.autoexecute_dir(package, storage_root=storage_root)
+        target = directory / detection_lua.DETECTION_FILENAME
+        try:
+            content = detection_lua.build_deng_txt(package, port=port, token=token)
+            raw = content.encode("utf-8")
+        except Exception as exc:  # noqa: BLE001
+            results.append(
+                {
+                    "package": package,
+                    "path": str(target),
+                    "filename": detection_lua.DETECTION_FILENAME,
+                    "byte_count": 0,
+                    "success": False,
+                    "error": f"build failed: {exc}",
+                }
+            )
+            continue
+        row: dict[str, Any] = {
+            "package": package,
+            "path": str(target),
+            "filename": detection_lua.DETECTION_FILENAME,
+            "byte_count": len(raw),
+            "success": False,
+            "error": "",
+        }
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+            row["success"] = True
+        except PermissionError as exc:
+            row["error"] = f"permission denied: {exc}"
+        except OSError as exc:
+            row["error"] = f"directory create/write failed: {exc}"
+        results.append(row)
+    return results
+
+
+def remove_detection_script(
+    packages: Iterable[str],
+    *,
+    executor: str = "delta",
+    storage_root: Path = DEFAULT_ANDROID_STORAGE_ROOT,
+) -> list[dict[str, Any]]:
+    """Delete the DENG detection bootstrap (``deng.txt``) from each package."""
+    from . import detection_lua
+
+    spec = get_executor(executor)
+    results: list[dict[str, Any]] = []
+    for package in packages:
+        target = spec.autoexecute_dir(package, storage_root=storage_root) / detection_lua.DETECTION_FILENAME
+        row: dict[str, Any] = {
+            "package": package,
+            "path": str(target),
+            "filename": detection_lua.DETECTION_FILENAME,
+            "deleted": False,
+            "success": False,
+            "error": "",
+        }
+        try:
+            if target.exists() and target.is_file():
+                target.unlink()
+                row["deleted"] = True
+            row["success"] = True
+        except PermissionError as exc:
+            row["error"] = f"permission denied: {exc}"
+        except OSError as exc:
+            row["error"] = f"delete failed: {exc}"
+        results.append(row)
+    return results
+
+
 def remove_script_from_packages(
     packages: Iterable[str],
     filename: str,

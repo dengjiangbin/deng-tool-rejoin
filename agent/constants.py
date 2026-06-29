@@ -37,6 +37,15 @@ PID_PATH = RUN_DIR / "agent.pid"
 MONITOR_PID_PATH = RUN_DIR / "monitor-bridge.pid"
 MONITOR_LOCK_PATH = RUN_DIR / "monitor-bridge.lock"
 MONITOR_STATUS_PATH = RUN_DIR / "monitor-bridge.status.json"
+# Detection worker (in-game Lua push channel).  The on-device detector.lua
+# POSTs heartbeats to a loopback port so the watchdog learns "in-game + which
+# server" instantly instead of scraping dumpsys/uiautomator/logcat.
+DETECTION_WORKER_PORT_PATH = RUN_DIR / "detection-worker.port"
+DETECTION_WORKER_TOKEN_PATH = RUN_DIR / "detection-worker.token"
+DETECTION_WORKER_STATUS_PATH = RUN_DIR / "detection-worker.status.json"
+# Fixed loopback port baked into the injected deng.txt so the Lua side and the
+# agent always agree (overridable via DENG_REJOIN_DETECTION_PORT for both).
+DEFAULT_DETECTION_WORKER_PORT = 52789
 LAUNCHER_DIR = APP_HOME / "launcher"
 CACHE_DIR = APP_HOME / "cache"
 SNAPSHOT_DIR = CACHE_DIR / "snapshots"
