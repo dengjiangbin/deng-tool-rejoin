@@ -117,7 +117,7 @@ class SupervisorLogcatFastPathTests(unittest.TestCase):
 
         fake_res = type("R", (), {"ok": True, "stdout": "10250"})()
         with patch.object(sup, "_ingest_push_heartbeat", return_value=""), \
-             patch.object(rlm.android, "run_root_command", return_value=fake_res):
+             patch.object(mon, "_authoritative_package_pids", return_value=["10250"]):
             state, detail = sup._detect_android_package_state(pkg)
 
         from agent.supervisor import STATUS_ONLINE

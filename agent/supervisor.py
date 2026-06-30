@@ -3157,6 +3157,7 @@ class WatchdogSupervisor:
             STATE_DEAD as RJN_DEAD,
             STATE_DISCONNECTED as RJN_DISCONNECTED,
             STATE_FAILED as RJN_FAILED,
+            _unpack_process_check,
         )
 
         t0 = time.monotonic()
@@ -3172,6 +3173,14 @@ class WatchdogSupervisor:
         self._ingest_push_heartbeat(pkg)
         self._sync_logcat_hb_push_channel(pkg)
         fresh_push = self._push_fresh(pkg)
+        try:
+            proc_exists, _, _ = _unpack_process_check(
+                self._rjn_monitor._process_check(pkg)
+            )
+            if not proc_exists:
+                fresh_push = False
+        except Exception:  # noqa: BLE001
+            pass
         ev = self._rjn_monitor.evaluate_package(pkg, fast_push=fresh_push)
         if not fresh_push:
             # No trustworthy in-game heartbeat this round → fall back to the slow

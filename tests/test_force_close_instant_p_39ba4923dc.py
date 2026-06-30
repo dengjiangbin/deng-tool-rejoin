@@ -67,7 +67,7 @@ def _go_online(mon: RjnLifecycleMonitor, pkg: str, pid: str = "9999") -> None:
 
 
 class ProcFastPathTests(unittest.TestCase):
-    """_process_check uses /proc/<pid> when PIDs are known."""
+    """_process_check uses package-scoped cmdline/pidof (not stale /proc cache)."""
 
     def setUp(self):
         (DATA_DIR / "status-monitor-runtime-state.json").unlink(missing_ok=True)
@@ -79,15 +79,13 @@ class ProcFastPathTests(unittest.TestCase):
         pkg = "com.pkg.proc1"
         mon = _monitor(pkg)
         row = mon._states[pkg]
-        # Simulate known PIDs by writing a non-existent PID
         row.pids = ["999999999"]
-        # Stale /proc miss must fall back to pidof; only declare dead when both fail.
-        with patch.object(rlm.android, "run_root_command", return_value=type("R", (), {"ok": True, "stdout": ""})()), \
-             patch.object(rlm.android, "is_process_running", return_value=False):
-            mon._root_info = type("RI", (), {"available": False, "tool": None})()
-            exists, pids, _definitive = mon._process_check(pkg)
+        row.online_since = time.time()
+        with patch.object(mon, "_authoritative_package_pids", return_value=[]):
+            exists, pids, definitive = mon._process_check(pkg)
         self.assertFalse(exists)
         self.assertEqual(pids, [])
+        self.assertTrue(definitive)
 
     def test_proc_check_rediscovers_after_stale_pid_cache(self) -> None:
         """Roblox PID rotation must not leave a live clone stuck process_missing."""
@@ -95,21 +93,18 @@ class ProcFastPathTests(unittest.TestCase):
         mon = _monitor(pkg)
         row = mon._states[pkg]
         row.pids = ["999999999"]  # stale
-        fake_res = type("R", (), {"ok": True, "stdout": "54321"})()
-        with patch.object(rlm.android, "run_root_command", return_value=fake_res):
-            mon._root_info = type("RI", (), {"available": True, "tool": "su"})()
+        with patch.object(mon, "_authoritative_package_pids", return_value=["54321"]):
             exists, pids, definitive = mon._process_check(pkg)
         self.assertTrue(exists)
         self.assertIn("54321", pids)
         self.assertFalse(definitive)
 
-    def test_proc_check_returns_true_when_pid_exists(self) -> None:
+    def test_proc_check_returns_true_when_authoritative_finds_pid(self) -> None:
         pkg = "com.pkg.proc2"
         mon = _monitor(pkg)
         row = mon._states[pkg]
         row.pids = ["12345"]
-        # Mock /proc/<pid> to exist so the test works on all platforms
-        with patch("agent.rjn_lifecycle_monitor.os.path.exists", return_value=True):
+        with patch.object(mon, "_authoritative_package_pids", return_value=["12345"]):
             exists, pids, _definitive = mon._process_check(pkg)
         self.assertTrue(exists)
         self.assertIn("12345", pids)
@@ -119,10 +114,7 @@ class ProcFastPathTests(unittest.TestCase):
         mon = _monitor(pkg)
         row = mon._states[pkg]
         row.pids = []  # no known PIDs
-        # pidof is mocked to return the PID
-        fake_res = type("R", (), {"ok": True, "stdout": "12345"})()
-        with patch.object(rlm.android, "run_root_command", return_value=fake_res):
-            mon._root_info = type("RI", (), {"available": True, "tool": "su"})()
+        with patch.object(mon, "_authoritative_package_pids", return_value=["12345"]):
             exists, pids, _definitive = mon._process_check(pkg)
         self.assertTrue(exists)
         self.assertIn("12345", pids)

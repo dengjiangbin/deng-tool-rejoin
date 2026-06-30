@@ -80,6 +80,10 @@ ALL_PACKAGES_DUMP_MAX_WORKERS = int(
     os.environ.get("DENG_REJOIN_ALL_PKG_DUMP_WORKERS", "4") or "4"
 )
 ALL_PACKAGES_DUMP_SKIP_EVAL_SECONDS = 1.5
+# Heartbeats read from a logcat *dump* must be this fresh (device epoch vs wall now)
+# or they are stale buffer lines that must not refresh online / block force-close
+# (probe p-a47ce4c396: force-closed clone stayed Online forever).
+HB_DUMP_MAX_AGE_SECONDS = float(os.environ.get("DENG_REJOIN_HB_DUMP_MAX_AGE", "12") or "12")
 
 # ── In-game Lua detector logcat heartbeat-loss (issue p-af27350e40) ───────────
 # detector.lua prints a "DENGRJN_HB|..." line to logcat every ~2s from inside a
@@ -684,7 +688,11 @@ class RjnLifecycleMonitor:
                 # the script has actually stopped.
                 ep = self._logcat_line_epoch(event.line, event.at)
                 row = self._states.get(event.package)
-                if row is None or ep > (row.last_ingame_hb_at + 0.5):
+                if row is None:
+                    self._ingest_logcat_heartbeat(event.package, event.line, ep)
+                elif ep > (row.last_ingame_hb_at + 0.5) and (
+                    now - ep
+                ) <= HB_DUMP_MAX_AGE_SECONDS:
                     self._ingest_logcat_heartbeat(event.package, event.line, ep)
             elif event.event == "package_logcat_game_join_loaded":
                 self._confirm_online_evidence(
@@ -1122,14 +1130,7 @@ class RjnLifecycleMonitor:
 
         with self._lock:
             row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
-            # Enroll this package in heartbeat-loss detection and record liveness
-            # (drives the silence demotion in ``evaluate_package``). Applies to
-            # both the loopback HTTP push and the logcat "DENGRJN_HB|" print.
-            if seen_at > row.last_ingame_hb_at:
-                row.last_ingame_hb_at = seen_at
-            row.last_ingame_hb_wall_at = time.time()
-            row.ingame_hb_ever = True
-            changed = False
+            new_beat = seen_at > (row.last_ingame_hb_at + 0.5) or row.last_ingame_hb_at <= 0
             for attr, val in (
                 ("observed_place_id", place_id),
                 ("observed_root_place_id", root_place_id),
@@ -1138,7 +1139,6 @@ class RjnLifecycleMonitor:
                 ival = _as_id(val)
                 if ival > 0 and getattr(row, attr) != ival:
                     setattr(row, attr, ival)
-                    changed = True
             jid = str(job_id or "").strip()
             if jid:
                 job_hash = _hash_code(jid)
@@ -1147,10 +1147,6 @@ class RjnLifecycleMonitor:
                         row.anchor_job_id_hash = job_hash
                     if job_hash != row.observed_job_id_hash:
                         row.observed_job_id_hash = job_hash
-                        changed = True
-            # First-join anchor for no-target / public configs (mirrors
-            # _capture_observed_identity): pin the legit first server, never
-            # flagging it as wrong.
             if (
                 WRONG_SERVER_ANCHOR_ENABLED
                 and not row.anchor_set
@@ -1161,17 +1157,15 @@ class RjnLifecycleMonitor:
                 row.anchor_root_place_id = row.observed_root_place_id
                 row.anchor_place_id = row.observed_place_id
                 row.anchor_set = True
-            else:
-                # Re-evaluate EVERY heartbeat, not only when the ids changed: a
-                # package that stays in the wrong server keeps sending the same
-                # (unchanged) placeId, and the old "elif changed" gate let the
-                # next heartbeat re-confirm it Online — so a moved package never
-                # stayed flagged.  ``_is_wrong_server_now`` is the pure predicate;
-                # ``_maybe_flag_wrong_server`` performs the (debounced) transition.
-                if self._is_wrong_server_now(row):
-                    self._maybe_flag_wrong_server(pkg, seen_at)
-                    return "wrong_server"
-                row.wrong_server_active = False
+            if self._is_wrong_server_now(row):
+                self._maybe_flag_wrong_server(pkg, seen_at)
+                return "wrong_server"
+            if not new_beat:
+                return ""
+            row.last_ingame_hb_at = seen_at
+            row.last_ingame_hb_wall_at = time.time()
+            row.ingame_hb_ever = True
+            row.wrong_server_active = False
             if bool(alive):
                 self._confirm_online_evidence(pkg, seen_at, source="push_heartbeat")
                 return "online"
@@ -1493,9 +1487,10 @@ class RjnLifecycleMonitor:
         # heartbeat-loss demotion.  A fresh beat confirms online, refreshes the
         # loss grace, and flags a wrong server (→ already DISCONNECTED, stop).
         if latest_hb_line and latest_hb_epoch > (row.last_ingame_hb_at + 0.5):
-            verdict = self._ingest_logcat_heartbeat(pkg, latest_hb_line, latest_hb_epoch or now)
-            if verdict == "wrong_server":
-                return
+            if (now - latest_hb_epoch) <= HB_DUMP_MAX_AGE_SECONDS:
+                verdict = self._ingest_logcat_heartbeat(pkg, latest_hb_line, latest_hb_epoch or now)
+                if verdict == "wrong_server":
+                    return
 
         # Wrong-Server / deeplink: process the most recent join-identity line. If
         # it flags Wrong Server the package is already DISCONNECTED — stop here.
@@ -1659,45 +1654,70 @@ class RjnLifecycleMonitor:
         """Backward-compatible alias — detection only."""
         self.note_launch_watchdog(package, relaunch=relaunch)
 
+    def _authoritative_package_pids(self, package: str) -> list[str]:
+        """Return PIDs provably owned by this clone package (cmdline scan + pidof).
+
+        Cached ``/proc/<pid>`` alone is NOT trusted: a stale PID from another
+        still-running clone kept force-closed packages showing process_running=true
+        (probe p-a47ce4c396).
+        """
+        pkg = android.validate_package_name(package)
+        pids: list[str] = []
+        root_tool = getattr(self._root_info, "tool", None) if self._root_info else None
+        try:
+            if getattr(self._root_info, "available", False) and root_tool:
+                res = android.run_root_command(
+                    android.process_cmdline_scan_args(pkg),
+                    root_tool=root_tool,
+                    timeout=3,
+                )
+            else:
+                res = android.run_command(
+                    android.process_cmdline_scan_args(pkg), timeout=3
+                )
+            if res.ok and (res.stdout or "").strip():
+                pids.extend(res.stdout.strip().split())
+        except Exception:  # noqa: BLE001
+            pass
+        if not pids:
+            try:
+                if getattr(self._root_info, "available", False) and root_tool:
+                    res = android.run_root_command(
+                        ["pidof", pkg], root_tool=root_tool, timeout=2
+                    )
+                else:
+                    res = android.run_command(["pidof", pkg], timeout=2)
+                if res.ok and (res.stdout or "").strip():
+                    pids.extend(res.stdout.strip().split())
+            except Exception:  # noqa: BLE001
+                pass
+        out: list[str] = []
+        seen: set[str] = set()
+        for pid in pids:
+            pid_s = str(pid or "").strip()
+            if pid_s and pid_s not in seen:
+                seen.add(pid_s)
+                out.append(pid_s)
+        return out
+
     def _process_check(self, package: str) -> tuple[bool, list[str], bool]:
         """Roblox package PID check.
 
-        Returns ``(exists, pids, definitive_absent)``.  ``definitive_absent`` is
-        True when we previously tracked PID(s), all are gone from ``/proc``, and
-        ``pidof`` rediscovery found nothing — a user force-close / crash, not a
-        transient tool force-stop gap.
+        Returns ``(exists, pids, definitive_absent)``.  Uses a package-scoped
+        cmdline / pidof probe — never a stale cached ``/proc`` PID alone.
         """
         pkg = android.validate_package_name(package)
         with self._lock:
             row = self._states.get(pkg)
             known_pids: list[str] = list(row.pids) if row else []
+            was_online = bool(row and self._was_ever_online_confirmed(row))
 
         had_known_pids = bool(known_pids)
-        if known_pids:
-            alive = [p for p in known_pids if os.path.exists(f"/proc/{p}")]
-            if alive:
-                return True, alive, False
-            # Cached PIDs are stale (Roblox restarted / PID rotated). Fall through
-            # to pidof rediscovery instead of declaring dead immediately — otherwise
-            # every clone after the first stays "Launching" with process_running=false
-            # while logcat heartbeats prove it is in-game (probe p-b967574a48).
-
-        # No known PIDs (or stale cache cleared) → discover via pidof.
-        pids: list[str] = []
-        root_tool = getattr(self._root_info, "tool", None) if self._root_info else None
-        try:
-            if getattr(self._root_info, "available", False) and root_tool:
-                res = android.run_root_command(["pidof", pkg], root_tool=root_tool, timeout=2)
-                if res.ok and (res.stdout or "").strip():
-                    pids = res.stdout.strip().split()
-            elif android.is_process_running(pkg):
-                res = android.run_command(["pidof", pkg], timeout=2)
-                if res.ok and (res.stdout or "").strip():
-                    pids = res.stdout.strip().split()
-        except Exception:  # noqa: BLE001
-            pass
-        definitive_absent = had_known_pids and not pids
-        return bool(pids), pids, definitive_absent
+        pids = self._authoritative_package_pids(pkg)
+        if pids:
+            return True, pids, False
+        definitive_absent = had_known_pids or was_online
+        return False, [], definitive_absent
 
     def try_mark_force_close_dead(self, package: str, *, at: float | None = None) -> bool:
         """Mark a force-closed/crashed clone DEAD when the process is provably gone.
@@ -1746,20 +1766,22 @@ class RjnLifecycleMonitor:
                 row = self._states.get(pkg)
                 if row is None:
                     continue
-                if row.internal_state not in {
-                    STATE_ONLINE_CONFIRMED,
-                    STATE_TELEPORTING,
-                    STATE_DISCONNECTED,
-                }:
+                if row.watchdog_active and not row.process_seen_since_launch:
                     continue
-                if row.watchdog_active:
+                was_tracking = (
+                    row.internal_state
+                    in {
+                        STATE_ONLINE_CONFIRMED,
+                        STATE_TELEPORTING,
+                        STATE_DISCONNECTED,
+                    }
+                    or self._was_ever_online_confirmed(row)
+                )
+                if not was_tracking:
                     continue
-                if not row.ingame_hb_ever:
-                    continue
-                silence = now - float(row.last_ingame_hb_wall_at or row.last_ingame_hb_at or 0.0)
-                if silence < FORCE_CLOSE_HB_SILENCE_SECONDS:
-                    continue
-            self.try_mark_force_close_dead(pkg, at=now)
+            exists, _pids, _definitive = _unpack_process_check(self._process_check(pkg))
+            if not exists:
+                self.try_mark_force_close_dead(pkg, at=now)
 
     def scan_all_packages_logcat_dump(self, *, force: bool = False) -> None:
         """PID-scoped logcat dump for every package — not round-robin gated.
