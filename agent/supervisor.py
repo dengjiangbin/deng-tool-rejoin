@@ -3353,13 +3353,40 @@ class WatchdogSupervisor:
             ):
                 state = STATUS_LAUNCHING
                 reason = "stagger_first_open_pending_confirmation"
-            else:
+            elif self._in_loading_grace(pkg) or (
+                pkg in self._relaunch_inflight
+                and time.monotonic() < self._relaunch_verify_until.get(pkg, 0.0)
+            ):
                 state = STATUS_RELAUNCHING
-                verify_until = self._relaunch_verify_until.get(pkg, 0.0)
-                if pkg in self._relaunch_inflight and time.monotonic() < verify_until:
+                if pkg in self._relaunch_inflight and time.monotonic() < self._relaunch_verify_until.get(pkg, 0.0):
                     reason = "android_relaunch_verification_pending"
                 else:
-                    reason = "relaunch_pending_gamejoinloadtime"
+                    reason = "relaunch_loading_grace"
+            else:
+                # Post-grace: do not pin Relaunching forever (probe p-cd09ac0ce3).
+                self._relaunch_inflight.discard(pkg)
+                self._relaunch_verify_until.pop(pkg, None)
+                if not ev.process_exists:
+                    state = STATUS_DEAD
+                    reason = str(
+                        detail.get("reason_internal")
+                        or detail.get("dead_reason")
+                        or "process_missing"
+                    )
+                elif (
+                    detail.get("launch_failed_reason")
+                    in {"launch_watchdog_timeout", "no_online_confirmation"}
+                    or ev.internal_state == RJN_FAILED
+                ):
+                    state = STATUS_JOIN_FAILED
+                    reason = str(
+                        detail.get("reason_user_friendly")
+                        or detail.get("launch_failed_reason")
+                        or reason
+                    )
+                else:
+                    state = STATUS_LAUNCHING
+                    reason = "relaunch_post_grace_pending_confirmation"
         elif current in {
             STATUS_LAUNCHING,
             STATUS_WAITING,
@@ -3368,11 +3395,22 @@ class WatchdogSupervisor:
             STATUS_PREPARING,
             STATUS_READY,
         }:
-            state = STATUS_LAUNCHING
-            if self._in_loading_grace(pkg):
-                reason = "launch_grace_started"
+            if (
+                not ev.process_exists
+                and not self._in_loading_grace(pkg)
+            ):
+                state = STATUS_DEAD
+                reason = str(
+                    detail.get("reason_internal")
+                    or detail.get("dead_reason")
+                    or "process_missing"
+                )
             else:
-                reason = "launch_pending_gamejoinloadtime"
+                state = STATUS_LAUNCHING
+                if self._in_loading_grace(pkg):
+                    reason = "launch_grace_started"
+                else:
+                    reason = "launch_pending_gamejoinloadtime"
         elif current == STATUS_ONLINE and not ev.is_online_confirmed:
             if ev.process_exists:
                 if self._in_loading_grace(pkg) or not self._all_launches_completed:
@@ -4088,6 +4126,7 @@ class WatchdogSupervisor:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
                 self._relaunch_inflight.discard(pkg)
                 self._relaunch_verify_until.pop(pkg, None)
+                self._set_status(pkg, STATUS_FAILED)
             self._post_recovery_memory_flush()
             # [DENG_REJOIN_NONBLOCKING_RECOVERY] probe p-765bbcc3d3.
             # The dead package has already been relaunched ONCE above (targeted,
