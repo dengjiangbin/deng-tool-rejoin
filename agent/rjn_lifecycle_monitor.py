@@ -299,6 +299,12 @@ class PackageRjnState:
     # code / captcha / freeze) and we demote → Disconnected. Reset every launch.
     last_ingame_hb_at: float = 0.0
     ingame_hb_ever: bool = False
+    # Tracks whether the process appeared at least once since the last
+    # (re)launch.  Reset by note_launch_watchdog.  When True and the process
+    # subsequently disappears during the watchdog window, that is a USER
+    # force-close (not the tool's own am-force-stop gap) → treated as dead
+    # even though watchdog_active is still True.
+    process_seen_since_launch: bool = False
     # Authoritative full-dump scan bookkeeping.
     last_dump_scan_at: float = 0.0
     last_dump_disconnect_epoch: float = 0.0
@@ -1345,7 +1351,7 @@ class RjnLifecycleMonitor:
             try:
                 res = android.run_command(
                     ["logcat", "-d", "--pid", pid_s, "-t", str(DUMP_TAIL_LINES)],
-                    timeout=8,
+                    timeout=3,
                 )
                 if res.ok and res.stdout:
                     lines.extend(res.stdout.splitlines())
@@ -1583,6 +1589,7 @@ class RjnLifecycleMonitor:
             # instantly demote the relaunched client).
             row.last_ingame_hb_at = 0.0
             row.ingame_hb_ever = False
+            row.process_seen_since_launch = False
             if relaunch:
                 row.internal_state = STATE_RELAUNCHING
                 row.last_transition_at = now
@@ -1597,8 +1604,34 @@ class RjnLifecycleMonitor:
         self.note_launch_watchdog(package, relaunch=relaunch)
 
     def _process_check(self, package: str) -> tuple[bool, list[str]]:
-        """Roblox package PID check — pidof/is_process_running only (no pgrep -f)."""
+        """Roblox package PID check.
+
+        Uses a two-tier approach for speed:
+        1. Fast path: if we have known PIDs from a previous check, verify them
+           via `/proc/<pid>` existence — a pure filesystem stat, no subprocess,
+           returns in microseconds.  If ALL known PIDs are gone, the process is
+           dead and we return False immediately without spawning pidof.  This is
+           the path that makes force-close detection effectively instant
+           (comparable to gamejoinloadtime online detection via the live stream).
+        2. Slow path: no known PIDs (first check, or after pids were cleared by
+           a relaunch/reset) → fall back to the root `pidof` subprocess as
+           before, which enumerates the new PID(s) for the next cycle.
+        """
         pkg = android.validate_package_name(package)
+        with self._lock:
+            row = self._states.get(pkg)
+            known_pids: list[str] = list(row.pids) if row else []
+
+        if known_pids:
+            alive = [p for p in known_pids if os.path.exists(f"/proc/{p}")]
+            if alive:
+                return True, alive
+            # ALL previously known PIDs are gone from /proc → dead.
+            # No need to spawn pidof — the process left, quickly.
+            return False, []
+
+        # No known PIDs → first check or post-relaunch. Use subprocess pidof
+        # to discover the new PID(s) so the fast path can run next round.
         pids: list[str] = []
         root_tool = getattr(self._root_info, "tool", None) if self._root_info else None
         try:
@@ -1673,18 +1706,10 @@ class RjnLifecycleMonitor:
                 row.process_missing_streak += 1
                 if row.process_missing_streak >= PROCESS_MISSING_CONFIRM:
                     # Any package that ever reached a live server this session and
-                    # whose process is now gone is a real force-close / crash →
-                    # recover it within PROCESS_MISSING_CONFIRM checks.  This MUST
-                    # include the logcat-heartbeat-only online path
-                    # (``ingame_hb_ever`` / ``online_since``): the old code gated
-                    # solely on ``_was_ever_online_confirmed`` (which the push
-                    # heartbeat could leave unset) and otherwise required the state
-                    # to be EXACTLY ONLINE_CONFIRMED — so a force-closed clone whose
-                    # state was DISCONNECTED/TELEPORTING fell through EVERY branch
-                    # and sat undetected for ~an hour (probe p-87b567bde8 #2).  The
-                    # supervisor's loading grace / relaunch-verify window is what
-                    # prevents a premature kill during the tool's own relaunch, so
-                    # ``ever_in_game`` takes precedence here exactly as before.
+                    # whose process is now gone is a real force-close / crash.
+                    # Covers the logcat-heartbeat-only online path (the slow-scrape
+                    # last_positive_online_evidence_at can be 0 on cloud-phone clones
+                    # where loopback push is blocked — probe p-87b567bde8 #2).
                     ever_in_game = (
                         row.ingame_hb_ever
                         or row.last_positive_online_evidence_at > 0
@@ -1695,7 +1720,18 @@ class RjnLifecycleMonitor:
                             STATE_DISCONNECTED,
                         }
                     )
-                    if ever_in_game:
+                    # Detect force-close DURING a relaunch window: the user
+                    # force-closes the package AFTER it started loading (process was
+                    # briefly seen since the last (re)launch) but BEFORE
+                    # gamejoinloadtime fires, so ever_in_game is still False.  This
+                    # is the "2nd+ force-close not detected" bug (p-39ba4923dc #3).
+                    # Using process_seen_since_launch distinguishes the tool's own
+                    # transient am-force-stop gap (process never seen → streak reset)
+                    # from a real user kill (process appeared then vanished → dead).
+                    user_kill_during_launch = (
+                        row.watchdog_active and row.process_seen_since_launch
+                    )
+                    if ever_in_game or user_kill_during_launch:
                         row.force_close_detected = True
                         self._transition(
                             pkg,
@@ -1708,13 +1744,13 @@ class RjnLifecycleMonitor:
                         row.watchdog_active
                         or row.internal_state in {STATE_LAUNCHING, STATE_RELAUNCHING}
                     ):
-                        # First launch still in flight (never reached a server yet)
-                        # — tolerate the transient process gap.
+                        # First launch still in flight AND process has never been
+                        # seen since launch — this is the tool's own am-force-stop
+                        # gap before am-start completes, not a user force-close.
                         row.process_missing_streak = 0
                     else:
                         # Never reached a live server and not launching — nothing to
-                        # recover yet; don't let the streak grow unbounded (this is
-                        # the old dead-end branch that left force-closes undetected).
+                        # recover yet; reset so the streak doesn't grow unbounded.
                         row.process_missing_streak = 0
             elif fast_push:
                 # Fresh in-game heartbeat already proved the live server this
@@ -1723,9 +1759,16 @@ class RjnLifecycleMonitor:
                 # heartbeat going silent (supervisor loss watchdog), not a log line.
                 row.process_missing_streak = 0
                 row.force_close_detected = False
+                # Track that the process was seen since the last (re)launch so a
+                # subsequent force-close during the watchdog window is caught.
+                if row.watchdog_active:
+                    row.process_seen_since_launch = True
             else:
                 row.process_missing_streak = 0
                 row.force_close_detected = False
+                # Track that the process was seen since the last (re)launch.
+                if row.watchdog_active:
+                    row.process_seen_since_launch = True
                 # Authoritative full-dump scan: catches a disconnect/idle kick or a
                 # move to a different game even when the live stream stalled or the
                 # log spam buried the line. Runs every round (cheap, PID-scoped)
