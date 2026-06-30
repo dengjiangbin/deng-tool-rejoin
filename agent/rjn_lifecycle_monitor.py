@@ -12,6 +12,7 @@ import re
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -70,6 +71,15 @@ DUMP_SCAN_MIN_INTERVAL_SECONDS = float(os.environ.get("DENG_REJOIN_DUMP_SCAN_INT
 DUMP_TAIL_LINES = int(os.environ.get("DENG_REJOIN_DUMP_TAIL_LINES", "4000"))
 DUMP_MAX_PIDS = 4
 DUMP_SCAN_ENABLED = os.environ.get("DENG_REJOIN_DISABLE_DUMP_SCAN", "").strip() not in {"1", "true", "yes"}
+# Every package gets a PID-scoped logcat dump on this cadence — independent of
+# watchdog round-robin turn order (probe p-0dac4920dc: clone #6 waited 76s).
+ALL_PACKAGES_DUMP_INTERVAL_SECONDS = float(
+    os.environ.get("DENG_REJOIN_ALL_PKG_DUMP_INTERVAL", "3") or "3"
+)
+ALL_PACKAGES_DUMP_MAX_WORKERS = int(
+    os.environ.get("DENG_REJOIN_ALL_PKG_DUMP_WORKERS", "4") or "4"
+)
+ALL_PACKAGES_DUMP_SKIP_EVAL_SECONDS = 1.5
 
 # ── In-game Lua detector logcat heartbeat-loss (issue p-af27350e40) ───────────
 # detector.lua prints a "DENGRJN_HB|..." line to logcat every ~2s from inside a
@@ -593,6 +603,7 @@ class RjnLifecycleMonitor:
                     self._handle_logcat_line(line.strip())
                     try:
                         self._poll_force_close_fast_lane()
+                        self.scan_all_packages_logcat_dump()
                     except Exception:  # noqa: BLE001
                         pass
                 except Exception as line_exc:  # noqa: BLE001
@@ -1405,7 +1416,7 @@ class RjnLifecycleMonitor:
                     self._detector_errors = self._detector_errors[-16:]
         return lines
 
-    def _scan_logcat_dump(self, pkg: str, now: float) -> None:
+    def _scan_logcat_dump(self, pkg: str, now: float, *, force: bool = False) -> None:
         """Authoritative full-dump disconnect + identity scan. Caller holds lock.
 
         Parses the most-recent disconnect-reason / idle / join-identity lines from
@@ -1420,7 +1431,7 @@ class RjnLifecycleMonitor:
         row = self._states.get(pkg)
         if row is None:
             return
-        if (now - row.last_dump_scan_at) < DUMP_SCAN_MIN_INTERVAL_SECONDS:
+        if not force and (now - row.last_dump_scan_at) < DUMP_SCAN_MIN_INTERVAL_SECONDS:
             return
         row.last_dump_scan_at = now
         pids = [str(p).strip() for p in (row.pids or []) if str(p).strip()]
@@ -1750,6 +1761,52 @@ class RjnLifecycleMonitor:
                     continue
             self.try_mark_force_close_dead(pkg, at=now)
 
+    def scan_all_packages_logcat_dump(self, *, force: bool = False) -> None:
+        """PID-scoped logcat dump for every package — not round-robin gated.
+
+        Runs on a fixed cadence from the logcat stream thread and at the start
+        of each watchdog round so clone #6 is not stuck waiting for clone #1's
+        turn (probe p-0dac4920dc: 76s between package checks).
+        """
+        now = time.time()
+        if not DUMP_SCAN_ENABLED:
+            return
+        if not force and (
+            now - getattr(self, "_last_all_packages_dump_at", 0.0)
+        ) < ALL_PACKAGES_DUMP_INTERVAL_SECONDS:
+            return
+        self._last_all_packages_dump_at = now
+        pkgs = [p for p in self.packages if p]
+        if not pkgs:
+            return
+
+        def _scan_one(pkg: str) -> None:
+            exists, pids, definitive_absent = _unpack_process_check(self._process_check(pkg))
+            if not exists and definitive_absent:
+                self.try_mark_force_close_dead(pkg, at=now)
+                return
+            if not pids:
+                with self._lock:
+                    row = self._states.get(pkg)
+                    if row is not None:
+                        row.process_exists = exists
+                        row.pids = []
+                        row.last_process_check_at = now
+                return
+            with self._lock:
+                row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
+                row.process_exists = exists
+                row.pids = list(pids)
+                row.last_process_check_at = now
+                self._scan_logcat_dump(pkg, now, force=True)
+
+        if len(pkgs) == 1:
+            _scan_one(pkgs[0])
+            return
+        workers = max(1, min(ALL_PACKAGES_DUMP_MAX_WORKERS, len(pkgs)))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="deng-logdump") as pool:
+            list(pool.map(_scan_one, pkgs))
+
     def evaluate_package(
         self, package: str, *, fast_push: bool = False
     ) -> PackageEvaluateResult:
@@ -1885,9 +1942,13 @@ class RjnLifecycleMonitor:
                     row.process_seen_since_launch = True
                 # Authoritative full-dump scan: catches a disconnect/idle kick or a
                 # move to a different game even when the live stream stalled or the
-                # log spam buried the line. Runs every round (cheap, PID-scoped)
-                # and is throttled internally.
-                self._scan_logcat_dump(pkg, now)
+                # log spam buried the line. Skip when scan_all_packages_logcat_dump
+                # just ran — avoids duplicate work on the slow round-robin path.
+                bulk_recent = (
+                    now - getattr(self, "_last_all_packages_dump_at", 0.0)
+                ) <= ALL_PACKAGES_DUMP_SKIP_EVAL_SECONDS
+                if not bulk_recent:
+                    self._scan_logcat_dump(pkg, now)
                 # In-game Lua detector heartbeat-loss: once detector.lua has
                 # printed at least one "DENGRJN_HB|" line this session, a silence
                 # past the grace while the process is alive means the client left

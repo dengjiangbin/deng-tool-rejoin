@@ -4343,6 +4343,11 @@ class WatchdogSupervisor:
             except Exception:  # noqa: BLE001
                 pass
 
+            try:
+                self._rjn_monitor.scan_all_packages_logcat_dump()
+            except Exception:  # noqa: BLE001
+                pass
+
             checked = 0
             round_started = time.monotonic()
             opened_packages = self._opened_packages()
