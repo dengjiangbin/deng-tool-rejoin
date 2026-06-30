@@ -146,6 +146,7 @@ describe('tracker upload 502 hardening + durable latest upload', () => {
       _events: {},
       once(evt, fn) { this._events[evt] = fn; return this; },
       status(code) { this.statusCode = code; return this; },
+      set() { return this; },
       json(payload) { this.body = payload; if (this._events.finish) this._events.finish(); return this; },
     };
     process.env.TRACKER_INGEST_MODE = '1';

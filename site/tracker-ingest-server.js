@@ -33,6 +33,9 @@ if (process.env.NODE_ENV === 'production') {
 process.env.TRACKER_INGEST_MODE = '1';
 process.env.SKIP_TRACKER_UPLOAD_ROUTES = '0';
 
+const { runIngestCluster } = require('./src/trackerIngestCluster');
+
+function startIngestServer() {
 const app = require('./src/trackerIngestApp');
 const { isTrackerUploadPath } = require('./src/trackerUploadPaths');
 const {
@@ -186,17 +189,22 @@ if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
 // from PM2's tracked process (the orphan-on-restart symptom). Bounded < 10s,
 // a child either binds during a normal restart race or exits for one clean respawn.
 const { listenWithReclaim, preBindReclaimSingleOwner } = require('./src/reclaimPort');
+const cluster = require('cluster');
+const { resolveWorkerCount } = require('./src/trackerIngestCluster');
 // 8792 is single-owner. If a stale node listener still holds the port at startup
 // the new instance cannot accept uploads anyway, and any in-flight data on a
 // stuck orphan is already lost — so deterministically reclaim before binding to
 // stop the crash-loop instead of waiting out the health-gated path.
-try {
-  const killed = preBindReclaimSingleOwner(PORT, '[deng-tracker-ingest]');
-  if (killed > 0) {
-    const waitUntil = Date.now() + 1200;
-    while (Date.now() < waitUntil) { /* brief pre-listen spin, startup only */ }
-  }
-} catch (_) { /* best effort */ }
+// In cluster mode the primary reclaims once before forking workers.
+if (resolveWorkerCount() <= 1 || !cluster.isWorker) {
+  try {
+    const killed = preBindReclaimSingleOwner(PORT, '[deng-tracker-ingest]');
+    if (killed > 0) {
+      const waitUntil = Date.now() + 1200;
+      while (Date.now() < waitUntil) { /* brief pre-listen spin, startup only */ }
+    }
+  } catch (_) { /* best effort */ }
+}
 listenWithReclaim(server, PORT, HOST, '[deng-tracker-ingest]', {
   pm2AppName: 'deng-tracker-ingest',
   // Ingest holds 800+ concurrent upload sockets; a deep accept backlog keeps new
@@ -254,3 +262,6 @@ process.on('unhandledRejection', (reason) => {
   if (isRecoverableFsError(reason)) return;
   process.exit(1);
 });
+}
+
+runIngestCluster(startIngestServer);

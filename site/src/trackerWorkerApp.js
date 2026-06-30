@@ -210,32 +210,12 @@ const lastPrecomputedMs = new Map(); // key -> Date.now() of last precompute
 const firstDirtySeenMs = new Map(); // key -> when it first became dirty (for oldest-age metric)
 const lastPresenceSig = new Map(); // key -> last presence_json string written (heartbeat decoupling)
 
-// The small presence/age fields the read API (8793) derives authoritative
-// red/green + ages from. These are written to the lightweight presence record
-// on EVERY real heartbeat — even when the inventory body is byte-stable — so an
-// actively-uploading account never reads stale "offline" with a frozen age.
-const WORKER_PRESENCE_FIELDS = [
-  'isOnline', 'trackerBuild', 'lastUploadTrackerBuild',
-  'lastAccountSeenAt', 'lastValidStatusAt', 'lastSuccessfulUploadAt',
-  'lastSuccessfulHeartbeatAt', 'lastHeartbeatAt', 'lastUploadReceivedAt',
-  'lastUploadAcceptedAt', 'lastSeenAt', 'lastSnapshotUploadAt', 'lastInventoryAt',
-  'lastStatsUploadAt', 'lastOfflineAt', 'lastFailureReason', 'lastUploadRejectReason',
-  'rejectReason', 'lastUploadStatusCodeReturned', 'lastUploadHttpStatus',
-  // Source-of-truth report identity — the read API derives online/offline + ages
-  // ONLY from these (never from precompute time). The worker copies them through
-  // unchanged; it never invents freshness.
-  'lastRealRobloxStatusAt', 'statusRevision', 'statusReportId', 'statusSeq',
-  'statusSessionId', 'statusCapturedAt', 'statusSentAt', 'serverReceivedStatusAt',
-  'statusIdentityReason',
-  'lastRealLeaderstatsAt', 'leaderstatsRevision', 'leaderstatsReportId', 'leaderstatsSeq',
-  'lastRealInventoryAt', 'inventoryRevision', 'inventoryReportId', 'inventorySeq', 'inventoryHash',
-  'reportIdentitySource', 'leaderstatsIdentitySource', 'inventoryIdentitySource',
-];
+const { PRESENCE_DISK_FIELDS } = require('./trackerPresenceFields');
 
 function buildPresenceJson(body) {
   if (!body || typeof body !== 'object') return null;
   const out = {};
-  for (const f of WORKER_PRESENCE_FIELDS) {
+  for (const f of PRESENCE_DISK_FIELDS) {
     if (body[f] !== undefined) out[f] = body[f];
   }
   return JSON.stringify(out);
@@ -348,7 +328,7 @@ function sourceSig(data) {
   const t = Array.isArray(data.playerDataTotemItems) ? data.playerDataTotemItems.length : 0;
   return [
     data.lastInventoryAt || '',
-    data.lastStatsUploadAt || data.playerStatsUpdatedAt || '',
+    data.lastRealLeaderstatsAt || data.lastStatsUploadAt || data.playerStatsUpdatedAt || '',
     data.lastStatsChangeAt || '',
     data.isOnline ? 1 : 0,
     f, s, t,
@@ -651,7 +631,7 @@ module.exports = {
     buildPresenceJson,
     sourceSig,
     sweepPresence,
-    WORKER_PRESENCE_FIELDS,
+    WORKER_PRESENCE_FIELDS: PRESENCE_DISK_FIELDS,
     PRESENCE_SWEEP_MS,
   },
 };

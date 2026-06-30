@@ -245,6 +245,39 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.match(src, /next\(\)/);
     const coalesceSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'trackerUploadCoalesce.js'), 'utf8');
     assert.match(coalesceSrc, /duplicate_lane_upload_coalesced/);
+    assert.match(coalesceSrc, /minuteCadenceLane/);
+    assert.match(coalesceSrc, /burstRetryMs/);
     assert.doesNotMatch(coalesceSrc, /status\(429\)/);
+  });
+
+  test('minute-cadence status lane is not coalesced across 60s even with 55s window', () => {
+    const prev = process.env.TRACKER_UPLOAD_COALESCE_MS;
+    process.env.TRACKER_UPLOAD_COALESCE_MS = '55000';
+    delete require.cache[require.resolve('../src/trackerUploadCoalesce')];
+    const coalesce = require('../src/trackerUploadCoalesce');
+    coalesce._resetForTests();
+    const body = {
+      type: 'tracker_status',
+      username: 'MinuteCadenceUser',
+      userId: 88001,
+      isOnline: true,
+      trackerBuild: MINIMUM_TRACKER_BUILD,
+    };
+    const req = { body, headers: {} };
+    const res = {
+      headersSent: false,
+      status() { return this; },
+      json() { return this; },
+    };
+    let hits = 0;
+    const next = () => { hits += 1; };
+    coalesce.trackerUploadCoalesceMiddleware(req, res, next);
+    assert.equal(hits, 1, 'first status upload must reach handler');
+    const laneKey = coalesce.uploadLaneKey(req);
+    coalesce._ageRecentForTests(laneKey, 62000);
+    coalesce.trackerUploadCoalesceMiddleware(req, res, next);
+    assert.equal(hits, 2, '62s later identical status must hit handler, not coalesce');
+    process.env.TRACKER_UPLOAD_COALESCE_MS = prev;
+    delete require.cache[require.resolve('../src/trackerUploadCoalesce')];
   });
 });

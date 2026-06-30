@@ -3,7 +3,10 @@
 const { EXPECTED_CLIENT_TRACKER_BUILD, isAllowedTrackerBuild } = require('./fishitTrackerBuild');
 
 const USERNAME_KEY_RE = /^[a-z0-9_]{3,20}$/;
-const { ACCOUNT_PRESENCE_GRACE_MS } = require('./trackerAccountPresence');
+const {
+  deriveAccountPresenceStatus,
+  ACCOUNT_ONLINE_THRESHOLD_MS,
+} = require('./trackerAccountPresence');
 
 function normaliseUsername(value) {
   const raw = String(value || '').trim();
@@ -63,11 +66,16 @@ function isTrustedClientBuild(build, expectedBuild = EXPECTED_CLIENT_TRACKER_BUI
   return s === expectedBuild || s.includes('LOADER_REGISTER_LIMIT_FIX');
 }
 
-/** Heartbeat-only and full snapshots — startup/discovery phases still count for presence. */
+/** Heartbeat-only and full snapshots — active in-game phases count for presence. */
 function isAllowedPresencePhase(phase) {
   const p = String(phase || '').trim().toLowerCase();
   if (!p) return true;
-  return p === 'live' || p === 'startup' || p === 'discovery' || p === 'syncing';
+  return p === 'live'
+    || p === 'startup'
+    || p === 'discovery'
+    || p === 'syncing'
+    || p === 'player_data_selected'
+    || p === 'replion_missing';
 }
 
 /** Accept heartbeat uploads without replion proof; full snapshots may carry replion proof. */
@@ -82,24 +90,12 @@ function hasCanonicalTrackerProof(data, proof) {
   return false;
 }
 
-function deriveAccountPresenceLive(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS, nowMs = Date.now()) {
-  const lastAccountSeenAt = resolveLastAccountSeenAt(data);
-  const seenAgeSeconds = syncAgeSecondsFromTimestamp(lastAccountSeenAt, nowMs);
-  const loaderBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
-  if (!data) return { live: false, reason: 'no_session' };
-  if (loaderBuild && !isTrustedClientBuild(loaderBuild)) {
-    return { live: false, reason: 'outdated_loader' };
-  }
-  if (!lastAccountSeenAt) return { live: false, reason: 'no_session' };
-  const recentSeen = seenAgeSeconds != null && seenAgeSeconds * 1000 < maxAgeMs;
-  const loaderOnline = data.isOnline === true;
-  const loaderOffline = data.isOnline === false;
-  if (recentSeen) {
-    if (loaderOffline) return { live: false, reason: 'client_offline' };
-    return { live: true, reason: loaderOnline ? 'heartbeat' : 'loader_contact' };
-  }
-  if (loaderOffline) return { live: false, reason: 'client_offline' };
-  return { live: false, reason: 'stale_heartbeat' };
+function deriveAccountPresenceLive(data, maxAgeMs = ACCOUNT_ONLINE_THRESHOLD_MS, nowMs = Date.now()) {
+  const status = deriveAccountPresenceStatus(data, maxAgeMs, nowMs);
+  return {
+    live: status.accountPresenceLive === true,
+    reason: status.accountPresenceReason || status.accountStatusReason || 'no_session',
+  };
 }
 
 function resolveUniqueKey(data) {
@@ -140,7 +136,7 @@ function evaluateCanonicalUser(data, opts = {}) {
   const uniqueKey = resolveUniqueKey(data);
   const latestSuccessfulUploadAt = resolveLatestSuccessfulUploadAt(data);
   const proof = extractTrackerProof(data);
-  const presence = deriveAccountPresenceLive(data, opts.maxAgeMs || ACCOUNT_PRESENCE_GRACE_MS, nowMs);
+  const presence = deriveAccountPresenceLive(data, opts.maxAgeMs || ACCOUNT_ONLINE_THRESHOLD_MS, nowMs);
   const duplicateUploadCount = Number(data?.duplicateUploadCount) >= 0
     ? Number(data.duplicateUploadCount)
     : Math.max(0, Number(data?.uploadRequestCount || 1) - 1);
@@ -321,7 +317,7 @@ function computeCanonicalTrackerUsers(liveTrackDB, opts = {}) {
     invalidPayloadIgnored,
     staleIgnored,
     expectedBuild,
-    onlineStaleMs: ACCOUNT_PRESENCE_GRACE_MS,
+    onlineStaleMs: ACCOUNT_ONLINE_THRESHOLD_MS,
     updatedAt: new Date(nowMs).toISOString(),
     summary: {
       rawUploadRows,
@@ -339,7 +335,7 @@ function computeCanonicalTrackerUsers(liveTrackDB, opts = {}) {
 }
 
 module.exports = {
-  ACCOUNT_PRESENCE_GRACE_MS,
+  ACCOUNT_ONLINE_THRESHOLD_MS,
   computeCanonicalTrackerUsers,
   deriveAccountPresenceLive,
   evaluateCanonicalUser,

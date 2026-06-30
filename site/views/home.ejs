@@ -80,7 +80,7 @@
                 <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="trackedPlayers" data-count-format="integer" data-count-duration="1200">0</strong>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="trackedPlayers" data-count-format="integer" data-count-duration="1200"<% if (typeof initialHomeStats !== 'undefined' && initialHomeStats && Number(initialHomeStats.trackedCount) > 0) { %> data-count-to="<%= initialHomeStats.trackedCount %>" data-count-immediate="1"<% } %>><%= (typeof initialHomeStats !== 'undefined' && initialHomeStats && Number(initialHomeStats.trackedCount) > 0) ? Number(initialHomeStats.trackedCount).toLocaleString('en-US') : '0' %></strong>
             <span class="deng-home-stat-card__meta">Across All Games</span>
           </article>
           <article class="deng-home-stat-card deng-home-stat-card--compact deng-home-stat-card--status-green" data-home-stat-card="onlineNow">
@@ -90,7 +90,7 @@
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--status-green js-count-up" data-home-stat-value="onlineNow" data-count-format="integer" data-count-duration="1200">0</strong>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--status-green js-count-up" data-home-stat-value="onlineNow" data-count-format="integer" data-count-duration="1200"<% if (typeof initialHomeStats !== 'undefined' && initialHomeStats && Number(initialHomeStats.onlineCount) > 0) { %> data-count-to="<%= initialHomeStats.onlineCount %>" data-count-immediate="1"<% } %>><%= (typeof initialHomeStats !== 'undefined' && initialHomeStats && Number(initialHomeStats.onlineCount) > 0) ? Number(initialHomeStats.onlineCount).toLocaleString('en-US') : '0' %></strong>
             <span class="deng-home-stat-card__meta" data-home-stat-meta="onlineNow">Tracked usernames online</span>
           </article>
         </div>

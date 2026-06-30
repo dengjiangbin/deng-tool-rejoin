@@ -20,6 +20,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { parseTimestampMs } = require('./trackerAccountPresence');
 
 let DatabaseSync = null;
 try {
@@ -163,6 +164,9 @@ function prepareStatements(db) {
     allRowsForCache: db.prepare(
       'SELECT session_key, user_id, latest_precomputed_json, precomputed_hash, last_precomputed_at, presence_json FROM tracker_latest_snapshots',
     ),
+    warmBatchRows: db.prepare(
+      'SELECT session_key, user_id, latest_precomputed_json, precomputed_hash, last_precomputed_at, presence_json FROM tracker_latest_snapshots ORDER BY session_key LIMIT ? OFFSET ?',
+    ),
     changedSince: db.prepare(
       'SELECT session_key, user_id, latest_precomputed_json, last_precomputed_at FROM tracker_latest_snapshots WHERE last_precomputed_at >= ?',
     ),
@@ -175,6 +179,9 @@ function prepareStatements(db) {
     ),
     getJsonByKey: db.prepare(
       'SELECT latest_precomputed_json, precomputed_hash, last_precomputed_at, user_id FROM tracker_latest_snapshots WHERE session_key = ?',
+    ),
+    getCacheRowByKey: db.prepare(
+      'SELECT session_key, user_id, latest_precomputed_json, precomputed_hash, last_precomputed_at, presence_json FROM tracker_latest_snapshots WHERE session_key = ?',
     ),
     count: db.prepare('SELECT COUNT(*) AS n FROM tracker_latest_snapshots'),
     insertHistory: db.prepare(
@@ -195,6 +202,36 @@ function prepareStatements(db) {
   };
 }
 
+function inventoryIdentityFromPresenceJson(presenceJson) {
+  if (!presenceJson || typeof presenceJson !== 'string') {
+    return { invMs: null, revision: null };
+  }
+  try {
+    const p = JSON.parse(presenceJson);
+    const invMs = parseTimestampMs(p.lastRealInventoryAt);
+    const revision = p.inventoryRevision != null ? Number(p.inventoryRevision) : null;
+    return {
+      invMs: invMs != null ? invMs : null,
+      revision: Number.isFinite(revision) ? revision : null,
+    };
+  } catch (_) {
+    return { invMs: null, revision: null };
+  }
+}
+
+function incomingInventoryIsStale(existingRow, incomingPresenceJson) {
+  if (!existingRow) return false;
+  const existing = inventoryIdentityFromPresenceJson(existingRow.presence_json);
+  const incoming = inventoryIdentityFromPresenceJson(incomingPresenceJson);
+  if (existing.revision != null && incoming.revision != null && incoming.revision < existing.revision) {
+    return true;
+  }
+  if (existing.invMs != null && incoming.invMs != null && incoming.invMs < existing.invMs) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * UPSERT the latest precomputed snapshot for one session. `precomputedBody`
  * is the full get-backpack object; it is JSON-stringified for storage.
@@ -202,11 +239,23 @@ function prepareStatements(db) {
 function upsertLatest(entry) {
   openDb();
   const nowIso = new Date().toISOString();
+  const sessionKey = String(entry.sessionKey);
+  let existingRow = null;
+  try {
+    existingRow = _stmts.getCacheRowByKey.get(sessionKey);
+  } catch (_) { /* proceed */ }
+  if (incomingInventoryIsStale(existingRow, entry.presenceJson || null)) {
+    // Never clobber a newer inventory snapshot with stale worker output.
+    if (entry.presenceJson) {
+      try { updatePresence(sessionKey, entry.presenceJson); } catch (_) { /* non-fatal */ }
+    }
+    return existingRow && existingRow.last_precomputed_at ? existingRow.last_precomputed_at : nowIso;
+  }
   const json = typeof entry.precomputedJson === 'string'
     ? entry.precomputedJson
     : JSON.stringify(entry.precomputedBody || {});
   _stmts.upsertLatest.run({
-    session_key: String(entry.sessionKey),
+    session_key: sessionKey,
     username: entry.username || null,
     user_id: entry.userId != null ? String(entry.userId) : null,
     latest_precomputed_json: json,
@@ -322,6 +371,20 @@ function getAllRowsForCache() {
   return _stmts.allRowsForCache.all();
 }
 
+/** Paginated warm-load rows — one SQLite round-trip per batch instead of N getJsonByKey calls. */
+function getWarmBatchRows(limit, offset) {
+  openDb();
+  const lim = Math.max(1, Math.min(Number(limit) || 200, 500));
+  const off = Math.max(0, Number(offset) || 0);
+  return _stmts.warmBatchRows.all(lim, off);
+}
+
+function countLatestSnapshots() {
+  openDb();
+  const row = _stmts.count.get();
+  return row && row.n != null ? Number(row.n) : 0;
+}
+
 /**
  * Return rows whose last_precomputed_at is >= the given ISO timestamp.
  * last_precomputed_at is an ISO-8601 string, so lexicographic >= equals
@@ -364,6 +427,11 @@ function allMeta() {
   return _stmts.allMeta.all();
 }
 
+function getCacheRowByKey(sessionKey) {
+  openDb();
+  return _stmts.getCacheRowByKey.get(String(sessionKey)) || null;
+}
+
 function getStoreStats() {
   openDb();
   const latest = _stmts.count.get();
@@ -400,9 +468,12 @@ module.exports = {
   getMeta,
   allMeta,
   getAllRowsForCache,
+  getWarmBatchRows,
+  countLatestSnapshots,
   getChangedSince,
   getChangedMetaSince,
   getJsonByKey,
+  getCacheRowByKey,
   resolveUserIdAlias,
   getStoreStats,
   close,

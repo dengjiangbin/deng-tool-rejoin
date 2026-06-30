@@ -126,7 +126,7 @@ describe('canonical tracker user counting', () => {
 
   test('stale accepted users stay in unique count but not online count', () => {
     const nowMs = Date.now();
-    const staleMs = nowMs - 130000;
+    const staleMs = nowMs - 160000;
     const result = computeCanonicalTrackerUsers({
       staleuser: validSession({
         username: 'staleuser',
@@ -139,6 +139,42 @@ describe('canonical tracker user counting', () => {
     assert.equal(result.currentBuildUniqueUsers, 1);
     assert.equal(result.onlineUniqueUsers, 0);
     assert.equal(result.staleIgnored, 1);
+  });
+
+  test('replion_missing phase counts toward online unique users when heartbeat is fresh', () => {
+    const nowMs = Date.now();
+    const ts = isoAt(nowMs);
+    const result = computeCanonicalTrackerUsers({
+      replionuser: validSession({
+        username: 'replionuser',
+        userId: 444002,
+        phase: 'replion_missing',
+        lastSuccessfulUploadAt: ts,
+        lastAccountSeenAt: ts,
+        lastRealRobloxStatusAt: ts,
+        lastHeartbeatAt: ts,
+      }, nowMs),
+    }, { nowMs });
+    assert.equal(result.currentBuildUniqueUsers, 1);
+    assert.equal(result.onlineUniqueUsers, 1);
+  });
+
+  test('player_data_selected phase counts toward online unique users', () => {
+    const nowMs = Date.now();
+    const ts = isoAt(nowMs);
+    const result = computeCanonicalTrackerUsers({
+      ingameuser: validSession({
+        username: 'ingameuser',
+        userId: 444001,
+        phase: 'player_data_selected',
+        lastSuccessfulUploadAt: ts,
+        lastAccountSeenAt: ts,
+        lastRealRobloxStatusAt: ts,
+        lastHeartbeatAt: ts,
+      }, nowMs),
+    }, { nowMs });
+    assert.equal(result.currentBuildUniqueUsers, 1);
+    assert.equal(result.onlineUniqueUsers, 1);
   });
 
   test('online unique count uses the same presence logic as inventory', () => {

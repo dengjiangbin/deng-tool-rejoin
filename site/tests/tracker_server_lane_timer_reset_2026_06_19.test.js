@@ -75,6 +75,39 @@ describe('server lane timer reset — real upload timestamp is source of truth',
     assert.equal(fns.formatStatsUploadDurationText(entry), '2s ago');
   });
 
+  test('leaderstats timer prefers fresher account-status uploadStatus when _auth is stale', () => {
+    const now = Date.now();
+    const blocks = [
+      extractFn(src, 'parseServerTimeMs'),
+      extractFn(src, 'entryUploadStatus'),
+      extractFn(src, 'liveDriftedSeconds'),
+      extractFn(src, 'entryStatsUploadSuccessTimestamp'),
+      extractFn(src, 'authAgeSecondsFromTs'),
+      extractFn(src, 'backendStatsAgeSeconds'),
+    ];
+    const evalFns = new Function(`
+      let trackerServerClockOffsetMs = 0;
+      function correctedClientNowMs(){ return Date.now() + trackerServerClockOffsetMs; }
+      function syncAgeSeconds(){ return null; }
+      function entryStatsUploadTimestamp(){ return null; }
+      function liveSecondsSinceStatsSuccess(entry) {
+        const st = entryUploadStatus(entry);
+        if (st && st.secondsSinceLastLeaderstatsSuccess != null) {
+          return liveDriftedSeconds(st, 'secondsSinceLastLeaderstatsSuccess', entry._uploadStatusFetchedAtMs);
+        }
+        return syncAgeSeconds(entryStatsUploadSuccessTimestamp(entry));
+      }
+      ${blocks.join('\n')}
+      return { backendStatsAgeSeconds };
+    `)();
+    const entry = {
+      _auth: { lastRealLeaderstatsAt: new Date(now - 600_000).toISOString() },
+      uploadStatus: { secondsSinceLastLeaderstatsSuccess: 8 },
+      _uploadStatusFetchedAtMs: now,
+    };
+    assert.equal(evalFns.backendStatsAgeSeconds(entry), 8);
+  });
+
   test('fish/item/detail inventory timer resets when lastRealInventoryAt advances', () => {
     const now = Date.now();
     const entry = { _auth: { lastRealInventoryAt: new Date(now - 180_000).toISOString() } };
@@ -112,6 +145,14 @@ describe('server lane timer reset — real upload timestamp is source of truth',
     assert.match(apply, /refreshEntryTableSyncDisplay\(entry, key\)/);
     assert.match(apply, /refreshEntrySyncDisplay\(entry\)/);
     assert.match(apply, /laneTimestampAdvanced/);
+  });
+
+  test('applyAccountStatusPayload merges newer leaderstats lane auth from account-status', () => {
+    const apply = extractFn(src, 'applyAccountStatusPayload');
+    assert.match(apply, /mergeLeaderstatsLaneAuthFromAccountStatus\(entry, st\)/);
+    const merge = extractFn(src, 'mergeLeaderstatsLaneAuthFromAccountStatus');
+    assert.match(merge, /leaderstatsLastSuccessAt/);
+    assert.match(merge, /lastRealLeaderstatsAt/);
   });
 
   test('8793 read API exposes lastReal* lane timestamps in headers and JSON body', () => {

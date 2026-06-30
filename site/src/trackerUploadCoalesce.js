@@ -85,9 +85,16 @@ function trackerUploadCoalesceMiddleware(req, res, next) {
   const laneKey = uploadLaneKey(req);
   const hash = lanePayloadHash(req.body);
   const now = Date.now();
+  const laneSuffix = laneKey.split(':').slice(-1)[0];
+  // Status + leaderstats repeat on ~60s with identical payloads by design.
+  // Coalesce only sub-second burst retries on those lanes — never a scheduled
+  // minute upload (misconfigured 55s windows used to freeze lastReal*At).
+  const minuteCadenceLane = laneSuffix === 'tracker_status' || laneSuffix === 'required_leaderstats';
+  const burstRetryMs = Math.min(COALESCE_WINDOW_MS, 5000);
+  const coalesceWindowMs = minuteCadenceLane ? burstRetryMs : COALESCE_WINDOW_MS;
   const prev = recentByLane.get(laneKey);
 
-  if (prev && (now - prev.at) < COALESCE_WINDOW_MS && prev.hash === hash) {
+  if (prev && (now - prev.at) < coalesceWindowMs && prev.hash === hash) {
     recordCoalescedUpload();
     req.trackerUploadCoalesced = true;
     req.trackerCoalesceCount = (prev.count || 1) + 1;
@@ -120,9 +127,15 @@ function _resetForTests() {
   recentByLane.clear();
 }
 
+function _ageRecentForTests(laneKey, ageMs) {
+  const prev = recentByLane.get(laneKey);
+  if (prev) recentByLane.set(laneKey, { ...prev, at: Date.now() - ageMs });
+}
+
 module.exports = {
   uploadLaneKey,
   trackerUploadCoalesceMiddleware,
   isValidTrackerUploadBody,
   _resetForTests,
+  _ageRecentForTests,
 };

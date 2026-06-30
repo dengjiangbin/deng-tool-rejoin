@@ -8,6 +8,7 @@
 const path = require('path');
 const fs = require('fs');
 const { getLagMs } = require('./trackerEventLoopMonitor');
+const { PRESENCE_DISK_FIELDS } = require('./trackerPresenceFields');
 
 const RETRYABLE_FS_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT']);
 const ACCOUNT_FLUSH_DEBOUNCE_MS = Number(process.env.FISHIT_ACCOUNT_FLUSH_MS || 300);
@@ -18,6 +19,18 @@ const MAX_FILE_BYTES_ALERT = Number(process.env.FISHIT_LIVE_JSON_MAX_BYTES || 25
 // constantly evicted/re-added accounts, so get-backpack flapped 404 and the
 // frontend intermittently showed nothing. Keep this well above peak players.
 const MAX_ACCOUNTS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 2000);
+
+function isSharedIndexFlushOwner() {
+  const workers = Number(process.env.TRACKER_INGEST_WORKERS || 0);
+  if (workers <= 1 || process.env.TRACKER_INGEST_MODE !== '1') return true;
+  try {
+    const cluster = require('cluster');
+    if (!cluster.isWorker) return true;
+    return cluster.worker.id === 1;
+  } catch (_) {
+    return true;
+  }
+}
 
 // Monotonic activity timestamps, freshest-wins, for the disk-reload freshness
 // guard (never clobber a newer in-memory row with an older shard on reload).
@@ -45,6 +58,15 @@ function accountFilePath(key) {
   return path.join(accountsDir(), `${safe || 'unknown'}.json`);
 }
 
+function presenceFilePath(key) {
+  const safe = String(key || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 80);
+  return path.join(accountsDir(), `${safe || 'unknown'}.presence.json`);
+}
+
+function uniqueTmpPath(target) {
+  return `${target}.${process.pid}.${Date.now()}.tmp`;
+}
+
 function legacyMonolithPath() {
   return process.env.FISHIT_LIVE_SESSIONS_PATH
     || path.join(__dirname, '..', 'data', 'fishit_live_sessions.json');
@@ -67,6 +89,7 @@ let _lastIndexMtimeMs = 0;
 // Per-shard mtime cache (filename -> mtimeMs) driving the incremental reload so
 // the worker tracks every account's latest shard without re-reading 800 files.
 let _shardMtimes = new Map();
+let _presenceMtimes = new Map();
 let _flushCount = 0;
 let _flushFailCount = 0;
 let _lastFlushMs = 0;
@@ -86,6 +109,22 @@ async function renameAsyncWithRetry(tmp, target, maxAttempts = 4) {
       lastErr = err;
       if (!RETRYABLE_FS_CODES.has(err.code) || attempt >= maxAttempts - 1) throw err;
       await new Promise((resolve) => setTimeout(resolve, 20 + attempt * 30));
+    }
+  }
+  throw lastErr;
+}
+
+function renameSyncWithRetry(tmp, target, maxAttempts = 8) {
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      fs.renameSync(tmp, target);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (!RETRYABLE_FS_CODES.has(err.code) || attempt >= maxAttempts - 1) throw err;
+      const end = Date.now() + 25 + attempt * 45;
+      while (Date.now() < end) { /* brief spin for Windows EPERM/EBUSY */ }
     }
   }
   throw lastErr;
@@ -227,7 +266,7 @@ async function flushAccountToDisk(key, row) {
     console.warn('[fishit] account session exceeds max bytes key=%s bytes=%d max=%d', key, bytes, MAX_ACCOUNT_BYTES);
   }
   const target = accountFilePath(key);
-  const tmp = `${target}.tmp`;
+  const tmp = uniqueTmpPath(target);
   await fs.promises.writeFile(tmp, payload, 'utf8');
   await renameAsyncWithRetry(tmp, target);
   ensureIndexLoaded();
@@ -238,11 +277,63 @@ async function flushAccountToDisk(key, row) {
   _index.updatedAt = new Date().toISOString();
   _indexDirty = true;
   _lastAccountFlushMs = Date.now() - started;
+  try {
+    _shardMtimes.set(path.basename(target), fs.statSync(target).mtimeMs);
+  } catch (_) { /* non-fatal */ }
   return { bytes, durationMs: _lastAccountFlushMs };
+}
+
+/** Synchronous single-account flush for inventory-critical ingest paths. */
+function flushAccountSync(key, row) {
+  if (!key || !row) return { flushed: false };
+  const started = Date.now();
+  const dir = accountsDir();
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const payload = JSON.stringify(row);
+  const bytes = Buffer.byteLength(payload, 'utf8');
+  const target = accountFilePath(key);
+  const tmp = uniqueTmpPath(target);
+  fs.writeFileSync(tmp, payload, 'utf8');
+  renameSyncWithRetry(tmp, target);
+  ensureIndexLoaded();
+  _index.accounts[key] = {
+    updatedAt: row.updatedAt || row.lastSeenAt || new Date().toISOString(),
+    bytes,
+  };
+  _index.updatedAt = new Date().toISOString();
+  _indexDirty = true;
+  _dirtyAccounts.delete(key);
+  try {
+    _shardMtimes.set(path.basename(target), fs.statSync(target).mtimeMs);
+  } catch (_) { /* non-fatal */ }
+  _lastAccountFlushMs = Date.now() - started;
+  return { flushed: true, bytes, durationMs: _lastAccountFlushMs };
+}
+
+/** Tiny presence sidecar — heartbeat path avoids full-shard EPERM contention on Windows. */
+function flushPresenceHeartbeatSync(key, row) {
+  if (!key || !row) return { flushed: false };
+  const started = Date.now();
+  const out = { usernameKey: key, presenceWrittenAt: new Date().toISOString() };
+  for (const f of PRESENCE_DISK_FIELDS) {
+    if (row[f] !== undefined) out[f] = row[f];
+  }
+  const payload = JSON.stringify(out);
+  const dir = accountsDir();
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const target = presenceFilePath(key);
+  const tmp = uniqueTmpPath(target);
+  fs.writeFileSync(tmp, payload, 'utf8');
+  renameSyncWithRetry(tmp, target);
+  try {
+    _presenceMtimes.set(path.basename(target), fs.statSync(target).mtimeMs);
+  } catch (_) { /* non-fatal */ }
+  return { flushed: true, bytes: Buffer.byteLength(payload, 'utf8'), durationMs: Date.now() - started };
 }
 
 async function flushIndexToDisk() {
   if (!_indexDirty || !_index) return { flushed: false };
+  if (!isSharedIndexFlushOwner()) return { flushed: false, skipped: 'index_flush_delegated' };
   const started = Date.now();
   const dir = shardedRoot();
   await fs.promises.mkdir(dir, { recursive: true });
@@ -338,12 +429,59 @@ function saveAccount(key, row, liveTrackDB) {
   return true;
 }
 
+function mergePresenceRawIntoSession(key, existing, raw) {
+  if (!raw || typeof raw !== 'object') return existing;
+  const base = existing && typeof existing === 'object'
+    ? existing
+    : { usernameKey: key, restoredFromDisk: true };
+  const mergedPresence = { ...base };
+  for (const pf of PRESENCE_DISK_FIELDS) {
+    if (raw[pf] !== undefined) mergedPresence[pf] = raw[pf];
+  }
+  preserveMonotonicLanes(base, mergedPresence);
+  mergedPresence.restoredFromDisk = true;
+  return mergedPresence;
+}
+
+function applyPresenceSidecar(key, liveTrackDB, sanitiseSessionFn) {
+  if (!key || !liveTrackDB || typeof liveTrackDB !== 'object') return false;
+  const presPath = presenceFilePath(key);
+  if (!fs.existsSync(presPath)) return false;
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(presPath, 'utf8'));
+  } catch (_) {
+    return false;
+  }
+  try {
+    _presenceMtimes.set(path.basename(presPath), fs.statSync(presPath).mtimeMs);
+  } catch (_) { /* non-fatal */ }
+  const hadExisting = !!(liveTrackDB[key] && typeof liveTrackDB[key] === 'object');
+  let existing = liveTrackDB[key];
+  const mainPath = accountFilePath(key);
+  if ((!existing || typeof existing !== 'object') && fs.existsSync(mainPath)) {
+    try {
+      const mainRaw = JSON.parse(fs.readFileSync(mainPath, 'utf8'));
+      const row = sanitiseSessionFn(key, mainRaw);
+      if (row) {
+        row.restoredFromDisk = true;
+        existing = row;
+      }
+    } catch (_) { /* optional main shard */ }
+  }
+  const merged = mergePresenceRawIntoSession(key, existing, raw);
+  liveTrackDB[key] = merged;
+  _accountCache.set(key, merged);
+  return hadExisting ? 'merged' : 'added';
+}
+
 function loadAllIntoLiveTrackDB(liveTrackDB, sanitiseSessionFn) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { loaded: 0 };
   migrateLegacyMonolithIfNeeded(sanitiseSessionFn);
   ensureIndexLoaded();
   let loaded = 0;
-  for (const key of Object.keys(_index.accounts || {})) {
+  const indexedKeys = Object.keys(_index.accounts || {});
+  for (const key of indexedKeys) {
     try {
       const file = accountFilePath(key);
       if (!fs.existsSync(file)) continue;
@@ -354,14 +492,86 @@ function loadAllIntoLiveTrackDB(liveTrackDB, sanitiseSessionFn) {
       liveTrackDB[key] = row;
       _accountCache.set(key, row);
       loaded += 1;
+      try {
+        _shardMtimes.set(path.basename(file), fs.statSync(file).mtimeMs);
+      } catch (_) { /* non-fatal */ }
     } catch (err) {
       console.warn('[fishit] sharded account load failed key=%s err=%s', key, err.message);
     }
   }
+  // Heartbeats write tiny presence sidecars without rewriting the full shard.
+  // Boot must merge them or online counts read stale lastRealRobloxStatusAt ages.
+  for (const key of indexedKeys) {
+    const presenceResult = applyPresenceSidecar(key, liveTrackDB, sanitiseSessionFn);
+    if (presenceResult === 'added') loaded += 1;
+  }
+  try {
+    const dir = accountsDir();
+    if (fs.existsSync(dir)) {
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.presence.json')) continue;
+        const key = f.slice(0, -('.presence.json'.length));
+        if (liveTrackDB[key]) continue;
+        if (applyPresenceSidecar(key, liveTrackDB, sanitiseSessionFn) === 'added') loaded += 1;
+      }
+    }
+  } catch (_) { /* non-fatal */ }
   for (const [alias, usernameKey] of Object.entries(_index.uidAliases || {})) {
     liveTrackDB[alias] = usernameKey;
   }
   return { loaded, path: shardedRoot(), updatedAt: _index.updatedAt || null, mode: 'sharded' };
+}
+
+/**
+ * Lightweight read-only snapshot for public homepage stats. Reads presence
+ * sidecars (fresh heartbeat truth) without hydrating the full in-memory store
+ * or scanning every main shard — avoids 10s+ event-loop blocks on the website
+ * lane that were driving PM2 restarts and 8791 orphan fights.
+ */
+function buildPublicStatsSessionSnapshot(sanitiseSessionFn, opts = {}) {
+  const snapshot = {};
+  if (!sanitiseSessionFn) return snapshot;
+  const dir = accountsDir();
+  if (!fs.existsSync(dir)) return snapshot;
+  const presenceOnly = opts.presenceOnly === true;
+
+  let files;
+  try {
+    files = fs.readdirSync(dir);
+  } catch (_) {
+    return snapshot;
+  }
+
+  for (const f of files) {
+    if (!f.endsWith('.presence.json')) continue;
+    const key = f.slice(0, -('.presence.json'.length));
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+      const base = {
+        username: raw.username || key,
+        usernameKey: key,
+        ...raw,
+      };
+      const row = sanitiseSessionFn(key, base);
+      if (row) snapshot[key] = row;
+    } catch (_) { /* skip corrupt sidecar */ }
+  }
+
+  if (presenceOnly) return snapshot;
+
+  ensureIndexLoaded();
+  for (const key of Object.keys(_index?.accounts || {})) {
+    if (snapshot[key]) continue;
+    const mainPath = accountFilePath(key);
+    if (!fs.existsSync(mainPath)) continue;
+    try {
+      const raw = JSON.parse(fs.readFileSync(mainPath, 'utf8'));
+      const row = sanitiseSessionFn(key, raw);
+      if (row) snapshot[key] = row;
+    } catch (_) { /* skip corrupt shard */ }
+  }
+
+  return snapshot;
 }
 
 // Highest monotonic activity timestamp on a session row. Used as the freshness
@@ -488,6 +698,76 @@ function preserveMonotonicLanes(existing, merged) {
   return merged;
 }
 
+function reloadAccountShard(key, liveTrackDB, sanitiseSessionFn) {
+  if (!liveTrackDB || typeof liveTrackDB !== 'object') return { loaded: false };
+  const normalizedKey = String(key || '').trim().toLowerCase();
+  if (!normalizedKey) return { loaded: false, key: normalizedKey };
+  try {
+    ensureIndexLoaded();
+    let merged = 0;
+    const presencePath = presenceFilePath(normalizedKey);
+    if (fs.existsSync(presencePath)) {
+      const fname = path.basename(presencePath);
+      let stat;
+      try { stat = fs.statSync(presencePath); } catch (_) { stat = null; }
+      const prevMtime = _presenceMtimes.get(fname);
+      if (stat && (prevMtime == null || stat.mtimeMs > prevMtime || !liveTrackDB[normalizedKey])) {
+        let raw;
+        try { raw = JSON.parse(fs.readFileSync(presencePath, 'utf8')); } catch (_) { raw = null; }
+        if (raw) {
+          _presenceMtimes.set(fname, stat.mtimeMs);
+          let existing = liveTrackDB[normalizedKey];
+          if (!existing || typeof existing !== 'object') {
+            existing = { usernameKey: normalizedKey, restoredFromDisk: true };
+            liveTrackDB[normalizedKey] = existing;
+          }
+          Object.assign(existing, mergePresenceRawIntoSession(normalizedKey, existing, raw));
+          _accountCache.set(normalizedKey, existing);
+          merged += 1;
+        }
+      }
+    }
+
+    const accountPath = accountFilePath(normalizedKey);
+    if (fs.existsSync(accountPath)) {
+      const fname = path.basename(accountPath);
+      let stat;
+      try { stat = fs.statSync(accountPath); } catch (_) { stat = null; }
+      const prevMtime = _shardMtimes.get(fname);
+      if (stat && (prevMtime == null || stat.mtimeMs > prevMtime || !liveTrackDB[normalizedKey])) {
+        let raw;
+        try { raw = JSON.parse(fs.readFileSync(accountPath, 'utf8')); } catch (_) { raw = null; }
+        if (raw) {
+          _shardMtimes.set(fname, stat.mtimeMs);
+          const row = sanitiseSessionFn(normalizedKey, raw);
+          if (row) {
+            const existing = liveTrackDB[normalizedKey];
+            if (existing && typeof existing === 'object'
+              && rowFreshnessMs(existing) > rowFreshnessMs(row)
+              && !laneRealTimestampsAdvanced(existing, row)) {
+              return { loaded: merged > 0, merged, key: normalizedKey, skipped: 'memory_fresher' };
+            }
+            row.restoredFromDisk = true;
+            const mergedRow = { ...(existing && typeof existing === 'object' ? existing : {}), ...row };
+            preserveMonotonicLanes(existing, mergedRow);
+            liveTrackDB[normalizedKey] = mergedRow;
+            _accountCache.set(normalizedKey, mergedRow);
+            merged += 1;
+          }
+        }
+      }
+    }
+
+    const aliasKey = `uid:${normalizedKey}`;
+    if (/^\d+$/.test(normalizedKey) && _index?.uidAliases?.[normalizedKey]) {
+      liveTrackDB[aliasKey] = _index.uidAliases[normalizedKey];
+    }
+    return { loaded: merged > 0, merged, key: normalizedKey, mode: 'sharded' };
+  } catch (err) {
+    return { loaded: false, key: normalizedKey, error: err.message };
+  }
+}
+
 function reloadChangedAccounts(liveTrackDB, sanitiseSessionFn) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { reloaded: false };
   try {
@@ -537,6 +817,28 @@ function reloadChangedAccounts(liveTrackDB, sanitiseSessionFn) {
       const full = path.join(dir, f);
       let stat;
       try { stat = fs.statSync(full); } catch (_) { continue; }
+
+      if (f.endsWith('.presence.json')) {
+        const prevMtime = _presenceMtimes.get(f);
+        if (prevMtime != null && stat.mtimeMs <= prevMtime) continue;
+        let raw;
+        try { raw = JSON.parse(fs.readFileSync(full, 'utf8')); } catch (_) { continue; }
+        _presenceMtimes.set(f, stat.mtimeMs);
+        const key = (raw && raw.usernameKey)
+          ? String(raw.usernameKey).toLowerCase()
+          : f.slice(0, -('.presence.json'.length));
+        let existing = liveTrackDB[key];
+        if (!existing || typeof existing !== 'object') {
+          existing = { usernameKey: key, restoredFromDisk: true };
+          liveTrackDB[key] = existing;
+        }
+        const mergedPresence = mergePresenceRawIntoSession(key, existing, raw);
+        Object.assign(existing, mergedPresence);
+        _accountCache.set(key, existing);
+        merged += 1;
+        continue;
+      }
+
       const prevMtime = _shardMtimes.get(f);
       if (prevMtime != null && stat.mtimeMs <= prevMtime) continue; // unchanged since last sync
       let raw;
@@ -566,6 +868,11 @@ function reloadChangedAccounts(liveTrackDB, sanitiseSessionFn) {
     if (_shardMtimes.size > seenFiles.size) {
       for (const f of Array.from(_shardMtimes.keys())) {
         if (!seenFiles.has(f)) _shardMtimes.delete(f);
+      }
+    }
+    if (_presenceMtimes.size > seenFiles.size) {
+      for (const f of Array.from(_presenceMtimes.keys())) {
+        if (!seenFiles.has(f)) _presenceMtimes.delete(f);
       }
     }
 
@@ -639,6 +946,7 @@ function resetShardedForTests() {
   _lastFlushMs = 0;
   _lastIndexMtimeMs = 0;
   _shardMtimes.clear();
+  _presenceMtimes.clear();
   try {
     const root = shardedRoot();
     if (fs.existsSync(root)) {
@@ -650,6 +958,7 @@ function resetShardedForTests() {
 function invalidateReloadCursorForTests() {
   _lastIndexMtimeMs = 0;
   _shardMtimes.clear();
+  _presenceMtimes.clear();
 }
 
 // Drop only the in-memory index/cache (keep on-disk shards) to simulate a fresh
@@ -661,6 +970,7 @@ function dropInMemoryIndexForTests() {
   _indexDirty = false;
   _lastIndexMtimeMs = 0;
   _shardMtimes.clear();
+  _presenceMtimes.clear();
 }
 
 module.exports = {
@@ -671,9 +981,13 @@ module.exports = {
   migrateLegacyMonolithIfNeeded,
   saveAccount,
   loadAllIntoLiveTrackDB,
+  buildPublicStatsSessionSnapshot,
+  reloadAccountShard,
   reloadChangedAccounts,
   preserveMonotonicLanes,
   flushDirtyAccountsAsync,
+  flushAccountSync,
+  flushPresenceHeartbeatSync,
   scheduleAccountFlush,
   getShardedMetrics,
   resetShardedForTests,

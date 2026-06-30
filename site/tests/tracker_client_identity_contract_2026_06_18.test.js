@@ -20,7 +20,9 @@ const path = require('node:path');
 const DIST = path.join(__dirname, '..', '..', 'dist', 'tracker.lua');
 
 function decodeDist(distSrc) {
-  const m = distSrc.match(/local __B=\[\[([\s\S]*?)\]\]\nlocal __A=/);
+  // Be CRLF-tolerant: dist files built on Windows ship with \r\n line endings,
+  // POSIX checkouts ship with \n. The base64 body is the only thing we need.
+  const m = distSrc.match(/local __B=\[\[([\s\S]*?)\]\]\r?\nlocal __A=/);
   if (!m) throw new Error('dist decode anchor missing');
   return Buffer.from(m[1], 'base64').toString('utf8');
 }

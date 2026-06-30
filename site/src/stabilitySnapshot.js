@@ -2,7 +2,7 @@
 
 const { buildStabilityStatus } = require('./stabilityStatus');
 
-const INTERVAL_MS = Number(process.env.STABILITY_SNAPSHOT_INTERVAL_MS || 3000);
+const INTERVAL_MS = Number(process.env.STABILITY_SNAPSHOT_INTERVAL_MS || 30_000);
 let cachedSnapshot = null;
 let cachedJson = null;
 let cachedAt = null;

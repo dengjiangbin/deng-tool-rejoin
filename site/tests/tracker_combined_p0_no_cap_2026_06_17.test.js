@@ -197,8 +197,16 @@ test('E/E4: pagination is applied after filter+sort and renders only the current
   assert.match(js, /\.slice\(startIndex,\s*startIndex\s*\+\s*accountsPageSize\)/);
 });
 
-test('B: timer base is seeded from backend age (not Date.now on open)', () => {
-  assert.match(SRC, /seedSectionBaseFromBackendAge/);
-  assert.match(SRC, /firstObservation\s*=\s*entry\._trackerDisplaySig === undefined/);
-  assert.match(SRC, /seedTimersFromBackend/);
+test('B: visible timer is frontend-receive only — no backend-age seeding survives (restored 4394cfd)', () => {
+  // Backend-age seeding was the rebuild regression. It is gone: the seeder is
+  // an inert no-op, the signature-gated reset path has no firstObservation
+  // branch, and the dedicated seedSection helper no longer exists.
+  assert.doesNotMatch(SRC, /seedSectionBaseFromBackendAge/);
+  assert.doesNotMatch(SRC, /firstObservation\s*=\s*entry\._trackerDisplaySig === undefined/);
+  // The seedTimersFromBackend identifier still exists, but only as an inert
+  // no-op stub kept for back-compat — never touching any timer field.
+  const stub = SRC.match(/function seedTimersFromBackend\(_entry\) \{[\s\S]*?\}/);
+  assert.ok(stub, 'seedTimersFromBackend stub missing');
+  assert.doesNotMatch(stub[0], /_frontendRefreshAt/);
+  assert.doesNotMatch(stub[0], /backendPresenceAgeSeconds/);
 });

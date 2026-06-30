@@ -11,6 +11,11 @@ const RETRYABLE_FS_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT']);
 let ebusyRetryCount = 0;
 let ebusySwallowCount = 0;
 let lastMaintenanceStats = null;
+let cachedDirMetrics = null;
+
+const MAX_SESSION_FILES = Number(process.env.SESSION_MAX_FILES || 8000);
+const SESSION_METRICS_CACHE_MS = Number(process.env.SESSION_METRICS_CACHE_MS || 60_000);
+const STARTUP_MAINTENANCE_DELAY_MS = Number(process.env.SESSION_STARTUP_MAINTENANCE_DELAY_MS || 45_000);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,11 +64,16 @@ class FileSessionStore extends session.Store {
   }
 
   _startMaintenance() {
-    setImmediate(() => {
+    const run = () => {
       this._runMaintenanceBatched().catch((err) => {
         console.warn('[sessionStore] maintenance failed:', err.message);
       });
-    });
+    };
+    if (process.env.NODE_ENV === 'test') {
+      setImmediate(run);
+      return;
+    }
+    setTimeout(run, STARTUP_MAINTENANCE_DELAY_MS).unref();
   }
 
   async _runMaintenanceBatched() {
@@ -132,13 +142,67 @@ class FileSessionStore extends session.Store {
     if (anonymousPruned > 0) {
       console.log(`[sessionStore] pruned ${anonymousPruned} anonymous session files`);
     }
+
+    let capRemoved = 0;
+    if (MAX_SESSION_FILES > 0) {
+      capRemoved = await this._enforceSessionFileCap(entries);
+    }
+
+    cachedDirMetrics = {
+      dir: this.dir,
+      jsonCount: entries.filter((n) => n.endsWith('.json')).length - capRemoved,
+      tmpCount: entries.filter((n) => n.endsWith('.tmp')).length - tmpRemoved,
+      oldestMtime: null,
+      cachedAt: Date.now(),
+    };
+
     lastMaintenanceStats = {
       tmpRemoved,
       pruned,
       anonymousPruned,
+      capRemoved,
       durationMs: Date.now() - started,
       finishedAt: new Date().toISOString(),
     };
+  }
+
+  async _enforceSessionFileCap(entries) {
+    const jsonNames = entries.filter((n) => n.endsWith('.json'));
+    if (jsonNames.length <= MAX_SESSION_FILES) return 0;
+    const candidates = [];
+    for (const name of jsonNames) {
+      const full = path.join(this.dir, name);
+      try {
+        const st = await fs.promises.stat(full);
+        candidates.push({ name, full, mtimeMs: st.mtimeMs });
+      } catch {
+        // ignore
+      }
+    }
+    candidates.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    let removed = 0;
+    const target = Math.max(1000, Math.floor(MAX_SESSION_FILES * 0.75));
+    for (const item of candidates) {
+      if (jsonNames.length - removed <= target) break;
+      try {
+        const text = await fs.promises.readFile(item.full, 'utf8');
+        const wrapped = JSON.parse(text);
+        if (this._isAuthenticatedSessionData(wrapped?.session)) continue;
+        await fs.promises.unlink(item.full);
+        removed += 1;
+      } catch {
+        try {
+          await fs.promises.unlink(item.full);
+          removed += 1;
+        } catch {
+          // ignore
+        }
+      }
+    }
+    if (removed > 0) {
+      console.log(`[sessionStore] cap cleanup removed ${removed} anonymous session files (target<=${target})`);
+    }
+    return removed;
   }
 
   _cleanTmpFiles() {
@@ -281,8 +345,24 @@ class FileSessionStore extends session.Store {
   }
 }
 
-function getSessionStoreMetrics(dir) {
+function getSessionStoreMetrics(dir, options = {}) {
+  const forceRefresh = Boolean(options.forceRefresh);
   const target = dir || path.join(os.tmpdir(), 'deng-tool-site-sessions');
+  const now = Date.now();
+  if (
+    !forceRefresh
+    && cachedDirMetrics
+    && cachedDirMetrics.dir === target
+    && (now - (cachedDirMetrics.cachedAt || 0)) < SESSION_METRICS_CACHE_MS
+  ) {
+    return {
+      ...cachedDirMetrics,
+      ebusyRetryCount,
+      ebusySwallowCount,
+      lastMaintenanceStats,
+      metricsSource: 'cache',
+    };
+  }
   let jsonCount = 0;
   let tmpCount = 0;
   let oldestMtime = null;
@@ -297,6 +377,13 @@ function getSessionStoreMetrics(dir) {
   } catch {
     // ignore
   }
+  cachedDirMetrics = {
+    dir: target,
+    jsonCount,
+    tmpCount,
+    oldestMtime,
+    cachedAt: now,
+  };
   return {
     dir: target,
     jsonCount,
@@ -305,6 +392,7 @@ function getSessionStoreMetrics(dir) {
     ebusyRetryCount,
     ebusySwallowCount,
     lastMaintenanceStats,
+    metricsSource: forceRefresh ? 'scan-forced' : 'scan',
   };
 }
 

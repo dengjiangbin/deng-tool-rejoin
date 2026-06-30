@@ -28,22 +28,26 @@ const EJS_SOURCE = path.join(__dirname, '..', 'src', 'inventory', 'fishit_tracke
 const hasRaw = fs.existsSync(RAW_TRACKER_LUA);
 const testIfRaw = hasRaw ? test : test.skip;
 
-const NEW_MARKER = 'UPLOAD_HTML_530_GATEWAY_DIAG_2026_06_15';
+const GATEWAY_DIAG_MARKER = 'UPLOAD_HTML_530_GATEWAY_DIAG_2026_06_15';
+const CURRENT_MARKER = 'STATUS_LANE_NEVER_THROTTLED_2026_06_19';
 
-test('BLOCKER-D new gateway-diag marker is the production build + allowlisted', () => {
-  assert.equal(PRODUCTION_TRACKER_BUILD, NEW_MARKER);
-  assert.equal(isAllowedTrackerBuild(NEW_MARKER), true);
-  // Previous marker stays accepted during client rollout.
+test('BLOCKER-D new gateway-diag marker stays allowlisted alongside the current production build', () => {
+  // Production advanced to STATUS_LANE_NEVER_THROTTLED_2026_06_19 (Layer 1
+  // status-lane bypass), but the previous gateway-diag build remains in the
+  // rollout window so any client still on it is accepted.
+  assert.equal(PRODUCTION_TRACKER_BUILD, CURRENT_MARKER);
+  assert.equal(isAllowedTrackerBuild(GATEWAY_DIAG_MARKER), true);
   assert.equal(isAllowedTrackerBuild('METADATA_PROBE_DEEP_SCAN_2026_06_15'), true);
 });
 
-test('BLOCKER-G leaderstats trust gate accepts the new marker + allowlisted builds', () => {
-  assert.equal(playerStats.isTrustedPlayerStatsBuild(NEW_MARKER), true);
+test('BLOCKER-G leaderstats trust gate accepts the gateway-diag marker + allowlisted builds', () => {
+  assert.equal(playerStats.isTrustedPlayerStatsBuild(GATEWAY_DIAG_MARKER), true);
+  assert.equal(playerStats.isTrustedPlayerStatsBuild(CURRENT_MARKER), true);
   assert.equal(playerStats.isTrustedPlayerStatsBuild('METADATA_PROBE_DEEP_SCAN_2026_06_15'), true);
   assert.equal(playerStats.isTrustedPlayerStatsBuild('UPLOAD_COMPACT_FAST_PATH_2026_06_13'), true);
 });
 
-test('frontend EJS trusts the new gateway-diag marker prefix', () => {
+test('frontend EJS still trusts the gateway-diag marker prefix', () => {
   const ejs = fs.readFileSync(EJS_SOURCE, 'utf8');
   assert.match(ejs, /UPLOAD_HTML_530_GATEWAY_DIAG/);
 });
@@ -62,8 +66,9 @@ testIfRaw('BLOCKER-C Lua detects gateway HTML / 5xx and logs UPLOAD_HTML_GATEWAY
   assert.match(lua, /Body:gsub\("%s\+", " "\):sub\(1, 120\)/);
   // gateway HTML must never be marked a success
   assert.match(lua, /if HttpDash\.isGatewayHtmlError\(result\) then return false end/);
-  // build marker bumped for this diagnostic change
-  assert.match(lua, /TRACKER_BUILD = "UPLOAD_HTML_530_GATEWAY_DIAG_2026_06_15"/);
+  // build marker now reflects the status-lane bypass; gateway-diag remains a
+  // historical allowlisted marker (see BLOCKER-D test above).
+  assert.match(lua, /TRACKER_BUILD = "STATUS_LANE_NEVER_THROTTLED_2026_06_19"/);
 });
 
 test('BLOCKER-H metadata: compactor preserves per-instance mutation + weight aliases', () => {

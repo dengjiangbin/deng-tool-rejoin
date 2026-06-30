@@ -87,6 +87,22 @@ test('read/get-backpack success does NOT mark online (presence is timestamp-deri
   assert.ok(c2.statusAgeSeconds > c1.statusAgeSeconds, 'age keeps advancing with real time');
 });
 
+test('leaderstats contract picks newest upload timestamp when identity field lags', () => {
+  const now = Date.now();
+  const freshUpload = iso(25 * 1000, now);
+  const staleIdentity = iso(18 * MIN, now);
+  const hit = {
+    presenceInput: {
+      lastRealLeaderstatsAt: staleIdentity,
+      lastStatsUploadAt: freshUpload,
+    },
+    hasRenderableData: true,
+  };
+  const c = readApp._buildPresenceContract(hit, now);
+  assert.equal(c.leaderstatsAgeSeconds, 25);
+  assert.equal(c.lastRealLeaderstatsAt, freshUpload);
+});
+
 test('ages derive from absolute real timestamps (cross-session deterministic)', () => {
   const now = 1_000_000_000_000;
   const hit = {
@@ -164,24 +180,28 @@ test('frontend: a transient read failure never wipes a valid displayed snapshot'
   assert.match(SRC, /catch \(_\) \{ if \(trackers\.has\(key\) && !entry\.lastData\) setCardRefreshFailed\(entry\); \}/);
 });
 
-test('frontend: timer formatter emits ONLY "<age> ago" (no extra words) or blank', () => {
+test('frontend: timer formatter emits ONLY "<age> ago" (s/m/H/D, compound allowed) or blank', () => {
   // Find the real implementation (skip any prose), then check its return templates.
   let idx = SRC.indexOf('function formatAgeAgo(');
   while (idx > -1 && !/function formatAgeAgo\(\s*ms\s*\)/.test(SRC.slice(idx, idx + 40))) {
     idx = SRC.indexOf('function formatAgeAgo(', idx + 1);
   }
   assert.ok(idx > -1, 'formatAgeAgo(ms) is defined');
-  const fn = SRC.slice(idx, idx + 700);
-  // Single canonical template: `${n}${unit} ago`, unit constrained to s/m/h/d.
-  assert.match(fn, /return `\$\{n\}\$\{unit\} ago`/, 'emits `${n}${unit} ago`');
-  assert.match(fn, /unit = 's'/);
-  assert.match(fn, /unit = 'm'/);
-  assert.match(fn, /unit = 'h'/);
-  assert.match(fn, /unit = 'd'/);
+  const fn = SRC.slice(idx, idx + 900);
+  // Restored 4394cfd format spec: "<n>s ago" / "<n>m ago" / "<n>m <n>s ago"
+  // / "<n>H ago" / "<n>H <n>m ago" / "<n>D ago". The implementation uses
+  // template literals for each branch; assert they end in " ago" and use the
+  // s/m/H/D units only.
+  assert.match(fn, /\$\{[^}]+\}s ago/);
+  assert.match(fn, /\$\{[^}]+\}m ago/);
+  assert.match(fn, /\$\{[^}]+\}H ago/);
+  assert.match(fn, /\$\{[^}]+\}D ago/);
   assert.doesNotMatch(fn, /Offline|No data|refreshed|since/i, 'no prefix/suffix words beyond "ago"');
-  // The produced strings must satisfy /^\d+[smhd] ago$/.
-  assert.match('11s ago', /^\d+[smhd] ago$/);
-  assert.match('9h ago', /^\d+[smhd] ago$/);
+  // The produced strings satisfy the restored format grammar.
+  const grammar = /^(\d+s|\d+m( \d+s)?|\d+H( \d+m)?|\d+D) ago$/;
+  for (const s of ['11s ago', '8m ago', '1m 2s ago', '2H ago', '1H 2m ago', '1D ago']) {
+    assert.match(s, grammar);
+  }
 });
 
 test('frontend: missing age renders blank, never a fabricated "1s ago"', () => {

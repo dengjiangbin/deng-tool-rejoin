@@ -811,8 +811,12 @@ if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1
         console.log('[fishit-tracker] migrated legacy live sessions to sharded store count=%d backup=%s',
           loaded.migrated, loaded.backup || 'none');
       }
-      const loadResult = sessionStore.loadIntoLiveTrackDB(liveTrackDB);
-      console.log('[fishit-tracker] canonical catalog rebuilt; sessions restored:', loadResult.loaded || 0);
+      if (process.env.TRACKER_INGEST_LAZY_HYDRATE === '1') {
+        console.log('[fishit-tracker] ingest lazy hydrate: skipping full session load (per-upload shard reload)');
+      } else {
+        const loadResult = sessionStore.loadIntoLiveTrackDB(liveTrackDB);
+        console.log('[fishit-tracker] canonical catalog rebuilt; sessions restored:', loadResult.loaded || 0);
+      }
     } catch (err) {
       console.warn('[fishit-tracker] boot hydrate failed:', err && err.message ? err.message : err);
     }
@@ -5307,12 +5311,33 @@ function handleUpdateBackpack(req, res) {
     const invLaneResult = stampReportIdentity(key, 'inventory', body, now);
     reinforceStatusFromLane(key, invLaneResult, online, now);
     if (hadPlayerStats) stampReportIdentity(key, 'leaderstats', body, now);
+    if (invLaneResult && invLaneResult.fresh && uploadVerboseLogAllowed()) {
+      console.log(
+        '[fishit-tracker] lane=inventory account=%s userId=%s revision=%s payloadBytes=%d accept=1 serverNow=%s',
+        key,
+        cleanUserId || '',
+        liveTrackDB[key].inventoryRevision != null ? liveTrackDB[key].inventoryRevision : '',
+        requestBytes,
+        now,
+      );
+    }
     persistSessionHeartbeat(key, { full: true });
     return finishTrackerUploadResponse(req, res, responsePayload, key);
 }
 
+function ingestAccountDiskSyncMiddleware(req, _res, next) {
+  if (process.env.TRACKER_INGEST_MODE !== '1') return next();
+  try {
+    const body = req.body || {};
+    const cleanUser = sanitiseUsername(body.username || body.userName);
+    if (cleanUser) sessionStore.ensureAccountLoaded(liveTrackDB, cleanUser.toLowerCase());
+  } catch (_) { /* best effort — upload handler still merges */ }
+  return next();
+}
+
 const updateBackpackMiddleware = [
   express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '8mb' }),
+  ingestAccountDiskSyncMiddleware,
   trackerUploadCoalesceMiddleware,
   safeTrackerUploadHandler(
     'update-backpack',
@@ -6162,6 +6187,25 @@ const PUBLIC_STATS_CACHE_MS = Number(process.env.PUBLIC_TRACKER_STATS_CACHE_MS |
 let _summaryDiskSyncedAt = 0;
 const SUMMARY_DISK_SYNC_MIN_MS = Number(process.env.TRACKER_SUMMARY_DISK_SYNC_MS || 5000);
 
+function resetPublicNetworkStatsCacheForTests() {
+  _publicNetworkStatsCache = null;
+  _publicNetworkStatsCacheAt = 0;
+}
+
+function setPublicNetworkStatsCacheForTests(stats, cachedAtMs) {
+  _publicNetworkStatsCache = stats;
+  _publicNetworkStatsCacheAt = Number.isFinite(Number(cachedAtMs))
+    ? Number(cachedAtMs)
+    : Date.now();
+}
+
+function isSuspiciousEmptyPublicStats(stats, registeredTrackedCount) {
+  if (!stats || typeof stats !== 'object') return false;
+  const registered = Number(registeredTrackedCount) || 0;
+  if (registered <= 0) return false;
+  return Number(stats.rawSessionRows) === 0 && Number(stats.onlineUsernames) === 0;
+}
+
 function ensureSummarySessionsFromDisk() {
   const now = Date.now();
   if (now - _summaryDiskSyncedAt < SUMMARY_DISK_SYNC_MIN_MS) return;
@@ -6171,21 +6215,8 @@ function ensureSummarySessionsFromDisk() {
   } catch (_) { /* non-blocking */ }
 }
 
-function collectPublicTrackerNetworkStats() {
-  const now = Date.now();
-  if (_publicNetworkStatsCache && (now - _publicNetworkStatsCacheAt) < PUBLIC_STATS_CACHE_MS) {
-    return _publicNetworkStatsCache;
-  }
-  // Presence sidecars carry fresh heartbeat truth without loading 1300+ full shards.
-  let statsDb = liveTrackDB;
-  try {
-    const snapshot = sessionStore.buildPublicStatsSessionSnapshot();
-    if (snapshot && typeof snapshot === 'object' && Object.keys(snapshot).length > 0) {
-      statsDb = snapshot;
-    }
-  } catch (_) { /* fall back to in-memory */ }
+function buildPublicStatsResultFromDb(statsDb, registeredTrackedCount) {
   const canonical = computeCanonicalTrackerUsers(statsDb);
-  const registeredTrackedCount = inventoryTrackedAccounts.countRegisteredTrackedUsernamesSync();
   const trackedUsernames = Math.max(registeredTrackedCount, canonical.currentBuildUniqueUsers);
   let inventoriesSynced = 0;
   for (const [key, data] of Object.entries(statsDb)) {
@@ -6198,7 +6229,7 @@ function collectPublicTrackerNetworkStats() {
       inventoriesSynced += 1;
     }
   }
-  const result = {
+  return {
     available: canonical.available,
     rawUploadRows: canonical.rawUploadRows,
     rawSessionRows: canonical.rawSessionRows,
@@ -6217,6 +6248,46 @@ function collectPublicTrackerNetworkStats() {
     inventoriesSynced,
     updatedAt: canonical.updatedAt,
   };
+}
+
+function collectPublicTrackerNetworkStats() {
+  const now = Date.now();
+  if (_publicNetworkStatsCache && (now - _publicNetworkStatsCacheAt) < PUBLIC_STATS_CACHE_MS) {
+    const cachedOnline = Number(_publicNetworkStatsCache.onlineUsernames) || 0;
+    const cachedRows = Number(_publicNetworkStatsCache.rawSessionRows) || 0;
+    if (cachedOnline > 0 || cachedRows > 0) {
+      return _publicNetworkStatsCache;
+    }
+    const registeredTrackedCount = inventoryTrackedAccounts.countRegisteredTrackedUsernamesSync();
+    if (!isSuspiciousEmptyPublicStats(_publicNetworkStatsCache, registeredTrackedCount)) {
+      return _publicNetworkStatsCache;
+    }
+  }
+  const registeredTrackedCount = inventoryTrackedAccounts.countRegisteredTrackedUsernamesSync();
+  // Presence sidecars carry fresh heartbeat truth without loading 1300+ full shards.
+  let statsDb = liveTrackDB;
+  try {
+    const snapshot = sessionStore.buildPublicStatsSessionSnapshot({ presenceOnly: true });
+    if (snapshot && typeof snapshot === 'object' && Object.keys(snapshot).length > 0) {
+      statsDb = snapshot;
+    }
+  } catch (_) { /* fall back to in-memory */ }
+  let result = buildPublicStatsResultFromDb(statsDb, registeredTrackedCount);
+  if (isSuspiciousEmptyPublicStats(result, registeredTrackedCount)) {
+    if (Object.keys(statsDb).length === 0 && Object.keys(liveTrackDB).length > 0) {
+      result = buildPublicStatsResultFromDb(liveTrackDB, registeredTrackedCount);
+    }
+    if (isSuspiciousEmptyPublicStats(result, registeredTrackedCount)
+      && _publicNetworkStatsCache
+      && Number(_publicNetworkStatsCache.onlineUsernames) > 0) {
+      return {
+        ..._publicNetworkStatsCache,
+        updatedAt: new Date().toISOString(),
+        cacheStale: true,
+      };
+    }
+    return result;
+  }
   _publicNetworkStatsCache = result;
   _publicNetworkStatsCacheAt = now;
   return result;
@@ -7141,6 +7212,10 @@ router.post('/api/fishit-tracker/request-catalog-scan/:username', postLimiter, (
 });
 
 function scheduleAioTrackerCacheRefresh(usernameKey) {
+  // Ingest (8792) never serves /api/aio/* — rebuilding SQLite-backed AIO datasets
+  // here wasted CPU, tripped Supabase fetch aborts, and starved /healthz under load.
+  // The site lane (8791) owns aioDatasetCache rebuilds on sync/full requests.
+  if (process.env.TRACKER_INGEST_MODE === '1') return;
   const key = String(usernameKey || '').trim().toLowerCase();
   if (!key) return;
   const listOwners = inventoryTrackedAccounts.listDiscordOwnersForUsernameKey;
@@ -7426,6 +7501,8 @@ module.exports.buildBackpackBodyForKey = buildBackpackBodyForKey;
 module.exports.collectPublicTrackerNetworkStats = collectPublicTrackerNetworkStats;
 module.exports.collectPublicTrackerNetworkProof = collectPublicTrackerNetworkProof;
 module.exports.buildPublicTrackerStatsPayload = buildPublicTrackerStatsPayload;
+module.exports.resetPublicNetworkStatsCacheForTests = resetPublicNetworkStatsCacheForTests;
+module.exports.setPublicNetworkStatsCacheForTests = setPublicNetworkStatsCacheForTests;
 module.exports.collectPublicFishItTrackerStats = collectPublicFishItTrackerStats;
 module.exports.mergeItemsNoDowngradeFromCatalog = mergeItemsNoDowngradeFromCatalog;
 module.exports.enrichItemsFromCatalog = enrichItemsFromCatalog;

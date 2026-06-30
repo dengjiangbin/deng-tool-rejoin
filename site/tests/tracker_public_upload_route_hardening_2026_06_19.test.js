@@ -158,12 +158,12 @@ test('probeHealthy resolves true for a live 200 /health server, false for a dead
   assert.equal(await reclaim.probeHealthy(port, '127.0.0.1', 600), false, 'closed port => unhealthy');
 });
 
-test('listenWithReclaim health-gates the reclaim (warm spare + PM2 orphan reclaim)', () => {
+test('listenWithReclaim health-gates the reclaim (warm spare stand-down, untracked orphan reclaim)', () => {
   const src = SRC('src/reclaimPort.js');
   assert.match(src, /warmSpare/);
   assert.match(src, /_probeHealthy/);
-  assert.match(src, /standing by as warm spare/);
-  assert.match(src, /PM2 orphan pid/);
+  assert.match(src, /standing down \(no kill\)/);
+  assert.match(src, /untracked orphan pid/);
   assert.match(src, /reclaimed \$\{port\} from DEAD orphan/);
   assert.match(src, /getPm2AppPid/);
 });

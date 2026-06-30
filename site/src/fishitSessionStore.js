@@ -590,6 +590,31 @@ function saveSession(key, data, liveTrackDB) {
   return true;
 }
 
+/** Immediate disk write for heartbeat/status so worker + read see fresh presence. */
+function flushSessionImmediate(key, data, options = {}) {
+  if (!key || !data) return { flushed: false };
+  const row = sanitiseSession(key, data);
+  if (!row) return { flushed: false };
+  if (shardedStore.useShardedStorage()) {
+    if (options.full === true) {
+      return shardedStore.flushAccountSync(key, row);
+    }
+    return shardedStore.flushPresenceHeartbeatSync(key, row);
+  }
+  return flushToDiskSync();
+}
+
+function ensureAccountLoaded(liveTrackDB, key) {
+  if (!liveTrackDB || typeof liveTrackDB !== 'object') return { loaded: false };
+  const normalizedKey = String(key || '').trim().toLowerCase();
+  if (!normalizedKey) return { loaded: false };
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.reloadAccountShard(normalizedKey, liveTrackDB, sanitiseSession);
+  }
+  reloadIfChanged(liveTrackDB);
+  return { loaded: !!liveTrackDB[normalizedKey], key: normalizedKey, mode: 'legacy' };
+}
+
 function reloadIfChanged(liveTrackDB) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { reloaded: false };
   if (shardedStore.useShardedStorage()) {
@@ -787,12 +812,33 @@ function migrateToShardedStorageIfNeeded() {
   return shardedStore.migrateLegacyMonolithIfNeeded(sanitiseSession);
 }
 
+function buildPublicStatsSessionSnapshot(opts = {}) {
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.buildPublicStatsSessionSnapshot(sanitiseSession, opts);
+  }
+  try {
+    _fileCache = _readFileFromDisk();
+    const out = {};
+    for (const [key, data] of Object.entries(_fileCache.sessions || {})) {
+      if (key.startsWith('uid:')) continue;
+      const row = sanitiseSession(key, data);
+      if (row) out[key] = row;
+    }
+    return out;
+  } catch (_) {
+    return {};
+  }
+}
+
 module.exports = {
   storePath,
   get STORE_PATH() { return storePath(); },
   loadIntoLiveTrackDB,
+  ensureAccountLoaded,
   reloadIfChanged,
+  buildPublicStatsSessionSnapshot,
   saveSession,
+  flushSessionImmediate,
   flushToDiskSync,
   flushToDiskAsync,
   schedulePriorityFlush,

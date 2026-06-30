@@ -182,8 +182,9 @@ function buildPresenceContract(hit, nowMs) {
     || input.lastRealRobloxStatusAt
     || presence.lastAccountSeenAt
     || null;
-  const lastRealInventoryAt = input.lastRealInventoryAt
-    || input.lastInventoryAt || input.lastSnapshotUploadAt || null;
+  // Inventory lane must never inherit status/snapshot upload time — that would
+  // fake a fresh inventory timer when only heartbeat/status advanced.
+  const lastRealInventoryAt = input.lastRealInventoryAt || input.lastInventoryAt || null;
   const lastRealLeaderstatsAt = pickNewestIso(
     input.lastRealLeaderstatsAt,
     input.lastStatsUploadAt,
@@ -300,19 +301,16 @@ function withReadContractJson(hit, contract, serverNow) {
 
 function warmLoadCache() {
   const started = Date.now();
-  let metaRows = [];
+  const batchSize = Number(process.env.TRACKER_READ_WARM_BATCH || 200);
+  let totalRows = 0;
   try {
-    // Metadata-only probe first — never pull every JSON blob synchronously here.
-    // That single query blocked the event loop for 15–20s on 1500+ accounts and
-    // made /health (and the web read-health probe) time out into 502/524.
-    metaRows = precomputeStore.getChangedMetaSince('');
+    totalRows = precomputeStore.countLatestSnapshots();
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[read] warm-load failed:', err.message);
     return;
   }
-  const batchSize = Number(process.env.TRACKER_READ_WARM_BATCH || 80);
-  let index = 0;
+  let offset = 0;
   const finish = () => {
     cacheWarmedAt = Date.now();
     cacheLastRefreshAt = cacheWarmedAt;
@@ -320,35 +318,36 @@ function warmLoadCache() {
     console.log(`[read] warm-loaded ${cacheByKey.size} snapshots in ${Date.now() - started}ms`);
   };
   const ingestBatch = () => {
-    const end = Math.min(index + batchSize, metaRows.length);
-    for (; index < end; index += 1) {
-      const meta = metaRows[index];
-      const key = String(meta.session_key);
-      let full = null;
-      try {
-        full = precomputeStore.getJsonByKey(key);
-      } catch (_) { full = null; }
-      if (full) {
-        ingestRow({
-          session_key: key,
-          user_id: meta.user_id,
-          latest_precomputed_json: full.json,
-          precomputed_hash: meta.precomputed_hash || full.precomputedHash,
-          last_precomputed_at: meta.last_precomputed_at || full.lastPrecomputedAt,
-          presence_json: meta.presence_json,
-        });
-      }
-      if (meta.last_precomputed_at > cacheMaxPrecomputedAt) {
-        cacheMaxPrecomputedAt = meta.last_precomputed_at;
-      }
+    let rows = [];
+    try {
+      rows = precomputeStore.getWarmBatchRows(batchSize, offset);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[read] warm-load batch failed:', err.message);
+      finish();
+      return;
     }
-    if (index < metaRows.length) {
+    for (const row of rows) {
+      if (!row || !row.latest_precomputed_json) continue;
+      ingestRow({
+        session_key: row.session_key,
+        user_id: row.user_id,
+        latest_precomputed_json: row.latest_precomputed_json,
+        precomputed_hash: row.precomputed_hash,
+        last_precomputed_at: row.last_precomputed_at,
+        presence_json: row.presence_json,
+      });
+      const at = row.last_precomputed_at || '';
+      if (at > cacheMaxPrecomputedAt) cacheMaxPrecomputedAt = at;
+    }
+    offset += rows.length;
+    if (rows.length >= batchSize && offset < totalRows) {
       setImmediate(ingestBatch);
       return;
     }
     finish();
   };
-  if (!metaRows.length) {
+  if (!totalRows) {
     finish();
     return;
   }
@@ -649,7 +648,7 @@ app.get('/api/fishit-tracker/latest/:username', servePrecomputed);
 app.get('/api/tracker/snapshot/:username', servePrecomputed);
 app.get('/api/fishit-tracker/snapshot/:username', servePrecomputed);
 
-app.get('/api/tracker/account-status', mountReadSession, requireTrackerReadAuth, async (req, res) => {
+async function handleReadAccountStatus(req, res) {
   try {
     const payload = await buildReadAccountStatusPayload(req.inventoryOwnerDiscordId, {
       lookupCached,
@@ -673,7 +672,10 @@ app.get('/api/tracker/account-status', mountReadSession, requireTrackerReadAuth,
     }
     return undefined;
   }
-});
+}
+
+app.get('/api/tracker/account-status', mountReadSession, requireTrackerReadAuth, handleReadAccountStatus);
+app.get('/api/fishit-tracker/account-status', mountReadSession, requireTrackerReadAuth, handleReadAccountStatus);
 
 // Any other tracker read that we do not serve precomputed is proxied to 8791 so
 // the read lane never silently drops a route during migration.
