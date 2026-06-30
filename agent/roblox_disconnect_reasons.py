@@ -38,7 +38,7 @@ ROBLOX_ERROR_CODE_PROMPTS: dict[int, str] = {
 # sends when a client leaves the actual map and lingers in the lobby/menu place;
 # the user wants that reported plainly (probe p-630c95f7cc #2).
 CLEAN_DISCONNECT_REASONS: dict[int, str] = {
-    285: "Account stays too long in the lobby",
+    285: "Account stays too long in the lobby/wrong server",
 }
 
 _ERROR_CODE_RE = re.compile(r"Error\s*Code\s*:?\s*(\d+)", re.I)

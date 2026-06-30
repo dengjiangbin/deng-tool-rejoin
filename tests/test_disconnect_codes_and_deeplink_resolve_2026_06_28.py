@@ -41,7 +41,7 @@ class DisconnectCodeReasonTests(unittest.TestCase):
             "disconnect_code_285",
             "Error Code: 285 928940,b5re230,7 [FLog::Network] Sending disconnect with reason: 285",
         )
-        self.assertEqual(text, "Account stays too long in the lobby")
+        self.assertEqual(text, "Account stays too long in the lobby/wrong server")
         self.assertNotIn("Error Code", text)
         self.assertNotIn("285", text)
 

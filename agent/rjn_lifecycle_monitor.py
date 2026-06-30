@@ -533,11 +533,19 @@ class RjnLifecycleMonitor:
 
     def _logcat_reader_loop(self) -> None:
         try:
+            # ``errors="replace"`` is CRITICAL: Roblox/Android log lines regularly
+            # contain non-UTF-8 bytes (player-name/emoji fragments, e.g. 0xc0).
+            # Without it, strict decoding raised UnicodeDecodeError, which killed
+            # this whole reader thread and silently degraded detection to the slow
+            # fallbacks — leaving force-closes / disconnects undetected for a very
+            # long time (probe p-87b567bde8 #2). Now a bad byte is just replaced.
             proc = subprocess.Popen(
                 ["logcat", "-v", "uid"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
             )
             self._logcat_proc = proc
@@ -546,14 +554,25 @@ class RjnLifecycleMonitor:
             while not self._stop_event.is_set():
                 if proc.stdout is None:
                     break
-                line = proc.stdout.readline()
-                if not line:
+                # A single malformed line must NEVER tear down the stream: catch
+                # per-line read/parse errors and keep going so the fast detector
+                # stays alive 24/7 (the whole point of the heartbeat system).
+                try:
+                    line = proc.stdout.readline()
+                    if not line:
+                        if proc.poll() is not None:
+                            break
+                        time.sleep(0.05)
+                        continue
+                    self._logcat_last_line_at = time.time()
+                    self._handle_logcat_line(line.strip())
+                except Exception as line_exc:  # noqa: BLE001
+                    self._detector_errors.append(f"logcat_line:{line_exc}"[:120])
+                    if len(self._detector_errors) > 16:
+                        self._detector_errors = self._detector_errors[-16:]
                     if proc.poll() is not None:
                         break
-                    time.sleep(0.05)
                     continue
-                self._logcat_last_line_at = time.time()
-                self._handle_logcat_line(line.strip())
         except Exception as exc:  # noqa: BLE001
             self._logcat_error = str(exc)[:160]
             self._detector_errors.append(self._logcat_error)
@@ -911,7 +930,16 @@ class RjnLifecycleMonitor:
             )
 
     def _was_ever_online_confirmed(self, row: PackageRjnState) -> bool:
-        return row.last_positive_online_evidence_at > 0
+        # Include the in-game Lua heartbeat path: on cloud-phone clones the live
+        # server is proven by the logcat "DENGRJN_HB|" beat (``ingame_hb_ever``)
+        # and ``online_since``, NOT only by the slow-scrape positive-evidence
+        # timestamp.  Counting only the latter let a force-closed heartbeat-online
+        # clone evade the process-missing kill path (probe p-87b567bde8 #2).
+        return (
+            row.last_positive_online_evidence_at > 0
+            or row.ingame_hb_ever
+            or row.online_since > 0
+        )
 
     @property
     def logcat_stream_alive(self) -> bool:
@@ -1644,7 +1672,30 @@ class RjnLifecycleMonitor:
             if not process_exists:
                 row.process_missing_streak += 1
                 if row.process_missing_streak >= PROCESS_MISSING_CONFIRM:
-                    if self._was_ever_online_confirmed(row):
+                    # Any package that ever reached a live server this session and
+                    # whose process is now gone is a real force-close / crash →
+                    # recover it within PROCESS_MISSING_CONFIRM checks.  This MUST
+                    # include the logcat-heartbeat-only online path
+                    # (``ingame_hb_ever`` / ``online_since``): the old code gated
+                    # solely on ``_was_ever_online_confirmed`` (which the push
+                    # heartbeat could leave unset) and otherwise required the state
+                    # to be EXACTLY ONLINE_CONFIRMED — so a force-closed clone whose
+                    # state was DISCONNECTED/TELEPORTING fell through EVERY branch
+                    # and sat undetected for ~an hour (probe p-87b567bde8 #2).  The
+                    # supervisor's loading grace / relaunch-verify window is what
+                    # prevents a premature kill during the tool's own relaunch, so
+                    # ``ever_in_game`` takes precedence here exactly as before.
+                    ever_in_game = (
+                        row.ingame_hb_ever
+                        or row.last_positive_online_evidence_at > 0
+                        or row.online_since > 0
+                        or row.internal_state in {
+                            STATE_ONLINE_CONFIRMED,
+                            STATE_TELEPORTING,
+                            STATE_DISCONNECTED,
+                        }
+                    )
+                    if ever_in_game:
                         row.force_close_detected = True
                         self._transition(
                             pkg,
@@ -1657,16 +1708,14 @@ class RjnLifecycleMonitor:
                         row.watchdog_active
                         or row.internal_state in {STATE_LAUNCHING, STATE_RELAUNCHING}
                     ):
+                        # First launch still in flight (never reached a server yet)
+                        # — tolerate the transient process gap.
                         row.process_missing_streak = 0
-                    elif row.internal_state == STATE_ONLINE_CONFIRMED:
-                        row.force_close_detected = True
-                        self._transition(
-                            pkg,
-                            STATE_DEAD,
-                            "process_missing",
-                            at=now,
-                            offline=True,
-                        )
+                    else:
+                        # Never reached a live server and not launching — nothing to
+                        # recover yet; don't let the streak grow unbounded (this is
+                        # the old dead-end branch that left force-closes undetected).
+                        row.process_missing_streak = 0
             elif fast_push:
                 # Fresh in-game heartbeat already proved the live server this
                 # round — skip the 8s/pid logcat dump and the dumpsys/uiautomator

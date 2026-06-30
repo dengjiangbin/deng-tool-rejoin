@@ -139,7 +139,7 @@ class ReasonTextTests(unittest.TestCase):
             format_lifecycle_dead_reason(
                 "disconnect_code_285", "Sending disconnect with reason: 285"
             ),
-            "Account stays too long in the lobby",
+            "Account stays too long in the lobby/wrong server",
         )
 
 
