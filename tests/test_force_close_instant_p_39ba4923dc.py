@@ -56,13 +56,13 @@ def _monitor(pkg: str, uid: str = "10104") -> RjnLifecycleMonitor:
 
 
 def _go_online(mon: RjnLifecycleMonitor, pkg: str, pid: str = "9999") -> None:
-    """Simulate package going online (gamejoinloadtime via stream)."""
-    mon.ingest_push_heartbeat(
-        pkg, alive=True, place_id=121864768012064, universe_id=6701277882, at=time.time()
-    )
+    """Simulate package going online via in-game heartbeat (primary hot lane)."""
     row = mon._states[pkg]
     row.pids = [pid]
     row.process_exists = True
+    mon.ingest_push_heartbeat(
+        pkg, alive=True, place_id=121864768012064, universe_id=6701277882, at=time.time()
+    )
     assert row.internal_state == STATE_ONLINE_CONFIRMED
 
 

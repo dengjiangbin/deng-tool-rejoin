@@ -55,6 +55,7 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         done_idx = source.find("batch_clear_cache_done", batch_idx)
         block = source[batch_idx:done_idx]
         self.assertIn("_set_all_phase_labels", block)
+        self.assertIn('_set_all_phase("Preparing"', block)
         self.assertNotIn('_set_all_phase("Clear Cache"', block)
 
     def test_live_dashboard_caches_package_ram_polling(self) -> None:

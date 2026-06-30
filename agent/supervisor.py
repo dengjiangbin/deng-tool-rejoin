@@ -3151,9 +3151,29 @@ class WatchdogSupervisor:
         except Exception:  # noqa: BLE001
             return ev
 
+    def _hot_lane_online_fresh(self, pkg: str) -> bool:
+        """Primary Online hot lane: fresh push_heartbeat + process still alive."""
+        try:
+            row = self._rjn_monitor._states.get(pkg)
+            if row is None or not row.ingame_hb_ever:
+                return False
+            if not row.process_exists:
+                return False
+            from .rjn_lifecycle_monitor import ONLINE_HB_FRESH_SECONDS
+
+            wall = float(row.last_ingame_hb_wall_at or 0.0)
+            return (
+                row.online_evidence_source == "push_heartbeat"
+                and wall > 0
+                and (time.time() - wall) <= ONLINE_HB_FRESH_SECONDS
+            )
+        except Exception:  # noqa: BLE001
+            return False
+
     def _detect_android_package_state(self, pkg: str) -> tuple[str, dict[str, Any]]:
         """Merge rjn detection with supervisor launch/relaunch state (detection only)."""
         from .rjn_lifecycle_monitor import (
+            PRIMARY_HOT_LANE_ONLY,
             STATE_DEAD as RJN_DEAD,
             STATE_DISCONNECTED as RJN_DISCONNECTED,
             STATE_FAILED as RJN_FAILED,
@@ -3166,32 +3186,47 @@ class WatchdogSupervisor:
             detail["elapsed_ms"] = int((time.monotonic() - t0) * 1000)
             self._log_state_evidence(pkg, detail, {}, STATUS_READY)
             return STATUS_READY, detail
-        # Fast path: a fresh in-game Lua heartbeat is the strongest, cheapest
-        # truth (placeId/jobId/universeId).  Feed it into the lifecycle monitor
-        # BEFORE the slow scrape so evaluate_package reflects online / wrong
-        # server instantly without dumpsys/uiautomator/logcat work.
-        self._ingest_push_heartbeat(pkg)
-        self._sync_logcat_hb_push_channel(pkg)
-        fresh_push = self._push_fresh(pkg)
-        try:
-            proc_exists, _, _ = _unpack_process_check(
-                self._rjn_monitor._process_check(pkg)
+        if PRIMARY_HOT_LANE_ONLY:
+            self._ingest_push_heartbeat(pkg)
+            fresh_push = self._hot_lane_online_fresh(pkg)
+            try:
+                proc_exists, _, _ = _unpack_process_check(
+                    self._rjn_monitor._process_check(pkg)
+                )
+                if not proc_exists:
+                    fresh_push = False
+            except Exception:  # noqa: BLE001
+                pass
+            ev = self._rjn_monitor.evaluate_package(
+                pkg, fast_push=fresh_push, hot_lane_only=True
             )
-            if not proc_exists:
-                fresh_push = False
-        except Exception:  # noqa: BLE001
-            pass
-        ev = self._rjn_monitor.evaluate_package(pkg, fast_push=fresh_push)
-        if not fresh_push:
-            # No trustworthy in-game heartbeat this round → fall back to the slow
-            # scrape + presence ground-truth, and let the heartbeat-loss watchdog
-            # decide if a previously-streaming client has gone silent (529/kick).
-            ev = self._try_online_evidence_fallback(pkg, ev)
-            ev = self._try_presence_target_verification(pkg, ev)
-            # A package kept "Online" only by a now-silent in-game heartbeat has
-            # left the live server (HTTP 529 / kick that scrapers can't see) —
-            # classify and demote so recovery (or Captcha-hang) is triggered.
-            ev = self._maybe_demote_on_heartbeat_loss(pkg, ev)
+        else:
+            # Fast path: a fresh in-game Lua heartbeat is the strongest, cheapest
+            # truth (placeId/jobId/universeId).  Feed it into the lifecycle monitor
+            # BEFORE the slow scrape so evaluate_package reflects online / wrong
+            # server instantly without dumpsys/uiautomator/logcat work.
+            self._ingest_push_heartbeat(pkg)
+            self._sync_logcat_hb_push_channel(pkg)
+            fresh_push = self._push_fresh(pkg)
+            try:
+                proc_exists, _, _ = _unpack_process_check(
+                    self._rjn_monitor._process_check(pkg)
+                )
+                if not proc_exists:
+                    fresh_push = False
+            except Exception:  # noqa: BLE001
+                pass
+            ev = self._rjn_monitor.evaluate_package(pkg, fast_push=fresh_push)
+            if not fresh_push:
+                # No trustworthy in-game heartbeat this round → fall back to the slow
+                # scrape + presence ground-truth, and let the heartbeat-loss watchdog
+                # decide if a previously-streaming client has gone silent (529/kick).
+                ev = self._try_online_evidence_fallback(pkg, ev)
+                ev = self._try_presence_target_verification(pkg, ev)
+                # A package kept "Online" only by a now-silent in-game heartbeat has
+                # left the live server (HTTP 529 / kick that scrapers can't see) —
+                # classify and demote so recovery (or Captcha-hang) is triggered.
+                ev = self._maybe_demote_on_heartbeat_loss(pkg, ev)
         current = str(self.status_map.get(pkg) or "").strip()
         detail = dict(ev.detail)
         reason = str(detail.get("reason") or ev.reason)
@@ -4353,7 +4388,10 @@ class WatchdogSupervisor:
                 pass
 
             try:
-                self._rjn_monitor.scan_all_packages_logcat_dump()
+                from .rjn_lifecycle_monitor import PRIMARY_HOT_LANE_ONLY
+
+                if not PRIMARY_HOT_LANE_ONLY:
+                    self._rjn_monitor.scan_all_packages_logcat_dump()
             except Exception:  # noqa: BLE001
                 pass
 

@@ -6266,6 +6266,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         package_names = [entry["package"] for entry in entries]
         _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
         safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
+        # Label silently before the mass clear (avoid render during root shells —
+        # Termux/Python 3.13 SIGSEGV risk), then redraw as soon as it finishes.
+        _set_all_phase_labels("Clear Cache")
         try:
             prep_cache = _run_start_batch_cache_clear(
                 package_names,
@@ -6274,7 +6277,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("start: batch cache clear error: %s", _exc)
             prep_cache = {pkg: "Failed" for pkg in package_names}
-        _set_all_phase_labels("Clear Cache")
+        _set_all_phase("Preparing", "Applying settings...")
         _start_session.mark("batch_low_graphics_begin", package_count=len(entries))
         for entry in entries:
             package = entry["package"]
@@ -6287,11 +6290,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                 )
             except Exception:  # noqa: BLE001
                 prep_gfx[package] = "error"
-        _render_phase("Clearing cache for all packages...")
         _start_session.mark("batch_clear_cache_done", package_count=len(entries))
         _start_session.mark("package_preparation_done", package_count=len(entries))
 
         # 2) Compute window layout silently (no public phase change).
+        _set_all_phase("Preparing", "Computing layout...")
         try:
             _start_session.mark("layout_begin")
             cfg, _layout_note = _prepare_automatic_layout(cfg, entries)

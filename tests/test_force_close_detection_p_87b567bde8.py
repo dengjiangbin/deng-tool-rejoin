@@ -57,6 +57,8 @@ def _monitor(pkg: str, uid: str = "10104") -> RjnLifecycleMonitor:
 def _online_via_heartbeat(mon: RjnLifecycleMonitor, pkg: str) -> None:
     # Mirror the cloud-phone reality: online proven ONLY by the in-game logcat
     # heartbeat (no slow-scrape positive evidence timestamp).
+    row = mon._states[pkg]
+    row.process_exists = True
     mon.ingest_push_heartbeat(
         pkg, alive=True, place_id=121864768012064, universe_id=6701277882, at=time.time()
     )
