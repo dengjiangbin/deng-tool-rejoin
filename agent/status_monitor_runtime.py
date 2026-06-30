@@ -250,6 +250,23 @@ def clear_online_since(package: str) -> None:
     _save_state(state)
 
 
+def mark_no_heartbeat(package: str, now: float | None = None) -> None:
+    """Label No Heartbeat without clearing online_since (runtime keeps counting)."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return
+    ts = float(now if now is not None else time.time())
+    state = _load_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    row["state"] = "NO_HEARTBEAT"
+    row["nhb_since"] = ts
+    row["last_transition_reason"] = "heartbeat_lost"
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_state(state)
+
+
 def pause_online_runtime(package: str, now: float | None = None) -> float:
     """Freeze Status Monitor runtime during No Heartbeat (process still alive)."""
     pkg = str(package or "").strip()
@@ -302,7 +319,7 @@ def resume_online_runtime(package: str, now: float | None = None) -> float:
 
 
 def effective_runtime_seconds(package: str, now: float | None = None) -> float | None:
-    """Return frozen-or-live online runtime for display and dead webhooks."""
+    """Return live online runtime from online_since (never frozen on No Heartbeat)."""
     pkg = str(package or "").strip()
     if not pkg:
         return None
@@ -310,11 +327,6 @@ def effective_runtime_seconds(package: str, now: float | None = None) -> float |
     if not isinstance(row, dict):
         return None
     ts = float(now if now is not None else time.time())
-    if row.get("runtime_paused"):
-        try:
-            return float(row.get("runtime_accumulated_sec") or 0.0)
-        except (TypeError, ValueError):
-            return 0.0
     try:
         online_since = float(row.get("online_since"))
     except (TypeError, ValueError):

@@ -1533,12 +1533,9 @@ class WatchdogSupervisor:
 
     def _status_monitor_runtime_started_at(self, pkg: str, status: str) -> tuple[float | None, str]:
         """Return wall-clock runtime anchor — only from gamejoinloadtime online_since."""
-        from .status_monitor_runtime import effective_runtime_seconds, load_online_since
+        from .status_monitor_runtime import load_online_since
 
         if status in {STATUS_ONLINE, STATUS_NO_HEARTBEAT}:
-            frozen = effective_runtime_seconds(pkg)
-            if frozen is not None:
-                return time.time() - float(frozen), "gamejoinloadtime_paused" if status == STATUS_NO_HEARTBEAT else "gamejoinloadtime"
             online_since, row = load_online_since(pkg)
             if online_since is not None:
                 src = str(row.get("runtime_source") or "gamejoinloadtime")
@@ -1551,17 +1548,10 @@ class WatchdogSupervisor:
         self, pkg: str, previous_state: str, state: str, now: float
     ) -> None:
         """Maintain online session timestamps from gamejoinloadtime only."""
-        from .status_monitor_runtime import (
-            effective_runtime_seconds,
-            load_online_since,
-            pause_online_runtime,
-            resume_online_runtime,
-        )
+        from .status_monitor_runtime import load_online_since
 
         if state in _METRIC_ACTIVE_STATES:
             self._last_online_ts[pkg] = now
-            if previous_state == STATUS_NO_HEARTBEAT:
-                resume_online_runtime(pkg, now)
             online_since, _ = load_online_since(pkg)
             if online_since is not None:
                 self._online_start_ts[pkg] = online_since
@@ -1583,11 +1573,9 @@ class WatchdogSupervisor:
                 except Exception:  # noqa: BLE001
                     pass
         elif state == STATUS_NO_HEARTBEAT:
-            if previous_state in _METRIC_ACTIVE_STATES:
-                pause_online_runtime(pkg, now)
-            frozen = effective_runtime_seconds(pkg)
-            if frozen is not None:
-                self._online_start_ts[pkg] = now - float(frozen)
+            online_since, _ = load_online_since(pkg)
+            if online_since is not None:
+                self._online_start_ts[pkg] = online_since
         elif state not in _METRIC_ACTIVE_STATES:
             self._online_start_ts.pop(pkg, None)
 

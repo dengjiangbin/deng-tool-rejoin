@@ -146,6 +146,7 @@ COMMANDS = {
 # weight glyphs that all Termux monospace fonts have.
 _ANSI_GREEN   = "\033[1;92m"   # bold bright green
 _ANSI_YELLOW  = "\033[1;93m"   # bold bright yellow
+_ANSI_ORANGE  = "\033[1;38;5;208m"  # bold orange (No Heartbeat — matches APK Warning)
 _ANSI_RED     = "\033[1;91m"   # bold bright red
 _ANSI_CYAN    = "\033[1;96m"   # bold bright cyan
 _ANSI_WHITE   = "\033[1;97m"   # bold bright white
@@ -4993,7 +4994,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Starting":          _ANSI_YELLOW,
         "Launching":         _ANSI_WHITE,
         "Relaunching":       _ANSI_WHITE,
-        "No Heartbeat":      _ANSI_YELLOW,
+        "No Heartbeat":      _ANSI_ORANGE,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
         ("Join" + "ing"):    _ANSI_CYAN,     # legacy alias

@@ -73,9 +73,10 @@ class TestStatusColors(unittest.TestCase):
     """Colorize map must have entries for all live watchdog states."""
 
     def test_no_heartbeat_has_color(self) -> None:
-        from agent.commands import _colorize_status
+        from agent.commands import _ANSI_ORANGE, _colorize_status
         out_nh = _colorize_status("No Heartbeat", use_color=True)
         self.assertIn("No Heartbeat", out_nh)
+        self.assertIn(_ANSI_ORANGE, out_nh)
         self.assertNotEqual(out_nh, "No Heartbeat", "No Heartbeat must be colorized")
 
     def test_launched_and_disconnected_have_colors(self) -> None:

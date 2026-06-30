@@ -1042,14 +1042,14 @@ class RjnLifecycleMonitor:
             row.last_offline_evidence_at = at
             from .status_monitor_runtime import (
                 clear_online_since,
-                pause_online_runtime,
+                mark_no_heartbeat,
                 record_lifecycle_transition,
             )
 
             if str(reason or "").strip() == "heartbeat_lost":
-                # Process alive but in-game proof paused — freeze runtime, do not
-                # treat as Dead / force-close (probe p-ac5a0399fc).
-                pause_online_runtime(pkg, at)
+                # Process alive but in-game proof quiet — keep online runtime
+                # counting; do not treat as Dead / force-close (p-ac5a0399fc).
+                mark_no_heartbeat(pkg, at)
                 record_lifecycle_transition(pkg, new_state, reason, now=at, offline=False)
             else:
                 row.online_since = 0.0
