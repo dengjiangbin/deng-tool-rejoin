@@ -6218,7 +6218,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             import time as _rt
 
             now = _rt.monotonic()
-            if now - _stagger_render_last < 0.85:
+            if now - _stagger_render_last < 0.35:
                 return
             _stagger_render_last = now
             _render_phase(_unused_note)
@@ -6457,6 +6457,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         def _on_stagger_launch_sent(launched_pkg: str) -> None:
             if launched_pkg not in _supervisor._package_opened:
                 _supervisor.mark_package_launched(launched_pkg)
+            try:
+                _supervisor.sync_stagger_display_status()
+            except Exception:  # noqa: BLE001
+                pass
 
         try:
             for index, entry in enumerate(entries, start=1):

@@ -3219,7 +3219,12 @@ class WatchdogSupervisor:
             return STATUS_READY, detail
         if PRIMARY_HOT_LANE_ONLY:
             self._ingest_push_heartbeat(pkg)
-            fresh_push = self._hot_lane_online_fresh(pkg)
+            self._sync_logcat_hb_push_channel(pkg)
+            try:
+                self._rjn_monitor.retry_confirm_pending_heartbeat(pkg)
+            except Exception:  # noqa: BLE001
+                pass
+            fresh_push = self._push_fresh(pkg)
             try:
                 proc_exists, _, _ = _unpack_process_check(
                     self._rjn_monitor._process_check(pkg)
@@ -3366,7 +3371,10 @@ class WatchdogSupervisor:
                 # Post-grace: do not pin Relaunching forever (probe p-cd09ac0ce3).
                 self._relaunch_inflight.discard(pkg)
                 self._relaunch_verify_until.pop(pkg, None)
-                if not ev.process_exists:
+                if ev.is_online_confirmed:
+                    state = STATUS_ONLINE
+                    reason = "push_heartbeat_confirmed"
+                elif not ev.process_exists:
                     state = STATUS_DEAD
                     reason = str(
                         detail.get("reason_internal")
@@ -3395,7 +3403,10 @@ class WatchdogSupervisor:
             STATUS_PREPARING,
             STATUS_READY,
         }:
-            if (
+            if ev.is_online_confirmed:
+                state = STATUS_ONLINE
+                reason = "push_heartbeat_confirmed"
+            elif (
                 not ev.process_exists
                 and not self._in_loading_grace(pkg)
             ):
@@ -4599,12 +4610,37 @@ class WatchdogSupervisor:
                 # tail pause for it — that is what keeps a full round at a few
                 # seconds even with many clones (p-5d0df79c33: detect < 15s).
                 fast_pkg = self._push_fresh(pkg)
+                try:
+                    self._ingest_push_heartbeat(pkg)
+                    self._sync_logcat_hb_push_channel(pkg)
+                    self._rjn_monitor.retry_confirm_pending_heartbeat(pkg)
+                    fast_pkg = self._push_fresh(pkg)
+                except Exception:  # noqa: BLE001
+                    pass
                 self._set_status(pkg, STATUS_CHECKING)
                 _maybe_render(force=True)
                 if not fast_pkg:
                     self._interruptible_sleep(self.PACKAGE_CHECKING_HOLD_SECONDS)
                 if pkg in prefetched:
-                    state, detail, launching_eval, error_text = prefetched[pkg]
+                    pref_state, pref_detail, pref_launching_eval, pref_err = prefetched[pkg]
+                    if pref_state in {
+                        STATUS_LAUNCHING,
+                        STATUS_RELAUNCHING,
+                        STATUS_WAITING,
+                        STATUS_REOPENING,
+                    } and fast_pkg:
+                        try:
+                            if launching_eval:
+                                state, detail = self._evaluate_launching_or_pending(pkg, entry)
+                            else:
+                                state, detail = self._detect_package_state(pkg, entry)
+                            error_text = ""
+                        except Exception as exc:  # noqa: BLE001
+                            error_text = str(exc)[:180]
+                            state = pref_state
+                            detail = pref_detail
+                    else:
+                        state, detail, launching_eval, error_text = prefetched[pkg]
                 else:
                     try:
                         if launching_eval:

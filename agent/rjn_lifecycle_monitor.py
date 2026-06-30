@@ -1327,28 +1327,48 @@ class RjnLifecycleMonitor:
                 }:
                     self._maybe_flag_wrong_server(pkg, seen_at)
                     return "wrong_server"
-            if not new_beat:
+            retry_pending = (
+                not new_beat
+                and row.internal_state != STATE_ONLINE_CONFIRMED
+                and row.ingame_hb_ever
+                and bool(alive)
+                and not row.wrong_server_active
+                and row.last_transition_reason != "wrong_server"
+                and row.last_ingame_hb_wall_at > 0
+                and (time.time() - row.last_ingame_hb_wall_at) <= ONLINE_HB_FRESH_SECONDS
+            )
+            if not new_beat and not retry_pending:
                 return ""
-            row.last_ingame_hb_at = seen_at
-            row.last_ingame_hb_wall_at = time.time()
-            row.ingame_hb_ever = True
-            row.wrong_server_active = False
-            if pid:
-                row.last_hb_pid = str(pid).strip()
-            if uid:
-                row.last_hb_uid = str(uid).strip()
+            if new_beat:
+                row.last_ingame_hb_at = seen_at
+                row.last_ingame_hb_wall_at = time.time()
+                row.ingame_hb_ever = True
+                row.wrong_server_active = False
+                if pid:
+                    row.last_hb_pid = str(pid).strip()
+                if uid:
+                    row.last_hb_uid = str(uid).strip()
             confirm_online = bool(alive)
+            hb_seen_at = (
+                float(row.last_ingame_hb_at or row.last_ingame_hb_wall_at or seen_at)
+                if retry_pending and not new_beat
+                else seen_at
+            )
+            eff_pid = pid if pid else row.last_hb_pid
+            eff_uid = uid if uid else row.last_hb_uid
             if confirm_online and PRIMARY_HOT_LANE_ONLY:
-                confirm_online = self._heartbeat_attribution_ok(pkg, pid=pid, uid=uid)
-                if confirm_online and row.launch_started_at > 0 and seen_at < (
+                confirm_online = self._heartbeat_attribution_ok(
+                    pkg, pid=eff_pid, uid=eff_uid
+                )
+                if confirm_online and row.launch_started_at > 0 and hb_seen_at < (
                     row.launch_started_at - 2.0
                 ):
                     confirm_online = False
-                if confirm_online and row.last_process_gone_at > 0 and seen_at <= (
+                if confirm_online and row.last_process_gone_at > 0 and hb_seen_at <= (
                     row.last_process_gone_at + 0.5
                 ):
                     confirm_online = False
-                if confirm_online and (time.time() - seen_at) > ONLINE_HB_FRESH_SECONDS:
+                if confirm_online and (time.time() - hb_seen_at) > ONLINE_HB_FRESH_SECONDS:
                     confirm_online = False
         if confirm_online and PRIMARY_HOT_LANE_ONLY:
             exists = False
@@ -1366,9 +1386,60 @@ class RjnLifecycleMonitor:
                 return ""
         if confirm_online:
             with self._lock:
-                self._confirm_online_evidence(pkg, seen_at, source="push_heartbeat")
+                row = self._states.get(pkg)
+                confirm_at = (
+                    float(row.last_ingame_hb_at or row.last_ingame_hb_wall_at or seen_at)
+                    if row is not None
+                    else seen_at
+                )
+                self._confirm_online_evidence(pkg, confirm_at, source="push_heartbeat")
             return "online"
         return ""
+
+    def retry_confirm_pending_heartbeat(self, package: str) -> bool:
+        """Confirm Online from a fresh heartbeat when the first beat beat process startup."""
+        pkg = str(package or "").strip()
+        if not pkg:
+            return False
+        now = time.time()
+        with self._lock:
+            row = self._states.get(pkg)
+            if row is None or not row.ingame_hb_ever:
+                return False
+            if row.internal_state == STATE_ONLINE_CONFIRMED:
+                return True
+            if row.wrong_server_active or row.last_transition_reason == "wrong_server":
+                return False
+            wall = float(row.last_ingame_hb_wall_at or 0.0)
+            if wall <= 0 or (now - wall) > ONLINE_HB_FRESH_SECONDS:
+                return False
+            seen_at = float(row.last_ingame_hb_at or wall)
+            hb_pid = str(row.last_hb_pid or "").strip()
+            hb_uid = str(row.last_hb_uid or "").strip()
+        process_exists, pids, _ = _unpack_process_check(self._process_check(pkg))
+        with self._lock:
+            row = self._states.get(pkg)
+            if row is not None:
+                row.process_exists = process_exists
+                row.pids = list(pids)
+                row.last_process_check_at = now
+                if process_exists:
+                    row.process_seen_since_launch = True
+        if not process_exists:
+            return False
+        with self._lock:
+            row = self._states.get(pkg)
+            if row is None or row.internal_state == STATE_ONLINE_CONFIRMED:
+                return bool(row and row.internal_state == STATE_ONLINE_CONFIRMED)
+            if not self._heartbeat_attribution_ok(pkg, pid=hb_pid or None, uid=hb_uid or None):
+                return False
+            if row.launch_started_at > 0 and seen_at < (row.launch_started_at - 2.0):
+                return False
+            if row.last_process_gone_at > 0 and seen_at <= (row.last_process_gone_at + 0.5):
+                return False
+        with self._lock:
+            self._confirm_online_evidence(pkg, seen_at, source="push_heartbeat")
+        return True
 
     def _ingest_logcat_heartbeat(
         self,
@@ -2086,6 +2157,8 @@ class RjnLifecycleMonitor:
         failed: list[str] = []
         hot_lane = PRIMARY_HOT_LANE_ONLY if hot_lane_only is None else hot_lane_only
         self._ensure_logcat_stream()
+        if hot_lane:
+            self.retry_confirm_pending_heartbeat(pkg)
         if not fast_push and not hot_lane:
             self._poll_recent_logcat()
         with self._lock:
@@ -2186,9 +2259,9 @@ class RjnLifecycleMonitor:
                         # Never reached a live server and not launching — nothing to
                         # recover yet; reset so the streak doesn't grow unbounded.
                         row.process_missing_streak = 0
-            elif fast_push or hot_lane:
-                # Fresh in-game heartbeat (Online hot lane) or hot-lane-only mode:
-                # skip dump scrape, heartbeat-loss demotion, and UI disconnect scan.
+            elif fast_push:
+                # Fresh in-game heartbeat: skip dump scrape, heartbeat-loss demotion,
+                # and UI disconnect scan — the beat is authoritative this round.
                 row.process_missing_streak = 0
                 row.force_close_detected = False
                 if row.watchdog_active:
@@ -2232,7 +2305,8 @@ class RjnLifecycleMonitor:
                     now - max(row.last_gamejoinloadtime_at, row.last_doteleport_at)
                 ) <= INGAME_HB_LOSS_SECONDS
                 if (
-                    INGAME_HB_LOSS_ENABLED
+                    not hot_lane
+                    and INGAME_HB_LOSS_ENABLED
                     and process_exists
                     and row.ingame_hb_ever
                     and row.last_ingame_hb_at > 0
@@ -2281,11 +2355,15 @@ class RjnLifecycleMonitor:
                 and row.last_positive_online_evidence_at > 0
             )
             if hot_lane:
+                fresh_hb = (
+                    row.ingame_hb_ever
+                    and row.last_ingame_hb_wall_at > 0
+                    and (now - row.last_ingame_hb_wall_at) <= ONLINE_HB_FRESH_SECONDS
+                )
                 has_positive_evidence = (
                     internal == STATE_ONLINE_CONFIRMED
                     and row.online_evidence_source == "push_heartbeat"
-                    and row.last_ingame_hb_wall_at > 0
-                    and (now - row.last_ingame_hb_wall_at) <= ONLINE_HB_FRESH_SECONDS
+                    and fresh_hb
                 )
             is_online = has_positive_evidence and process_exists
             if process_exists and _package_force_stopped_quick(pkg):
