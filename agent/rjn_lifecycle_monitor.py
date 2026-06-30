@@ -29,6 +29,15 @@ WATCHED_PHRASES = (
 )
 DEFAULT_LAUNCH_WATCHDOG_SECONDS = 120.0
 PROCESS_MISSING_CONFIRM = 2
+# After in-game HB silence + /proc+pidof prove the clone is gone, mark force-close
+# on this cadence from the logcat stream — independent of slow watchdog rounds
+# (probe p-0dac4920dc: 4 min force-close mislabeled as heartbeat_lost).
+FORCE_CLOSE_FAST_LANE_POLL_SECONDS = float(
+    os.environ.get("DENG_REJOIN_FORCE_CLOSE_LANE_SEC", "2") or "2"
+)
+FORCE_CLOSE_HB_SILENCE_SECONDS = float(
+    os.environ.get("DENG_REJOIN_FORCE_CLOSE_HB_SILENCE_SEC", "4") or "4"
+)
 DISCONNECT_SCAN_INTERVAL_SECONDS = 5.0
 # When the logcat stream is healthy it catches "Sending disconnect with reason"
 # (e.g. 278) instantly, so the slow dumpsys/uiautomator disconnect scan only needs
@@ -178,6 +187,15 @@ WRONG_SERVER_JOBID_ENABLED = os.environ.get("DENG_REJOIN_WRONG_SERVER_JOBID", "1
 _LOGCAT_TS_PREFIX_RE = re.compile(
     r"^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})"
 )
+
+
+def _unpack_process_check(
+    result: tuple[bool, list[str]] | tuple[bool, list[str], bool],
+) -> tuple[bool, list[str], bool]:
+    """Normalize real ``_process_check`` output and legacy 2-tuple test mocks."""
+    if len(result) >= 3:
+        return bool(result[0]), list(result[1]), bool(result[2])
+    return bool(result[0]), list(result[1]), False
 
 
 def _hash_code(code: object) -> str:
@@ -470,7 +488,7 @@ class RjnLifecycleMonitor:
                 pid: pkg for pkg, pid in self._pid_map.items() if pid
             }
             for pkg, row in self._states.items():
-                _exists, pids = self._process_check(pkg)
+                _exists, pids, _definitive = _unpack_process_check(self._process_check(pkg))
                 for pid in pids:
                     self._pid_map[pkg] = pid
                     self._pid_to_package[pid] = pkg
@@ -573,6 +591,10 @@ class RjnLifecycleMonitor:
                         continue
                     self._logcat_last_line_at = time.time()
                     self._handle_logcat_line(line.strip())
+                    try:
+                        self._poll_force_close_fast_lane()
+                    except Exception:  # noqa: BLE001
+                        pass
                 except Exception as line_exc:  # noqa: BLE001
                     self._detector_errors.append(f"logcat_line:{line_exc}"[:120])
                     if len(self._detector_errors) > 16:
@@ -1626,29 +1648,24 @@ class RjnLifecycleMonitor:
         """Backward-compatible alias — detection only."""
         self.note_launch_watchdog(package, relaunch=relaunch)
 
-    def _process_check(self, package: str) -> tuple[bool, list[str]]:
+    def _process_check(self, package: str) -> tuple[bool, list[str], bool]:
         """Roblox package PID check.
 
-        Uses a two-tier approach for speed:
-        1. Fast path: if we have known PIDs from a previous check, verify them
-           via `/proc/<pid>` existence — a pure filesystem stat, no subprocess,
-           returns in microseconds.  If ALL known PIDs are gone, the process is
-           dead and we return False immediately without spawning pidof.  This is
-           the path that makes force-close detection effectively instant
-           (comparable to gamejoinloadtime online detection via the live stream).
-        2. Slow path: no known PIDs (first check, or after pids were cleared by
-           a relaunch/reset) → fall back to the root `pidof` subprocess as
-           before, which enumerates the new PID(s) for the next cycle.
+        Returns ``(exists, pids, definitive_absent)``.  ``definitive_absent`` is
+        True when we previously tracked PID(s), all are gone from ``/proc``, and
+        ``pidof`` rediscovery found nothing — a user force-close / crash, not a
+        transient tool force-stop gap.
         """
         pkg = android.validate_package_name(package)
         with self._lock:
             row = self._states.get(pkg)
             known_pids: list[str] = list(row.pids) if row else []
 
+        had_known_pids = bool(known_pids)
         if known_pids:
             alive = [p for p in known_pids if os.path.exists(f"/proc/{p}")]
             if alive:
-                return True, alive
+                return True, alive, False
             # Cached PIDs are stale (Roblox restarted / PID rotated). Fall through
             # to pidof rediscovery instead of declaring dead immediately — otherwise
             # every clone after the first stays "Launching" with process_running=false
@@ -1668,7 +1685,70 @@ class RjnLifecycleMonitor:
                     pids = res.stdout.strip().split()
         except Exception:  # noqa: BLE001
             pass
-        return bool(pids), pids
+        definitive_absent = had_known_pids and not pids
+        return bool(pids), pids, definitive_absent
+
+    def try_mark_force_close_dead(self, package: str, *, at: float | None = None) -> bool:
+        """Mark a force-closed/crashed clone DEAD when the process is provably gone.
+
+        Returns True when this call transitioned (or already had) ``process_missing``
+        DEAD.  Safe to call from the logcat stream, supervisor, or evaluate paths.
+        """
+        pkg = str(package or "").strip()
+        if not pkg:
+            return False
+        exists, _pids, _definitive = _unpack_process_check(self._process_check(pkg))
+        if exists:
+            return False
+        now = float(at if at is not None else time.time())
+        with self._lock:
+            row = self._states.get(pkg)
+            if row is None:
+                return False
+            if row.internal_state == STATE_DEAD and row.last_transition_reason == "process_missing":
+                return True
+            ever = self._was_ever_online_confirmed(row)
+            user_kill_launch = row.watchdog_active and row.process_seen_since_launch
+            if not ever and not user_kill_launch:
+                return False
+            if row.watchdog_active and not row.process_seen_since_launch:
+                return False
+            row.force_close_detected = True
+            row.process_missing_streak = PROCESS_MISSING_CONFIRM
+            self._transition(
+                pkg,
+                STATE_DEAD,
+                "process_missing",
+                at=now,
+                offline=True,
+            )
+            return True
+
+    def _poll_force_close_fast_lane(self) -> None:
+        """Stream-side force-close detector — runs every ~2s independent of watchdog."""
+        now = time.time()
+        if now - getattr(self, "_last_force_close_lane_at", 0.0) < FORCE_CLOSE_FAST_LANE_POLL_SECONDS:
+            return
+        self._last_force_close_lane_at = now
+        for pkg in list(self.packages):
+            with self._lock:
+                row = self._states.get(pkg)
+                if row is None:
+                    continue
+                if row.internal_state not in {
+                    STATE_ONLINE_CONFIRMED,
+                    STATE_TELEPORTING,
+                    STATE_DISCONNECTED,
+                }:
+                    continue
+                if row.watchdog_active:
+                    continue
+                if not row.ingame_hb_ever:
+                    continue
+                silence = now - float(row.last_ingame_hb_wall_at or row.last_ingame_hb_at or 0.0)
+                if silence < FORCE_CLOSE_HB_SILENCE_SECONDS:
+                    continue
+            self.try_mark_force_close_dead(pkg, at=now)
 
     def evaluate_package(
         self, package: str, *, fast_push: bool = False
@@ -1696,7 +1776,9 @@ class RjnLifecycleMonitor:
                 res = self._uid_resolutions[pkg]
                 if not res.uid:
                     failed.append("uid_not_resolved")
-            process_exists, pids = self._process_check(pkg)
+            process_exists, pids, definitive_absent = _unpack_process_check(
+                self._process_check(pkg)
+            )
             row.process_exists = process_exists
             row.pids = list(pids)
             row.last_process_check_at = now
@@ -1727,7 +1809,16 @@ class RjnLifecycleMonitor:
 
             if not process_exists:
                 row.process_missing_streak += 1
-                if row.process_missing_streak >= PROCESS_MISSING_CONFIRM:
+                confirm_needed = PROCESS_MISSING_CONFIRM
+                if definitive_absent and (
+                    row.internal_state
+                    in {STATE_ONLINE_CONFIRMED, STATE_TELEPORTING, STATE_DISCONNECTED}
+                    or row.ingame_hb_ever
+                    or row.online_since > 0
+                ):
+                    if not (row.watchdog_active and not row.process_seen_since_launch):
+                        confirm_needed = 1
+                if row.process_missing_streak >= confirm_needed:
                     # Any package that ever reached a live server this session and
                     # whose process is now gone is a real force-close / crash.
                     # Covers the logcat-heartbeat-only online path (the slow-scrape
@@ -1822,6 +1913,7 @@ class RjnLifecycleMonitor:
                 ) <= INGAME_HB_LOSS_SECONDS
                 if (
                     INGAME_HB_LOSS_ENABLED
+                    and process_exists
                     and row.ingame_hb_ever
                     and row.last_ingame_hb_at > 0
                     and row.internal_state in {STATE_ONLINE_CONFIRMED, STATE_TELEPORTING}

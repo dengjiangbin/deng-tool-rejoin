@@ -85,7 +85,7 @@ class ProcFastPathTests(unittest.TestCase):
         with patch.object(rlm.android, "run_root_command", return_value=type("R", (), {"ok": True, "stdout": ""})()), \
              patch.object(rlm.android, "is_process_running", return_value=False):
             mon._root_info = type("RI", (), {"available": False, "tool": None})()
-            exists, pids = mon._process_check(pkg)
+            exists, pids, _definitive = mon._process_check(pkg)
         self.assertFalse(exists)
         self.assertEqual(pids, [])
 
@@ -98,9 +98,10 @@ class ProcFastPathTests(unittest.TestCase):
         fake_res = type("R", (), {"ok": True, "stdout": "54321"})()
         with patch.object(rlm.android, "run_root_command", return_value=fake_res):
             mon._root_info = type("RI", (), {"available": True, "tool": "su"})()
-            exists, pids = mon._process_check(pkg)
+            exists, pids, definitive = mon._process_check(pkg)
         self.assertTrue(exists)
         self.assertIn("54321", pids)
+        self.assertFalse(definitive)
 
     def test_proc_check_returns_true_when_pid_exists(self) -> None:
         pkg = "com.pkg.proc2"
@@ -109,7 +110,7 @@ class ProcFastPathTests(unittest.TestCase):
         row.pids = ["12345"]
         # Mock /proc/<pid> to exist so the test works on all platforms
         with patch("agent.rjn_lifecycle_monitor.os.path.exists", return_value=True):
-            exists, pids = mon._process_check(pkg)
+            exists, pids, _definitive = mon._process_check(pkg)
         self.assertTrue(exists)
         self.assertIn("12345", pids)
 
@@ -122,7 +123,7 @@ class ProcFastPathTests(unittest.TestCase):
         fake_res = type("R", (), {"ok": True, "stdout": "12345"})()
         with patch.object(rlm.android, "run_root_command", return_value=fake_res):
             mon._root_info = type("RI", (), {"available": True, "tool": "su"})()
-            exists, pids = mon._process_check(pkg)
+            exists, pids, _definitive = mon._process_check(pkg)
         self.assertTrue(exists)
         self.assertIn("12345", pids)
 

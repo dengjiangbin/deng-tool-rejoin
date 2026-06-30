@@ -3038,6 +3038,22 @@ class WatchdogSupervisor:
         except Exception:  # noqa: BLE001
             return ""
 
+    def _heartbeat_channel_silent(self, pkg: str) -> tuple[bool, float]:
+        """True when the in-game detector (loopback or logcat) has gone quiet."""
+        last = float(self._push_last_seen.get(pkg, 0.0) or 0.0)
+        try:
+            row = self._rjn_monitor._states.get(pkg)
+            if row is not None:
+                wall = float(row.last_ingame_hb_wall_at or row.last_ingame_hb_at or 0.0)
+                if wall > last:
+                    last = wall
+        except Exception:  # noqa: BLE001
+            pass
+        if last <= 0:
+            return False, 0.0
+        silent_for = max(0.0, time.time() - last)
+        return silent_for > PUSH_HEARTBEAT_LOSS_SECONDS, silent_for
+
     def _maybe_demote_on_heartbeat_loss(self, pkg: str, ev: Any) -> Any:
         """Catch GL-rendered kicks (e.g. HTTP error 529) the scrapers cannot see.
 
@@ -3055,21 +3071,32 @@ class WatchdogSupervisor:
         * otherwise            → Disconnected → normal recovery (relaunch).
         """
         try:
-            if ev is None or not ev.is_online_confirmed or not ev.process_exists:
+            if ev is None or not ev.is_online_confirmed:
                 return ev
-            if pkg not in self._push_ever_seen:
+            # Force-close stops the in-game heartbeat AND kills the process — never
+            # mislabel that as heartbeat_lost (probe p-0dac4920dc).
+            try:
+                if self._rjn_monitor.try_mark_force_close_dead(pkg):
+                    return self._rjn_monitor.evaluate_package(
+                        pkg, fast_push=self._push_fresh(pkg)
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+            if not getattr(ev, "process_exists", False):
+                return ev
+            if pkg not in self._push_ever_seen and not self._ingame_hb_fresh(pkg):
                 return ev  # detector not in use for this package — unaffected
             # Only act when the stale heartbeat is the SOLE basis for Online; a
             # fresher logcat/presence proof changes the source and keeps it up.
             if str(ev.detail.get("online_evidence_source") or "") != "push_heartbeat":
                 return ev
-            last_seen = float(self._push_last_seen.get(pkg, 0.0) or 0.0)
-            if last_seen <= 0:
-                return ev
-            if (time.time() - last_seen) <= PUSH_HEARTBEAT_LOSS_SECONDS:
+            silent, silent_for = self._heartbeat_channel_silent(pkg)
+            if not silent:
                 return ev
         except Exception:  # noqa: BLE001
             return ev
+
+        last_seen = time.time() - silent_for
 
         # Heartbeat lost while the process is alive → not in a live server.
         try:
@@ -3104,11 +3131,16 @@ class WatchdogSupervisor:
         log_event(
             self._logger, "info", "[DENG_REJOIN_PUSH_HEARTBEAT_LOST]",
             package=pkg,
-            silent_seconds=round(time.time() - last_seen, 1),
+            silent_seconds=round(silent_for, 1),
             action="treat_as_disconnected",
             reason="heartbeat_lost",
         )
         try:
+            # Re-verify process before disconnect — force-close must stay process_missing.
+            if self._rjn_monitor.try_mark_force_close_dead(pkg):
+                return self._rjn_monitor.evaluate_package(
+                    pkg, fast_push=self._push_fresh(pkg)
+                )
             self._rjn_monitor.apply_disconnect(
                 pkg,
                 time.time(),
@@ -3187,11 +3219,35 @@ class WatchdogSupervisor:
             self._captcha_detected.pop(pkg, None)
             self._captcha_detected_at.pop(pkg, None)
         elif ev.internal_state == RJN_DISCONNECTED or detail.get("last_with_reason_at"):
-            state = STATUS_DISCONNECTED
-            reason = str(detail.get("reason_user_friendly") or reason)
-            self._relaunch_inflight.discard(pkg)
-            self._relaunch_verify_until.pop(pkg, None)
-            self._missing_evidence_since.pop(pkg, None)
+            reason_internal = str(
+                detail.get("reason_internal") or detail.get("dead_reason") or reason
+            )
+            if reason_internal == "heartbeat_lost":
+                state = STATUS_DISCONNECTED
+                reason = str(detail.get("reason_user_friendly") or reason)
+                try:
+                    if self._rjn_monitor.try_mark_force_close_dead(pkg):
+                        ev = self._rjn_monitor.evaluate_package(
+                            pkg, fast_push=fresh_push
+                        )
+                        detail = dict(ev.detail)
+                        reason = str(detail.get("reason") or ev.reason)
+                        if ev.internal_state == RJN_DEAD:
+                            state = STATUS_DEAD
+                            reason = str(
+                                detail.get("reason_internal")
+                                or detail.get("dead_reason")
+                                or reason
+                            )
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                state = STATUS_DISCONNECTED
+                reason = str(detail.get("reason_user_friendly") or reason)
+            if state != STATUS_DEAD:
+                self._relaunch_inflight.discard(pkg)
+                self._relaunch_verify_until.pop(pkg, None)
+                self._missing_evidence_since.pop(pkg, None)
         elif (
             detail.get("launch_failed_reason") in {
                 "launch_watchdog_timeout",
@@ -3635,7 +3691,19 @@ class WatchdogSupervisor:
             return False
         was_online = self._package_was_steady_online(pkg, prev, detail)
         definitive = self._definitive_dead_detail(detail)
+        reason_internal = str(
+            (detail or {}).get("reason_internal")
+            or (detail or {}).get("dead_reason")
+            or (detail or {}).get("reason")
+            or ""
+        ).lower()
         if state == STATUS_DISCONNECTED and was_online:
+            if "heartbeat_lost" in reason_internal:
+                try:
+                    if self._rjn_monitor.try_mark_force_close_dead(pkg):
+                        return False
+                except Exception:  # noqa: BLE001
+                    pass
             return True
         if was_online and definitive:
             return True
