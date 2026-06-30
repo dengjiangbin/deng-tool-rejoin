@@ -6210,6 +6210,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 pass
 
         def _render_phase_throttled(_unused_note: str = "") -> None:
+            nonlocal _stagger_render_last
             import time as _rt
 
             now = _rt.monotonic()

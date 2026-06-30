@@ -39,6 +39,14 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         source = inspect.getsource(android.run_root_command)
         self.assertIn("return run_command", source)
 
+    def test_render_phase_throttled_declares_stagger_render_nonlocal(self) -> None:
+        """Throttled stagger repaint must nonlocal _stagger_render_last (probe p-67c1a5c06b)."""
+        source = inspect.getsource(commands.cmd_start)
+        idx = source.find("def _render_phase_throttled")
+        self.assertGreater(idx, -1, "_render_phase_throttled must exist")
+        block = source[idx:idx + 220]
+        self.assertIn("nonlocal _stagger_render_last", block)
+
     def test_start_uses_single_watchdog_instance(self) -> None:
         source = inspect.getsource(commands.cmd_start)
         self.assertEqual(source.count("WatchdogSupervisor("), 1)
