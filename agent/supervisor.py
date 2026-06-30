@@ -1729,6 +1729,18 @@ class WatchdogSupervisor:
         with self._state_lock:
             return [pkg for pkg in self.packages if pkg in self._package_opened]
 
+    def sync_stagger_display_status(self) -> None:
+        """Refresh opened clones from hot-lane while Start still launches the rest."""
+        for pkg in self._opened_packages():
+            try:
+                state, detail = self._detect_android_package_state(pkg)
+            except Exception:  # noqa: BLE001
+                continue
+            if state == STATUS_FAILED:
+                state = STATUS_JOIN_FAILED
+            self._set_status(pkg, state)
+            self._prev_state[pkg] = state
+
     def _detection_worker_count(self) -> int:
         sup = self.cfg.get("supervisor")
         if not isinstance(sup, dict):

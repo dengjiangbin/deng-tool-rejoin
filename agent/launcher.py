@@ -184,6 +184,11 @@ def _wait_for_launch_ready(package: str, cfg: dict[str, Any]) -> dict[str, Any]:
     return last
 
 
+def _start_stagger_launch_settle(cfg: dict[str, Any]) -> float:
+    """Brief pause after ``am start`` during stagger — no dumpsys (HB owns Online)."""
+    return _launch_wait_seconds(cfg, "start_launch_settle_sec", 1.0, 0.3, 2.5)
+
+
 RECOVERY_LAUNCH_REASONS = frozenset({
     "recovery_gate_retry",
     "dead_recovery",
@@ -264,6 +269,7 @@ def perform_rejoin(
     masked_url = mask_launch_url(url_for_launch) if url_for_launch else None
     root_used = False
     warning: str | None = None
+    _launch_sent_cb = config_data.get("__on_launch_sent")
 
     log_event(
         logger,
@@ -506,49 +512,76 @@ def perform_rejoin(
             error = mask_urls_in_text(result.summary or "Android launch command failed")
             raise RuntimeError(error)
 
-        from . import launch_verify
+        start_stagger_fast = reason == "start"
+        if start_stagger_fast and callable(_launch_sent_cb):
+            try:
+                _launch_sent_cb(package)
+            except Exception:  # noqa: BLE001
+                pass
 
-        verification = launch_verify.verify_launch(
-            package,
-            launch_result=result,
-            launch_method=_method,
-            wait_seconds=_launch_verify_wait_seconds(cfg),
-        )
-        readiness = _wait_for_launch_ready(package, cfg)
-        if not verification.success and not readiness.get("process_alive"):
-            raise RuntimeError(verification.failure_message())
-        if verification.success and not readiness.get("process_alive"):
-            readiness = _read_launch_state(package)
+        from . import launch_verify
         retry_count = 0
-        if readiness.get("black_screen_suspected"):
-            retry_count = 1
+        if start_stagger_fast:
+            settle = _start_stagger_launch_settle(cfg)
+            if settle:
+                time.sleep(settle)
+            readiness = {
+                "process_alive": True,
+                "activity_visible": False,
+                "surface_present": False,
+                "black_screen_suspected": False,
+            }
+            verification = None
             log_event(
                 logger,
-                "warning",
-                "launch_black_screen_retry",
+                "info",
+                "[DENG_REJOIN_START_STAGGER_FAST]",
                 package=package,
-                first_method=_method,
-                retry_method="delayed_no_bounds",
-                private_url_mode=url_context.get("private_url_mode", "global"),
-                url_config_source=url_context.get("url_config_source", "blank"),
+                launch_method=_method,
+                settle_sec=settle,
+                reason="stagger_queue_must_not_block_on_dumpsys_verify",
             )
-            time.sleep(_launch_wait_seconds(cfg, "launch_black_screen_retry_delay_sec", 1.5, 0.5, 5.0))
-            retry_result, retry_method = android.launch_package_with_options(package, url_for_launch or None)
-            if _result_used_root(retry_result) or retry_method.startswith("root_"):
-                root_used = True
-            if retry_result.ok:
-                result = retry_result
-                _method = retry_method
-                readiness = _wait_for_launch_ready(package, cfg)
-            else:
+        else:
+            verification = launch_verify.verify_launch(
+                package,
+                launch_result=result,
+                launch_method=_method,
+                wait_seconds=_launch_verify_wait_seconds(cfg),
+            )
+            readiness = _wait_for_launch_ready(package, cfg)
+            if not verification.success and not readiness.get("process_alive"):
+                raise RuntimeError(verification.failure_message())
+            if verification.success and not readiness.get("process_alive"):
+                readiness = _read_launch_state(package)
+            if readiness.get("black_screen_suspected"):
+                retry_count = 1
                 log_event(
                     logger,
                     "warning",
-                    "launch_black_screen_retry_failed",
+                    "launch_black_screen_retry",
                     package=package,
-                    method=retry_method,
-                    error=mask_urls_in_text(retry_result.summary),
+                    first_method=_method,
+                    retry_method="delayed_no_bounds",
+                    private_url_mode=url_context.get("private_url_mode", "global"),
+                    url_config_source=url_context.get("url_config_source", "blank"),
                 )
+                time.sleep(_launch_wait_seconds(cfg, "launch_black_screen_retry_delay_sec", 1.5, 0.5, 5.0))
+                retry_result, retry_method = android.launch_package_with_options(package, url_for_launch or None)
+                if _result_used_root(retry_result) or retry_method.startswith("root_"):
+                    root_used = True
+                if retry_result.ok:
+                    result = retry_result
+                    _method = retry_method
+                    readiness = _wait_for_launch_ready(package, cfg)
+                else:
+                    log_event(
+                        logger,
+                        "warning",
+                        "launch_black_screen_retry_failed",
+                        package=package,
+                        method=retry_method,
+                        error=mask_urls_in_text(retry_result.summary),
+                    )
         log_event(
             logger,
             "info",
@@ -570,14 +603,16 @@ def perform_rejoin(
             black_screen_suspected=str(bool(readiness.get("black_screen_suspected"))).lower(),
             layout_applied_before_surface="false",
             retry_count=retry_count,
+            start_stagger_fast=str(start_stagger_fast).lower(),
             final_state="ready" if not readiness.get("black_screen_suspected") else "suspect",
         )
-        if not readiness.get("process_alive"):
-            if not verification.success:
-                raise RuntimeError(verification.failure_message())
-            raise RuntimeError("Android launch returned success but package process was not detected")
-        if readiness.get("black_screen_suspected"):
-            raise RuntimeError("Android launch returned success but no visible activity or surface was detected")
+        if not start_stagger_fast:
+            if not readiness.get("process_alive"):
+                if verification is not None and not verification.success:
+                    raise RuntimeError(verification.failure_message())
+                raise RuntimeError("Android launch returned success but package process was not detected")
+            if readiness.get("black_screen_suspected"):
+                raise RuntimeError("Android launch returned success but no visible activity or surface was detected")
 
         log_event(
             logger, "info", "launch_result",

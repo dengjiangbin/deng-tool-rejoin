@@ -6132,6 +6132,37 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 return "RAM: Unknown"
 
+        def _phase_table_state(pkg: str) -> str:
+            """During stagger: hot-lane truth for opened clones; phase labels for the rest."""
+            ph = str(phase.get(pkg) or "").strip()
+            if _supervisor_ref is None:
+                return ph or "Checking..."
+            opened = pkg in getattr(_supervisor_ref, "_package_opened", set())
+            sup_st = str(_supervisor_ref.status_map.get(pkg) or "").strip()
+            if getattr(_supervisor_ref, "_all_launches_completed", False):
+                return sup_st or ph or "Checking..."
+            if opened:
+                if sup_st in ("Online", "In Lobby", "In Game", "Launched", "In Server", "Background"):
+                    return "Online"
+                if sup_st in ("Dead", "Join Failed", "Disconnected", "Offline", "Unknown"):
+                    return "Dead"
+                if sup_st == "Wrong Game / Wrong Server":
+                    return "Dead"
+                if sup_st in ("Relaunching", "Reconnecting"):
+                    return "Relaunching"
+                if sup_st in ("Launching", "Waiting", "Checking", "Pending", "Join Unconfirmed"):
+                    return "Launching"
+                if sup_st == "Failed":
+                    return "Failed"
+                if sup_st:
+                    return sup_st
+                return "Launching"
+            if ph in ("Launching", "Failed", "Preparing", "Clear Cache"):
+                return ph
+            return ph or "Ready"
+
+        _stagger_render_last = 0.0
+
         def _render_phase(_unused_note: str = "") -> None:
             """Atomically redraw the dashboard with the current phase per package.
 
@@ -6142,16 +6173,21 @@ def cmd_start(args: argparse.Namespace) -> int:
             Uses clear_scrollback=True on every call so old banner/table lines
             from prior phases never bleed through on slow Termux terminals.
             """
+            nonlocal _stagger_render_last
+            if (
+                _supervisor_ref is not None
+                and not getattr(_supervisor_ref, "_all_launches_completed", False)
+            ):
+                try:
+                    _supervisor_ref.sync_stagger_display_status()
+                except Exception:  # noqa: BLE001
+                    pass
             rows = [
                 (
                     i + 1,
                     e["package"],
                     _account_username_for_table(e),
-                    (
-                        _supervisor_ref.status_map.get(e["package"])
-                        if _supervisor_ref is not None
-                        else phase.get(e["package"], "Checking...")
-                    ) or phase.get(e["package"], "Checking..."),
+                    _phase_table_state(e["package"]),
                     "0s",
                     "0 MB",
                 )
@@ -6167,8 +6203,20 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 pass
             lines.append(build_start_table(rows, use_color=use_color))
-            _clear_terminal(clear_scrollback=True)
-            safe_io.write_stdout_block("\n".join(lines) + "\n")
+            try:
+                _clear_terminal(clear_scrollback=True)
+                safe_io.write_stdout_block("\n".join(lines) + "\n")
+            except OSError:
+                pass
+
+        def _render_phase_throttled(_unused_note: str = "") -> None:
+            import time as _rt
+
+            now = _rt.monotonic()
+            if now - _stagger_render_last < 0.85:
+                return
+            _stagger_render_last = now
+            _render_phase(_unused_note)
 
         def _set_all_phase(label: str, note: str = "") -> None:
             for pkg in phase:
@@ -6381,6 +6429,18 @@ def cmd_start(args: argparse.Namespace) -> int:
         for _boot_entry in entries:
             phase[_boot_entry["package"]] = "Ready"
 
+        for _prep_entry in entries:
+            try:
+                from .package_key import ensure_package_key_for_start as _epkfs_batch
+
+                _epkfs_batch(
+                    _prep_entry["package"],
+                    runtime_cfg,
+                    root_enabled=bool(runtime_cfg.get("root_mode_enabled", False)),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
         # ── PHASE 2: staggered launching (30s between packages) ───────────────
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
@@ -6389,63 +6449,63 @@ def cmd_start(args: argparse.Namespace) -> int:
         _start_session.mark("package_launch_begin", package_count=len(entries))
         _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
 
-        for index, entry in enumerate(entries, start=1):
-            package = entry["package"]
-            runtime_entry = runtime_entry_by_pkg.get(package, entry)
-            launch_attempted[package] = True
-            for later in entries[index:]:
-                phase[later["package"]] = "Ready"
-            phase[package] = "Launching"
-            _render_phase("Launching clone...")
-            package_cfg = dict(runtime_cfg)
-            package_cfg["roblox_package"] = package
-            from .config import private_url_launch_context as _purl_ctx
-            _url_context = _purl_ctx(runtime_entry, runtime_cfg)
-            _has_url = _url_context.get("url_mode") == "private_url"
-            try:
-                from .package_key import ensure_package_key_for_start as _epkfs
-                _epkfs(
-                    package,
-                    runtime_cfg,
-                    root_enabled=bool(runtime_cfg.get("root_mode_enabled", False)),
-                )
-            except Exception:  # noqa: BLE001
-                pass
-            result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
-            launch_ok[package] = result.success
-            launch_err[package] = result.error or ""
-            if not result.success:
-                phase[package] = "Failed"
-                _supervisor._set_status(package, _STATUS_FAILED)
-                _render_phase()
-                continue
+        def _on_stagger_launch_sent(launched_pkg: str) -> None:
+            if launched_pkg not in _supervisor._package_opened:
+                _supervisor.mark_package_launched(launched_pkg)
 
-            _supervisor.mark_package_launched(package)
-            _supervisor._set_status(package, _STATUS_WAITING)
-            phase[package] = _STATUS_WAITING
-            launch_ok[package] = True
-            launch_err[package] = ""
-            _render_phase("Launching...")
-            _start_log.info(
-                "[DENG_REJOIN_STAGGERED_LAUNCH] package=%s index=%d/%d"
-                " launcher=%s phase=launching success=true watchdog_daemon=%s",
-                package,
-                index,
-                len(entries),
-                "private_url" if _has_url else "app_only",
-                str(_supervisor.watchdog_thread_alive()).lower(),
-            )
-            if index < len(entries):
-                import time as _t
-                from .supervisor import WatchdogSupervisor as _WS
-                _stagger_deadline = _t.monotonic() + _WS.LAUNCH_STAGGER_SECONDS
-                while _t.monotonic() < _stagger_deadline:
+        try:
+            for index, entry in enumerate(entries, start=1):
+                package = entry["package"]
+                runtime_entry = runtime_entry_by_pkg.get(package, entry)
+                launch_attempted[package] = True
+                for later in entries[index:]:
+                    phase[later["package"]] = "Ready"
+                phase[package] = "Launching"
+                _render_phase("Launching clone...")
+                package_cfg = dict(runtime_cfg)
+                package_cfg["roblox_package"] = package
+                package_cfg["__on_launch_sent"] = _on_stagger_launch_sent
+                from .config import private_url_launch_context as _purl_ctx
+                _url_context = _purl_ctx(runtime_entry, runtime_cfg)
+                _has_url = _url_context.get("url_mode") == "private_url"
+                result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
+                launch_ok[package] = result.success
+                launch_err[package] = result.error or ""
+                if not result.success:
+                    phase[package] = "Failed"
+                    _supervisor._set_status(package, _STATUS_FAILED)
                     _render_phase()
-                    _stagger_remain = _stagger_deadline - _t.monotonic()
-                    _t.sleep(max(0.0, min(1.0, _stagger_remain)))
+                    continue
+
+                if package not in _supervisor._package_opened:
+                    _supervisor.mark_package_launched(package)
+                _supervisor._set_status(package, _STATUS_WAITING)
+                phase[package] = _STATUS_WAITING
+                launch_ok[package] = True
+                launch_err[package] = ""
+                _render_phase("Launching...")
+                _start_log.info(
+                    "[DENG_REJOIN_STAGGERED_LAUNCH] package=%s index=%d/%d"
+                    " launcher=%s phase=launching success=true watchdog_daemon=%s",
+                    package,
+                    index,
+                    len(entries),
+                    "private_url" if _has_url else "app_only",
+                    str(_supervisor.watchdog_thread_alive()).lower(),
+                )
+                if index < len(entries):
+                    import time as _t
+                    from .supervisor import WatchdogSupervisor as _WS
+                    _stagger_deadline = _t.monotonic() + _WS.LAUNCH_STAGGER_SECONDS
+                    while _t.monotonic() < _stagger_deadline:
+                        _render_phase_throttled()
+                        _stagger_remain = _stagger_deadline - _t.monotonic()
+                        _t.sleep(max(0.0, min(1.0, _stagger_remain)))
+        finally:
+            if not getattr(_supervisor, "_all_launches_completed", False):
+                _supervisor.mark_all_launches_completed()
 
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
-        _supervisor.mark_all_launches_completed()
         _start_session.mark("all_launches_completed", package_count=len(entries))
 
         # 6) Grace wait before verifying layout — keep packages shown as
