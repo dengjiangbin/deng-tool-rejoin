@@ -6396,7 +6396,6 @@ def cmd_start(args: argparse.Namespace) -> int:
             for later in entries[index:]:
                 phase[later["package"]] = "Ready"
             phase[package] = "Launching"
-            _supervisor.mark_package_launched(package)
             _render_phase("Launching clone...")
             package_cfg = dict(runtime_cfg)
             package_cfg["roblox_package"] = package

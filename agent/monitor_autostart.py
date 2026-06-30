@@ -92,6 +92,11 @@ _last_issue_result: str | None = None
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
+def get_active_supervisor() -> Any:
+    """Return the live supervisor reference, or ``None``."""
+    return _active_supervisor
+
+
 def set_active_supervisor(supervisor: Any) -> None:
     """Register the live supervisor so its package snapshots get pushed.
 
@@ -100,6 +105,12 @@ def set_active_supervisor(supervisor: Any) -> None:
     """
     global _active_supervisor
     try:
+        prev = _active_supervisor
+        if prev is not None and prev is not supervisor:
+            try:
+                prev.stop(source="superseded_by_new_start")
+            except Exception:  # noqa: BLE001
+                pass
         _active_supervisor = supervisor
     except Exception:  # noqa: BLE001
         pass
@@ -832,6 +843,7 @@ __all__ = [
     "ensure_monitor_bridge_started",
     "get_monitor_status_summary",
     "reset_for_tests",
+    "get_active_supervisor",
     "set_active_supervisor",
     "set_config",
     "stop_monitor_bridge",

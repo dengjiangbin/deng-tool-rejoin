@@ -356,7 +356,7 @@ class PackageRjnState:
     # force-close (not the tool's own am-force-stop gap) → treated as dead
     # even though watchdog_active is still True.
     process_seen_since_launch: bool = False
-    # Authoritative full-dump scan bookkeeping.
+    dead_lane_enabled: bool = False
     last_dump_scan_at: float = 0.0
     last_dump_disconnect_epoch: float = 0.0
     # Diagnostic: freshness + sample of EVERY UID-matched logcat line (not just
@@ -633,11 +633,21 @@ class RjnLifecycleMonitor:
         return bool(exists)
 
     def _dead_lane_armed_for(self, row: PackageRjnState) -> bool:
-        """Only packages that entered a launch/relaunch window this session."""
+        """Only packages that completed a real launch bind this session."""
+        if not row.dead_lane_enabled:
+            return False
+        if row.watchdog_active and not row.process_seen_since_launch:
+            return False
         return bool(
-            row.watchdog_active
-            or row.launch_started_at > 0
-            or self._was_ever_online_confirmed(row)
+            self._was_ever_online_confirmed(row)
+            or row.watchdog_active
+            or row.internal_state
+            in {
+                STATE_ONLINE_CONFIRMED,
+                STATE_TELEPORTING,
+                STATE_DISCONNECTED,
+                STATE_RELAUNCHING,
+            }
         )
 
     def _poll_dead_hot_lane(self) -> None:
@@ -1802,6 +1812,24 @@ class RjnLifecycleMonitor:
         now = time.time()
         with self._lock:
             row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
+            if (
+                not relaunch
+                and row.watchdog_active
+                and row.launch_started_at > 0
+                and (now - row.launch_started_at) < 8.0
+            ):
+                # Duplicate mark_package_launched (pre/post perform_rejoin) must
+                # not wipe a heartbeat that arrived during launch (p-5eb24dfd96).
+                return
+            if (
+                row.internal_state == STATE_ONLINE_CONFIRMED
+                and row.online_evidence_source == "push_heartbeat"
+                and row.last_ingame_hb_wall_at > 0
+                and (now - row.last_ingame_hb_wall_at) <= ONLINE_HB_FRESH_SECONDS
+            ):
+                row.watchdog_active = False
+                row.dead_lane_enabled = True
+                return
             row.launch_started_at = now
             # Open/refresh the global launch-quiet window: this and every other
             # online clone gets its heartbeat throttled while this one loads, so
@@ -1844,6 +1872,7 @@ class RjnLifecycleMonitor:
                 row.internal_state = STATE_LAUNCHING
                 row.last_transition_at = now
                 row.last_transition_reason = "launch_watchdog_started"
+            row.dead_lane_enabled = True
 
     def begin_launch_watchdog(self, package: str, *, relaunch: bool = False) -> None:
         """Backward-compatible alias — detection only."""

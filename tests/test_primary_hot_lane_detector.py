@@ -90,6 +90,7 @@ class ForceCloseDeadTests(unittest.TestCase):
         row.ingame_hb_ever = True
         row.last_ingame_hb_wall_at = time.time()
         row.online_since = time.time() - 60
+        row.dead_lane_enabled = True
 
         with patch.object(mon, "_process_check", return_value=(False, [], True)):
             mon._poll_dead_hot_lane()
@@ -144,6 +145,7 @@ class SixCloneParallelTests(unittest.TestCase):
         row.internal_state = STATE_ONLINE_CONFIRMED
         row.ingame_hb_ever = True
         row.online_since = time.time() - 120
+        row.dead_lane_enabled = True
 
         def _proc_check(pkg: str) -> tuple[bool, list[str], bool]:
             if pkg == target:
@@ -213,6 +215,7 @@ class DeadLaneIsolationTests(unittest.TestCase):
             row.internal_state = STATE_ONLINE_CONFIRMED
             row.ingame_hb_ever = True
             row.online_since = time.time() - 60
+            row.dead_lane_enabled = True
 
         def _proc(pkg: str) -> tuple[bool, list[str], bool]:
             if pkg == PKG_A:

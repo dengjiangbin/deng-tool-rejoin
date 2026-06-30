@@ -84,5 +84,24 @@ class RelaunchWrongServerTests(unittest.TestCase):
         self.assertFalse(row.wrong_server_active)
 
 
+class DuplicateLaunchBindTests(unittest.TestCase):
+    def test_duplicate_note_launch_watchdog_preserves_fresh_hb(self) -> None:
+        mon = RjnLifecycleMonitor([PKG])
+        mon.start_session()
+        row = mon._states[PKG]
+        row.process_exists = True
+        row.watchdog_active = True
+        row.launch_started_at = time.time() - 2
+        row.dead_lane_enabled = True
+        mon.ingest_push_heartbeat(
+            PKG, alive=True, place_id=111, universe_id=222, at=time.time()
+        )
+        self.assertEqual(row.internal_state, STATE_ONLINE_CONFIRMED)
+        wall = row.last_ingame_hb_wall_at
+        mon.note_launch_watchdog(PKG, relaunch=False)
+        self.assertEqual(row.last_ingame_hb_wall_at, wall)
+        self.assertEqual(row.internal_state, STATE_ONLINE_CONFIRMED)
+
+
 if __name__ == "__main__":
     unittest.main()

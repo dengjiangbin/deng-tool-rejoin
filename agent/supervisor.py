@@ -1651,6 +1651,14 @@ class WatchdogSupervisor:
         """Launch the watchdog loop on a dedicated daemon thread (non-blocking)."""
         if self.watchdog_thread_alive():
             return
+        try:
+            from . import monitor_autostart as _mon_auto
+
+            prev = _mon_auto.get_active_supervisor()
+            if prev is not None and prev is not self and prev.watchdog_thread_alive():
+                prev.stop(source="superseded_watchdog_daemon")
+        except Exception:  # noqa: BLE001
+            pass
         self._display_interval = float(display_interval)
         self._render_callback = render_callback
         self.stop_event.clear()
