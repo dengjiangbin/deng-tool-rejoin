@@ -584,6 +584,14 @@ class RjnLifecycleMonitor:
         row.online_since = 0.0
         row.runtime_source = ""
         row.last_process_gone_at = now
+        row.wrong_server_active = False
+        row.last_wrong_server_at = 0.0
+        row.anchor_job_id_hash = ""
+        row.observed_job_id_hash = ""
+        row.anchor_place_id = 0
+        row.anchor_root_place_id = 0
+        row.anchor_universe_id = 0
+        row.anchor_set = False
 
     def _heartbeat_attribution_ok(
         self, pkg: str, *, pid: str | None = None, uid: str | None = None
@@ -624,6 +632,14 @@ class RjnLifecycleMonitor:
         exists = row.process_exists if process_exists is None else process_exists
         return bool(exists)
 
+    def _dead_lane_armed_for(self, row: PackageRjnState) -> bool:
+        """Only packages that entered a launch/relaunch window this session."""
+        return bool(
+            row.watchdog_active
+            or row.launch_started_at > 0
+            or self._was_ever_online_confirmed(row)
+        )
+
     def _poll_dead_hot_lane(self) -> None:
         """Primary Dead hot lane: scan every package for missing process."""
         now = time.time()
@@ -637,25 +653,13 @@ class RjnLifecycleMonitor:
                     row.last_process_check_at = now
             if exists:
                 continue
-            was_tracking = False
             with self._lock:
                 row = self._states.get(pkg)
-                if row is None:
+                if row is None or not self._dead_lane_armed_for(row):
                     continue
-                was_tracking = (
-                    self._was_ever_online_confirmed(row)
-                    or (row.watchdog_active and row.process_seen_since_launch)
-                    or row.internal_state
-                    in {
-                        STATE_ONLINE_CONFIRMED,
-                        STATE_TELEPORTING,
-                        STATE_DISCONNECTED,
-                        STATE_RELAUNCHING,
-                        STATE_LAUNCHING,
-                    }
-                )
-            if was_tracking:
-                self.try_mark_force_close_dead(pkg, at=now)
+                if row.watchdog_active and not row.process_seen_since_launch:
+                    continue
+            self.try_mark_force_close_dead(pkg, at=now)
 
     def stop_session(self) -> None:
         self._stop_event.set()
@@ -1294,8 +1298,15 @@ class RjnLifecycleMonitor:
                 row.anchor_place_id = row.observed_place_id
                 row.anchor_set = True
             if self._is_wrong_server_now(row):
-                self._maybe_flag_wrong_server(pkg, seen_at)
-                return "wrong_server"
+                # During launch/relaunch the jobId always changes — do not treat a
+                # fresh post-recovery heartbeat as wrong-server (probe p-37108c2d2a).
+                if not row.watchdog_active and row.internal_state not in {
+                    STATE_LAUNCHING,
+                    STATE_RELAUNCHING,
+                    STATE_DEAD,
+                }:
+                    self._maybe_flag_wrong_server(pkg, seen_at)
+                    return "wrong_server"
             if not new_beat:
                 return ""
             row.last_ingame_hb_at = seen_at
@@ -1310,7 +1321,7 @@ class RjnLifecycleMonitor:
             if confirm_online and PRIMARY_HOT_LANE_ONLY:
                 confirm_online = self._heartbeat_attribution_ok(pkg, pid=pid, uid=uid)
                 if confirm_online and row.launch_started_at > 0 and seen_at < (
-                    row.launch_started_at - 0.5
+                    row.launch_started_at - 2.0
                 ):
                     confirm_online = False
                 if confirm_online and row.last_process_gone_at > 0 and seen_at <= (
