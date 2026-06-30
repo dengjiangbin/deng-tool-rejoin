@@ -239,11 +239,88 @@ def clear_online_since(package: str) -> None:
     packages = state.setdefault("packages", {})
     row = dict(packages.get(pkg) or {})
     row.pop("online_since", None)
+    row.pop("runtime_accumulated_sec", None)
+    row.pop("runtime_paused", None)
+    row.pop("runtime_paused_at", None)
+    row.pop("nhb_since", None)
     row["state"] = "DEAD"
     row["last_transition_reason"] = "online_cleared"
     row["updated_at"] = time.time()
     packages[pkg] = row
     _save_state(state)
+
+
+def pause_online_runtime(package: str, now: float | None = None) -> float:
+    """Freeze Status Monitor runtime during No Heartbeat (process still alive)."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return 0.0
+    ts = float(now if now is not None else time.time())
+    state = _load_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    accumulated = float(row.get("runtime_accumulated_sec") or 0.0)
+    if not row.get("runtime_paused"):
+        try:
+            online_since = float(row.get("online_since"))
+            accumulated += max(0.0, ts - online_since)
+        except (TypeError, ValueError):
+            pass
+    row["runtime_accumulated_sec"] = accumulated
+    row["runtime_paused"] = True
+    row["runtime_paused_at"] = ts
+    row["nhb_since"] = ts
+    row["state"] = "NO_HEARTBEAT"
+    row["last_transition_reason"] = "heartbeat_lost_pause"
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_state(state)
+    return accumulated
+
+
+def resume_online_runtime(package: str, now: float | None = None) -> float:
+    """Resume runtime after heartbeat returns before the No Heartbeat kill-switch."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return 0.0
+    ts = float(now if now is not None else time.time())
+    state = _load_state()
+    packages = state.setdefault("packages", {})
+    row = dict(packages.get(pkg) or {})
+    accumulated = float(row.get("runtime_accumulated_sec") or 0.0)
+    row["online_since"] = ts - accumulated
+    row["runtime_paused"] = False
+    row.pop("runtime_accumulated_sec", None)
+    row.pop("runtime_paused_at", None)
+    row.pop("nhb_since", None)
+    row["state"] = "ONLINE_CONFIRMED"
+    row["last_transition_reason"] = "heartbeat_resumed"
+    row["updated_at"] = time.time()
+    packages[pkg] = row
+    _save_state(state)
+    return accumulated
+
+
+def effective_runtime_seconds(package: str, now: float | None = None) -> float | None:
+    """Return frozen-or-live online runtime for display and dead webhooks."""
+    pkg = str(package or "").strip()
+    if not pkg:
+        return None
+    row = (_load_state().get("packages") or {}).get(pkg)
+    if not isinstance(row, dict):
+        return None
+    ts = float(now if now is not None else time.time())
+    if row.get("runtime_paused"):
+        try:
+            return float(row.get("runtime_accumulated_sec") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    try:
+        online_since = float(row.get("online_since"))
+    except (TypeError, ValueError):
+        accumulated = float(row.get("runtime_accumulated_sec") or 0.0)
+        return accumulated if accumulated > 0 else None
+    return max(0.0, ts - online_since)
 
 
 def lifecycle_row_for_package(package: str) -> dict[str, Any]:

@@ -527,6 +527,14 @@ def lifecycle_dead_runtime_seconds(
     pkg = str(package or "").strip()
     if not pkg:
         return None
+    try:
+        from .status_monitor_runtime import effective_runtime_seconds
+
+        frozen = effective_runtime_seconds(pkg, dead_at)
+        if frozen is not None:
+            return frozen
+    except Exception:  # noqa: BLE001
+        pass
     row = _load_package_lifecycle_state().get("packages", {}).get(pkg, {})
     alive_raw = row.get("alive_since") if isinstance(row, dict) else None
     if alive_raw is None and fallback_alive_since is not None:

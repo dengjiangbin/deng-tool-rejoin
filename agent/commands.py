@@ -4993,6 +4993,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Starting":          _ANSI_YELLOW,
         "Launching":         _ANSI_WHITE,
         "Relaunching":       _ANSI_WHITE,
+        "No Heartbeat":      _ANSI_YELLOW,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
         ("Join" + "ing"):    _ANSI_CYAN,     # legacy alias
@@ -6144,6 +6145,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             if opened:
                 if sup_st in ("Online", "In Lobby", "In Game", "Launched", "In Server", "Background"):
                     return "Online"
+                if sup_st == "No Heartbeat":
+                    return "No Heartbeat"
                 if sup_st in ("Dead", "Join Failed", "Disconnected", "Offline", "Unknown"):
                     return "Dead"
                 if sup_st == "Wrong Game / Wrong Server":
@@ -6734,6 +6737,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Dead":             "Dead",
             "Relaunching":      "Relaunching",
             "Launching":        "Launching",
+            "No Heartbeat":     "No Heartbeat",
             "Waiting":          "Launching",
             "Checking":         "Launching",
             "Pending":          "Launching",
@@ -6764,7 +6768,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _usage_cache = {}
                 setattr(_live_dashboard, "_usage_cache", _usage_cache)
 
-            _metric_states = {"Online", "In Lobby"}
+            _metric_states = {"Online", "In Lobby", "No Heartbeat"}
 
             def _get_runtime(pkg: str) -> str:
                 raw_state = _live_map.get(pkg, "Unknown")
@@ -6773,6 +6777,13 @@ def cmd_start(args: argparse.Namespace) -> int:
                     return "0s"
                 start_ts = getattr(_supervisor, "_online_start_ts", {}).get(pkg, 0.0)
                 if not start_ts:
+                    try:
+                        from agent.status_monitor_runtime import effective_runtime_seconds
+                        frozen = effective_runtime_seconds(pkg, _now_ts)
+                        if frozen is not None:
+                            return format_runtime_compact(max(0.0, float(frozen)))
+                    except Exception:  # noqa: BLE001
+                        pass
                     return "0s"
                 return format_runtime_compact(max(0.0, _now_ts - start_ts))
 

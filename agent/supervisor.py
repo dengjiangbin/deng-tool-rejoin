@@ -180,6 +180,7 @@ STATUS_JOIN_UNCONFIRMED  = "Join " + "Unconfirmed"  # App healthy but no in-game
 # State vocabulary aligned to user-facing terminology:
 STATUS_LAUNCHED          = "Launched"
 STATUS_DISCONNECTED      = "Disconnected"
+STATUS_NO_HEARTBEAT      = "No Heartbeat"
 
 # ── Live watchdog vocabulary (WatchdogSupervisor) ────────────────────────────
 # These three states are the ONLY public steady states produced by WatchdogSupervisor:
@@ -190,7 +191,6 @@ STATUS_DISCONNECTED      = "Disconnected"
 _METRIC_ACTIVE_STATES = frozenset({STATUS_ONLINE})
 _ACCOUNT_DEAD_WEBHOOK_STATES = frozenset({
     STATUS_DEAD,
-    STATUS_DISCONNECTED,
     STATUS_JOIN_FAILED,
     # Captcha fires an "Account Dead" webhook (reason "Captcha Verification") but
     # is deliberately EXCLUDED from the recovery branch below so the package
@@ -198,9 +198,9 @@ _ACCOUNT_DEAD_WEBHOOK_STATES = frozenset({
     STATUS_CAPTCHA,
 })
 # States that the watchdog actively recovers (relaunches).  Captcha is NOT here.
+# No Heartbeat waits for NHB_KILL_SWITCH_SECONDS before force-stop → Dead.
 _RECOVERY_TRIGGER_STATES = frozenset({
     STATUS_DEAD,
-    STATUS_DISCONNECTED,
     STATUS_JOIN_FAILED,
 })
 
@@ -1277,7 +1277,9 @@ class WatchdogSupervisor:
     RECOVERY_FORCE_STOP_BREATH_SECONDS: float = 1.5
 
     # ── No-Heartbeat kill-switch: force-stop after continuous stall ─────────
-    NHB_KILL_SWITCH_SECONDS: int = 60
+    NHB_KILL_SWITCH_SECONDS: int = int(
+        os.environ.get("DENG_REJOIN_NHB_KILL_SWITCH_SECONDS", "300") or "300"
+    )
     MISSING_EVIDENCE_CONFIRM_SECONDS: float = 15.0
 
     # ── Post-launch transition allowance before presence becomes decisive ───
@@ -1531,9 +1533,12 @@ class WatchdogSupervisor:
 
     def _status_monitor_runtime_started_at(self, pkg: str, status: str) -> tuple[float | None, str]:
         """Return wall-clock runtime anchor — only from gamejoinloadtime online_since."""
-        from .status_monitor_runtime import load_online_since
+        from .status_monitor_runtime import effective_runtime_seconds, load_online_since
 
-        if status == STATUS_ONLINE:
+        if status in {STATUS_ONLINE, STATUS_NO_HEARTBEAT}:
+            frozen = effective_runtime_seconds(pkg)
+            if frozen is not None:
+                return time.time() - float(frozen), "gamejoinloadtime_paused" if status == STATUS_NO_HEARTBEAT else "gamejoinloadtime"
             online_since, row = load_online_since(pkg)
             if online_since is not None:
                 src = str(row.get("runtime_source") or "gamejoinloadtime")
@@ -1546,10 +1551,17 @@ class WatchdogSupervisor:
         self, pkg: str, previous_state: str, state: str, now: float
     ) -> None:
         """Maintain online session timestamps from gamejoinloadtime only."""
-        from .status_monitor_runtime import load_online_since
+        from .status_monitor_runtime import (
+            effective_runtime_seconds,
+            load_online_since,
+            pause_online_runtime,
+            resume_online_runtime,
+        )
 
         if state in _METRIC_ACTIVE_STATES:
             self._last_online_ts[pkg] = now
+            if previous_state == STATUS_NO_HEARTBEAT:
+                resume_online_runtime(pkg, now)
             online_since, _ = load_online_since(pkg)
             if online_since is not None:
                 self._online_start_ts[pkg] = online_since
@@ -1570,13 +1582,20 @@ class WatchdogSupervisor:
                     finalize_launch_incremental_sample(pkg)
                 except Exception:  # noqa: BLE001
                     pass
+        elif state == STATUS_NO_HEARTBEAT:
+            if previous_state in _METRIC_ACTIVE_STATES:
+                pause_online_runtime(pkg, now)
+            frozen = effective_runtime_seconds(pkg)
+            if frozen is not None:
+                self._online_start_ts[pkg] = now - float(frozen)
         elif state not in _METRIC_ACTIVE_STATES:
             self._online_start_ts.pop(pkg, None)
 
-        if state in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED}:
+        if state in {STATUS_DEAD, STATUS_JOIN_FAILED}:
             self._last_online_ts.pop(pkg, None)
-            if state in {STATUS_DEAD, STATUS_JOIN_FAILED}:
-                self._clear_status_monitor_runtime_state(pkg)
+            self._clear_status_monitor_runtime_state(pkg)
+        elif state == STATUS_DISCONNECTED:
+            self._last_online_ts.pop(pkg, None)
 
     def _handle_stop(self, signum: Any, frame: Any) -> None:
         source = "sigterm" if signum == signal.SIGTERM else ("sigint" if signum == signal.SIGINT else f"signal_{signum}")
@@ -1613,7 +1632,7 @@ class WatchdogSupervisor:
             status = requested
         elif requested == "Reconnecting":
             status = STATUS_LAUNCHING
-        elif requested in {STATUS_ONLINE, STATUS_DEAD, STATUS_DISCONNECTED}:
+        elif requested in {STATUS_ONLINE, STATUS_DEAD, STATUS_DISCONNECTED, STATUS_NO_HEARTBEAT}:
             status = requested
         else:
             status = STATUS_DEAD
@@ -2717,7 +2736,11 @@ class WatchdogSupervisor:
         return ""
 
     def _package_awaiting_first_open(self, pkg: str) -> bool:
-        return pkg not in self._package_opened
+        if pkg in self._package_opened:
+            return False
+        # Unit tests and recovery paths may set loading-grace timestamps without
+        # going through mark_package_launched; treat that as opened enough to detect.
+        return pkg not in self._last_launched_at
 
     def _ready_state_detail(self, pkg: str) -> dict[str, Any]:
         return {
@@ -3287,8 +3310,12 @@ class WatchdogSupervisor:
                 detail.get("reason_internal") or detail.get("dead_reason") or reason
             )
             if reason_internal == "heartbeat_lost":
-                state = STATUS_DISCONNECTED
-                reason = str(detail.get("reason_user_friendly") or reason)
+                if self._in_loading_grace(pkg) or not self._all_launches_completed:
+                    state = STATUS_LAUNCHING
+                    reason = "launch_grace_heartbeat_quiet"
+                else:
+                    state = STATUS_NO_HEARTBEAT
+                    reason = str(detail.get("reason_user_friendly") or "No in-game heartbeat")
                 try:
                     if self._rjn_monitor.try_mark_force_close_dead(pkg):
                         ev = self._rjn_monitor.evaluate_package(
@@ -3308,7 +3335,7 @@ class WatchdogSupervisor:
             else:
                 state = STATUS_DISCONNECTED
                 reason = str(detail.get("reason_user_friendly") or reason)
-            if state != STATUS_DEAD:
+            if state not in {STATUS_DEAD, STATUS_NO_HEARTBEAT}:
                 self._relaunch_inflight.discard(pkg)
                 self._relaunch_verify_until.pop(pkg, None)
                 self._missing_evidence_since.pop(pkg, None)
@@ -3332,12 +3359,19 @@ class WatchdogSupervisor:
             self._relaunch_verify_until.pop(pkg, None)
             self._missing_evidence_since.pop(pkg, None)
         elif current in {STATUS_RELAUNCHING, STATUS_REOPENING} and not ev.is_online_confirmed:
-            state = STATUS_RELAUNCHING
-            verify_until = self._relaunch_verify_until.get(pkg, 0.0)
-            if pkg in self._relaunch_inflight and time.monotonic() < verify_until:
-                reason = "android_relaunch_verification_pending"
+            if (
+                not self._all_launches_completed
+                and pkg not in self._relaunch_inflight
+            ):
+                state = STATUS_LAUNCHING
+                reason = "stagger_first_open_pending_confirmation"
             else:
-                reason = "relaunch_pending_gamejoinloadtime"
+                state = STATUS_RELAUNCHING
+                verify_until = self._relaunch_verify_until.get(pkg, 0.0)
+                if pkg in self._relaunch_inflight and time.monotonic() < verify_until:
+                    reason = "android_relaunch_verification_pending"
+                else:
+                    reason = "relaunch_pending_gamejoinloadtime"
         elif current in {
             STATUS_LAUNCHING,
             STATUS_WAITING,
@@ -3353,11 +3387,16 @@ class WatchdogSupervisor:
                 reason = "launch_pending_gamejoinloadtime"
         elif current == STATUS_ONLINE and not ev.is_online_confirmed:
             if ev.process_exists:
-                state = STATUS_LAUNCHING
+                if self._in_loading_grace(pkg) or not self._all_launches_completed:
+                    state = STATUS_LAUNCHING
+                else:
+                    state = STATUS_NO_HEARTBEAT
                 reason = str(detail.get("reason_internal") or "online_proof_lost")
             else:
                 state = STATUS_DEAD
                 reason = str(detail.get("reason_internal") or "online_proof_lost")
+        elif current in {STATUS_NO_HEARTBEAT} and ev.is_online_confirmed:
+            state = STATUS_ONLINE
         elif current in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED, STATUS_FAILED}:
             state = current
         else:
@@ -3762,13 +3801,7 @@ class WatchdogSupervisor:
             or ""
         ).lower()
         if state == STATUS_DISCONNECTED and was_online:
-            if "heartbeat_lost" in reason_internal:
-                try:
-                    if self._rjn_monitor.try_mark_force_close_dead(pkg):
-                        return False
-                except Exception:  # noqa: BLE001
-                    pass
-            return True
+            return False
         if was_online and definitive:
             return True
         if (self._in_loading_grace(pkg) or self._in_grace(pkg, now)) and not definitive:
@@ -3888,6 +3921,13 @@ class WatchdogSupervisor:
         )
         if runtime_seconds is None:
             try:
+                from .status_monitor_runtime import effective_runtime_seconds
+
+                runtime_seconds = effective_runtime_seconds(pkg, dead_at)
+            except Exception:  # noqa: BLE001
+                pass
+        if runtime_seconds is None:
+            try:
                 from .status_monitor_runtime import load_online_since
 
                 online_since, _ = load_online_since(pkg)
@@ -3985,7 +4025,7 @@ class WatchdogSupervisor:
         url_context = private_url_launch_context(entry, self.cfg)
         url_configured = url_context.get("url_mode") == "private_url"
 
-        if state in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED}:
+        if state in _RECOVERY_TRIGGER_STATES:
             # Never let a stale relaunch-inflight flag block recovery for a fresh
             # disconnect/dead signal (probe p-9c18ae51bc: 278 detected but no relaunch).
             self._relaunch_inflight.discard(pkg)
@@ -4074,6 +4114,74 @@ class WatchdogSupervisor:
             # throttling (_reserve_recovery_launch_attempt) and loading grace
             # (_relaunch_verify_until) still prevent relaunch storms.
             return False
+
+        elif state == STATUS_NO_HEARTBEAT:
+            if self.status_map.get(pkg) == STATUS_ONLINE:
+                self._nhb_since.pop(pkg, None)
+                return False
+            if self._in_loading_grace(pkg) and not immediate_recovery:
+                self._nhb_since.pop(pkg, None)
+                log_event(
+                    logger, "info", "[DENG_REJOIN_LOADING_GRACE]",
+                    package=pkg,
+                    grace_sec=self.LOADING_GRACE_SECONDS,
+                    elapsed_sec=round(
+                        time.monotonic() - self._ensure_launch_timestamp(pkg), 1
+                    ),
+                    action="suppress_nhb_kill_switch",
+                )
+                return False
+            if immediate_recovery:
+                log_event(
+                    logger, "info", "[DENG_REJOIN_ROOT_PROCESS_HARD_DROP]",
+                    package=pkg,
+                    action="force_stop_relaunch",
+                    reason="root_ps_missing",
+                )
+                self._nhb_since.pop(pkg, None)
+                self._nhb_cooldown_until.pop(pkg, None)
+                self._set_status(pkg, STATUS_DEAD)
+                self._post_recovery_memory_flush()
+                return True
+            nhb_since = self._nhb_since.get(pkg)
+            now_mono = time.monotonic()
+            if nhb_since is None:
+                self._nhb_since[pkg] = now_mono
+                log_event(
+                    logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_TIMER]",
+                    package=pkg,
+                    started_at=round(now_mono, 3),
+                    kill_switch_sec=self.NHB_KILL_SWITCH_SECONDS,
+                )
+                return False
+            elapsed = now_mono - nhb_since
+            if elapsed < self.NHB_KILL_SWITCH_SECONDS:
+                log_event(
+                    logger, "debug", "[DENG_REJOIN_NO_HEARTBEAT_WAIT]",
+                    package=pkg,
+                    elapsed_sec=round(elapsed, 1),
+                    remaining_sec=round(self.NHB_KILL_SWITCH_SECONDS - elapsed, 1),
+                )
+                return False
+            log_event(
+                logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_KILL_SWITCH]",
+                package=pkg,
+                elapsed_sec=round(elapsed, 1),
+                action="force_stop",
+                reason="no_heartbeat_timeout",
+            )
+            self._nhb_since.pop(pkg, None)
+            self._nhb_cooldown_until.pop(pkg, None)
+            if self._force_stop_target_package(pkg):
+                time.sleep(float(self.RECOVERY_FORCE_STOP_BREATH_SECONDS))
+            self._set_status(pkg, STATUS_DEAD)
+            if callable(render_callback):
+                try:
+                    render_callback()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._post_recovery_memory_flush()
+            return True
 
         elif state == "__retired_state__":
             if self.status_map.get(pkg) == STATUS_ONLINE:
@@ -4541,6 +4649,8 @@ class WatchdogSupervisor:
                 if False:
                     if process_hard_drop or not self._in_loading_grace(pkg):
                         self._nhb_since.setdefault(pkg, now_mono)
+                elif state == STATUS_NO_HEARTBEAT:
+                    self._nhb_since.setdefault(pkg, now_mono)
                 else:
                     self._nhb_since.pop(pkg, None)
 
@@ -4557,7 +4667,13 @@ class WatchdogSupervisor:
                 # package, so the next dead account is recovered on its turn and
                 # nothing extra happens when no package is dead.
                 if state not in {STATUS_WRONG_GAME, STATUS_UNKNOWN}:
-                    if state in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED}:
+                    if state in _RECOVERY_TRIGGER_STATES:
+                        self._handle_state(
+                            pkg, entry, state, prev, now,
+                            render_callback=render_callback,
+                            detail=detail,
+                        )
+                    elif state == STATUS_NO_HEARTBEAT:
                         self._handle_state(
                             pkg, entry, state, prev, now,
                             render_callback=render_callback,

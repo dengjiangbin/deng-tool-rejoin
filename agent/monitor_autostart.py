@@ -395,6 +395,7 @@ _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
     "Launched": "Launching",
     "Preparing": "Launching",
     "Relaunching": "Relaunching",
+    "No Heartbeat": "No Heartbeat",
     "Joining": "Launching",
     "Join Unconfirmed": "Launching",
     # Heartbeat lost on a known-good process. Reconnecting / Background
@@ -421,7 +422,7 @@ _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
 
 # Public allow-list for cross-checking: exactly five values.
 APK_VISIBLE_STATES: frozenset[str] = frozenset(
-    {"Dead", "Relaunching", "Online"}
+    {"Dead", "Relaunching", "Online", "Launching", "No Heartbeat"}
 )
 
 
