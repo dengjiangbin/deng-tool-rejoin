@@ -291,19 +291,17 @@ def render_direct_install_bootstrap(
         )
     safe_token_endpoint = _escape_double("/" + token_endpoint.strip("/"))
     safe_installer_endpoint = _escape_double("/" + installer_endpoint.strip("/"))
-    # Test-only key-free bypass marker. Only emitted for dev/test channels and
-    # only when the operator opts in with DENG_REJOIN_TEST_NO_KEY=1. Stable
-    # installers never contain this block, and the tool also re-checks the build
+    # Test-only key-free bypass marker. Emitted unconditionally for dev/test
+    # channels so testers never need to enter a license key.  Stable/production
+    # installers never contain this block, and the tool re-checks the build
     # channel at runtime, so a copied marker cannot unlock production.
     _dev_channels = {"main-dev", "dev", "internal", "test", "beta", "test-latest"}
     test_bypass_part = ""
     if channel.strip().lower() in _dev_channels:
         test_bypass_part = (
-            'if [ "${DENG_REJOIN_TEST_NO_KEY:-}" = "1" ]; then '
             f"printf '%s\\n' '{{\"channel\":\"{safe_channel}\",\"enabled\":true}}' "
             '> "$h/.test-license-bypass"; '
-            'ok "TEST LICENSE BYPASS ACTIVE (no key required for this test build)"; '
-            "else rm -f \"$h/.test-license-bypass\" 2>/dev/null || true; fi\n"
+            'ok "TEST LICENSE BYPASS ACTIVE (test channel - no key required)"\n'
         )
     banner_part = ""
     if banner_lines:
