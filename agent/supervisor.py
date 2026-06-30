@@ -2961,14 +2961,44 @@ class WatchdogSupervisor:
             return False
         return True
 
+    def _ingame_hb_fresh(self, pkg: str) -> bool:
+        """Fresh in-game heartbeat ingested via logcat (clone-safe fallback)."""
+        try:
+            row = self._rjn_monitor._states.get(pkg)
+        except Exception:  # noqa: BLE001
+            return False
+        if row is None or not row.ingame_hb_ever:
+            return False
+        last = float(row.last_ingame_hb_wall_at or row.last_ingame_hb_at or 0.0)
+        return last > 0.0 and (time.time() - last) <= PUSH_HEARTBEAT_FRESH_SECONDS
+
+    def _sync_logcat_hb_push_channel(self, pkg: str) -> None:
+        """Mirror a fresh logcat heartbeat into the supervisor fast-path cache."""
+        if not self._ingame_hb_fresh(pkg):
+            return
+        try:
+            row = self._rjn_monitor._states.get(pkg)
+            if row is None:
+                return
+            wall = float(row.last_ingame_hb_wall_at or row.last_ingame_hb_at or 0.0)
+            if wall <= 0:
+                return
+            self._push_ever_seen.add(pkg)
+            self._push_last_seen[pkg] = wall
+        except Exception:  # noqa: BLE001
+            pass
+
     def _push_fresh(self, pkg: str) -> bool:
         """True when this package's in-game Lua detector reported within the
         freshness window.  When fresh, the heartbeat is authoritative and the
-        whole slow scrape + presence path is skipped (the fast path)."""
-        if pkg not in self._push_ever_seen:
-            return False
+        whole slow scrape + presence path is skipped (the fast path).
+
+        Accepts both the loopback HTTP push AND the logcat ``DENGRJN_HB|`` print
+        (required on cloud-phone clones where 127.0.0.1:52789 is unreachable)."""
         last = float(self._push_last_seen.get(pkg, 0.0) or 0.0)
-        return last > 0.0 and (time.time() - last) <= PUSH_HEARTBEAT_FRESH_SECONDS
+        if last > 0.0 and (time.time() - last) <= PUSH_HEARTBEAT_FRESH_SECONDS:
+            return True
+        return self._ingame_hb_fresh(pkg)
 
     def _ingest_push_heartbeat(self, pkg: str) -> str:
         """Consume the latest in-game Lua push heartbeat for ``pkg`` (if fresh).
@@ -3108,6 +3138,7 @@ class WatchdogSupervisor:
         # BEFORE the slow scrape so evaluate_package reflects online / wrong
         # server instantly without dumpsys/uiautomator/logcat work.
         self._ingest_push_heartbeat(pkg)
+        self._sync_logcat_hb_push_channel(pkg)
         fresh_push = self._push_fresh(pkg)
         ev = self._rjn_monitor.evaluate_package(pkg, fast_push=fresh_push)
         if not fresh_push:
@@ -3213,6 +3244,7 @@ class WatchdogSupervisor:
             state = current or ev.public_status
 
         detail.update({
+            "process_running": str(ev.process_exists).lower(),
             "process_evidence": str(ev.process_exists).lower(),
             "activity_evidence": "diagnostic_only",
             "window_evidence": "diagnostic_only",

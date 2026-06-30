@@ -298,6 +298,7 @@ class PackageRjnState:
     # while the process is alive, the client left the live server (kick / error
     # code / captcha / freeze) and we demote → Disconnected. Reset every launch.
     last_ingame_hb_at: float = 0.0
+    last_ingame_hb_wall_at: float = 0.0
     ingame_hb_ever: bool = False
     # Tracks whether the process appeared at least once since the last
     # (re)launch.  Reset by note_launch_watchdog.  When True and the process
@@ -766,6 +767,26 @@ class RjnLifecycleMonitor:
                     if len(self._recent_events) > 128:
                         self._recent_events = self._recent_events[-128:]
                     return
+            # In-game Lua detector heartbeat — the 24/7 fast path on cloud phones
+            # where loopback HTTP to 127.0.0.1 is sandboxed (probe p-b967574a48).
+            # Previously these lines were only recorded in recent_uid_lines and
+            # never confirmed online until a slow poll/dump ran minutes later.
+            if _INGAME_HB_RE.search(line):
+                hb_row = self._states.get(pkg)
+                if hb_row is None or seen_at > (hb_row.last_ingame_hb_wall_at + 0.5):
+                    self._ingest_logcat_heartbeat(pkg, line, seen_at)
+                hb_event = LogcatEvent(
+                    package=pkg,
+                    uid=effective_uid,
+                    phrase="push_heartbeat",
+                    raw_line_sanitized=_sanitize_line(line),
+                    seen_at=seen_at,
+                )
+                hb_event.action_taken = self._states[pkg].internal_state
+                self._recent_events.append(hb_event)
+                if len(self._recent_events) > 128:
+                    self._recent_events = self._recent_events[-128:]
+                return
             phrase = ""
             if _WITH_REASON_RE.search(line):
                 phrase = "with reason"
@@ -1073,6 +1094,7 @@ class RjnLifecycleMonitor:
             # both the loopback HTTP push and the logcat "DENGRJN_HB|" print.
             if seen_at > row.last_ingame_hb_at:
                 row.last_ingame_hb_at = seen_at
+            row.last_ingame_hb_wall_at = time.time()
             row.ingame_hb_ever = True
             changed = False
             for attr, val in (
@@ -1588,6 +1610,7 @@ class RjnLifecycleMonitor:
             # first in-game heartbeat (a stale pre-launch heartbeat must not
             # instantly demote the relaunched client).
             row.last_ingame_hb_at = 0.0
+            row.last_ingame_hb_wall_at = 0.0
             row.ingame_hb_ever = False
             row.process_seen_since_launch = False
             if relaunch:
@@ -1626,12 +1649,12 @@ class RjnLifecycleMonitor:
             alive = [p for p in known_pids if os.path.exists(f"/proc/{p}")]
             if alive:
                 return True, alive
-            # ALL previously known PIDs are gone from /proc → dead.
-            # No need to spawn pidof — the process left, quickly.
-            return False, []
+            # Cached PIDs are stale (Roblox restarted / PID rotated). Fall through
+            # to pidof rediscovery instead of declaring dead immediately — otherwise
+            # every clone after the first stays "Launching" with process_running=false
+            # while logcat heartbeats prove it is in-game (probe p-b967574a48).
 
-        # No known PIDs → first check or post-relaunch. Use subprocess pidof
-        # to discover the new PID(s) so the fast path can run next round.
+        # No known PIDs (or stale cache cleared) → discover via pidof.
         pids: list[str] = []
         root_tool = getattr(self._root_info, "tool", None) if self._root_info else None
         try:

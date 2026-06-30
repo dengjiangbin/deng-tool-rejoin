@@ -81,9 +81,26 @@ class ProcFastPathTests(unittest.TestCase):
         row = mon._states[pkg]
         # Simulate known PIDs by writing a non-existent PID
         row.pids = ["999999999"]
-        exists, pids = mon._process_check(pkg)
+        # Stale /proc miss must fall back to pidof; only declare dead when both fail.
+        with patch.object(rlm.android, "run_root_command", return_value=type("R", (), {"ok": True, "stdout": ""})()), \
+             patch.object(rlm.android, "is_process_running", return_value=False):
+            mon._root_info = type("RI", (), {"available": False, "tool": None})()
+            exists, pids = mon._process_check(pkg)
         self.assertFalse(exists)
         self.assertEqual(pids, [])
+
+    def test_proc_check_rediscovers_after_stale_pid_cache(self) -> None:
+        """Roblox PID rotation must not leave a live clone stuck process_missing."""
+        pkg = "com.pkg.proc1b"
+        mon = _monitor(pkg)
+        row = mon._states[pkg]
+        row.pids = ["999999999"]  # stale
+        fake_res = type("R", (), {"ok": True, "stdout": "54321"})()
+        with patch.object(rlm.android, "run_root_command", return_value=fake_res):
+            mon._root_info = type("RI", (), {"available": True, "tool": "su"})()
+            exists, pids = mon._process_check(pkg)
+        self.assertTrue(exists)
+        self.assertIn("54321", pids)
 
     def test_proc_check_returns_true_when_pid_exists(self) -> None:
         pkg = "com.pkg.proc2"
