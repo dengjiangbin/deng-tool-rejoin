@@ -2198,12 +2198,14 @@ class RjnLifecycleMonitor:
             if (
                 not relaunch  # A relaunch must always advance the generation counter
                 and row.internal_state == STATE_ONLINE_CONFIRMED
-                and row.online_evidence_source == "push_heartbeat"
-                and row.last_ingame_hb_wall_at > 0
-                and (now - row.last_ingame_hb_wall_at) <= ONLINE_HB_FRESH_SECONDS
+                and row.online_evidence_source in _FAST_ONLINE_EVALUATE_SOURCES
+                and row.last_positive_online_evidence_at > 0
+                and (now - row.last_positive_online_evidence_at) <= ONLINE_HB_FRESH_SECONDS
             ):
-                # Package is freshly Online with a live heartbeat; just disarm the
-                # watchdog and leave state intact so the in-flight HB is not lost.
+                # Package is freshly Online (via push_heartbeat OR gamejoinloadtime);
+                # disarm the watchdog and leave state intact so the confirmation is
+                # not lost.  Covers the window where gamejoin fires before the first
+                # push_heartbeat arrives (previous guard only checked push_heartbeat).
                 row.watchdog_active = False
                 row.dead_lane_enabled = True
                 return
@@ -2707,16 +2709,23 @@ class RjnLifecycleMonitor:
                     and row.last_ingame_hb_wall_at > 0
                     and (now - row.last_ingame_hb_wall_at) <= ONLINE_HB_FRESH_SECONDS
                 )
-                # gamejoinloadtime is a definitive native Roblox join signal —
-                # treat it equally to push_heartbeat in the hot lane.
-                gamejoin_fresh = (
-                    row.last_gamejoinloadtime_at > 0
-                    and (now - row.last_gamejoinloadtime_at) <= ONLINE_HB_FRESH_SECONDS
+                # Pre-HB window: gamejoin fires once at join time.  Before the first
+                # push_heartbeat arrives (~5-15s later) the old code's 9s window caused
+                # STATUS_ONLINE to blink off, breaking the stagger gate.
+                # Fix: accept gamejoin confirmation during the window where no HB has
+                # yet been received (ingame_hb_ever=False) using the generation counter
+                # as proof that gamejoin belongs to the current session.
+                # Once the first HB arrives (ingame_hb_ever=True) we require freshness.
+                # This prevents false "online" after a player leaves game without HB.
+                gamejoin_pre_hb = (
+                    not row.ingame_hb_ever
+                    and row.online_confirmed_generation >= row.launch_generation
+                    and row.online_evidence_source in _FAST_ONLINE_EVALUATE_SOURCES
                 )
                 has_positive_evidence = (
                     internal == STATE_ONLINE_CONFIRMED
                     and row.online_evidence_source in _FAST_ONLINE_EVALUATE_SOURCES
-                    and (fresh_hb or gamejoin_fresh)
+                    and (fresh_hb or gamejoin_pre_hb)
                 )
             is_online = has_positive_evidence and process_exists
             if process_exists and _package_force_stopped_quick(pkg):
@@ -2919,12 +2928,50 @@ class RjnLifecycleMonitor:
             for pkg, row in self._states.items():
                 age = max(0.0, now - row.launch_started_at) if row.launch_started_at else 0.0
                 ev = self.evaluate_package(pkg)
+                # old_fast_signal: whichever fast proof fired most recently
+                _gjl = row.last_gamejoinloadtime_at or 0.0
+                _hbw = row.last_ingame_hb_wall_at or 0.0
+                _fast_at = max(_gjl, _hbw) or None
+                _fast_type = (
+                    "push_heartbeat" if _hbw >= _gjl and _hbw > 0
+                    else ("gamejoinloadtime" if _gjl > 0 else None)
+                )
                 packages_out[pkg] = {
+                    # Core state fields
                     "state": row.internal_state,
+                    "state_reason": row.last_state_change_reason or row.last_transition_reason or None,
                     "online_since": row.online_since or None,
+                    "online_promoted_by": row.online_evidence_source or None,
                     "runtime_source": row.runtime_source or "gamejoinloadtime",
+                    # Launch/relaunch inflight flags
+                    "initial_launch_inflight": row.initial_launch_inflight,
+                    "relaunch_inflight": row.relaunching,
+                    "recovery_reason": row.recovery_reason or None,
+                    # Generation counters
+                    "launch_generation": row.launch_generation,
+                    "relaunch_generation": row.relaunch_generation,
+                    "online_confirmed_generation": row.online_confirmed_generation,
+                    # PID/process tracking
+                    "current_pid": row.current_pid or None,
+                    "pid_start_time": row.pid_start_time or None,
+                    "process_seen_at": row.process_seen_at or None,
                     "process_exists": row.process_exists,
                     "pids": list(row.pids),
+                    # Timing anchors
+                    "launch_started_at": row.launch_started_at or None,
+                    "relaunch_started_at": row.relaunch_started_at or None,
+                    "relaunch_started_ago": (
+                        round(now - row.relaunch_started_at, 1) if row.relaunch_started_at else None
+                    ),
+                    # Fast signal timestamps (old fast path restored)
+                    "old_fast_signal_seen_at": _fast_at,
+                    "old_fast_signal_type": _fast_type,
+                    "live_logcat_gamejoin_seen_at": row.last_gamejoin_at or None,
+                    "dump_logcat_gamejoin_seen_at": row.last_gamejoinloadtime_at or None,
+                    "detector_hb_seen_at": row.last_ingame_hb_wall_at or None,
+                    # Signal rejection
+                    "last_rejected_signal_reason": row.last_rejected_signal_reason or None,
+                    # Standard fields
                     "last_gamejoinloadtime_at": row.last_gamejoinloadtime_at or None,
                     "last_doteleport_at": row.last_doteleport_at or None,
                     "last_with_reason_at": row.last_with_reason_at or None,
@@ -2940,7 +2987,6 @@ class RjnLifecycleMonitor:
                     "observed_private_code_set": bool(row.observed_private_code_hash),
                     "wrong_server_detected": row.last_transition_reason == "wrong_server",
                     "last_logcat_event_at": row.last_logcat_event_at or None,
-                    "launch_started_at": row.launch_started_at or None,
                     "launch_watchdog_active": row.watchdog_active,
                     "launch_watchdog_age_seconds": round(age, 1),
                     "launch_watchdog_timeout_seconds": self._launch_watchdog_seconds,
@@ -2951,6 +2997,7 @@ class RjnLifecycleMonitor:
                     "reason_user_friendly": ev.detail.get("reason_user_friendly") or ev.reason,
                     "failed_checks": list(ev.failed_checks),
                     "is_online_confirmed": ev.is_online_confirmed,
+                    "last_positive_online_evidence_at": row.last_positive_online_evidence_at or None,
                     "last_uid_line_at": row.last_uid_line_at or None,
                     "uid_line_silence_seconds": (
                         round(now - row.last_uid_line_at, 1) if row.last_uid_line_at else None

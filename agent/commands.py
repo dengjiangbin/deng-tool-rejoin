@@ -6483,8 +6483,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         # launching the next one.  Prevents all clones from fighting for RAM/CPU
         # while loading simultaneously (probe p-1a7fcce102 problem #1 — 3-4 min
         # gaps caused by resource contention, not deliberate timer).
-        # Timeout: 120 s per package; prints visible blocked_reason every 30s.
-        _ONLINE_GATE_TIMEOUT_S = 120.0
+        # Timeout: 15 s per package (same as old fixed LAUNCH_STAGGER_SECONDS=15).
+        # If Online is detected fast (<15s), gate opens immediately for <2s next-launch.
+        # If Roblox hasn't joined by 15s, we proceed anyway (like the old fixed stagger).
+        # 120s was causing 5-minute stalls when the gate failed to detect Online.
+        _ONLINE_GATE_TIMEOUT_S = 15.0
         _ONLINE_GATE_WARN_INTERVAL_S = 30.0  # print blocked_reason every 30s
 
         def _wait_for_package_online(pkg: str, idx: int, total: int) -> None:
