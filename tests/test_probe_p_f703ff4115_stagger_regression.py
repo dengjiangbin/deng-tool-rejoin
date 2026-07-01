@@ -106,10 +106,11 @@ class TestStartStaggerFastLaunch(unittest.TestCase):
         self.assertEqual(sup.status_map.get("com.moons.litesc"), STATUS_ONLINE)
 
     def test_stagger_recovery_deferred_until_all_launches_completed(self) -> None:
-        from agent.supervisor import STATUS_DEAD, WatchdogSupervisor
+        from agent.supervisor import STATUS_DEAD, STATUS_READY, WatchdogSupervisor
 
         sup = WatchdogSupervisor([{"package": "com.moons.litesc"}], {})
         sup._all_launches_completed = False
+        sup.status_map["com.moons.litesc"] = STATUS_READY
         with patch.object(sup, "_do_launch") as launch:
             sup._handle_state(
                 "com.moons.litesc",

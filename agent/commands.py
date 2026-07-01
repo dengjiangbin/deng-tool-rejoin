@@ -6209,6 +6209,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 return "Launching"
             if ph in ("Launching", "Failed", "Preparing", "Clear Cache"):
                 return ph
+            if sup_st == "Ready" or ph == "Ready":
+                return "Ready"
             return ph or "Ready"
 
         _stagger_render_last = 0.0
@@ -6462,7 +6464,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 pass
 
-        # ── PHASE 2: staggered launching (30s between packages) ───────────────
+        # ── PHASE 2: sequential stagger launch (Ready queue → Launching) ───
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
         launch_attempted: dict[str, bool] = {}
@@ -6484,6 +6486,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 launch_attempted[package] = True
                 for later in entries[index:]:
                     phase[later["package"]] = "Ready"
+                    _supervisor._set_status(later["package"], _STATUS_READY)
                 phase[package] = "Launching"
                 _stagger_render_last = 0.0
                 _render_phase_throttled()
@@ -6518,14 +6521,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                     "private_url" if _has_url else "app_only",
                     str(_supervisor.watchdog_thread_alive()).lower(),
                 )
-                if index < len(entries):
-                    import time as _t
-                    from .supervisor import WatchdogSupervisor as _WS
-                    _stagger_deadline = _t.monotonic() + _WS.LAUNCH_STAGGER_SECONDS
-                    while _t.monotonic() < _stagger_deadline:
-                        _render_phase_throttled()
-                        _stagger_remain = _stagger_deadline - _t.monotonic()
-                        _t.sleep(max(0.0, min(1.0, _stagger_remain)))
         finally:
             if not getattr(_supervisor, "_all_launches_completed", False):
                 _supervisor.mark_all_launches_completed()

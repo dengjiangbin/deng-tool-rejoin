@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 import time
@@ -193,9 +194,18 @@ class PresenceProfileTests(unittest.TestCase):
 
 
 class StaggeredLaunchTests(unittest.TestCase):
-    def test_launch_stagger_constant_is_15_seconds(self) -> None:
-        from agent.supervisor import WatchdogSupervisor
-        self.assertEqual(WatchdogSupervisor.LAUNCH_STAGGER_SECONDS, 15)
+    def test_start_launch_has_no_inter_clone_stagger_sleep(self) -> None:
+        import agent.commands as commands
+
+        src = inspect.getsource(commands.cmd_start)
+        self.assertNotIn("_stagger_deadline", src)
+        self.assertIn('_set_status(later["package"], _STATUS_READY)', src)
+        self.assertIn("_package_awaiting_first_open", inspect.getsource(
+            __import__("agent.supervisor", fromlist=["supervisor"]).WatchdogSupervisor._package_awaiting_first_open
+        ))
+        self.assertIn("STATUS_READY", inspect.getsource(
+            __import__("agent.supervisor", fromlist=["supervisor"]).WatchdogSupervisor._package_awaiting_first_open
+        ))
 
     def test_presence_timeout_under_15_seconds(self) -> None:
         from agent.roblox_presence import HTTP_TIMEOUT

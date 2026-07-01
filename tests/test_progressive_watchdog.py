@@ -37,6 +37,17 @@ class ProgressiveWatchdogTests(unittest.TestCase):
         self.assertTrue(sup._package_awaiting_first_open("com.pkg.b"))
         sup.mark_all_launches_completed()
         self.assertFalse(sup._package_awaiting_first_open("com.pkg.b"))
+        self.assertEqual(sup.status_map.get("com.pkg.b"), "Failed")
+
+    def test_ready_status_skips_presence_monitoring(self) -> None:
+        from agent.supervisor import STATUS_READY, WatchdogSupervisor
+
+        sup = WatchdogSupervisor([{"package": "com.pkg.a"}], {})
+        sup.status_map["com.pkg.a"] = STATUS_READY
+        with patch.object(sup, "_rjn_monitor") as mon:
+            state, _detail = sup._detect_android_package_state("com.pkg.a")
+        mon.evaluate_package.assert_not_called()
+        self.assertEqual(state, STATUS_READY)
 
     def test_prefetch_uses_parallel_workers_for_multiple_opened(self) -> None:
         sup = WatchdogSupervisor(

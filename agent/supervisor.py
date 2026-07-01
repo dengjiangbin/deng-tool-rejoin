@@ -155,7 +155,7 @@ STATUS_IN_LOBBY          = "In Lobby"          # Roblox presence type 1 (home/lo
 STATUS_OFFLINE           = "Offline"
 STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
 STATUS_LAUNCHING         = "Launching"
-STATUS_READY             = "Ready"               # Awaiting first staggered open
+STATUS_READY             = "Ready"               # Queued for stagger — no presence monitoring
 STATUS_REOPENING         = "Relaunching"        # legacy constant name
 STATUS_RELAUNCHING       = "Relaunching"
 STATUS_WAITING           = "Waiting"
@@ -1232,7 +1232,8 @@ class WatchdogSupervisor:
     DEFAULT_GRACE_SECONDS: int = 30
 
     # ── Staggered launch: strict pause between package opens ────────────────
-    LAUNCH_STAGGER_SECONDS: int = 15
+    # Legacy: inter-clone wall-clock stagger removed — Ready queue gates monitoring.
+    LAUNCH_STAGGER_SECONDS: int = 0
 
     # ── Round-robin watchdog: visible Checking hold + tail pause per package ─
     # These are cosmetic pacing sleeps, NOT detection time: real detection is
@@ -1713,11 +1714,12 @@ class WatchdogSupervisor:
         """Release the global launch latch so the watchdog may begin checking."""
         now = time.monotonic()
         with self._state_lock:
-            # Anchor grace only for clones that actually received am start; backfill
-            # the rest so recovery/monitoring can treat never-opened slots as dead.
-            for pkg in self._package_opened:
-                self._last_launched_at.setdefault(pkg, now)
             for pkg in self.packages:
+                st = str(self.status_map.get(pkg) or "").strip()
+                if st == STATUS_READY:
+                    self.status_map[pkg] = STATUS_FAILED
+                self._last_launched_at.setdefault(pkg, now)
+            for pkg in self._package_opened:
                 self._last_launched_at.setdefault(pkg, now)
             self._all_launches_completed = True
         try:
@@ -2755,9 +2757,14 @@ class WatchdogSupervisor:
         return ""
 
     def _package_awaiting_first_open(self, pkg: str) -> bool:
+        """Ready = queued for stagger launch; no online/dead/presence monitoring."""
         if self._all_launches_completed:
             return False
-        return pkg not in self._package_opened
+        return str(self.status_map.get(pkg) or "").strip() == STATUS_READY
+
+    def _is_ready_queued(self, pkg: str) -> bool:
+        """Alias for callers that express the Ready-queue contract explicitly."""
+        return self._package_awaiting_first_open(pkg)
 
     def _ready_state_detail(self, pkg: str) -> dict[str, Any]:
         return {
@@ -3066,6 +3073,8 @@ class WatchdogSupervisor:
         Best-effort: returns the monitor verdict (``"online"`` / ``"wrong_server"``
         / ``""``) and never raises.
         """
+        if self._is_ready_queued(pkg):
+            return ""
         try:
             from . import detection_worker
 
