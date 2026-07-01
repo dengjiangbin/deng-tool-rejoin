@@ -2393,9 +2393,12 @@ def clear_package_cache_for_start(
     paths = [
         f"/data/user/0/{package}/cache",
         f"/data/user/0/{package}/code_cache",
+        f"/data/user/0/{package}/files/tmp",
+        f"/data/user/0/{package}/files/http",
         f"/data/data/{package}/cache",
         f"/data/data/{package}/code_cache",
         f"/data/data/{package}/files/tmp",
+        f"/data/data/{package}/files/http",
     ]
     quoted = " ".join(shlex.quote(p) for p in paths)
     sh = (
@@ -2510,6 +2513,19 @@ def clear_packages_cache_mass_batch(
         except Exception:  # noqa: BLE001
             results[pkg] = "Failed"
     return results
+
+
+def trim_page_cache_after_mass_clear(*, root_info: RootInfo | None = None) -> bool:
+    """Drop Linux page cache after Start prep — frees RAM without touching app data."""
+    info = root_info or detect_root()
+    if not info.available or not info.tool:
+        return False
+    res = run_root_command(
+        ["sh", "-c", "sync; echo 1 > /proc/sys/vm/drop_caches"],
+        root_tool=str(info.tool),
+        timeout=20,
+    )
+    return bool(res.ok or res.returncode in (0, 1))
 
 
 def clear_package_cache_recovery(
@@ -3058,13 +3074,14 @@ def optimize_cloud_phone_memory(
     keep_packages: list[str],
     *,
     cooldown_seconds: int = _CLOUD_MEMORY_COOLDOWN_SECONDS,
+    disable_google_packages: bool = False,
 ) -> dict[str, object]:
     """Default Cloud Phone Extreme memory preparation.
 
-    This is not a selectable mode. It is the only Start-time memory policy:
-    disable allowed Google packages with ``pm disable-user --user 0`` and
-    force-stop selected nonessential apps. Core Android, Termux, root manager,
-    launcher, keyboard, and Roblox targets are protected.
+    Force-stops selected nonessential apps. Google Play / GMS packages are left
+    running by default (user feedback: disabling them during Start caused service
+    churn and lower free RAM after re-enable). Set ``disable_google_packages``
+    to opt into the legacy ``pm disable-user`` sweep.
     """
     global _CLOUD_MEMORY_LAST_RUN
     now = time.monotonic()
@@ -3100,22 +3117,23 @@ def optimize_cloud_phone_memory(
     skipped: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
 
-    for pkg in sorted(_CLOUD_DISABLE_PACKAGES & installed_set):
-        if _is_cloud_memory_protected(pkg, protected):
-            skipped.append({"package": pkg, "reason": "protected"})
-            continue
-        if _is_package_disabled(pkg, root_info.tool):
-            disabled.append(pkg)
-            continue
-        res = run_root_command(
-            ["pm", "disable-user", "--user", "0", pkg],
-            root_tool=root_info.tool,
-            timeout=10,
-        )
-        if res.ok:
-            disabled.append(pkg)
-        else:
-            failed.append({"package": pkg, "action": "disable-user", "error": (res.stderr or res.stdout)[:120]})
+    if disable_google_packages:
+        for pkg in sorted(_CLOUD_DISABLE_PACKAGES & installed_set):
+            if _is_cloud_memory_protected(pkg, protected):
+                skipped.append({"package": pkg, "reason": "protected"})
+                continue
+            if _is_package_disabled(pkg, root_info.tool):
+                disabled.append(pkg)
+                continue
+            res = run_root_command(
+                ["pm", "disable-user", "--user", "0", pkg],
+                root_tool=root_info.tool,
+                timeout=10,
+            )
+            if res.ok:
+                disabled.append(pkg)
+            else:
+                failed.append({"package": pkg, "action": "disable-user", "error": (res.stderr or res.stdout)[:120]})
 
     for pkg in installed:
         should_stop = pkg in _CLOUD_FORCE_STOP_EXACT or any(pkg.startswith(prefix) for prefix in _CLOUD_FORCE_STOP_PREFIXES)

@@ -1713,6 +1713,10 @@ class WatchdogSupervisor:
         """Release the global launch latch so the watchdog may begin checking."""
         now = time.monotonic()
         with self._state_lock:
+            # Anchor grace only for clones that actually received am start; backfill
+            # the rest so recovery/monitoring can treat never-opened slots as dead.
+            for pkg in self._package_opened:
+                self._last_launched_at.setdefault(pkg, now)
             for pkg in self.packages:
                 self._last_launched_at.setdefault(pkg, now)
             self._all_launches_completed = True
@@ -1762,7 +1766,10 @@ class WatchdogSupervisor:
                 else:
                     cur = str(self.status_map.get(pkg) or "").strip()
                     if cur in {STATUS_ONLINE, STATUS_RELAUNCHING}:
-                        state = cur
+                        if cur == STATUS_RELAUNCHING and not self._all_launches_completed:
+                            state = STATUS_LAUNCHING
+                        else:
+                            state = cur
                     elif cur == STATUS_FAILED:
                         state = STATUS_JOIN_FAILED
                     else:
@@ -2748,11 +2755,9 @@ class WatchdogSupervisor:
         return ""
 
     def _package_awaiting_first_open(self, pkg: str) -> bool:
-        if pkg in self._package_opened:
+        if self._all_launches_completed:
             return False
-        # Unit tests and recovery paths may set loading-grace timestamps without
-        # going through mark_package_launched; treat that as opened enough to detect.
-        return pkg not in self._last_launched_at
+        return pkg not in self._package_opened
 
     def _ready_state_detail(self, pkg: str) -> dict[str, Any]:
         return {

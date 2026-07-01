@@ -6197,7 +6197,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                 if sup_st == "Wrong Game / Wrong Server":
                     return "Dead"
                 if sup_st in ("Relaunching", "Reconnecting"):
-                    return "Relaunching"
+                    if getattr(_supervisor_ref, "_all_launches_completed", False):
+                        return "Relaunching"
+                    return "Launching"
                 if sup_st in ("Launching", "Waiting", "Checking", "Pending", "Join Unconfirmed"):
                     return "Launching"
                 if sup_st == "Failed":
@@ -6307,6 +6309,19 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
 
+        try:
+            _bg_stopped = android.force_stop_packages_except(
+                packages_sl,
+                cfg.get("package_detection_hints"),
+            )
+            if _bg_stopped:
+                _start_log.info(
+                    "[DENG_REJOIN_PREP_STOP_BACKGROUND] stopped=%s",
+                    ",".join(_bg_stopped),
+                )
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("start: background roblox stop error: %s", _exc)
+
         # 2) Clear Cache — visible phase BEFORE root cache shells (segfault-safe).
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         prep_gfx: dict[str, str] = {}
@@ -6324,6 +6339,16 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_log.debug("start: batch cache clear error: %s", _exc)
             prep_cache = {pkg: "Failed" for pkg in package_names}
         _start_session.mark("batch_clear_cache_done", package_count=len(entries))
+        _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
+        try:
+            if _prep_root.available:
+                _trim_ok = android.trim_page_cache_after_mass_clear(root_info=_prep_root)
+                _start_log.info(
+                    "[DENG_REJOIN_PREP_TRIM_PAGE_CACHE] ok=%s",
+                    str(_trim_ok).lower(),
+                )
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("start: page cache trim error: %s", _exc)
         _start_session.mark("batch_low_graphics_begin", package_count=len(entries))
         for entry in entries:
             package = entry["package"]
@@ -6460,7 +6485,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for later in entries[index:]:
                     phase[later["package"]] = "Ready"
                 phase[package] = "Launching"
-                _render_phase("Launching clone...")
+                _stagger_render_last = 0.0
+                _render_phase_throttled()
                 package_cfg = dict(runtime_cfg)
                 package_cfg["roblox_package"] = package
                 package_cfg["__on_launch_sent"] = _on_stagger_launch_sent

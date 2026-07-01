@@ -26,6 +26,18 @@ class ProgressiveWatchdogTests(unittest.TestCase):
         self.assertTrue(sup._watchdog_monitoring_active())
         self.assertTrue(sup._package_awaiting_first_open("com.pkg.b"))
 
+    def test_unopened_clones_stay_awaiting_until_batch_latch_released(self) -> None:
+        sup = WatchdogSupervisor(
+            [{"package": "com.pkg.a"}, {"package": "com.pkg.b"}],
+            {},
+            initial_status={"com.pkg.a": STATUS_LAUNCHING, "com.pkg.b": STATUS_READY},
+        )
+        sup.mark_package_launched("com.pkg.a")
+        sup._last_launched_at["com.pkg.b"] = 999.0
+        self.assertTrue(sup._package_awaiting_first_open("com.pkg.b"))
+        sup.mark_all_launches_completed()
+        self.assertFalse(sup._package_awaiting_first_open("com.pkg.b"))
+
     def test_prefetch_uses_parallel_workers_for_multiple_opened(self) -> None:
         sup = WatchdogSupervisor(
             [{"package": "com.pkg.a"}, {"package": "com.pkg.b"}],

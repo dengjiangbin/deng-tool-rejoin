@@ -25,7 +25,7 @@ from . import android
 def _settle_before_start_cache_clear() -> None:
     """Brief pause so the force-stop prep burst settles before cache clear."""
     if android.is_termux():
-        time.sleep(0.5)
+        time.sleep(0.8)
 
 
 def run_start_mass_cache_clear(

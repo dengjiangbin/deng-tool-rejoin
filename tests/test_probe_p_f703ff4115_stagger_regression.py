@@ -120,6 +120,16 @@ class TestStartStaggerFastLaunch(unittest.TestCase):
             )
         launch.assert_not_called()
 
+    def test_start_prep_keeps_google_and_restores_background_stop(self) -> None:
+        import agent.android as android
+        import agent.commands as commands
+
+        src = inspect.getsource(commands.cmd_start)
+        self.assertIn("force_stop_packages_except", src)
+        self.assertIn("trim_page_cache_after_mass_clear", src)
+        self.assertIn("_fast_force_stop_selected_packages", src)
+        self.assertIn("disable_google_packages", inspect.getsource(android.optimize_cloud_phone_memory))
+
 
 if __name__ == "__main__":
     unittest.main()

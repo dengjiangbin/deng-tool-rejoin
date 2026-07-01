@@ -270,6 +270,7 @@ def perform_rejoin(
     root_used = False
     warning: str | None = None
     _launch_sent_cb = config_data.get("__on_launch_sent")
+    start_stagger_fast = reason == "start"
 
     log_event(
         logger,
@@ -394,7 +395,18 @@ def perform_rejoin(
                           method=stopped_via, package=package)
                 # Brief grace so the WindowManager actually tears down
                 # the activity before we re-create it.
-                time.sleep(min(2.5, max(1.0, int(cfg.get("reconnect_delay_seconds", 2)) / 2)))
+                if start_stagger_fast:
+                    time.sleep(
+                        min(
+                            0.6,
+                            max(
+                                0.3,
+                                int(cfg.get("reconnect_delay_seconds", 2)) / 8,
+                            ),
+                        )
+                    )
+                else:
+                    time.sleep(min(2.5, max(1.0, int(cfg.get("reconnect_delay_seconds", 2)) / 2)))
             else:
                 # Even without successful stop, log so the operator can
                 # correlate "bounds not honored" with "task still alive".
@@ -512,7 +524,6 @@ def perform_rejoin(
             error = mask_urls_in_text(result.summary or "Android launch command failed")
             raise RuntimeError(error)
 
-        start_stagger_fast = reason == "start"
         if start_stagger_fast and callable(_launch_sent_cb):
             try:
                 _launch_sent_cb(package)
