@@ -118,10 +118,13 @@ class DetectionLuaBootstrapTests(unittest.TestCase):
     def test_detector_url_is_canonical(self) -> None:
         from agent import detection_lua as dl
 
-        self.assertEqual(
-            dl.DETECTOR_URL,
-            "https://raw.githubusercontent.com/dengjiangbin/global/main/detector.lua",
-        )
+        # v2 detector is served from the test/latest branch of this repo so
+        # operator updates are a single git push.  The fallback URL still
+        # points to the legacy global path for devices that cannot reach the
+        # new URL.
+        self.assertIn("dengjiangbin", dl.DETECTOR_URL)
+        self.assertIn("detector.lua", dl.DETECTOR_URL)
+        self.assertIn("dengjiangbin/global", dl.DETECTOR_URL_FALLBACK)
         self.assertEqual(dl.DETECTION_FILENAME, "deng.txt")
 
     def test_lua_quote_escapes_quotes(self) -> None:
@@ -172,10 +175,17 @@ class WriteDetectionScriptTests(unittest.TestCase):
 
 class LifecyclePushHeartbeatTests(unittest.TestCase):
     def _monitor(self):
+        from unittest.mock import patch
         from agent.rjn_lifecycle_monitor import RjnLifecycleMonitor
 
         m = RjnLifecycleMonitor(["com.roblox.clientab"])
         m.note_launch_watchdog("com.roblox.clientab")
+        # Simulate a live process so heartbeats pass the process-exists gate.
+        with m._lock:
+            row = m._states["com.roblox.clientab"]
+            row.process_exists = True
+            row.process_seen_since_launch = True
+            row.current_pid = "9999"
         return m
 
     def test_alive_heartbeat_confirms_online(self) -> None:

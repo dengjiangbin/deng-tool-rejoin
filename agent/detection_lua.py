@@ -17,11 +17,16 @@ This module never executes Lua; it only builds text.
 
 from __future__ import annotations
 
-DETECTOR_URL = "https://raw.githubusercontent.com/dengjiangbin/global/main/detector.lua"
+# v2 detector: session_id, gamejoin-gated Online proof, burst heartbeats.
+# Served from the test/latest branch so operator updates are git-push only.
+# Fall back to the legacy global path if this URL is unavailable.
+DETECTOR_URL = (
+    "https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin"
+    "/test/latest/assets/lua/detector.lua"
+)
+DETECTOR_URL_FALLBACK = "https://raw.githubusercontent.com/dengjiangbin/global/main/detector.lua"
 DETECTION_FILENAME = "deng.txt"
-# 3s heartbeat: fast enough that online / wrong-server / dead all resolve well
-# under the 15s target (4 missed posts == 12s loss grace) without spamming the
-# loopback worker (user p-5d0df79c33).
+# 2s heartbeat: burst on startup then every 2s (v2 supports burst schedule).
 DEFAULT_HEARTBEAT_INTERVAL = 2
 
 
@@ -53,8 +58,14 @@ def build_bootstrap_lua(
     package: str,
     interval: int = DEFAULT_HEARTBEAT_INTERVAL,
     url: str = DETECTOR_URL,
+    fallback_url: str = DETECTOR_URL_FALLBACK,
 ) -> str:
-    """Readable bootstrap: pin config + loadstring the remote detector."""
+    """Readable bootstrap: pin config + loadstring the remote detector.
+
+    Tries the primary URL first (v2 detector with session_id + burst HB).
+    Falls back to the legacy URL if the primary is unavailable.
+    """
+    fb = _lua_quote(fallback_url)
     return (
         "local D={}\n"
         f"D.port={int(port)}\n"
@@ -64,6 +75,9 @@ def build_bootstrap_lua(
         "local G=(getgenv and getgenv()) or _G\n"
         "G.DENG=D\n"
         f"local ok,src=pcall(function() return game:HttpGet({_lua_quote(url)}) end)\n"
+        f"if not (ok and src and #src>100) then\n"
+        f"  ok,src=pcall(function() return game:HttpGet({fb}) end)\n"
+        "end\n"
         "if ok and src then\n"
         "  local f=(loadstring or load)(src)\n"
         "  if f then pcall(f) end\n"

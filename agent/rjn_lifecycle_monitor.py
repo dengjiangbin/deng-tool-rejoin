@@ -126,9 +126,22 @@ INGAME_HB_LOSS_ENABLED = os.environ.get("DENG_REJOIN_DISABLE_INGAME_HB_LOSS", ""
 INGAME_HB_LOSS_LAUNCH_QUIET_SECONDS = float(
     os.environ.get("DENG_REJOIN_INGAME_HB_LOSS_LAUNCH_QUIET_SEC", "30") or "30"
 )
-# Parses the heartbeat payload: DENGRJN_HB|placeId|rootPlaceId|universeId|jobId|alive
+# v1 parser: DENGRJN_HB|placeId|rootPlaceId|universeId|jobId|alive
+# Kept for backward compatibility with devices still running v1 detector.lua.
 _INGAME_HB_RE = re.compile(
     r"DENGRJN_HB\|(\d*)\|(\d*)\|(\d*)\|([^|\s]*)\|([01])"
+)
+# v2 extension: ...alive|session_id|seq|userId (appended to v1 fields)
+_INGAME_HB_V2_RE = re.compile(
+    r"DENGRJN_HB\|(\d*)\|(\d*)\|(\d*)\|([^|\s]*)\|([01])\|([^|\s]+)\|(\d+)\|(\d+)"
+)
+# v2 gamejoin gate: DENGRJN_JOIN|session_id|seq|userId|placeId|rootPlaceId|universeId|jobId
+_INGAME_JOIN_RE = re.compile(
+    r"DENGRJN_JOIN\|([^|\s]+)\|(\d+)\|(\d+)\|(\d*)\|(\d*)\|(\d*)\|([^|\s]*)"
+)
+# v2 start marker: DENGRJN_START|session_id|userId|detector_started_at
+_INGAME_START_RE = re.compile(
+    r"DENGRJN_START\|([^|\s]+)\|(\d+)\|([\d.]+)"
 )
 WRONG_SERVER_ANCHOR_ENABLED = os.environ.get("DENG_REJOIN_WRONG_SERVER_ANCHOR", "1").strip() in {"1", "true", "yes"}
 
@@ -363,6 +376,32 @@ class PackageRjnState:
     # set Online for a newer session.
     launch_generation: int = 0
     online_confirmed_generation: int = -1
+    # --- v2 authority fields (generation-based signal validation) ---
+    # Unique identifier for this launch session; generated on every note_launch_watchdog()
+    # call.  Detector.lua embeds the same value in DENGRJN_HB/JOIN markers so the
+    # monitor can reject signals from a previous/parallel session without relying
+    # solely on timestamps.
+    session_id: str = ""
+    # Most-recently confirmed live PID from _poll_dead_hot_lane / process_check.
+    current_pid: str = ""
+    # Field 22 from /proc/<pid>/stat (start time in clock ticks) read when the PID
+    # is first observed.  Any later signal tagged with the same PID but a different
+    # start time is from a PID-reused process and is rejected.
+    pid_start_time: str = ""
+    # Monotonic time when the process was first seen alive after this launch.
+    process_seen_at: float = 0.0
+    # Monotonic time of the last accepted fresh heartbeat (current generation).
+    last_fresh_hb_at: float = 0.0
+    # Monotonic time of the last accepted DENGRJN_JOIN marker.
+    last_gamejoin_at: float = 0.0
+    # Monotonic time when relaunch was enqueued by the supervisor.
+    relaunch_started_at: float = 0.0
+    # session_id carried by the last accepted DENGRJN_HB / JOIN marker.
+    last_hb_session_id: str = ""
+    # Reason the last incoming signal was rejected; cleared on next accepted signal.
+    last_rejected_signal_reason: str = ""
+    # Human-readable description of the most recent state-change trigger.
+    last_state_change_reason: str = ""
     last_dump_scan_at: float = 0.0
     last_dump_disconnect_epoch: float = 0.0
     # Diagnostic: freshness + sample of EVERY UID-matched logcat line (not just
@@ -623,20 +662,58 @@ class RjnLifecycleMonitor:
         pid: str | None = None,
         uid: str | None = None,
         process_exists: bool | None = None,
+        hb_session_id: str | None = None,
     ) -> bool:
+        """Return True only when this heartbeat is authoritative for the current session.
+
+        Checks (in priority order):
+        1. process_exists — process must be alive (or unknown)
+        2. PID attribution — if PID given, must match current package
+        3. launch_started_at — heartbeat must not predate this launch
+        4. process_gone_at — heartbeat must not have been sent before process died
+        5. freshness — heartbeat wall-clock age must be < ONLINE_HB_FRESH_SECONDS
+        6. session_id — if v2 session_id present, must match current session
+        7. PID start time — if PID given and pid_start_time stored, must match
+        """
         if not self._heartbeat_attribution_ok(pkg, pid=pid, uid=uid):
+            row.last_rejected_signal_reason = f"pid_uid_mismatch pid={pid} uid={uid}"
             return False
         if row.launch_started_at > 0 and seen_at < (row.launch_started_at - 0.5):
+            row.last_rejected_signal_reason = (
+                f"hb_predates_launch seen_at={seen_at:.1f} launch_at={row.launch_started_at:.1f}"
+            )
             return False
         if row.last_process_gone_at > 0 and seen_at <= (row.last_process_gone_at + 0.5):
+            row.last_rejected_signal_reason = (
+                f"hb_after_process_gone gone_at={row.last_process_gone_at:.1f}"
+            )
             return False
-        wall = float(row.last_ingame_hb_wall_at or seen_at or time.time())
-        if (time.time() - wall) > ONLINE_HB_FRESH_SECONDS and seen_at <= row.last_ingame_hb_at:
-            pass
         if (time.time() - seen_at) > ONLINE_HB_FRESH_SECONDS:
+            row.last_rejected_signal_reason = (
+                f"hb_stale age={(time.time()-seen_at):.1f}s limit={ONLINE_HB_FRESH_SECONDS}s"
+            )
             return False
+        # v2: session_id check — reject heartbeats from a previous session.
+        if hb_session_id and row.session_id and hb_session_id != row.session_id:
+            row.last_rejected_signal_reason = (
+                f"session_mismatch hb_sid={hb_session_id} current_sid={row.session_id}"
+            )
+            return False
+        # v2: PID start time check — reject heartbeats from PID-reused processes.
+        pid_s = str(pid or "").strip()
+        if pid_s and row.current_pid and pid_s == row.current_pid and row.pid_start_time:
+            current_start = self._read_pid_start_time(pid_s)
+            if current_start and current_start != row.pid_start_time:
+                row.last_rejected_signal_reason = (
+                    f"pid_reuse_detected pid={pid_s} "
+                    f"stored_start={row.pid_start_time} current_start={current_start}"
+                )
+                return False
         exists = row.process_exists if process_exists is None else process_exists
-        return bool(exists)
+        if not exists:
+            row.last_rejected_signal_reason = "process_not_running"
+            return False
+        return True
 
     def _dead_lane_armed_for(self, row: PackageRjnState) -> bool:
         """Only packages that completed a real launch bind this session."""
@@ -656,31 +733,88 @@ class RjnLifecycleMonitor:
             }
         )
 
+    def _read_pid_start_time(self, pid: str) -> str:
+        """Read /proc/<pid>/stat field 22 (start time) for PID reuse detection.
+
+        Returns the start time as a string, or "" if unavailable.  Called with
+        the lock NOT held.
+        """
+        try:
+            import subprocess as _sp
+
+            res = _sp.run(
+                ["cat", f"/proc/{pid}/stat"],
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+            if res.returncode == 0 and res.stdout:
+                parts = res.stdout.split()
+                if len(parts) >= 22:
+                    return parts[21]
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
     def _poll_dead_hot_lane(self) -> None:
-        """Primary Dead hot lane: scan every package for missing process."""
+        """Primary Dead hot lane: scan every package for missing process.
+
+        Runs every 1-2s; updates current_pid, pid_start_time, process_seen_at,
+        and arms dead lane immediately on first process detection.
+        """
         now = time.time()
         for pkg in list(self.packages):
             exists, pids, _definitive = _unpack_process_check(self._process_check(pkg))
+            new_pid = pids[0] if (pids and exists) else ""
             with self._lock:
                 row = self._states.get(pkg)
-                if row is not None:
-                    row.process_exists = exists
-                    row.pids = list(pids)
-                    row.last_process_check_at = now
-                    if exists and row.watchdog_active and not row.process_seen_since_launch:
+                if row is None:
+                    continue
+                row.process_exists = exists
+                row.pids = list(pids)
+                row.last_process_check_at = now
+                if exists:
+                    if row.watchdog_active and not row.process_seen_since_launch:
                         # Process is alive → arm the dead lane immediately so a
                         # force-close during load is detected within the next 1s
                         # poll without waiting for a full evaluate_package() round.
                         row.process_seen_since_launch = True
-            if exists:
+                        row.process_seen_at = now
+                    # Track current PID; read start time on first discovery
+                    # so PID-reuse bugs can be caught later.
+                    if new_pid and new_pid != row.current_pid:
+                        row.current_pid = new_pid
+                        if row.process_seen_at == 0.0:
+                            row.process_seen_at = now
+                    need_start_time = new_pid and not row.pid_start_time
+                else:
+                    # Process disappeared — clear PID cache immediately so stale
+                    # heartbeats tagged with the old PID are rejected.
+                    if row.current_pid:
+                        row.last_rejected_signal_reason = (
+                            f"process_gone_pid_{row.current_pid}_cleared_at_{now:.1f}"
+                        )
+                    row.current_pid = ""
+                    row.pid_start_time = ""
+                    need_start_time = False
+
+            if not exists:
+                with self._lock:
+                    row = self._states.get(pkg)
+                    if row is None or not self._dead_lane_armed_for(row):
+                        continue
+                    if row.watchdog_active and not row.process_seen_since_launch:
+                        continue
+                self.try_mark_force_close_dead(pkg, at=now)
                 continue
-            with self._lock:
-                row = self._states.get(pkg)
-                if row is None or not self._dead_lane_armed_for(row):
-                    continue
-                if row.watchdog_active and not row.process_seen_since_launch:
-                    continue
-            self.try_mark_force_close_dead(pkg, at=now)
+
+            # Read pid_start_time outside the lock (subprocess may block briefly).
+            if need_start_time:
+                start_time = self._read_pid_start_time(new_pid)
+                with self._lock:
+                    row = self._states.get(pkg)
+                    if row is not None and row.current_pid == new_pid and not row.pid_start_time:
+                        row.pid_start_time = start_time
 
     def stop_session(self) -> None:
         self._stop_event.set()
@@ -962,6 +1096,27 @@ class RjnLifecycleMonitor:
                     if len(self._recent_events) > 128:
                         self._recent_events = self._recent_events[-128:]
                     return
+            # v2: DENGRJN_JOIN — gamejoin gate marker (game context confirmed valid).
+            # This is the primary Online proof for the fast path.
+            if _INGAME_JOIN_RE.search(line):
+                hb_pid = self._pid_for_line(line)
+                self._ingest_logcat_join_marker(
+                    pkg, line, seen_at, pid=hb_pid, uid=effective_uid
+                )
+                join_event = LogcatEvent(
+                    package=pkg,
+                    uid=effective_uid,
+                    phrase="gamejoinloadtime",
+                    raw_line_sanitized=_sanitize_line(line),
+                    seen_at=seen_at,
+                )
+                with self._lock:
+                    row_state = self._states.get(pkg)
+                    join_event.action_taken = row_state.internal_state if row_state else ""
+                self._recent_events.append(join_event)
+                if len(self._recent_events) > 128:
+                    self._recent_events = self._recent_events[-128:]
+                return
             # In-game Lua detector heartbeat — the 24/7 fast path on cloud phones
             # where loopback HTTP to 127.0.0.1 is sandboxed (probe p-b967574a48).
             # Previously these lines were only recorded in recent_uid_lines and
@@ -980,7 +1135,8 @@ class RjnLifecycleMonitor:
                     raw_line_sanitized=_sanitize_line(line),
                     seen_at=seen_at,
                 )
-                hb_event.action_taken = self._states[pkg].internal_state
+                with self._lock:
+                    hb_event.action_taken = (self._states.get(pkg) or PackageRjnState(package=pkg)).internal_state
                 self._recent_events.append(hb_event)
                 if len(self._recent_events) > 128:
                     self._recent_events = self._recent_events[-128:]
@@ -1112,6 +1268,13 @@ class RjnLifecycleMonitor:
         row.process_missing_streak = 0
         row.force_close_detected = False
         row.relaunching = False
+        # v2: record the generation at which Online was confirmed so the stagger
+        # gate can verify this is a fresh current-generation proof immediately,
+        # without needing a separate evaluate_package() call.
+        if row.online_confirmed_generation != row.launch_generation:
+            row.online_confirmed_generation = row.launch_generation
+        row.last_fresh_hb_at = row.last_fresh_hb_at or at
+        row.last_state_change_reason = source
         if source == "gamejoinloadtime":
             row.last_gamejoinloadtime_at = at
             from .status_monitor_runtime import mark_online_confirmed_gamejoin
@@ -1276,6 +1439,8 @@ class RjnLifecycleMonitor:
         at: float | None = None,
         pid: str | None = None,
         uid: str | None = None,
+        session_id: str | None = None,
+        hb_seq: int | None = None,
     ) -> str:
         """Feed an in-game Lua push heartbeat (loopback detection worker).
 
@@ -1285,12 +1450,17 @@ class RjnLifecycleMonitor:
         detection) and, unless that join is the wrong server, confirm online —
         bypassing the slow dumpsys/uiautomator/logcat scrape entirely.
 
+        ``session_id`` (v2) must match the per-package session_id generated at
+        launch time.  Mismatched session_ids indicate a stale signal from a
+        previous session and are rejected.
+
         Returns ``"wrong_server"``, ``"online"`` or ``""``.
         """
         pkg = str(package or "").strip()
         if not pkg:
             return ""
         seen_at = float(at if at is not None else time.time())
+        hb_sid = str(session_id or "").strip()
 
         def _as_id(value: object) -> int:
             try:
@@ -1301,6 +1471,12 @@ class RjnLifecycleMonitor:
 
         with self._lock:
             row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
+            # v2: Reject heartbeats from a previous session.
+            if hb_sid and row.session_id and hb_sid != row.session_id:
+                row.last_rejected_signal_reason = (
+                    f"push_hb_session_mismatch hb_sid={hb_sid} cur_sid={row.session_id}"
+                )
+                return ""
             new_beat = seen_at > (row.last_ingame_hb_at + 0.5) or row.last_ingame_hb_at <= 0
             for attr, val in (
                 ("observed_place_id", place_id),
@@ -1359,6 +1535,10 @@ class RjnLifecycleMonitor:
                     row.last_hb_pid = str(pid).strip()
                 if uid:
                     row.last_hb_uid = str(uid).strip()
+                if hb_sid:
+                    row.last_hb_session_id = hb_sid
+                row.last_fresh_hb_at = time.time()
+                row.last_rejected_signal_reason = ""
             confirm_online = bool(alive)
             hb_seen_at = (
                 float(row.last_ingame_hb_at or row.last_ingame_hb_wall_at or seen_at)
@@ -1375,12 +1555,21 @@ class RjnLifecycleMonitor:
                     row.launch_started_at - 2.0
                 ):
                     confirm_online = False
+                    row.last_rejected_signal_reason = (
+                        f"hb_predates_launch seen={hb_seen_at:.1f} launch={row.launch_started_at:.1f}"
+                    )
                 if confirm_online and row.last_process_gone_at > 0 and hb_seen_at <= (
                     row.last_process_gone_at + 0.5
                 ):
                     confirm_online = False
+                    row.last_rejected_signal_reason = (
+                        f"hb_after_process_gone gone_at={row.last_process_gone_at:.1f}"
+                    )
                 if confirm_online and (time.time() - hb_seen_at) > ONLINE_HB_FRESH_SECONDS:
                     confirm_online = False
+                    row.last_rejected_signal_reason = (
+                        f"hb_stale_wall age={(time.time()-hb_seen_at):.1f}s"
+                    )
         if confirm_online and PRIMARY_HOT_LANE_ONLY:
             exists = False
             with self._lock:
@@ -1463,13 +1652,38 @@ class RjnLifecycleMonitor:
     ) -> str:
         """Parse a logcat ``DENGRJN_HB|...`` line and feed it as a heartbeat.
 
-        This is the clone-safe twin of the loopback HTTP push: the in-game Lua
-        detector ``print``s its heartbeat to logcat, the PID-scoped dump (or the
-        live stream) reads it, and we route it through ``ingest_push_heartbeat``
+        Supports both v1 format (5 fields) and v2 format (8 fields with
+        session_id|seq|userId appended).  Routes through ``ingest_push_heartbeat``
         so online/wrong-server/heartbeat-loss all behave identically regardless
         of which channel delivered the beat.  Returns the monitor verdict.
         """
-        m = _INGAME_HB_RE.search(raw_line or "")
+        raw = raw_line or ""
+        # Try v2 parser first (session_id + seq + userId extension).
+        m2 = _INGAME_HB_V2_RE.search(raw)
+        if m2:
+            place_id     = m2.group(1) or 0
+            root_place_id= m2.group(2) or 0
+            universe_id  = m2.group(3) or 0
+            job_id       = m2.group(4) or ""
+            alive        = (m2.group(5) or "1") == "1"
+            hb_sid       = m2.group(6) or ""
+            hb_seq       = int(m2.group(7) or 0)
+            hb_uid       = m2.group(8) or ""
+            return self.ingest_push_heartbeat(
+                pkg,
+                alive=alive,
+                place_id=place_id,
+                root_place_id=root_place_id,
+                universe_id=universe_id,
+                job_id=job_id,
+                at=at,
+                pid=pid,
+                uid=uid or hb_uid or None,
+                session_id=hb_sid or None,
+                hb_seq=hb_seq or None,
+            )
+        # Fall back to v1 parser (backward compatibility).
+        m = _INGAME_HB_RE.search(raw)
         if not m:
             return ""
         place_id = m.group(1) or 0
@@ -1488,6 +1702,57 @@ class RjnLifecycleMonitor:
             pid=pid,
             uid=uid,
         )
+
+    def _ingest_logcat_join_marker(
+        self,
+        pkg: str,
+        raw_line: str,
+        at: float,
+        *,
+        pid: str | None = None,
+        uid: str | None = None,
+    ) -> bool:
+        """Parse a ``DENGRJN_JOIN|...`` line (v2 gamejoin gate marker).
+
+        The gamejoin marker is emitted by detector.lua only after the game
+        context is valid (LocalPlayer, placeId, jobId).  It is treated as
+        a definitive Online proof — equivalent to gamejoinloadtime but with
+        session_id validation.
+
+        Returns True when the marker was accepted and online was confirmed.
+        """
+        m = _INGAME_JOIN_RE.search(raw_line or "")
+        if not m:
+            return False
+        hb_sid = m.group(1) or ""
+        _seq   = int(m.group(2) or 0)
+        hb_uid = m.group(3) or ""
+        place_id  = m.group(4) or 0
+        root_place_id = m.group(5) or 0
+        universe_id   = m.group(6) or 0
+        job_id        = m.group(7) or ""
+        with self._lock:
+            row = self._states.get(pkg)
+            if row is None:
+                return False
+            # v2 session_id gate.
+            if hb_sid and row.session_id and hb_sid != row.session_id:
+                row.last_rejected_signal_reason = (
+                    f"join_session_mismatch hb_sid={hb_sid} cur_sid={row.session_id}"
+                )
+                return False
+            if row.launch_started_at > 0 and at < (row.launch_started_at - 0.5):
+                row.last_rejected_signal_reason = (
+                    f"join_predates_launch at={at:.1f} launch={row.launch_started_at:.1f}"
+                )
+                return False
+            row.last_gamejoin_at = at
+            row.last_hb_session_id = hb_sid or row.last_hb_session_id
+            row.last_fresh_hb_at = at
+            row.last_rejected_signal_reason = ""
+            row.last_state_change_reason = "gamejoin_marker_accepted"
+            self._confirm_online_evidence(pkg, at, source="gamejoinloadtime")
+        return True
 
     def _has_expected_target(self, row: PackageRjnState) -> bool:
         return bool(
@@ -1914,11 +2179,14 @@ class RjnLifecycleMonitor:
                 # not wipe a heartbeat that arrived during launch (p-5eb24dfd96).
                 return
             if (
-                row.internal_state == STATE_ONLINE_CONFIRMED
+                not relaunch  # A relaunch must always advance the generation counter
+                and row.internal_state == STATE_ONLINE_CONFIRMED
                 and row.online_evidence_source == "push_heartbeat"
                 and row.last_ingame_hb_wall_at > 0
                 and (now - row.last_ingame_hb_wall_at) <= ONLINE_HB_FRESH_SECONDS
             ):
+                # Package is freshly Online with a live heartbeat; just disarm the
+                # watchdog and leave state intact so the in-flight HB is not lost.
                 row.watchdog_active = False
                 row.dead_lane_enabled = True
                 return
@@ -1937,6 +2205,19 @@ class RjnLifecycleMonitor:
             # stagger gate never accepts an Online proof from a previous session.
             row.launch_generation += 1
             row.online_confirmed_generation = -1
+            # v2: generate a unique session_id for this launch so detector.lua
+            # heartbeat/join markers can be validated against the current session.
+            row.session_id = f"g{row.launch_generation}_{int(now * 1000) % 10000000}"
+            row.current_pid = ""
+            row.pid_start_time = ""
+            row.process_seen_at = 0.0
+            row.last_fresh_hb_at = 0.0
+            row.last_gamejoin_at = 0.0
+            row.last_hb_session_id = ""
+            row.last_rejected_signal_reason = ""
+            if relaunch:
+                row.relaunch_started_at = now
+            row.last_state_change_reason = "relaunch_watchdog_started" if relaunch else "launch_watchdog_started"
             # Fresh session: re-anchor Wrong-Server detection and let a new
             # post-launch disconnect be acted on again.
             row.observed_place_id = 0
@@ -2089,6 +2370,11 @@ class RjnLifecycleMonitor:
                 return False
             row.force_close_detected = True
             row.process_missing_streak = PROCESS_MISSING_CONFIRM
+            row.last_state_change_reason = "process_missing_force_close"
+            # Clear the PID cache immediately so no stale heartbeat can
+            # revive this package after the process disappears.
+            row.current_pid = ""
+            row.pid_start_time = ""
             self._clear_online_evidence(pkg, at=now)
             self._transition(
                 pkg,
@@ -2450,6 +2736,9 @@ class RjnLifecycleMonitor:
             # validation and probe visibility.
             if is_online and row.online_confirmed_generation != row.launch_generation:
                 row.online_confirmed_generation = row.launch_generation
+            if is_online:
+                row.last_fresh_hb_at = row.last_fresh_hb_at or now
+                row.last_state_change_reason = row.online_evidence_source or "push_heartbeat"
             detail = {
                 "internal_state": internal,
                 "online_confirmed": str(is_online).lower(),
@@ -2463,6 +2752,17 @@ class RjnLifecycleMonitor:
                 "launch_watchdog_active": str(row.watchdog_active).lower(),
                 "launch_generation": row.launch_generation,
                 "online_confirmed_generation": row.online_confirmed_generation,
+                # v2 authority fields
+                "session_id": row.session_id or "",
+                "current_pid": row.current_pid or "",
+                "pid_start_time": row.pid_start_time or "",
+                "process_seen_at": row.process_seen_at or "",
+                "last_fresh_hb_at": row.last_fresh_hb_at or "",
+                "last_gamejoin_at": row.last_gamejoin_at or "",
+                "relaunch_started_at": row.relaunch_started_at or "",
+                "last_hb_session_id": row.last_hb_session_id or "",
+                "last_rejected_signal_reason": row.last_rejected_signal_reason or "",
+                "last_state_change_reason": row.last_state_change_reason or "",
                 "launch_watchdog_age_seconds": round(
                     max(0.0, now - row.launch_started_at) if row.launch_started_at else 0.0,
                     1,

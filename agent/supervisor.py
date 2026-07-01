@@ -177,6 +177,7 @@ STATUS_LOBBY             = "Lobby"             # App open at home/lobby, no URL 
 STATUS_IN_SERVER         = "In Server"         # Strong evidence: game experience loaded
 STATUS_CLOSED            = "Closed"            # App cleanly not running after a session
 STATUS_JOIN_UNCONFIRMED  = "Join " + "Unconfirmed"  # App healthy but no in-game evidence yet
+STATUS_JOINING           = "Joining"               # Legacy alias kept for backward compatibility
 # State vocabulary aligned to user-facing terminology:
 STATUS_LAUNCHED          = "Launched"
 STATUS_DISCONNECTED      = "Disconnected"
