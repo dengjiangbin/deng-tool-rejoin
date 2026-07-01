@@ -1768,10 +1768,10 @@ class WatchdogSupervisor:
                 else:
                     cur = str(self.status_map.get(pkg) or "").strip()
                     if cur in {STATUS_ONLINE, STATUS_RELAUNCHING}:
-                        if cur == STATUS_RELAUNCHING and not self._all_launches_completed:
-                            state = STATUS_LAUNCHING
-                        else:
-                            state = cur
+                        # Keep STATUS_RELAUNCHING as-is — recovery relaunch must
+                        # display Relaunching, not be overridden to Launching during
+                        # the stagger phase (probe p-1a7fcce102 problem #2).
+                        state = cur
                     elif cur == STATUS_FAILED:
                         state = STATUS_JOIN_FAILED
                     else:
@@ -3406,12 +3406,16 @@ class WatchdogSupervisor:
                 else:
                     reason = "relaunch_loading_grace"
             else:
-                # Post-grace: do not pin Relaunching forever (probe p-cd09ac0ce3).
-                self._relaunch_inflight.discard(pkg)
+                # Post-grace: clear the verify window but keep showing Relaunching
+                # until the package is confirmed online, dead, or failed.
+                # Reverting to Launching here (old behaviour) caused the "overloop"
+                # bug where recovery relaunches displayed as Launching and blocked
+                # the stagger gate (probe p-1a7fcce102 problem #2/#5).
                 self._relaunch_verify_until.pop(pkg, None)
                 if ev.is_online_confirmed:
                     state = STATUS_ONLINE
                     reason = "push_heartbeat_confirmed"
+                    self._relaunch_inflight.discard(pkg)
                 elif not ev.process_exists:
                     state = STATUS_DEAD
                     reason = str(
@@ -3419,6 +3423,7 @@ class WatchdogSupervisor:
                         or detail.get("dead_reason")
                         or "process_missing"
                     )
+                    self._relaunch_inflight.discard(pkg)
                 elif (
                     detail.get("launch_failed_reason")
                     in {"launch_watchdog_timeout", "no_online_confirmation"}
@@ -3430,8 +3435,9 @@ class WatchdogSupervisor:
                         or detail.get("launch_failed_reason")
                         or reason
                     )
+                    self._relaunch_inflight.discard(pkg)
                 else:
-                    state = STATUS_LAUNCHING
+                    state = STATUS_RELAUNCHING
                     reason = "relaunch_post_grace_pending_confirmation"
         elif current in {
             STATUS_LAUNCHING,
@@ -3470,8 +3476,17 @@ class WatchdogSupervisor:
             else:
                 state = STATUS_DEAD
                 reason = str(detail.get("reason_internal") or "online_proof_lost")
-        elif current in {STATUS_NO_HEARTBEAT} and ev.is_online_confirmed:
-            state = STATUS_ONLINE
+        elif current in {STATUS_NO_HEARTBEAT}:
+            if ev.is_online_confirmed:
+                state = STATUS_ONLINE
+            elif not ev.process_exists:
+                # Process confirmed gone while in No-Heartbeat → force-close/crash.
+                state = STATUS_DEAD
+                reason = str(
+                    detail.get("reason_internal")
+                    or detail.get("dead_reason")
+                    or "process_missing"
+                )
         elif current in {STATUS_DEAD, STATUS_DISCONNECTED, STATUS_JOIN_FAILED, STATUS_FAILED}:
             state = current
         else:
@@ -4100,15 +4115,19 @@ class WatchdogSupervisor:
         if not self._all_launches_completed and state in (
             _RECOVERY_TRIGGER_STATES | {STATUS_NO_HEARTBEAT}
         ):
-            log_event(
-                logger,
-                "debug",
-                "[DENG_REJOIN_STAGGER_RECOVERY_DEFERRED]",
-                package=pkg,
-                state=state,
-                action="wait_for_all_launches_completed",
-            )
-            return False
+            # Never defer a confirmed Dead package — it needs to relaunch immediately
+            # regardless of stagger phase (probe: 24-min delay when dead during stagger).
+            # Only defer No-Heartbeat packages that were never online in this session.
+            if state != STATUS_DEAD:
+                log_event(
+                    logger,
+                    "debug",
+                    "[DENG_REJOIN_STAGGER_RECOVERY_DEFERRED]",
+                    package=pkg,
+                    state=state,
+                    action="wait_for_all_launches_completed",
+                )
+                return False
         url_context = private_url_launch_context(entry, self.cfg)
         url_configured = url_context.get("url_mode") == "private_url"
 

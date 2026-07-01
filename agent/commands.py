@@ -6479,6 +6479,38 @@ def cmd_start(args: argparse.Namespace) -> int:
             if launched_pkg not in _supervisor._package_opened:
                 _supervisor.mark_package_launched(launched_pkg)
 
+        # Online-gated stagger: wait for each package to confirm Online before
+        # launching the next one.  Prevents all clones from fighting for RAM/CPU
+        # while loading simultaneously (probe p-1a7fcce102 problem #1 — 3-4 min
+        # gaps caused by resource contention, not deliberate timer).
+        # Timeout: 300 s per package — if it never goes Online we proceed anyway.
+        _ONLINE_GATE_TIMEOUT_S = 300.0
+
+        def _wait_for_package_online(pkg: str, idx: int, total: int) -> None:
+            import time as _t
+            deadline = _t.monotonic() + _ONLINE_GATE_TIMEOUT_S
+            _start_log.info(
+                "[DENG_REJOIN_STAGGER_ONLINE_GATE] package=%s index=%d/%d"
+                " waiting_for=Online timeout_sec=%.0f",
+                pkg, idx, total, _ONLINE_GATE_TIMEOUT_S,
+            )
+            while _t.monotonic() < deadline:
+                current_st = _supervisor.status_map.get(pkg, "")
+                if current_st == _STATUS_ONLINE:
+                    _start_log.info(
+                        "[DENG_REJOIN_STAGGER_ONLINE_GATE_DONE] package=%s index=%d/%d state=Online",
+                        pkg, idx, total,
+                    )
+                    return
+                _render_phase_throttled()
+                _t.sleep(0.5)
+            _start_log.warning(
+                "[DENG_REJOIN_STAGGER_ONLINE_GATE_TIMEOUT] package=%s index=%d/%d"
+                " timeout_sec=%.0f last_state=%s",
+                pkg, idx, total, _ONLINE_GATE_TIMEOUT_S,
+                _supervisor.status_map.get(pkg, "unknown"),
+            )
+
         try:
             for index, entry in enumerate(entries, start=1):
                 package = entry["package"]
@@ -6521,6 +6553,12 @@ def cmd_start(args: argparse.Namespace) -> int:
                     "private_url" if _has_url else "app_only",
                     str(_supervisor.watchdog_thread_alive()).lower(),
                 )
+
+                # Online-gated stagger: after am start, wait for this clone to
+                # reach Online before launching the next one.  Skip the wait for
+                # the last package (nothing left to gate).
+                if index < len(entries):
+                    _wait_for_package_online(package, index, len(entries))
         finally:
             if not getattr(_supervisor, "_all_launches_completed", False):
                 _supervisor.mark_all_launches_completed()
