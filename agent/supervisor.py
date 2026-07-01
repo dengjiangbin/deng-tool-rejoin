@@ -1737,16 +1737,40 @@ class WatchdogSupervisor:
             return [pkg for pkg in self.packages if pkg in self._package_opened]
 
     def sync_stagger_display_status(self) -> None:
-        """Refresh opened clones from hot-lane while Start still launches the rest."""
+        """Refresh opened clones from the hot lane only while Start staggers the rest.
+
+        Must never call the slow ``_detect_android_package_state`` / presence /
+        dumpsys scrape on the Start main thread — that blocked stagger after clone
+        1 (probe p-414b08a38d) and prevented clones 2–6 from ever opening.
+        """
+        from .rjn_lifecycle_monitor import STATE_ONLINE_CONFIRMED
+
         for pkg in self._opened_packages():
             try:
-                state, detail = self._detect_android_package_state(pkg)
+                self._sync_logcat_hb_push_channel(pkg)
+                try:
+                    self._rjn_monitor.retry_confirm_pending_heartbeat(pkg)
+                except Exception:  # noqa: BLE001
+                    pass
+                row = self._rjn_monitor._states.get(pkg)
+                if (
+                    row is not None
+                    and row.internal_state == STATE_ONLINE_CONFIRMED
+                    and self._push_fresh(pkg)
+                ):
+                    state = STATUS_ONLINE
+                else:
+                    cur = str(self.status_map.get(pkg) or "").strip()
+                    if cur in {STATUS_ONLINE, STATUS_RELAUNCHING}:
+                        state = cur
+                    elif cur == STATUS_FAILED:
+                        state = STATUS_JOIN_FAILED
+                    else:
+                        state = STATUS_LAUNCHING
+                self._set_status(pkg, state)
+                self._prev_state[pkg] = state
             except Exception:  # noqa: BLE001
                 continue
-            if state == STATUS_FAILED:
-                state = STATUS_JOIN_FAILED
-            self._set_status(pkg, state)
-            self._prev_state[pkg] = state
 
     def _detection_worker_count(self) -> int:
         sup = self.cfg.get("supervisor")
@@ -4059,6 +4083,18 @@ class WatchdogSupervisor:
         "Launching" gate.
         """
         logger = self._logger
+        if not self._all_launches_completed and state in (
+            _RECOVERY_TRIGGER_STATES | {STATUS_NO_HEARTBEAT}
+        ):
+            log_event(
+                logger,
+                "debug",
+                "[DENG_REJOIN_STAGGER_RECOVERY_DEFERRED]",
+                package=pkg,
+                state=state,
+                action="wait_for_all_launches_completed",
+            )
+            return False
         url_context = private_url_launch_context(entry, self.cfg)
         url_configured = url_context.get("url_mode") == "private_url"
 

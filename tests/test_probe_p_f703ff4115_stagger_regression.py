@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -84,20 +85,40 @@ class TestStartStaggerFastLaunch(unittest.TestCase):
 
     def test_supervisor_sync_stagger_display_status(self) -> None:
         from agent.supervisor import STATUS_ONLINE, WatchdogSupervisor
+        from agent.rjn_lifecycle_monitor import STATE_ONLINE_CONFIRMED, PackageRjnState
 
         sup = WatchdogSupervisor(
             [{"package": "com.moons.litesc"}, {"package": "com.moons.litesd"}],
             {"roblox_packages": [{"package": "com.moons.litesc"}, {"package": "com.moons.litesd"}]},
         )
         sup._package_opened.add("com.moons.litesc")
-        with patch.object(
+        row = PackageRjnState(package="com.moons.litesc")
+        row.internal_state = STATE_ONLINE_CONFIRMED
+        row.last_ingame_hb_wall_at = time.time()
+        row.ingame_hb_ever = True
+        sup._rjn_monitor._states["com.moons.litesc"] = row
+        with patch.object(sup, "_push_fresh", return_value=True), patch.object(
             sup,
             "_detect_android_package_state",
-            return_value=(STATUS_ONLINE, {"process_running": "true"}),
-        ) as detect:
+            side_effect=AssertionError("slow detect must not run during stagger sync"),
+        ):
             sup.sync_stagger_display_status()
-        detect.assert_called_once_with("com.moons.litesc")
         self.assertEqual(sup.status_map.get("com.moons.litesc"), STATUS_ONLINE)
+
+    def test_stagger_recovery_deferred_until_all_launches_completed(self) -> None:
+        from agent.supervisor import STATUS_DEAD, WatchdogSupervisor
+
+        sup = WatchdogSupervisor([{"package": "com.moons.litesc"}], {})
+        sup._all_launches_completed = False
+        with patch.object(sup, "_do_launch") as launch:
+            sup._handle_state(
+                "com.moons.litesc",
+                {"package": "com.moons.litesc"},
+                STATUS_DEAD,
+                "Online",
+                time.time(),
+            )
+        launch.assert_not_called()
 
 
 if __name__ == "__main__":

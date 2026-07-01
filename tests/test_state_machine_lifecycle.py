@@ -127,6 +127,7 @@ class LaunchingDeadTests(unittest.TestCase):
     def test_launching_dead_triggers_relaunch_handle_state(self) -> None:
         entry = {"package": "com.pkg.e", "account_username": "user1"}
         sup = WatchdogSupervisor([entry], {"roblox_packages": [entry]})
+        sup._all_launches_completed = True
         with patch.object(sup, "_reserve_recovery_launch_attempt", return_value=True), \
              patch.object(sup, "_do_launch", return_value=True) as launch, \
              patch("agent.cache_clear_phases.run_recovery_cache_clear", return_value={"success": True}), \
@@ -165,6 +166,7 @@ class WatchdogFailedTests(unittest.TestCase):
     def test_join_failed_recovery_path(self) -> None:
         entry = {"package": "com.pkg.g", "account_username": "user1"}
         sup = WatchdogSupervisor([entry], {"roblox_packages": [entry]})
+        sup._all_launches_completed = True
         with patch.object(sup, "_reserve_recovery_launch_attempt", return_value=True), \
              patch.object(sup, "_do_launch", return_value=True), \
              patch("agent.cache_clear_phases.run_recovery_cache_clear", return_value={"success": True}), \

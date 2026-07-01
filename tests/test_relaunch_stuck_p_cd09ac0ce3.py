@@ -109,6 +109,7 @@ class RelaunchStuckRegressionTests(unittest.TestCase):
 
     def test_handle_state_failed_launch_sets_failed(self) -> None:
         sup = WatchdogSupervisor([_entry()], _cfg())
+        sup._all_launches_completed = True
         with patch.object(sup, "_reserve_recovery_launch_attempt", return_value=True), patch.object(
             sup, "run_recovery_cache_clear", create=True
         ), patch(

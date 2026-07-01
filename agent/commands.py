@@ -939,6 +939,50 @@ def _run_start_batch_cache_clear(
     return run_start_mass_cache_clear(packages, root_info=root_info)
 
 
+def _fast_force_stop_selected_packages(
+    packages: list[str],
+    root_info: android.RootInfo,
+    *,
+    logger: Any = None,
+) -> None:
+    """Force-stop only the selected clones once with a single settle window.
+
+    The old per-package PID verify loop (0.3s + 0.8s + 0.3s × N) made Preparing
+    feel stuck on multi-clone Start.  One batch stop + one quick retry pass is
+    enough before cache clear.
+    """
+    import time as _t
+
+    log = logger
+    for pkg in packages:
+        try:
+            android.force_stop_package(pkg, root_info)
+        except Exception as exc:  # noqa: BLE001
+            if log is not None:
+                log.debug("fast force-stop error package=%s err=%s", pkg, exc)
+    _t.sleep(0.2)
+    survivors: list[str] = []
+    for pkg in packages:
+        try:
+            if android.get_package_pid(pkg, root_info):
+                survivors.append(pkg)
+        except Exception:  # noqa: BLE001
+            pass
+    if survivors:
+        for pkg in survivors:
+            try:
+                android.force_stop_package(pkg, root_info)
+            except Exception:  # noqa: BLE001
+                pass
+        _t.sleep(0.15)
+    if log is not None:
+        log.info(
+            "[DENG_REJOIN_PREPARE_FAST] packages=%d survivors_after_retry=%d",
+            len(packages),
+            len(survivors),
+        )
+
+
 def _remote_license_isolated(
     cfg: dict[str, Any],
     *,
@@ -6232,96 +6276,45 @@ def cmd_start(args: argparse.Namespace) -> int:
             for pkg in phase:
                 phase[pkg] = label
 
-        # 1) "Preparing" — force-stop each configured package individually,
-        #    verify it is dead, and clear background apps to free RAM.
-        #    Only configured/selected packages are targeted; Termux and
-        #    system apps are never touched.
+        # 1) Preparing — quick stop of selected clones only (Termux protected).
         _transition_lifecycle("PREPARING", "prepare_packages")
         _start_session.mark("package_preparation_begin", package_count=len(entries))
-        _set_all_phase("Preparing", "Stopping configured packages...")
         packages_sl = [e["package"] for e in entries]
-        keep_alive  = ["com.termux"] + packages_sl
+        keep_alive = ["com.termux"] + packages_sl
+        _prep_root = android.detect_root()
 
-        # 1a) Do not run a global background kill during normal Start.
-        # Probe p-52aeb6420f showed post-launch visual disruption; keep Start
-        # bounded to selected package prep only.
-        _start_log.info(
-            "[DENG_REJOIN_START_SAFETY] action=skip_global_kill "
-            "reason=normal_start_must_not_close_all_apps keep_alive=%s",
-            ",".join(keep_alive),
-        )
-
-        # Cloud Phone Extreme memory behavior is the default and only memory
-        # preparation path for this tool. It is automatic, never selectable,
-        # and keeps Termux/Roblox/core Android packages protected.
+        _set_all_phase("Preparing", "Stopping selected packages...")
         try:
             _cloud_mem = android.optimize_cloud_phone_memory(keep_alive)
-            _start_log.info(
-                "[DENG_REJOIN_CLOUD_PHONE_MEMORY] disabled=%s stopped=%s skipped=%s"
-                " failed=%s recovery=%s cooldown_skipped=%s uninstall_used=false",
-                ",".join(str(p) for p in _cloud_mem.get("disabled") or []) or "none",
-                ",".join(str(p) for p in _cloud_mem.get("stopped") or []) or "none",
-                json.dumps(_cloud_mem.get("skipped") or [], separators=(",", ":")),
-                json.dumps(_cloud_mem.get("failed") or [], separators=(",", ":")),
-                _cloud_mem.get("recovery_command", "pm enable com.google.android.gms"),
-                str(_cloud_mem.get("cooldown_skipped", False)).lower(),
-            )
             if not _cloud_mem.get("cooldown_skipped"):
+                _start_log.info(
+                    "[DENG_REJOIN_CLOUD_PHONE_MEMORY] disabled=%s stopped=%s skipped=%s"
+                    " failed=%s recovery=%s cooldown_skipped=%s uninstall_used=false",
+                    ",".join(str(p) for p in _cloud_mem.get("disabled") or []) or "none",
+                    ",".join(str(p) for p in _cloud_mem.get("stopped") or []) or "none",
+                    json.dumps(_cloud_mem.get("skipped") or [], separators=(",", ":")),
+                    json.dumps(_cloud_mem.get("failed") or [], separators=(",", ":")),
+                    _cloud_mem.get("recovery_command", "pm enable com.google.android.gms"),
+                    str(_cloud_mem.get("cooldown_skipped", False)).lower(),
+                )
                 _start_log.info("[*] Recovery: %s", _cloud_mem.get("recovery_command"))
+            else:
+                _start_log.info(
+                    "[DENG_REJOIN_CLOUD_PHONE_MEMORY] cooldown_skipped=true action=skip_heavy_scan",
+                )
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("cloud phone memory optimization error (non-fatal): %s", _exc)
 
-        # 1b) Also force-stop any OTHER detected Roblox packages not in our list.
-        try:
-            android.force_stop_packages_except(packages_sl, cfg.get("package_detection_hints"))
-        except Exception:  # noqa: BLE001
-            _start_log.debug("start: force_stop_packages_except error (non-fatal)")
+        _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
 
-        # 1c) Force-stop each CONFIGURED package individually with PID verification.
-        #     Termux (com.termux) and system apps are excluded by design.
-        import logging as _logging
-        _prep_root = android.detect_root()
-        for _prep_entry in entries:
-            _prep_pkg = _prep_entry["package"]
-            _pid_before = ""
-            _pid_after  = ""
-            _stop_ok    = False
-            _stop_err   = ""
-            try:
-                _pid_before = android.get_package_pid(_prep_pkg, _prep_root)
-                _stop_res   = android.force_stop_package(_prep_pkg, _prep_root)
-                _stop_ok    = bool(_stop_res.ok)
-                if not _stop_ok:
-                    _stop_err = (_stop_res.stderr or "")[:80]
-                # Verify process is dead; retry once if still alive.
-                import time as _t
-                _t.sleep(0.3)
-                _pid_after = android.get_package_pid(_prep_pkg, _prep_root)
-                if _pid_after:
-                    _t.sleep(0.8)
-                    android.force_stop_package(_prep_pkg, _prep_root)
-                    _t.sleep(0.3)
-                    _pid_after = android.get_package_pid(_prep_pkg, _prep_root)
-                _stop_ok = not bool(_pid_after)
-            except Exception as _exc:  # noqa: BLE001
-                _stop_err = str(_exc)[:80]
-            _start_log.info(
-                "[DENG_REJOIN_PREPARE_PACKAGE] package=%s force_stop_attempt=1"
-                " pid_before=%s pid_after=%s success=%s error=%s",
-                _prep_pkg, _pid_before or "none", _pid_after or "none",
-                str(_stop_ok).lower(), _stop_err,
-            )
-
-        # ── PHASE 1 (continued): batch Clear Cache — all packages, no delays ───
+        # 2) Clear Cache — visible phase BEFORE root cache shells (segfault-safe).
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         prep_gfx: dict[str, str] = {}
         prep_cache: dict[str, str] = {}
         package_names = [entry["package"] for entry in entries]
+        _set_all_phase("Clear Cache")
         _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
         safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
-        # Label silently before the mass clear (avoid render during root shells —
-        # Termux/Python 3.13 SIGSEGV risk), then redraw as soon as it finishes.
-        _set_all_phase_labels("Clear Cache")
         try:
             prep_cache = _run_start_batch_cache_clear(
                 package_names,
@@ -6330,7 +6323,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("start: batch cache clear error: %s", _exc)
             prep_cache = {pkg: "Failed" for pkg in package_names}
-        _set_all_phase("Preparing", "Applying settings...")
+        _start_session.mark("batch_clear_cache_done", package_count=len(entries))
         _start_session.mark("batch_low_graphics_begin", package_count=len(entries))
         for entry in entries:
             package = entry["package"]
@@ -6343,11 +6336,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                 )
             except Exception:  # noqa: BLE001
                 prep_gfx[package] = "error"
-        _start_session.mark("batch_clear_cache_done", package_count=len(entries))
         _start_session.mark("package_preparation_done", package_count=len(entries))
 
-        # 2) Compute window layout silently (no public phase change).
-        _set_all_phase("Preparing", "Computing layout...")
+        # 3) Silent post-cache setup (layout / Termux dock — no Preparing flash).
         try:
             _start_session.mark("layout_begin")
             cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
@@ -6455,12 +6446,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
 
         def _on_stagger_launch_sent(launched_pkg: str) -> None:
+            # Mark opened only — never run detection here; perform_rejoin calls
+            # this synchronously right after am start and must return immediately
+            # so clones 2–6 are not blocked behind slow scrape/lock contention.
             if launched_pkg not in _supervisor._package_opened:
                 _supervisor.mark_package_launched(launched_pkg)
-            try:
-                _supervisor.sync_stagger_display_status()
-            except Exception:  # noqa: BLE001
-                pass
 
         try:
             for index, entry in enumerate(entries, start=1):
@@ -6516,6 +6506,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
         _start_session.mark("all_launches_completed", package_count=len(entries))
+        _transition_lifecycle("MONITORING", "all_launch_commands_sent")
 
         # 6) Grace wait before verifying layout — keep packages shown as
         #    "Launching" (no "Waiting" label shown in public UI).
@@ -6840,7 +6831,6 @@ def cmd_start(args: argparse.Namespace) -> int:
             _clear_terminal(clear_scrollback=False)
             safe_io.write_stdout_block("\n".join(lines) + "\n")
 
-        _transition_lifecycle("MONITORING", "launch_complete")
         try:
             from .logger import configure_logging, log_event
             log_event(

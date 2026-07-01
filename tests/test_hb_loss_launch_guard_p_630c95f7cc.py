@@ -51,9 +51,11 @@ def _monitor(pkg: str, uid: str = "10104") -> RjnLifecycleMonitor:
 
 
 def _online(mon: RjnLifecycleMonitor, pkg: str) -> None:
-    mon.ingest_push_heartbeat(
-        pkg, alive=True, place_id=121864768012064, universe_id=6701277882, at=time.time()
-    )
+    mon._states[pkg].process_exists = True
+    with patch.object(mon, "_process_check", return_value=(True, ["3721"], False)):
+        mon.ingest_push_heartbeat(
+            pkg, alive=True, place_id=121864768012064, universe_id=6701277882, at=time.time()
+        )
     assert mon._states[pkg].internal_state == STATE_ONLINE_CONFIRMED
 
 
@@ -87,9 +89,12 @@ class HeartbeatLossLaunchGuardTests(unittest.TestCase):
         self.assertEqual(ev.internal_state, STATE_ONLINE_CONFIRMED)
         self.assertTrue(ev.is_online_confirmed)
 
-    def test_after_launch_quiet_real_heartbeat_loss_still_fires(self) -> None:
-        # Once the launch storm has fully settled, a genuine heartbeat silence
-        # (real kick / GL error / captcha) still demotes — detection preserved.
+    def test_after_launch_quiet_heartbeat_silence_stays_online_in_hot_lane(self) -> None:
+        # Primary hot lane: heartbeat-loss is not a Dead signal — only process
+        # missing is. Silence after launch storm must not demote Online clones.
+        from agent.rjn_lifecycle_monitor import PRIMARY_HOT_LANE_ONLY
+
+        self.assertTrue(PRIMARY_HOT_LANE_ONLY)
         pkg = "com.pkg.guard2"
         mon = _monitor(pkg)
         _online(mon, pkg)
@@ -97,8 +102,8 @@ class HeartbeatLossLaunchGuardTests(unittest.TestCase):
         mon._last_any_launch_at = time.time() - (INGAME_HB_LOSS_LAUNCH_QUIET_SECONDS + 5)
         _silence(mon, pkg)
         ev = _evaluate(mon, pkg)
-        self.assertEqual(ev.internal_state, STATE_DISCONNECTED)
-        self.assertEqual(mon._states[pkg].last_transition_reason, "heartbeat_lost")
+        self.assertEqual(ev.internal_state, STATE_ONLINE_CONFIRMED)
+        self.assertTrue(ev.is_online_confirmed)
 
     def test_recent_join_loading_suppresses_false_heartbeat_loss(self) -> None:
         # Right after a join/teleport the heartbeat legitimately pauses during the

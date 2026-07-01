@@ -27,15 +27,15 @@ from agent import lockfile
 class TestStartBatchCacheClear(unittest.TestCase):
     def test_start_runs_cache_clear_before_ui_labels(self) -> None:
         src = inspect.getsource(commands.cmd_start)
+        visible_idx = src.find('_set_all_phase("Clear Cache")')
         batch_idx = src.find("batch_clear_cache_begin")
         done_idx = src.find("batch_clear_cache_done", batch_idx)
         block = src[batch_idx:done_idx]
         clear_idx = block.find("_run_start_batch_cache_clear")
-        label_idx = block.find('_set_all_phase_labels("Clear Cache")')
+        self.assertGreater(visible_idx, -1)
+        self.assertLess(visible_idx, batch_idx)
         self.assertGreater(clear_idx, -1)
-        self.assertGreater(label_idx, -1)
-        self.assertLess(label_idx, clear_idx)
-        self.assertIn('_set_all_phase("Preparing"', block)
+        self.assertNotIn('_set_all_phase("Preparing"', block)
 
     def test_start_uses_fast_batch_cache_clear_not_verified(self) -> None:
         src = inspect.getsource(commands.cmd_start)
