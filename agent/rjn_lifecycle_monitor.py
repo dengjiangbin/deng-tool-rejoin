@@ -357,6 +357,12 @@ class PackageRjnState:
     # even though watchdog_active is still True.
     process_seen_since_launch: bool = False
     dead_lane_enabled: bool = False
+    # Authority-layer generation counter: incremented on every note_launch_watchdog()
+    # call (both first launch and every relaunch).  Every Online confirmation records
+    # the generation at which it was proved so stale pre-launch heartbeats can never
+    # set Online for a newer session.
+    launch_generation: int = 0
+    online_confirmed_generation: int = -1
     last_dump_scan_at: float = 0.0
     last_dump_disconnect_epoch: float = 0.0
     # Diagnostic: freshness + sample of EVERY UID-matched logcat line (not just
@@ -661,6 +667,11 @@ class RjnLifecycleMonitor:
                     row.process_exists = exists
                     row.pids = list(pids)
                     row.last_process_check_at = now
+                    if exists and row.watchdog_active and not row.process_seen_since_launch:
+                        # Process is alive → arm the dead lane immediately so a
+                        # force-close during load is detected within the next 1s
+                        # poll without waiting for a full evaluate_package() round.
+                        row.process_seen_since_launch = True
             if exists:
                 continue
             with self._lock:
@@ -1920,6 +1931,12 @@ class RjnLifecycleMonitor:
             row.watchdog_active = True
             row.launch_failed_reason = ""
             row.relaunching = bool(relaunch)
+            # Advance the generation counter so any heartbeat/gamejoin confirmed
+            # under this generation is unambiguously from the current session.
+            # online_confirmed_generation is reset to -1 (unconfirmed) so the
+            # stagger gate never accepts an Online proof from a previous session.
+            row.launch_generation += 1
+            row.online_confirmed_generation = -1
             # Fresh session: re-anchor Wrong-Server detection and let a new
             # post-launch disconnect be acted on again.
             row.observed_place_id = 0
@@ -1958,6 +1975,27 @@ class RjnLifecycleMonitor:
     def begin_launch_watchdog(self, package: str, *, relaunch: bool = False) -> None:
         """Backward-compatible alias — detection only."""
         self.note_launch_watchdog(package, relaunch=relaunch)
+
+    def get_launch_generation(self, package: str) -> int:
+        """Return the current launch generation counter for this package.
+
+        Starts at 0 before first launch; incremented by every
+        ``note_launch_watchdog()`` call (first launch and every relaunch).
+        """
+        with self._lock:
+            row = self._states.get(str(package or "").strip())
+            return row.launch_generation if row is not None else 0
+
+    def get_online_generation(self, package: str) -> int:
+        """Return the generation at which Online was last confirmed for this package.
+
+        -1 means not yet confirmed in the current session.  Matches
+        ``get_launch_generation()`` only when a fresh current-session
+        heartbeat/gamejoin has arrived.
+        """
+        with self._lock:
+            row = self._states.get(str(package or "").strip())
+            return row.online_confirmed_generation if row is not None else -1
 
     def _authoritative_package_pids(self, package: str) -> list[str]:
         """Return PIDs provably owned by this clone package (cmdline scan + pidof).
@@ -2408,6 +2446,10 @@ class RjnLifecycleMonitor:
                     row.disconnect_prompt_text or None,
                 )
 
+            # Record generation at which Online was proved for stagger-gate
+            # validation and probe visibility.
+            if is_online and row.online_confirmed_generation != row.launch_generation:
+                row.online_confirmed_generation = row.launch_generation
             detail = {
                 "internal_state": internal,
                 "online_confirmed": str(is_online).lower(),
@@ -2419,6 +2461,8 @@ class RjnLifecycleMonitor:
                 "reason": reason,
                 "dead_reason": row.last_transition_reason if not is_online else "",
                 "launch_watchdog_active": str(row.watchdog_active).lower(),
+                "launch_generation": row.launch_generation,
+                "online_confirmed_generation": row.online_confirmed_generation,
                 "launch_watchdog_age_seconds": round(
                     max(0.0, now - row.launch_started_at) if row.launch_started_at else 0.0,
                     1,

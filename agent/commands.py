@@ -6487,28 +6487,50 @@ def cmd_start(args: argparse.Namespace) -> int:
         _ONLINE_GATE_TIMEOUT_S = 300.0
 
         def _wait_for_package_online(pkg: str, idx: int, total: int) -> None:
+            """Block until pkg has current-generation Online proof or timeout."""
             import time as _t
+            # Read the generation counter immediately after launch.  The stagger
+            # must only unblock on Online that was confirmed for THIS launch
+            # generation — not a stale Online from a previous session that somehow
+            # persisted in status_map.
+            _rjn = getattr(_supervisor, "_rjn_monitor", None)
+            expected_gen = _rjn.get_launch_generation(pkg) if _rjn else 0
             deadline = _t.monotonic() + _ONLINE_GATE_TIMEOUT_S
             _start_log.info(
                 "[DENG_REJOIN_STAGGER_ONLINE_GATE] package=%s index=%d/%d"
-                " waiting_for=Online timeout_sec=%.0f",
-                pkg, idx, total, _ONLINE_GATE_TIMEOUT_S,
+                " waiting_for=Online generation=%d timeout_sec=%.0f",
+                pkg, idx, total, expected_gen, _ONLINE_GATE_TIMEOUT_S,
             )
             while _t.monotonic() < deadline:
                 current_st = _supervisor.status_map.get(pkg, "")
+                # For current-generation proof: check Online confirmed in the same
+                # generation as this launch.  If no lifecycle monitor is available
+                # fall back to status_map alone (same as before).
                 if current_st == _STATUS_ONLINE:
-                    _start_log.info(
-                        "[DENG_REJOIN_STAGGER_ONLINE_GATE_DONE] package=%s index=%d/%d state=Online",
-                        pkg, idx, total,
-                    )
-                    return
+                    if _rjn is None:
+                        _start_log.info(
+                            "[DENG_REJOIN_STAGGER_ONLINE_GATE_DONE] package=%s"
+                            " index=%d/%d state=Online (no gen check)",
+                            pkg, idx, total,
+                        )
+                        return
+                    online_gen = _rjn.get_online_generation(pkg)
+                    if online_gen >= expected_gen:
+                        _start_log.info(
+                            "[DENG_REJOIN_STAGGER_ONLINE_GATE_DONE] package=%s"
+                            " index=%d/%d state=Online generation=%d (current=%d)",
+                            pkg, idx, total, online_gen, expected_gen,
+                        )
+                        return
                 _render_phase_throttled()
                 _t.sleep(0.5)
             _start_log.warning(
                 "[DENG_REJOIN_STAGGER_ONLINE_GATE_TIMEOUT] package=%s index=%d/%d"
-                " timeout_sec=%.0f last_state=%s",
+                " timeout_sec=%.0f last_state=%s expected_gen=%d online_gen=%d",
                 pkg, idx, total, _ONLINE_GATE_TIMEOUT_S,
                 _supervisor.status_map.get(pkg, "unknown"),
+                expected_gen,
+                (_rjn.get_online_generation(pkg) if _rjn else -1),
             )
 
         try:
