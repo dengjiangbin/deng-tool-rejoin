@@ -59,7 +59,21 @@ BUTTON_SELECT_VERSION = "license_panel:select_version"
 REMOVED_BUTTON_RESET_HWID = "license_panel:reset_hwid"
 REMOVED_BUTTON_REDEEM     = "license_panel:redeem"
 
+GUIDE_THREAD_ID = "1508728390910218250"
+DEFAULT_PANEL_GUILD_ID = "1435142398647734396"
+
 PANEL_LOGO_URL = "https://aio.deng.my.id/public/img/deng-logo.png"
+
+
+def build_guide_thread_url(
+    *,
+    guild_id: str | None = None,
+    thread_id: str | None = None,
+) -> str:
+    """Discord jump URL for the Rejoin panel guide thread."""
+    gid = str(guild_id or DEFAULT_PANEL_GUILD_ID).strip()
+    tid = str(thread_id or GUIDE_THREAD_ID).strip()
+    return f"https://discord.com/channels/{gid}/{tid}"
 
 # ── Slash command names ────────────────────────────────────────────────────────
 
