@@ -1257,6 +1257,21 @@ class WatchdogSupervisor:
     RECOVERY_MAX_CONSECUTIVE_LAUNCHES: int = 3
     RECOVERY_LAUNCH_THROTTLE_SECONDS: float = 60.0
 
+    # ── Focused round-robin checker (single scheduler) ───────────────────────
+    # The checker focuses exactly ONE package at a time for up to
+    # FOCUS_WINDOW_SECONDS.  It advances early the instant Online is confirmed,
+    # runs recovery immediately on confirmed Dead, and counts consecutive
+    # no-heartbeat focus windows per package (NO_HEARTBEAT_FOCUS_LIMIT → recover).
+    FOCUS_WINDOW_SECONDS: float = float(
+        os.environ.get("DENG_REJOIN_FOCUS_WINDOW_SEC", "10") or "10"
+    )
+    FOCUS_POLL_SECONDS: float = float(
+        os.environ.get("DENG_REJOIN_FOCUS_POLL_SEC", "0.5") or "0.5"
+    )
+    NO_HEARTBEAT_FOCUS_LIMIT: int = int(
+        os.environ.get("DENG_REJOIN_NO_HEARTBEAT_LIMIT", "7") or "7"
+    )
+
     # ── Roblox presence API fault shield (429 / 5xx / timeout) ───────────────
     PRESENCE_RATE_LIMIT_BACKOFF_SECONDS: float = 15.0
     PRESENCE_API_FAULT_BACKOFF_SECONDS: float = 15.0
@@ -4532,6 +4547,168 @@ class WatchdogSupervisor:
             )
             return False
 
+    # ─── Focused round-robin checker helpers ──────────────────────────────────
+
+    @staticmethod
+    def _focused_checker_enabled() -> bool:
+        return (
+            os.environ.get("DENG_REJOIN_FOCUSED_CHECKER", "1") or "1"
+        ).strip().lower() not in {"0", "false", "no", "off"}
+
+    def _checker_pointer(self):
+        try:
+            from . import checker_pointer
+
+            return checker_pointer.get()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _focused_online_evidence(self, pkg: str):
+        """Fast Online proof for the focused package, or None.
+
+        Fix for probe p-0baff0dfdc: a *fresh* UID-matched push_heartbeat (or
+        gamejoinloadtime) must be allowed to advance the focused checker even
+        though the slow ``online_detection.primary_required_signal`` gate still
+        prefers gamejoinloadtime.  We reuse the proven freshness guard
+        (``_push_fresh``) and the confirmed-online lifecycle state.
+        """
+        try:
+            from .rjn_lifecycle_monitor import STATE_ONLINE_CONFIRMED
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            self._ingest_push_heartbeat(pkg)
+            self._sync_logcat_hb_push_channel(pkg)
+            self._rjn_monitor.retry_confirm_pending_heartbeat(pkg)
+        except Exception:  # noqa: BLE001
+            pass
+        now = time.time()
+        try:
+            with self._rjn_monitor._lock:
+                row = self._rjn_monitor._states.get(pkg)
+                if row is None:
+                    return None
+                if row.internal_state != STATE_ONLINE_CONFIRMED:
+                    return None
+                source = str(getattr(row, "runtime_source", "") or "online")
+                last_at = float(
+                    getattr(row, "last_positive_online_evidence_at", 0.0) or 0.0
+                )
+        except Exception:  # noqa: BLE001
+            return None
+        # Only advance on genuinely fresh online evidence — never a stale old
+        # heartbeat (safety requirement).
+        if not self._push_fresh(pkg):
+            return None
+        age_ms = round(max(0.0, now - last_at) * 1000.0, 1) if last_at else None
+        return source, age_ms
+
+    def _focused_dead_evidence(self, pkg: str, state: str, detail: dict):
+        """Confirmed Dead/crash/force-close for the focused package, or None."""
+        dead_states = {STATUS_DEAD, STATUS_JOIN_FAILED, STATUS_FAILED}
+        if state in dead_states:
+            reason = str(detail.get("reason") or "dead")
+            return reason, "current_detector", f"{state}:{reason}"
+        # Fast layered signal: the live force-close race detector marks a
+        # package "dead" from logcat crash/force-stop or process_poll vanish.
+        try:
+            from .force_close_race import get_active_force_close_race_detector
+
+            race = get_active_force_close_race_detector()
+            if race is not None:
+                with race._lock:
+                    row = race._packages.get(pkg)
+                    if row is not None and row.status == "dead":
+                        rec = row.logcat_crash if row.logcat_crash.first_at else row.process_poll
+                        source = "logcat" if row.logcat_crash.first_at else "process_poll"
+                        return (
+                            rec.evidence or "process_missing",
+                            source,
+                            (rec.raw_sample or rec.evidence or "")[:160],
+                        )
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    def _publish_focus_pointer(self, pkg: str, index: int, *, now: float) -> None:
+        ptr = self._checker_pointer()
+        if ptr is None:
+            return
+        try:
+            ptr.begin_focus(pkg, index, now=now, window_s=self.FOCUS_WINDOW_SECONDS)
+            ptr.set_loop_health(
+                checker_loop_alive=True,
+                logcat_reader_alive=bool(
+                    getattr(self._rjn_monitor, "_logcat_stream_alive", False)
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _focused_dwell(self, pkg: str, entry: dict, index: int, now: float, render_cb) -> str:
+        """Focus ``pkg`` for up to FOCUS_WINDOW_SECONDS.
+
+        Advances early on Online; on confirmed Dead runs the existing guarded
+        recovery immediately.  Returns the terminal focus outcome string.
+
+        Replaces the cosmetic round-robin tail pause — it never adds latency
+        for an already-Online package (which returns instantly) and gives a
+        genuine bounded watch window to a not-yet-Online one.
+        """
+        from . import focused_checker as _fc
+
+        ptr = self._checker_pointer()
+        start = time.monotonic()
+        window = float(self.FOCUS_WINDOW_SECONDS)
+        poll = max(0.1, float(self.FOCUS_POLL_SECONDS))
+        last_shown = -1
+        while not self.stop_event.is_set():
+            elapsed = time.monotonic() - start
+            # Dead wins fastest.
+            state_now = self.status_map.get(pkg, "")
+            dead = self._focused_dead_evidence(pkg, state_now, {})
+            if dead is not None and ptr is not None:
+                ptr.mark_dead_detected(pkg, dead[0], dead[1], dead[2])
+                return _fc.OUTCOME_DEAD
+            # Online advances immediately.
+            online = self._focused_online_evidence(pkg)
+            if online is not None:
+                if ptr is not None:
+                    ptr.set_online_evidence(pkg, online[0], online[1])
+                    ptr.reset_no_heartbeat(pkg)
+                    from . import checker_pointer as _cp
+
+                    ptr.set_pointer_text(_cp.POINTER_ONLINE)
+                return _fc.OUTCOME_ONLINE_EARLY
+            shown = int(elapsed)
+            if ptr is not None and shown != last_shown and shown >= 1:
+                last_shown = shown
+                ptr.update_focus_timer(min(shown, int(window)))
+                if render_cb is not None:
+                    try:
+                        render_cb()
+                    except Exception:  # noqa: BLE001
+                        pass
+            if elapsed >= window:
+                break
+            self._interruptible_sleep(min(poll, max(0.0, window - elapsed)))
+
+        # Window completed without Online / Dead → count a no-heartbeat window.
+        if ptr is not None:
+            count = ptr.increment_no_heartbeat(pkg)
+            if count >= self.NO_HEARTBEAT_FOCUS_LIMIT and not ptr.recovery_in_progress:
+                try:
+                    self._handle_state(
+                        pkg, entry, STATUS_DEAD,
+                        self._prev_state.get(pkg, ""), now,
+                        render_callback=render_cb,
+                        detail={"reason": "focus_no_heartbeat_limit"},
+                    )
+                    ptr.reset_no_heartbeat(pkg)
+                except Exception:  # noqa: BLE001
+                    pass
+        return _fc.OUTCOME_NO_HEARTBEAT
+
     # ─── Main loop ────────────────────────────────────────────────────────────
 
     def run_forever(
@@ -4611,6 +4788,16 @@ class WatchdogSupervisor:
             package_count=len(self.packages),
         )
 
+        if self._focused_checker_enabled():
+            _ptr = self._checker_pointer()
+            if _ptr is not None:
+                from . import checker_pointer as _cp
+
+                _ptr.set_mode(_cp.MODE_CHECKING, _cp.POINTER_CHECKING)
+                _ptr.set_loop_health(
+                    checker_loop_alive=True, duplicate_loop_guard_status="ok"
+                )
+
         while not self.stop_event.is_set():
             self._round += 1
             now = time.time()
@@ -4666,6 +4853,9 @@ class WatchdogSupervisor:
                 opened_index += 1
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = ""
+
+                if self._focused_checker_enabled():
+                    self._publish_focus_pointer(pkg, opened_index, now=now)
 
                 _maybe_render(force=True)
                 check_started = time.monotonic()
@@ -4854,7 +5044,26 @@ class WatchdogSupervisor:
                         checking_hold_sec=self.PACKAGE_CHECKING_HOLD_SECONDS,
                         tail_pause_sec=0.0 if fast_pkg else self._round_robin_tail_seconds(),
                     )
-                    if not fast_pkg:
+                    if self._focused_checker_enabled():
+                        # Focused window replaces the cosmetic tail pause: an
+                        # already-Online package returns instantly; a pending one
+                        # is watched for up to FOCUS_WINDOW_SECONDS, advancing the
+                        # moment Online is confirmed or recovering the moment Dead
+                        # is confirmed.  Recovery-on-dead is handled inline here.
+                        outcome = self._focused_dwell(
+                            pkg, entry, opened_index, now,
+                            lambda: _maybe_render(force=True),
+                        )
+                        from . import focused_checker as _fc
+
+                        if outcome == _fc.OUTCOME_DEAD and self.status_map.get(pkg) != STATUS_DEAD:
+                            self._set_status(pkg, STATUS_DEAD)
+                            self._handle_state(
+                                pkg, entry, STATUS_DEAD,
+                                self._prev_state.get(pkg, ""), now,
+                                render_callback=render_callback, detail={"reason": "focus_dead"},
+                            )
+                    elif not fast_pkg:
                         self._interruptible_sleep(self._round_robin_tail_seconds())
 
             _counts = {

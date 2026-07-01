@@ -1368,6 +1368,13 @@ def collect_probe(
         errors.append({"step": "force_close_race", "error": str(exc)[:200]})
         out["force_close_race"] = {"enabled": False, "error": str(exc)[:120]}
     try:
+        from . import checker_pointer as _checker_pointer
+
+        out["focused_checker"] = _checker_pointer.probe_snapshot()
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "focused_checker", "error": str(exc)[:200]})
+        out["focused_checker"] = {"error": str(exc)[:120]}
+    try:
         from .launch_relaunch_trace import probe_snapshot as launch_probe_snapshot
 
         rjn = out.get("rjn_style_detection") or {}
@@ -1669,7 +1676,7 @@ _PROBE_PINNED_FIELDS = frozenset({
     "last_start_diagnostics", "start_crash_state", "last_failing_command", "webhook_debug",
     "rjn_detection_only", "online_detection", "decision", "state_machine",
     "dead_detection", "launch_relaunch", "relaunch", "account_dead_webhook",
-    "resize_debug",
+    "resize_debug", "focused_checker",
 })
 
 

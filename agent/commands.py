@@ -5092,7 +5092,24 @@ def _cap_plain_cell(raw: str, max_w: int) -> str:
     return text[: max_w - 3] + "..."
 
 
-def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
+def _checker_pointer_text() -> str | None:
+    """Global focused-checker pointer text, or None when the checker is idle.
+
+    Returning None keeps the legacy single-row header (no regression) until
+    the focused checker publishes a pointer.
+    """
+    try:
+        from . import checker_pointer as _cp
+
+        text = _cp.get().pointer_text()
+        return text or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def build_start_table(
+    rows: list[tuple], *, use_color: bool = False, pointer_text: str | None = None
+) -> str:
     """Build the live Start table: #, Package, Username, State.
 
     Rows may be 4-tuples (idx, pkg, username, state) for backward compatibility,
@@ -5100,6 +5117,12 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     6-tuples (idx, pkg, username, state, runtime, usage).
     Runtime/usage telemetry may still be supplied by callers but is not shown
     in the user-visible Start table.
+
+    ``pointer_text`` is the *global* focused-checker pointer (e.g.
+    ``Getting Ready..``, ``Checking..``, ``3s``, ``Dead Detected``).  When
+    supplied it is rendered as a second header row under the ``State`` column
+    only; every other column is visually merged (blank second row) so the
+    table stays readable on Termux.
 
     Every line is hard-clamped via ``termux_ui.fit_line()`` for narrow screens.
     Static package management lists use separate simplified renderers.
@@ -5128,10 +5151,19 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
         for i in range(len(str_rows))
     ]
 
+    # Global checker pointer (State column, row 2).  Cap to the State column
+    # budget and fold its width into the State column so it never overflows.
+    pointer_cell = ""
+    if pointer_text:
+        pointer_cell = _cap_plain_cell(str(pointer_text), col_caps[len(headers) - 1])
+
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
         for i in range(len(headers))
     ]
+    if pointer_cell:
+        state_idx = len(headers) - 1
+        widths[state_idx] = max(widths[state_idx], _visible_len(pointer_cell))
 
     def _bold(text: str) -> str:
         if not use_color or not text:
@@ -5165,9 +5197,22 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
         parts = [_cell(str(colored[i]), widths[i], str(raw[i])) for i in range(len(widths))]
         return "│" + "│".join(parts) + "│"
 
-    lines = [
-        _hline("┌", "┬", "┐"),
-        _header_row(headers),
+    def _pointer_header_row() -> str:
+        # Second header row: blank for all columns except State so the other
+        # columns visually merge across both header rows.
+        cells = ["" for _ in range(len(widths))]
+        state_idx = len(headers) - 1
+        cells[state_idx] = _colorize_status(pointer_cell, use_color=use_color)
+        parts = [
+            _cell(cells[i], widths[i], "" if i != state_idx else pointer_cell)
+            for i in range(len(widths))
+        ]
+        return "│" + "│".join(parts) + "│"
+
+    lines = [_hline("┌", "┬", "┐"), _header_row(headers)]
+    if pointer_cell:
+        lines.append(_pointer_header_row())
+    lines += [
         _hline("├", "┼", "┤"),
         *(_data_row(colored_rows[i], str_rows[i]) for i in range(len(colored_rows))),
         _hline("└", "┴", "┘"),
@@ -6254,7 +6299,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                     lines.append("")
             except Exception:  # noqa: BLE001
                 pass
-            lines.append(build_start_table(rows, use_color=use_color))
+            lines.append(
+                build_start_table(
+                    rows, use_color=use_color, pointer_text=_checker_pointer_text()
+                )
+            )
             try:
                 _clear_terminal(clear_scrollback=True)
                 safe_io.write_stdout_block("\n".join(lines) + "\n")
@@ -6490,6 +6539,48 @@ def cmd_start(args: argparse.Namespace) -> int:
         _ONLINE_GATE_TIMEOUT_S = 15.0
         _ONLINE_GATE_WARN_INTERVAL_S = 30.0  # print blocked_reason every 30s
 
+        # ── First-launch mode ────────────────────────────────────────────
+        # New default: fixed-interval first launch.  Package #2 is launched a
+        # fixed FIRST_LAUNCH_INTERVAL_S after #1 *regardless* of #1 Online
+        # status, so a slow/failed first Online can never block or slow the
+        # initial launch sequence (task spec).  Set
+        # DENG_REJOIN_FIRST_LAUNCH_MODE=online_gate to restore the old
+        # Online-gated stagger.
+        _FIRST_LAUNCH_MODE = (
+            os.environ.get("DENG_REJOIN_FIRST_LAUNCH_MODE", "interval") or "interval"
+        ).strip().lower()
+        try:
+            _FIRST_LAUNCH_INTERVAL_S = float(
+                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_INTERVAL_SEC", "60") or "60"
+            )
+        except ValueError:
+            _FIRST_LAUNCH_INTERVAL_S = 60.0
+
+        try:
+            from . import checker_pointer as _checker_pointer
+        except Exception:  # noqa: BLE001
+            _checker_pointer = None  # type: ignore[assignment]
+
+        def _first_launch_interval_wait(pkg: str, idx: int, total: int) -> None:
+            """Wait a fixed interval before launching the next package.
+
+            Never inspects Online status — a crashed/slow package can never
+            block the scheduled launch order.
+            """
+            import time as _t
+
+            deadline = _t.monotonic() + _FIRST_LAUNCH_INTERVAL_S
+            _start_log.info(
+                "[DENG_REJOIN_FIRST_LAUNCH_INTERVAL] package=%s index=%d/%d"
+                " interval_sec=%.0f (no Online gate)",
+                pkg, idx, total, _FIRST_LAUNCH_INTERVAL_S,
+            )
+            while _t.monotonic() < deadline:
+                if getattr(_supervisor, "stop_event", None) is not None and _supervisor.stop_event.is_set():
+                    return
+                _render_phase_throttled()
+                _t.sleep(0.5)
+
         def _wait_for_package_online(pkg: str, idx: int, total: int) -> None:
             """Block until pkg has current-generation Online proof or timeout.
 
@@ -6592,6 +6683,12 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _final_st, expected_gen, _online_gen,
             )
 
+        if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
+            try:
+                _checker_pointer.get().begin_getting_ready([e["package"] for e in entries])
+            except Exception:  # noqa: BLE001
+                pass
+
         try:
             for index, entry in enumerate(entries, start=1):
                 package = entry["package"]
@@ -6600,6 +6697,16 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for later in entries[index:]:
                     phase[later["package"]] = "Ready"
                     _supervisor._set_status(later["package"], _STATUS_READY)
+                if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
+                    try:
+                        import time as _t_open
+
+                        _checker_pointer.get().begin_opening(
+                            package,
+                            next_package_at=_t_open.monotonic() + _FIRST_LAUNCH_INTERVAL_S,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
                 phase[package] = "Launching"
                 _stagger_render_last = 0.0
                 _render_phase_throttled()
@@ -6624,6 +6731,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                 phase[package] = _STATUS_WAITING
                 launch_ok[package] = True
                 launch_err[package] = ""
+                if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
+                    try:
+                        _checker_pointer.get().mark_supposedly_launched(package)
+                    except Exception:  # noqa: BLE001
+                        pass
                 _render_phase("Launching...")
                 _start_log.info(
                     "[DENG_REJOIN_STAGGERED_LAUNCH] package=%s index=%d/%d"
@@ -6635,11 +6747,14 @@ def cmd_start(args: argparse.Namespace) -> int:
                     str(_supervisor.watchdog_thread_alive()).lower(),
                 )
 
-                # Online-gated stagger: after am start, wait for this clone to
-                # reach Online before launching the next one.  Skip the wait for
-                # the last package (nothing left to gate).
+                # First-launch pacing: fixed interval (default) never waits for
+                # Online; online_gate mode restores the legacy behaviour.  Skip
+                # the wait for the last package (nothing left to pace).
                 if index < len(entries):
-                    _wait_for_package_online(package, index, len(entries))
+                    if _FIRST_LAUNCH_MODE == "online_gate":
+                        _wait_for_package_online(package, index, len(entries))
+                    else:
+                        _first_launch_interval_wait(package, index, len(entries))
         finally:
             if not getattr(_supervisor, "_all_launches_completed", False):
                 _supervisor.mark_all_launches_completed()
@@ -6967,7 +7082,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                 )
                 for i, e in enumerate(entries)
             ]
-            lines.append(build_start_table(live_rows, use_color=use_color))
+            lines.append(
+                build_start_table(
+                    live_rows, use_color=use_color, pointer_text=_checker_pointer_text()
+                )
+            )
             _clear_terminal(clear_scrollback=False)
             safe_io.write_stdout_block("\n".join(lines) + "\n")
 
