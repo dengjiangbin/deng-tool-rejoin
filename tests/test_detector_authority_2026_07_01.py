@@ -78,6 +78,7 @@ def _make_supervisor(*packages):
     sup.packages = pkgs
     sup.status_map = {}
     sup._relaunch_inflight = set()
+    sup._initial_launch_inflight = set()
     sup._relaunch_verify_until = {}
     sup._all_launches_completed = False
     sup._package_opened = set()
@@ -284,52 +285,74 @@ class T04_RelaunchingNotOverwrittenByLaunching(unittest.TestCase):
 # ============================================================================
 
 class T05_RelaunchInflightClearsOnFreshHB(unittest.TestCase):
-    """online_confirmed_generation is updated only when a current-generation
-    heartbeat/gamejoin confirms Online."""
+    """online_confirmed_generation is updated on Online confirmation.
+    Session_id is logged for diagnostics but NOT used for rejection —
+    detector.lua uses JobId-based IDs, Python uses timestamp-based IDs,
+    they must not be cross-checked. Timestamp guards are the authority."""
 
-    def test_generation_mismatch_does_not_confirm_online(self):
+    def test_predates_launch_hb_rejected(self):
+        """HB with at < launch_started_at must be rejected (timestamp guard)."""
         m = _make_monitor()
-
-        # Advance generation to 3
-        for _ in range(3):
-            m.note_launch_watchdog(PKG, relaunch=True)
+        # Advance generation
+        m.note_launch_watchdog(PKG, relaunch=True)
         with m._lock:
             row = m._states[PKG]
             row.process_exists = True
             row.process_seen_since_launch = True
+            launch_at = row.launch_started_at
 
-        # Old session_id from a previous generation
-        old_sid = "g1_000000"
-
-        # Old session_id heartbeat must be rejected
+        # HB timestamped before this launch
+        stale_at = launch_at - 5.0
         verdict = m.ingest_push_heartbeat(
             PKG, alive=True, place_id=111, universe_id=222, job_id="srv",
-            session_id=old_sid,
+            at=stale_at,
         )
         self.assertNotEqual(verdict, "online",
-                            "wrong-session HB must not confirm Online")
+                            "pre-launch HB must not confirm Online")
 
-    def test_correct_generation_confirms_online(self):
+    def test_session_id_mismatch_does_not_block_online(self):
+        """A heartbeat with a different session_id format (JobId from detector.lua)
+        must NOT be rejected — session_id is diagnostic only."""
         m = _make_monitor()
         m.note_launch_watchdog(PKG, relaunch=True)
         with m._lock:
             row = m._states[PKG]
             row.process_exists = True
             row.process_seen_since_launch = True
-            current_sid = row.session_id
             expected_gen = row.launch_generation
 
-        # Correct session_id confirms Online
+        # JobId-format session_id (from detector.lua) — different from Python's format
+        detector_sid = "abc123-def456-ghi789"  # game.JobId format
+
+        # Must be ACCEPTED (session_id check removed — timestamp guards are sufficient)
         verdict = m.ingest_push_heartbeat(
             PKG, alive=True, place_id=111, universe_id=222, job_id="srv",
-            session_id=current_sid,
+            session_id=detector_sid,
         )
         self.assertEqual(verdict, "online",
-                         "correct-session HB must confirm Online")
+                         "JobId session_id must not block Online — session_id check removed")
 
         # Verify generation was recorded immediately (not waiting for evaluate_package)
         self.assertEqual(m.get_online_generation(PKG), expected_gen,
                          "online_generation must match launch_generation after fresh HB")
+
+    def test_current_generation_hb_confirms_online(self):
+        """A current-generation HB confirms Online and records the generation."""
+        m = _make_monitor()
+        m.note_launch_watchdog(PKG, relaunch=True)
+        with m._lock:
+            row = m._states[PKG]
+            row.process_exists = True
+            row.process_seen_since_launch = True
+            expected_gen = row.launch_generation
+
+        verdict = m.ingest_push_heartbeat(
+            PKG, alive=True, place_id=111, universe_id=222, job_id="srv",
+        )
+        self.assertEqual(verdict, "online",
+                         "current-generation HB must confirm Online")
+        self.assertEqual(m.get_online_generation(PKG), expected_gen,
+                         "online_generation must match launch_generation")
 
 
 # ============================================================================
@@ -378,20 +401,46 @@ class T06_PresenceCannotOverrideDead(unittest.TestCase):
 # ============================================================================
 
 class T07_PIDReuseRejected(unittest.TestCase):
-    """A heartbeat tagged with a session_id from a previous launch must be
-    rejected after a relaunch generates a new session_id."""
+    """Heartbeat rejection guards: timestamp-based and process-based.
 
-    def test_pid_reuse_session_mismatch_rejected(self):
-        """session_id from old session (before relaunch) must be rejected."""
+    Session_id is no longer used for rejection (detector.lua uses JobId format,
+    Python monitor uses timestamp format — they never match). Guards are:
+    - HB timestamped before launch_started_at → rejected
+    - HB timestamped after last_process_gone_at → rejected
+    - HB with process_exists=False (verified live) → rejected
+    """
+
+    def test_predates_launch_hb_rejected_after_relaunch(self):
+        """HB from before the new launch's start time must be rejected."""
         m = _make_monitor()
+        _confirm_online(m)
 
-        # Capture session_id from first launch
+        # Relaunch — new launch_started_at
+        m.note_launch_watchdog(PKG, relaunch=True)
+        with m._lock:
+            row = m._states[PKG]
+            row.process_exists = True
+            row.process_seen_since_launch = True
+            launch_at = row.launch_started_at
+
+        # HB from before this relaunch
+        stale_at = launch_at - 5.0
+        verdict = m.ingest_push_heartbeat(
+            PKG, alive=True, place_id=111, universe_id=222, job_id="srv",
+            at=stale_at,
+        )
+        self.assertNotEqual(verdict, "online",
+                            "pre-launch HB must be rejected (timestamp guard)")
+
+    def test_session_id_logged_but_not_blocking(self):
+        """session_id mismatch is logged but does NOT block Online confirmation.
+        This is intentional: detector.lua uses game.JobId format which is
+        incompatible with the Python monitor's g<gen>_<ts> format."""
+        m = _make_monitor()
         with m._lock:
             old_sid = m._states[PKG].session_id
 
         _confirm_online(m)
-
-        # Simulate relaunch (new session_id + new generation)
         m.note_launch_watchdog(PKG, relaunch=True)
         with m._lock:
             row = m._states[PKG]
@@ -399,21 +448,15 @@ class T07_PIDReuseRejected(unittest.TestCase):
             row.process_seen_since_launch = True
             new_sid = row.session_id
 
-        self.assertNotEqual(old_sid, new_sid,
-                            "relaunch must generate a new session_id")
+        self.assertNotEqual(old_sid, new_sid, "relaunch must generate a new session_id")
 
-        # A heartbeat from the OLD session must be rejected
+        # Old-format session_id is logged but does NOT block Online
         verdict = m.ingest_push_heartbeat(
             PKG, alive=True, place_id=111, universe_id=222, job_id="srv",
             session_id=old_sid,
         )
-        self.assertNotEqual(verdict, "online",
-                            "old-session HB after relaunch must be rejected")
-
-        with m._lock:
-            reason = m._states[PKG].last_rejected_signal_reason
-        self.assertIn("session", reason.lower(),
-                      "rejection reason must mention session mismatch")
+        self.assertEqual(verdict, "online",
+                         "session_id mismatch must not block Online (diagnostic only)")
 
     def test_no_session_id_still_works_v1_compat(self):
         """v1 heartbeats (no session_id) must still work for backward compat."""

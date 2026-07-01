@@ -1382,6 +1382,10 @@ class WatchdogSupervisor:
         self._recovery_launch_attempts: dict[str, int] = {}
         self._recovery_throttle_until: dict[str, float] = {}
         self._relaunch_inflight: set[str] = set()
+        # Packages currently in their FIRST launch (not a recovery relaunch).
+        # Set in mark_package_launched; cleared on Online or when recovery fires.
+        # Used to ensure first-launch packages never display STATUS_RELAUNCHING.
+        self._initial_launch_inflight: set[str] = set()
         self._relaunch_verify_until: dict[str, float] = {}
         self._missing_evidence_since: dict[str, float] = {}
         # Packages currently showing a captcha / bot-verification overlay. Value
@@ -1634,6 +1638,10 @@ class WatchdogSupervisor:
         if old != status:
             if status == STATUS_LAUNCHING and old != STATUS_LAUNCHING:
                 self._maybe_record_package_launch_started(pkg, old)
+            if status == STATUS_ONLINE:
+                # First-launch promotion: package is confirmed Online.
+                self._initial_launch_inflight.discard(pkg)
+                self._relaunch_inflight.discard(pkg)
             if callable(self.on_status_change):
                 self.on_status_change(pkg, status)
 
@@ -1760,19 +1768,19 @@ class WatchdogSupervisor:
                 except Exception:  # noqa: BLE001
                     pass
                 row = self._rjn_monitor._states.get(pkg)
-                if (
-                    row is not None
-                    and row.internal_state == STATE_ONLINE_CONFIRMED
-                    and self._push_fresh(pkg)
-                ):
+                if row is not None and row.internal_state == STATE_ONLINE_CONFIRMED:
+                    # Online proof received (gamejoinloadtime or HB) — unblock stagger
+                    # immediately. Do NOT require _push_fresh here: that would block the
+                    # stagger gate for up to PUSH_HEARTBEAT_FRESH_SECONDS after the join.
                     state = STATUS_ONLINE
                 else:
                     cur = str(self.status_map.get(pkg) or "").strip()
-                    if cur in {STATUS_ONLINE, STATUS_RELAUNCHING}:
-                        # Keep STATUS_RELAUNCHING as-is — recovery relaunch must
-                        # display Relaunching, not be overridden to Launching during
-                        # the stagger phase (probe p-1a7fcce102 problem #2).
-                        state = cur
+                    if cur == STATUS_ONLINE:
+                        state = STATUS_ONLINE
+                    elif cur == STATUS_RELAUNCHING and pkg not in self._initial_launch_inflight:
+                        # Keep STATUS_RELAUNCHING only for confirmed recovery relaunches.
+                        # First-launch packages must never show Relaunching.
+                        state = STATUS_RELAUNCHING
                     elif cur == STATUS_FAILED:
                         state = STATUS_JOIN_FAILED
                     else:
@@ -1853,6 +1861,10 @@ class WatchdogSupervisor:
                 self._rjn_monitor.start_session()
             except Exception:  # noqa: BLE001
                 pass
+            # Track that this is a first launch so recovery relaunches that
+            # happen later (e.g. JOIN_FAILED after 120s timeout) do not cause
+            # STATUS_RELAUNCHING to show where STATUS_LAUNCHING is expected.
+            self._initial_launch_inflight.add(pkg)
         self._mark_launched(pkg)
         try:
             self._rjn_monitor.note_launch_watchdog(pkg, relaunch=False)
@@ -3391,7 +3403,13 @@ class WatchdogSupervisor:
             self._relaunch_verify_until.pop(pkg, None)
             self._missing_evidence_since.pop(pkg, None)
         elif current in {STATUS_RELAUNCHING, STATUS_REOPENING} and not ev.is_online_confirmed:
-            if (
+            if pkg in self._initial_launch_inflight:
+                # This is a first-launch package that was never confirmed Dead.
+                # Recovery fired due to join timeout but the user-visible state
+                # must show Launching, not Relaunching (no Dead event happened).
+                state = STATUS_LAUNCHING
+                reason = "initial_launch_no_dead_event"
+            elif (
                 not self._all_launches_completed
                 and pkg not in self._relaunch_inflight
             ):
@@ -4165,6 +4183,8 @@ class WatchdogSupervisor:
             except Exception:  # noqa: BLE001
                 pass
             self._relaunch_inflight.add(pkg)
+            # When recovery fires, this package is no longer in its first launch.
+            self._initial_launch_inflight.discard(pkg)
             self._set_status(pkg, STATUS_REOPENING)
             from .cache_clear_phases import run_recovery_cache_clear
 

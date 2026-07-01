@@ -145,6 +145,10 @@ _INGAME_START_RE = re.compile(
 )
 WRONG_SERVER_ANCHOR_ENABLED = os.environ.get("DENG_REJOIN_WRONG_SERVER_ANCHOR", "1").strip() in {"1", "true", "yes"}
 
+# Fast (authoritative) sources accepted by the hot-lane evaluate path.
+# Both fire from inside a live server and are generation-validated upstream.
+_FAST_ONLINE_EVALUATE_SOURCES = frozenset({"push_heartbeat", "gamejoinloadtime"})
+
 _UID_OPTIONAL_ONLINE_SOURCES = frozenset({
     "presence_in_experience",
     "activity_in_game",
@@ -155,6 +159,9 @@ _UID_OPTIONAL_ONLINE_SOURCES = frozenset({
     # device UID never resolved for log attribution.  Requiring a UID here was
     # silently keeping such clones from ever flipping Online (p-5d0df79c33).
     "push_heartbeat",
+    # Native Roblox logcat join marker — definitive proof same as push_heartbeat.
+    # Clones whose UID didn't resolve must still flip Online via logcat.
+    "gamejoinloadtime",
 })
 
 STATE_STOPPED = "STOPPED"
@@ -396,6 +403,13 @@ class PackageRjnState:
     last_gamejoin_at: float = 0.0
     # Monotonic time when relaunch was enqueued by the supervisor.
     relaunch_started_at: float = 0.0
+    # Incremented on every relaunch (note_launch_watchdog(relaunch=True)).
+    relaunch_generation: int = 0
+    # True only during the FIRST launch (not recovery relaunches).
+    # Cleared on Online confirmation or when a recovery relaunch starts.
+    initial_launch_inflight: bool = False
+    # Reason for recovery relaunch (e.g. "dead_recovery"). Empty on first launch.
+    recovery_reason: str = ""
     # session_id carried by the last accepted DENGRJN_HB / JOIN marker.
     last_hb_session_id: str = ""
     # Reason the last incoming signal was rejected; cleared on next accepted signal.
@@ -1238,7 +1252,10 @@ class RjnLifecycleMonitor:
     ) -> None:
         row = self._states[pkg]
         source_norm = str(source or "").strip()
-        if PRIMARY_HOT_LANE_ONLY and source_norm != "push_heartbeat":
+        # Fast-path: allow both gamejoinloadtime (native Roblox logcat AND DENGRJN_JOIN)
+        # and push_heartbeat (DENGRJN_HB) through even in PRIMARY_HOT_LANE_ONLY mode.
+        # These are definitive in-game proofs. Only block scrape/presence fallbacks.
+        if PRIMARY_HOT_LANE_ONLY and source_norm not in _FAST_ONLINE_EVALUATE_SOURCES:
             return
         # ``gamejoinloadtime`` (logcat join marker) and ``push_heartbeat`` (the
         # in-game Lua detector, which only fires AFTER game.Loaded) are both
@@ -1246,7 +1263,7 @@ class RjnLifecycleMonitor:
         # to the launch-window debounce that protects the slow scrape fallbacks
         # from confirming online prematurely.  Gating push behind the 20s window
         # was the main cause of "relaunching → online 5 minutes" (p-5d0df79c33).
-        definitive = source_norm in {"gamejoinloadtime", "push_heartbeat"}
+        definitive = source_norm in _FAST_ONLINE_EVALUATE_SOURCES
         if row.launch_started_at > 0 and not definitive:
             if at < row.launch_started_at:
                 return
@@ -1268,6 +1285,7 @@ class RjnLifecycleMonitor:
         row.process_missing_streak = 0
         row.force_close_detected = False
         row.relaunching = False
+        row.initial_launch_inflight = False
         # v2: record the generation at which Online was confirmed so the stagger
         # gate can verify this is a fresh current-generation proof immediately,
         # without needing a separate evaluate_package() call.
@@ -1471,12 +1489,13 @@ class RjnLifecycleMonitor:
 
         with self._lock:
             row = self._states.setdefault(pkg, PackageRjnState(package=pkg))
-            # v2: Reject heartbeats from a previous session.
+            # v2: session_id is logged for diagnostics but NOT used for rejection.
+            # detector.lua uses game.JobId as its SESSION_ID; the Python monitor
+            # generates its own format (g<gen>_<ts>). They will never match unless
+            # we explicitly pass the ID from the bootstrap. Using it as a hard gate
+            # would reject ALL v2 heartbeats — the root cause of >5-min stagger gaps.
             if hb_sid and row.session_id and hb_sid != row.session_id:
-                row.last_rejected_signal_reason = (
-                    f"push_hb_session_mismatch hb_sid={hb_sid} cur_sid={row.session_id}"
-                )
-                return ""
+                row.last_hb_session_id = hb_sid  # Log for diagnostics only
             new_beat = seen_at > (row.last_ingame_hb_at + 0.5) or row.last_ingame_hb_at <= 0
             for attr, val in (
                 ("observed_place_id", place_id),
@@ -1735,12 +1754,10 @@ class RjnLifecycleMonitor:
             row = self._states.get(pkg)
             if row is None:
                 return False
-            # v2 session_id gate.
+            # v2 session_id is logged for diagnostics only — not used for rejection.
+            # (See ingest_push_heartbeat comment for full explanation.)
             if hb_sid and row.session_id and hb_sid != row.session_id:
-                row.last_rejected_signal_reason = (
-                    f"join_session_mismatch hb_sid={hb_sid} cur_sid={row.session_id}"
-                )
-                return False
+                row.last_hb_session_id = hb_sid  # Log for diagnostics
             if row.launch_started_at > 0 and at < (row.launch_started_at - 0.5):
                 row.last_rejected_signal_reason = (
                     f"join_predates_launch at={at:.1f} launch={row.launch_started_at:.1f}"
@@ -2217,6 +2234,12 @@ class RjnLifecycleMonitor:
             row.last_rejected_signal_reason = ""
             if relaunch:
                 row.relaunch_started_at = now
+                row.initial_launch_inflight = False
+                row.relaunch_generation += 1
+                row.recovery_reason = "dead_recovery"
+            else:
+                row.initial_launch_inflight = True
+                row.recovery_reason = ""
             row.last_state_change_reason = "relaunch_watchdog_started" if relaunch else "launch_watchdog_started"
             # Fresh session: re-anchor Wrong-Server detection and let a new
             # post-launch disconnect be acted on again.
@@ -2684,10 +2707,16 @@ class RjnLifecycleMonitor:
                     and row.last_ingame_hb_wall_at > 0
                     and (now - row.last_ingame_hb_wall_at) <= ONLINE_HB_FRESH_SECONDS
                 )
+                # gamejoinloadtime is a definitive native Roblox join signal —
+                # treat it equally to push_heartbeat in the hot lane.
+                gamejoin_fresh = (
+                    row.last_gamejoinloadtime_at > 0
+                    and (now - row.last_gamejoinloadtime_at) <= ONLINE_HB_FRESH_SECONDS
+                )
                 has_positive_evidence = (
                     internal == STATE_ONLINE_CONFIRMED
-                    and row.online_evidence_source == "push_heartbeat"
-                    and fresh_hb
+                    and row.online_evidence_source in _FAST_ONLINE_EVALUATE_SOURCES
+                    and (fresh_hb or gamejoin_fresh)
                 )
             is_online = has_positive_evidence and process_exists
             if process_exists and _package_force_stopped_quick(pkg):
@@ -2763,6 +2792,29 @@ class RjnLifecycleMonitor:
                 "last_hb_session_id": row.last_hb_session_id or "",
                 "last_rejected_signal_reason": row.last_rejected_signal_reason or "",
                 "last_state_change_reason": row.last_state_change_reason or "",
+                # Stagger / probe fields requested by user
+                "initial_launch_inflight": row.initial_launch_inflight,
+                "relaunch_inflight": row.relaunching,
+                "recovery_reason": row.recovery_reason or "",
+                "relaunch_generation": row.relaunch_generation,
+                "am_start_at": row.launch_started_at or "",
+                "relaunch_started_ago": (
+                    round(now - row.relaunch_started_at, 1)
+                    if row.relaunch_started_at > 0 else ""
+                ),
+                "live_logcat_gamejoin_seen_at": row.last_gamejoin_at or row.last_gamejoinloadtime_at or "",
+                "dump_logcat_gamejoin_seen_at": row.last_gamejoinloadtime_at or "",
+                "detector_hb_seen_at": row.last_fresh_hb_at or "",
+                "online_promoted_at": row.online_since or "",
+                "online_promoted_by": row.online_evidence_source or "",
+                "next_package_allowed_at": (
+                    round(row.online_since + 1.0, 3) if row.online_since else ""
+                ),
+                "blocked_reason": (
+                    row.launch_failed_reason or row.last_rejected_signal_reason
+                    or (row.last_state_change_reason if not is_online else "")
+                    or ""
+                ),
                 "launch_watchdog_age_seconds": round(
                     max(0.0, now - row.launch_started_at) if row.launch_started_at else 0.0,
                     1,

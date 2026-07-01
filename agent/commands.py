@@ -6511,6 +6511,23 @@ def cmd_start(args: argparse.Namespace) -> int:
             )
             while _t.monotonic() < deadline:
                 current_st = _supervisor.status_map.get(pkg, "")
+                # FAST PATH: check rjn_monitor state directly for sub-100ms unblocking.
+                # sync_stagger_display_status propagates STATE_ONLINE_CONFIRMED → status_map,
+                # but reading the monitor directly avoids the 0.25s render cycle delay.
+                if _rjn is not None and current_st != _STATUS_ONLINE:
+                    try:
+                        from .rjn_lifecycle_monitor import STATE_ONLINE_CONFIRMED as _SOC
+                        _row = _rjn._states.get(pkg)
+                        if (
+                            _row is not None
+                            and _row.internal_state == _SOC
+                            and _row.online_confirmed_generation >= expected_gen
+                        ):
+                            # Promote status_map immediately so stagger proceeds
+                            _supervisor._set_status(pkg, _STATUS_ONLINE)
+                            current_st = _STATUS_ONLINE
+                    except Exception:  # noqa: BLE001
+                        pass
                 # For current-generation proof: check Online confirmed in the same
                 # generation as this launch.  If no lifecycle monitor is available
                 # fall back to status_map alone (same as before).
@@ -6540,7 +6557,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     if _rjn is not None:
                         try:
                             from .rjn_lifecycle_monitor import RjnLifecycleMonitor as _RLM
-                            ev = _rjn.evaluate_package(pkg, hot_lane=False)
+                            ev = _rjn.evaluate_package(pkg, hot_lane_only=False)
                             cur_detail = ev.detail if ev else {}
                         except Exception:  # noqa: BLE001
                             pass
