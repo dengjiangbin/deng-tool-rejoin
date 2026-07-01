@@ -553,6 +553,7 @@ class RjnLifecycleMonitor:
         self._detector_errors: list[str] = []
         self._session_started: bool = False
         self._last_logcat_poll_at: float = 0.0
+        self._force_close_race: Any = None
 
     def refresh_uid_map(self) -> dict[str, str]:
         with self._lock:
@@ -607,6 +608,18 @@ class RjnLifecycleMonitor:
             self.refresh_pid_map()
             self._start_logcat_thread()
             self._start_dead_hot_lane_thread()
+            self._start_force_close_race()
+
+    def _start_force_close_race(self) -> None:
+        try:
+            from .force_close_race import ForceCloseRaceDetector
+
+            if self._force_close_race is not None:
+                return
+            self._force_close_race = ForceCloseRaceDetector(self.packages, monitor=self)
+            self._force_close_race.start()
+        except Exception:  # noqa: BLE001
+            self._force_close_race = None
 
     def _start_dead_hot_lane_thread(self) -> None:
         if getattr(self, "_dead_lane_thread", None) and self._dead_lane_thread.is_alive():
@@ -832,6 +845,13 @@ class RjnLifecycleMonitor:
 
     def stop_session(self) -> None:
         self._stop_event.set()
+        race = self._force_close_race
+        if race is not None:
+            try:
+                race.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._force_close_race = None
         proc = self._logcat_proc
         if proc is not None:
             try:
@@ -1241,6 +1261,18 @@ class RjnLifecycleMonitor:
             from .status_monitor_runtime import record_lifecycle_transition
 
             record_lifecycle_transition(pkg, new_state, reason, now=at)
+        race = self._force_close_race
+        if race is not None and new_state in {STATE_DEAD, STATE_DISCONNECTED, STATE_FAILED}:
+            try:
+                race.note_current_detector(
+                    pkg,
+                    at=at,
+                    state=new_state,
+                    reason=reason,
+                    source="current_lifecycle",
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
     def _confirm_online_evidence(
         self,
@@ -1252,6 +1284,15 @@ class RjnLifecycleMonitor:
     ) -> None:
         row = self._states[pkg]
         source_norm = str(source or "").strip()
+        if source_norm in _FAST_ONLINE_EVALUATE_SOURCES or source_norm == "push_heartbeat":
+            exists, _pids, definitive = _unpack_process_check(self._process_check(pkg))
+            if not exists and (
+                definitive
+                or row.internal_state == STATE_ONLINE_CONFIRMED
+                or row.ingame_hb_ever
+            ):
+                row.last_rejected_signal_reason = "process_missing_blocks_online_confirm"
+                return
         # Fast-path: allow both gamejoinloadtime (native Roblox logcat AND DENGRJN_JOIN)
         # and push_heartbeat (DENGRJN_HB) through even in PRIMARY_HOT_LANE_ONLY mode.
         # These are definitive in-game proofs. Only block scrape/presence fallbacks.
@@ -1292,6 +1333,12 @@ class RjnLifecycleMonitor:
         if row.online_confirmed_generation != row.launch_generation:
             row.online_confirmed_generation = row.launch_generation
         row.last_fresh_hb_at = row.last_fresh_hb_at or at
+        race = self._force_close_race
+        if race is not None:
+            try:
+                race.note_online(pkg, at=at)
+            except Exception:  # noqa: BLE001
+                pass
         row.last_state_change_reason = source
         if source == "gamejoinloadtime":
             row.last_gamejoinloadtime_at = at

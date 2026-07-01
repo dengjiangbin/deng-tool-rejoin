@@ -1361,6 +1361,13 @@ def collect_probe(
         out["resize_debug"] = {"error": str(exc)[:120]}
     out["rjn_style_detection"] = _capture_rjn_style_detection(errors)
     try:
+        from .force_close_race import probe_force_close_race_snapshot
+
+        out["force_close_race"] = probe_force_close_race_snapshot()
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "force_close_race", "error": str(exc)[:200]})
+        out["force_close_race"] = {"enabled": False, "error": str(exc)[:120]}
+    try:
         from .launch_relaunch_trace import probe_snapshot as launch_probe_snapshot
 
         rjn = out.get("rjn_style_detection") or {}
