@@ -940,6 +940,33 @@ def _run_start_batch_cache_clear(
     return run_start_mass_cache_clear(packages, root_info=root_info)
 
 
+def run_callable_with_deadline(fn, deadline_s: float):
+    """Run ``fn()`` in a daemon thread bounded by ``deadline_s``.
+
+    Returns ``(result, timed_out)``.  On timeout ``result`` is ``None`` and the
+    worker keeps running in the background (used so a blocking first-launch can
+    never stall the interval scheduler — probe p-5dacb6657a).
+    """
+    import threading as _thr
+
+    holder: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            holder["result"] = fn()
+        except Exception as _exc:  # noqa: BLE001
+            holder["error"] = _exc
+
+    worker = _thr.Thread(target=_run, name="bounded-call", daemon=True)
+    worker.start()
+    worker.join(max(0.1, float(deadline_s)))
+    if worker.is_alive():
+        return None, True
+    if "error" in holder:
+        raise holder["error"]
+    return holder.get("result"), False
+
+
 def _fast_force_stop_selected_packages(
     packages: list[str],
     root_info: android.RootInfo,
@@ -6480,6 +6507,17 @@ def cmd_start(args: argparse.Namespace) -> int:
             )
         except ValueError:
             _GETTING_READY_DWELL_S = 1.5
+        # Hard deadline for a single first-launch perform_rejoin. If the launch
+        # command blocks (root prompt, busy activity manager, etc.), the loop
+        # must still advance so launching starts right after the first cache
+        # clear finishes and never stays stuck (probe p-5dacb6657a).
+        try:
+            _FIRST_LAUNCH_LAUNCH_DEADLINE_S = max(
+                1.0,
+                float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DEADLINE_SEC", "5") or "5"),
+            )
+        except ValueError:
+            _FIRST_LAUNCH_LAUNCH_DEADLINE_S = 5.0
         try:
             from . import checker_pointer as _checker_pointer
         except Exception:  # noqa: BLE001
@@ -6869,6 +6907,33 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 pass
 
+        def _bounded_first_launch(pkg_cfg, runtime_entry, deadline_s):
+            """Run perform_rejoin under a hard deadline.
+
+            The launch command (am start / force-stop) is dispatched inside a
+            worker; if it does not return within ``deadline_s`` the sequence
+            treats the launch as dispatched (returns ``None``) and advances to
+            the next package so launching starts right after the first cache
+            clear and never hangs (probe p-5dacb6657a).
+            """
+            try:
+                result, timed_out = run_callable_with_deadline(
+                    lambda: perform_rejoin(
+                        pkg_cfg, reason="start", package_entry=runtime_entry
+                    ),
+                    deadline_s,
+                )
+            except Exception as _exc:  # noqa: BLE001
+                return RejoinResult(False, root_used=False, error=str(_exc)[:200])
+            if timed_out:
+                _start_log.warning(
+                    "[DENG_REJOIN_FIRST_LAUNCH_DEADLINE] package=%s deadline_sec=%.1f"
+                    " action=advance_launch_dispatched",
+                    str(pkg_cfg.get("roblox_package")), float(deadline_s),
+                )
+                return None
+            return result
+
         try:
             for index, entry in enumerate(entries, start=1):
                 package = entry["package"]
@@ -6896,14 +6961,28 @@ def cmd_start(args: argparse.Namespace) -> int:
                 from .config import private_url_launch_context as _purl_ctx
                 _url_context = _purl_ctx(runtime_entry, runtime_cfg)
                 _has_url = _url_context.get("url_mode") == "private_url"
-                result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
-                launch_ok[package] = result.success
-                launch_err[package] = result.error or ""
-                if not result.success:
-                    phase[package] = "Failed"
-                    _supervisor._set_status(package, _STATUS_FAILED)
-                    _render_phase()
-                    continue
+                if _FIRST_LAUNCH_MODE == "interval":
+                    result = _bounded_first_launch(
+                        package_cfg, runtime_entry, _FIRST_LAUNCH_LAUNCH_DEADLINE_S
+                    )
+                else:
+                    result = perform_rejoin(
+                        package_cfg, reason="start", package_entry=runtime_entry
+                    )
+                # ``None`` == launch dispatched but still running past the hard
+                # deadline: advance as if launched so the interval scheduler
+                # keeps going (never stuck at Opening..).
+                if result is None:
+                    launch_ok[package] = True
+                    launch_err[package] = ""
+                else:
+                    launch_ok[package] = result.success
+                    launch_err[package] = result.error or ""
+                    if not result.success:
+                        phase[package] = "Failed"
+                        _supervisor._set_status(package, _STATUS_FAILED)
+                        _render_phase()
+                        continue
 
                 if package not in _supervisor._package_opened:
                     _supervisor.mark_package_launched(package)

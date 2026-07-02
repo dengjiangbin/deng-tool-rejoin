@@ -235,5 +235,39 @@ def test_stale_state_file_reports_dead_checker(tmp_path, monkeypatch):
     assert snap["checker_state_file_age_s"] >= 100
 
 
+# ── Bounded first-launch (probe p-5dacb6657a) ──────────────────────────
+def test_bounded_launch_returns_result_when_fast():
+    from agent.commands import run_callable_with_deadline
+
+    result, timed_out = run_callable_with_deadline(lambda: "launched", 5.0)
+    assert result == "launched"
+    assert timed_out is False
+
+
+def test_bounded_launch_times_out_and_advances():
+    from agent.commands import run_callable_with_deadline
+
+    def _hang():
+        time.sleep(30)
+        return "should_not_reach"
+
+    started = time.monotonic()
+    result, timed_out = run_callable_with_deadline(_hang, 0.4)
+    elapsed = time.monotonic() - started
+    assert timed_out is True
+    assert result is None
+    assert elapsed < 5.0  # advanced quickly; did NOT wait 30s
+
+
+def test_bounded_launch_propagates_exception():
+    from agent.commands import run_callable_with_deadline
+
+    def _boom():
+        raise RuntimeError("launch blew up")
+
+    with pytest.raises(RuntimeError, match="launch blew up"):
+        run_callable_with_deadline(_boom, 5.0)
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))
