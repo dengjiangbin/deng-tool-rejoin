@@ -6315,6 +6315,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         # Per-package phase label.  Updated in place by _phase() below.
         phase: dict[str, str] = {e["package"]: "Preparing" for e in entries}
 
+        # Interval-mode stagger must never run slow hot-lane sync from the
+        # launch scheduler thread (probe p-a5e6f62d28).
+        _launch_cfg: dict[str, bool] = {"interval_mode": True}
+
         # RAM info is cached between renders (updated every ~9s) to avoid
         # reading /proc/meminfo on every 3-second render tick.  Defined here
         # (before _render_phase) so _render_phase can call _get_ram_label
@@ -6435,6 +6439,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             if (
                 _supervisor_ref is not None
                 and not getattr(_supervisor_ref, "_all_launches_completed", False)
+                and not _launch_cfg.get("interval_mode", False)
             ):
                 try:
                     _supervisor_ref.sync_stagger_display_status()
@@ -6495,6 +6500,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _FIRST_LAUNCH_MODE = (
             os.environ.get("DENG_REJOIN_FIRST_LAUNCH_MODE", "interval") or "interval"
         ).strip().lower()
+        _launch_cfg["interval_mode"] = _FIRST_LAUNCH_MODE == "interval"
         try:
             _FIRST_LAUNCH_INTERVAL_S = float(
                 os.environ.get("DENG_REJOIN_FIRST_LAUNCH_INTERVAL_SEC", "30") or "30"
@@ -6531,6 +6537,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         # stale prior-session state and stamps a fresh session id.
         if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
             try:
+                from .launch_relaunch_trace import record_start_pressed as _record_start_pressed
+
+                _record_start_pressed()
                 _ptr_gr = _checker_pointer.get()
                 _ptr_gr.enable_persistence()
                 _ptr_gr.reset_for_new_start(
@@ -6640,16 +6649,28 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         # Cache clear runs independently — never blocks the launch schedule.
         def _cache_clear_bg() -> None:
+            from .cache_clear_phases import (
+                START_CACHE_CLEAR_DEADLINE_S,
+                run_start_mass_cache_clear_bounded,
+            )
+
+            _ptr_cc = _checker_pointer.get() if _checker_pointer is not None else None
             try:
-                prep_cache.update(
-                    _run_start_batch_cache_clear(
-                        package_names,
-                        root_info=_prep_root,
-                    )
+                cc_out = run_start_mass_cache_clear_bounded(
+                    package_names,
+                    root_info=_prep_root,
+                    deadline_s=START_CACHE_CLEAR_DEADLINE_S,
+                    checker_pointer=_ptr_cc,
+                )
+                prep_cache.update(dict(cc_out.get("results") or {}))
+                _launch_sched.record_clear_cache_finished(
+                    duration_ms=cc_out.get("cache_clear_duration_ms"),
+                    timed_out=bool(cc_out.get("cache_clear_timeout")),
                 )
             except Exception as _exc:  # noqa: BLE001
                 _start_log.debug("start: batch cache clear error: %s", _exc)
                 prep_cache.update({pkg: "Failed" for pkg in package_names})
+                _launch_sched.record_clear_cache_finished(timed_out=True)
             finally:
                 _start_session.mark("batch_clear_cache_done", package_count=len(entries))
 
@@ -6698,6 +6719,17 @@ def cmd_start(args: argparse.Namespace) -> int:
                 return "success"
             return f"failed:{launch_err[package] or 'unknown'}"
 
+        def _defer_render(note: str = "") -> None:
+            try:
+                threading.Thread(
+                    target=_render_phase_throttled,
+                    args=(note,),
+                    name="start-phase-render",
+                    daemon=True,
+                ).start()
+            except Exception:  # noqa: BLE001
+                pass
+
         def _sched_before_launch(index: int, package: str) -> None:
             launch_attempted[package] = True
             sup = _supervisor_ref
@@ -6719,9 +6751,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 except Exception:  # noqa: BLE001
                     pass
             phase[package] = "Launching"
-            nonlocal _stagger_render_last
-            _stagger_render_last = 0.0
-            _render_phase_throttled()
+            _defer_render()
 
         def _sched_after_launch(index: int, package: str, result: str) -> None:
             sup = _supervisor_ref
@@ -6729,7 +6759,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 phase[package] = "Failed"
                 if sup is not None:
                     sup._set_status(package, _STATUS_FAILED)
-                _render_phase()
+                _defer_render()
                 return
             if sup is not None:
                 if package not in sup._package_opened:
@@ -6744,7 +6774,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     _checker_pointer.get().note_launch_interval(_FIRST_LAUNCH_INTERVAL_S)
                 except Exception:  # noqa: BLE001
                     pass
-            _render_phase("Launching...")
+            _defer_render("Launching...")
             _start_log.info(
                 "[DENG_REJOIN_SCHEDULED_LAUNCH] package=%s index=%d/%d result=%s"
                 " anchor=%.3f fired_skew_ms=%s",
@@ -6760,14 +6790,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                 ),
             )
 
-        _sched_thread: threading.Thread | None = None
-        if _FIRST_LAUNCH_MODE == "interval":
-            _sched_thread = _launch_sched.start_background(
-                _sched_launch_one,
-                on_before_launch=_sched_before_launch,
-                on_after_launch=_sched_after_launch,
-                stop_event=None,
-            )
+        def _username_for_launch(index: int, package: str) -> str:
+            entry = runtime_entry_by_pkg.get(package, entries[index])
+            return _account_username_for_table(entry)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
@@ -6776,7 +6801,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg["package_start_times"] = start_times
         cfg["monitor_started_at"] = time.time()
 
-        # ── Bootstrap watchdog ASAP (before first launch due at T+5) ─────────
+        # ── Bootstrap watchdog BEFORE first launch due at T+5 ────────────────
         _any_url = any(
             str(effective_private_server_url(entry, runtime_cfg) or "").strip()
             for entry in runtime_entries
@@ -6815,6 +6840,17 @@ def cmd_start(args: argparse.Namespace) -> int:
             render_callback=None,
         )
         _start_session.mark("watchdog_daemon_started", package_count=len(entries))
+
+        _sched_thread: threading.Thread | None = None
+        if _FIRST_LAUNCH_MODE == "interval":
+            _sched_thread = _launch_sched.start_background(
+                _sched_launch_one,
+                on_before_launch=_sched_before_launch,
+                on_after_launch=_sched_after_launch,
+                stop_event=None,
+                username_for_index=_username_for_launch,
+            )
+
         try:
             from .termux_session import ensure_termux_session_alive as _ensure_termux_alive
 

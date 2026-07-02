@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -109,15 +110,60 @@ def test_probe_snapshot_fields_present():
     for key in (
         "session_id",
         "clear_cache_started_at",
+        "clear_cache_finished_at",
+        "clear_cache_duration_ms",
+        "clear_cache_timeout",
         "first_launch_due_at",
+        "launch_scheduler_started_at",
+        "first_launch_called_at",
+        "first_launch_delay_from_clear_cache_start_ms",
+        "checking_system_started_at",
+        "lifecycle_blocker",
         "interval_seconds",
         "first_launch_delay_seconds",
         "scheduler_alive",
         "blocked_by_clear_cache",
         "blocked_by_online_wait",
+        "launch_interval_observed_ms",
+        "launch_calls",
         "launch_attempts",
     ):
         assert key in snap
     assert snap["first_launch_delay_seconds"] == 5.0
     assert snap["interval_seconds"] == 30.0
     assert len(snap["launch_attempts"]) == 2
+
+
+def test_async_launch_does_not_delay_next_due_time():
+    clock = FakeClock(0.0)
+    sched = LaunchScheduler(
+        session_id="s6",
+        packages=["p0", "p1"],
+        first_launch_delay_seconds=5.0,
+        interval_seconds=30.0,
+    )
+    sched.mark_clear_cache_started(monotonic_now=0.0)
+    p0_started = threading.Event()
+    p0_release = threading.Event()
+
+    def launch_one(index: int, _package: str) -> str:
+        if index == 0:
+            p0_started.set()
+            p0_release.wait(2.0)
+        return "success"
+
+    runner = threading.Thread(
+        target=sched.run_schedule,
+        kwargs={
+            "launch_one": launch_one,
+            "monotonic_fn": clock.monotonic,
+            "sleep_fn": clock.sleep,
+        },
+        daemon=True,
+    )
+    runner.start()
+    assert p0_started.wait(1.0)
+    snap = sched.probe_snapshot()
+    assert snap["launch_attempts"][1]["fired_at"] == 35.0
+    p0_release.set()
+    runner.join(5.0)

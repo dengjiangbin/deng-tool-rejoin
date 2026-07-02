@@ -4929,7 +4929,15 @@ class WatchdogSupervisor:
                         ):
                             from . import checker_pointer as _cp_hb
 
-                            _hb_ptr.set_mode(_cp_hb.MODE_CHECKING, _cp_hb.POINTER_CHECKING)
+                            _hb_ptr.mark_checking_system_started()
+                            try:
+                                from . import launch_scheduler as _ls
+
+                                _active = _ls.get()
+                                if _active is not None:
+                                    _active.mark_checking_system_started()
+                            except Exception:  # noqa: BLE001
+                                pass
                     except Exception:  # noqa: BLE001
                         pass
             self._keep_termux_session_alive()

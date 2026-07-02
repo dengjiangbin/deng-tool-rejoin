@@ -27,6 +27,12 @@ from . import android
 # advance to relaunch — a wrong/hung root shell can never freeze recovery.
 RECOVERY_CACHE_CLEAR_DEADLINE_S = 25.0
 
+# Start prep (TYPE A): total wall-clock budget for the whole batch.  Launch
+# scheduling is anchored at clear-cache *start* and must never wait for this
+# phase to finish (probe p-a5e6f62d28).
+START_CACHE_CLEAR_DEADLINE_S = 5.0
+START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S = 3
+
 
 def _settle_before_start_cache_clear() -> None:
     """Brief pause so the force-stop prep burst settles before cache clear."""
@@ -38,12 +44,124 @@ def run_start_mass_cache_clear(
     packages: list[str],
     *,
     root_info: android.RootInfo | None = None,
+    per_package_timeout_s: int = START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S,
 ) -> dict[str, str]:
     """TYPE A: mass cache clear for every selected package (Start prep only)."""
     if not packages:
         return {}
     _settle_before_start_cache_clear()
-    return android.clear_packages_cache_mass_batch(packages, root_info=root_info)
+    return android.clear_packages_cache_mass_batch(
+        packages,
+        root_info=root_info,
+        per_package_timeout_s=per_package_timeout_s,
+    )
+
+
+def run_start_mass_cache_clear_bounded(
+    packages: list[str],
+    *,
+    root_info: android.RootInfo | None = None,
+    deadline_s: float = START_CACHE_CLEAR_DEADLINE_S,
+    checker_pointer: Any | None = None,
+) -> dict[str, object]:
+    """TYPE A with a hard total deadline — never blocks launch scheduling.
+
+    Whether this times out, throws, or partially clears, the caller must
+    continue into the launch scheduler immediately after the deadline.
+    """
+    started_at = time.time()
+    if checker_pointer is not None:
+        try:
+            checker_pointer.begin_cache_clear(command_kind="start_mass_su_find_delete")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _finish(
+        results: dict[str, str],
+        *,
+        status: str,
+        timed_out: bool,
+        exit_code: int,
+        error: str,
+    ) -> dict[str, object]:
+        finished_at = time.time()
+        duration_ms = round((finished_at - started_at) * 1000.0, 1)
+        out: dict[str, object] = {
+            "results": results,
+            "cache_clear_started_at": started_at,
+            "cache_clear_finished_at": finished_at,
+            "cache_clear_duration_ms": duration_ms,
+            "cache_clear_timeout": timed_out,
+            "cache_clear_status": status,
+            "cache_clear_timed_out": timed_out,
+            "cache_clear_exit_code": exit_code,
+            "cache_clear_error": error,
+            "cache_clear_command_kind": "start_mass_su_find_delete",
+        }
+        if checker_pointer is not None:
+            try:
+                checker_pointer.record_cache_clear_result(
+                    status=status,
+                    exit_code=exit_code,
+                    timed_out=timed_out,
+                    error=error,
+                    command_kind="start_mass_su_find_delete",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    if not packages:
+        return _finish({}, status="skipped_empty", timed_out=False, exit_code=0, error="")
+
+    holder: dict[str, Any] = {}
+
+    def _work() -> None:
+        try:
+            holder["results"] = run_start_mass_cache_clear(
+                packages,
+                root_info=root_info,
+                per_package_timeout_s=START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001
+            holder["error"] = str(exc)[:200]
+
+    worker = threading.Thread(
+        target=_work, name="start-mass-cache-clear", daemon=True
+    )
+    worker.start()
+    worker.join(max(0.5, float(deadline_s)))
+
+    if worker.is_alive():
+        partial = dict(holder.get("results") or {})
+        for pkg in packages:
+            partial.setdefault(str(pkg), "TimedOut")
+        return _finish(
+            partial,
+            status="timeout_continue_launch",
+            timed_out=True,
+            exit_code=124,
+            error="start_cache_clear_deadline_exceeded",
+        )
+
+    if "error" in holder:
+        failed = {str(pkg): "Failed" for pkg in packages}
+        return _finish(
+            failed,
+            status="failed_continue_launch",
+            timed_out=False,
+            exit_code=1,
+            error=holder["error"],
+        )
+
+    results = dict(holder.get("results") or {})
+    return _finish(
+        results,
+        status="success",
+        timed_out=False,
+        exit_code=0,
+        error="",
+    )
 
 
 def run_recovery_cache_clear(

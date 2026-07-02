@@ -2500,6 +2500,7 @@ def clear_packages_cache_mass_batch(
     packages: Iterable[str],
     *,
     root_info: RootInfo | None = None,
+    per_package_timeout_s: int = 45,
 ) -> dict[str, str]:
     """Phase-1 Start mass clear (cache-clear TYPE A) — all selected clones.
 
@@ -2531,9 +2532,12 @@ def clear_packages_cache_mass_batch(
             results.setdefault(pkg, "Skipped")
         return results
     root_tool = str(info.tool)
+    pkg_timeout = max(2, int(per_package_timeout_s))
     for pkg in package_list:
         try:
-            results[pkg] = clear_package_cache_for_start(pkg, root_tool=root_tool)
+            results[pkg] = clear_package_cache_for_start(
+                pkg, root_tool=root_tool, timeout_s=pkg_timeout
+            )
         except Exception:  # noqa: BLE001
             results[pkg] = "Failed"
     return results

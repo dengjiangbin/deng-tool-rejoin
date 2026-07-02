@@ -1384,6 +1384,10 @@ def collect_probe(
             "first_launch_phase": _fc.get("first_launch_phase"),
             "first_launch_next_package_at": _fc.get("first_launch_next_package_at"),
             "valid_state_writer": _fc.get("valid_state_writer"),
+            "start_pressed_at": _fc.get("start_pressed_at"),
+            "getting_ready_at": _fc.get("getting_ready_at"),
+            "checking_system_started_at": _fc.get("checking_system_started_at"),
+            "lifecycle_blocker": _fc.get("lifecycle_blocker"),
         }
         try:
             from .launch_scheduler import probe_snapshot as _launch_schedule_probe

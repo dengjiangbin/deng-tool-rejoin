@@ -134,6 +134,9 @@ class CheckerPointerState:
     session_id: str = ""
     checker_pid: int | None = None
     start_pressed_at: float | None = None            # wall-clock (time.time)
+    getting_ready_at: float | None = None            # wall-clock (time.time)
+    checking_system_started_at: float | None = None  # wall-clock (time.time)
+    lifecycle_blocker: str = ""
     checker_last_heartbeat_at: float | None = None   # wall-clock (time.time)
     checker_dead_reason: str = ""
 
@@ -207,6 +210,9 @@ class CheckerPointerState:
             self.checker_pid = int(pid) if pid is not None else None
             now = time.time()
             self.start_pressed_at = start_pressed_at if start_pressed_at is not None else now
+            self.getting_ready_at = None
+            self.checking_system_started_at = None
+            self.lifecycle_blocker = ""
             self.checker_last_heartbeat_at = now
             self.checker_dead_reason = ""
             self.checker_loop_alive = True
@@ -261,14 +267,29 @@ class CheckerPointerState:
             self.checker_mode = MODE_GETTING_READY
             self.state_pointer_text = POINTER_GETTING_READY
             self.first_launch_phase = "getting_ready"
+            self.getting_ready_at = time.time()
             self.first_launch_started_packages = []
             self.first_launch_supposedly_launched_packages = []
             self.launch_waiting_for_online = False
             self.launch_blocked_reason = ""
+            self.lifecycle_blocker = ""
             if interval_s is not None:
                 self.first_launch_interval_s = float(interval_s)
             for pkg in packages:
                 self._pkg(pkg)
+            self._persist(force=True)
+
+    def mark_checking_system_started(self) -> None:
+        with self._lock:
+            if self.checking_system_started_at is None:
+                self.checking_system_started_at = time.time()
+            self.checker_mode = MODE_CHECKING
+            self.state_pointer_text = POINTER_CHECKING
+            self._persist(force=True)
+
+    def set_lifecycle_blocker(self, reason: str) -> None:
+        with self._lock:
+            self.lifecycle_blocker = str(reason or "")[:200]
             self._persist(force=True)
 
     def begin_opening(self, package: str, *, next_package_at: float | None = None) -> None:
@@ -672,6 +693,9 @@ class CheckerPointerState:
                 "session_id": self.session_id or None,
                 "checker_pid": self.checker_pid,
                 "start_pressed_at": self.start_pressed_at,
+                "getting_ready_at": self.getting_ready_at,
+                "checking_system_started_at": self.checking_system_started_at,
+                "lifecycle_blocker": self.lifecycle_blocker or None,
                 "checker_last_heartbeat_at": self.checker_last_heartbeat_at,
                 "checker_dead_reason": self.checker_dead_reason or None,
                 # ── Cache-clear result (bounded recovery) ─────────────

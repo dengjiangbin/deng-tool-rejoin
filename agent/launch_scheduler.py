@@ -7,8 +7,8 @@ command at::
     clear_cache_started_at + first_launch_delay_seconds + (i * interval_seconds)
 
 Default: first package at T+5s, then every 30s.  The scheduler never waits for
-cache clear completion, Online, heartbeat, Dead, or adb hangs (probe
-p-bf0b2feb55).
+cache clear completion, Online, heartbeat, Dead, prior launch completion, or
+adb hangs (probe p-a5e6f62d28).
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ _STATE_MAX_AGE_S = 600.0
 DEFAULT_FIRST_LAUNCH_DELAY_S = 5.0
 DEFAULT_INTERVAL_S = 30.0
 DEFAULT_COMMAND_TIMEOUT_S = 5.0
+DEFAULT_BEFORE_LAUNCH_TIMEOUT_S = 0.5
 
 
 def _state_file_path():
@@ -49,6 +50,9 @@ class LaunchAttemptRecord:
     command_finished_at: float | None = None
     command_timeout: float = DEFAULT_COMMAND_TIMEOUT_S
     result: str = "pending"
+    username: str = ""
+    command: str = "perform_rejoin"
+    error: str = ""
 
     def to_probe_dict(self, *, anchor: float | None) -> dict[str, Any]:
         delta_ms = None
@@ -57,14 +61,18 @@ class LaunchAttemptRecord:
         return {
             "package": self.package,
             "index": self.index,
+            "username": self.username or None,
             "due_at": self.due_at,
             "fired_at": self.fired_at,
+            "called_at": self.command_started_at,
             "skew_ms": self.skew_ms,
             "delta_from_clear_cache_ms": delta_ms,
             "command_started_at": self.command_started_at,
             "command_finished_at": self.command_finished_at,
             "command_timeout": self.command_timeout,
+            "command": self.command,
             "result": self.result,
+            "error": self.error or None,
         }
 
 
@@ -77,14 +85,23 @@ class LaunchScheduler:
     first_launch_delay_seconds: float = DEFAULT_FIRST_LAUNCH_DELAY_S
     interval_seconds: float = DEFAULT_INTERVAL_S
     command_timeout_seconds: float = DEFAULT_COMMAND_TIMEOUT_S
+    before_launch_timeout_seconds: float = DEFAULT_BEFORE_LAUNCH_TIMEOUT_S
 
     clear_cache_started_at: float | None = None
+    clear_cache_finished_at: float | None = None
+    clear_cache_duration_ms: float | None = None
+    clear_cache_timeout: bool = False
     first_launch_due_at: float | None = None
+    launch_scheduler_started_at: float | None = None
+    first_launch_called_at: float | None = None
+    checking_system_started_at: float | None = None
+    lifecycle_blocker: str = ""
     scheduler_alive: bool = False
     blocked_by_clear_cache: bool = False
     blocked_by_online_wait: bool = False
 
     _attempts: list[LaunchAttemptRecord] = field(default_factory=list)
+    _launch_interval_observed_ms: list[float] = field(default_factory=list)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     _done_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _thread: threading.Thread | None = field(default=None, repr=False)
@@ -124,9 +141,51 @@ class LaunchScheduler:
             self.first_launch_due_at = now + self.first_launch_delay_seconds
             self.blocked_by_clear_cache = False
             self.blocked_by_online_wait = False
+            self.lifecycle_blocker = ""
             self._rebuild_attempts()
             self._persist(force=True)
         return now
+
+    def record_clear_cache_finished(
+        self,
+        *,
+        finished_at: float | None = None,
+        duration_ms: float | None = None,
+        timed_out: bool = False,
+    ) -> None:
+        with self._lock:
+            self.clear_cache_finished_at = float(
+                finished_at if finished_at is not None else time.monotonic()
+            )
+            if duration_ms is not None:
+                self.clear_cache_duration_ms = float(duration_ms)
+            elif self.clear_cache_started_at is not None:
+                self.clear_cache_duration_ms = round(
+                    (self.clear_cache_finished_at - self.clear_cache_started_at) * 1000.0,
+                    1,
+                )
+            self.clear_cache_timeout = bool(timed_out)
+            self.blocked_by_clear_cache = False
+            self._persist(force=True)
+
+    def mark_scheduler_started(self, *, monotonic_now: float | None = None) -> None:
+        with self._lock:
+            self.launch_scheduler_started_at = float(
+                monotonic_now if monotonic_now is not None else time.monotonic()
+            )
+            self._persist(force=True)
+
+    def mark_checking_system_started(self, *, monotonic_now: float | None = None) -> None:
+        with self._lock:
+            self.checking_system_started_at = float(
+                monotonic_now if monotonic_now is not None else time.monotonic()
+            )
+            self._persist(force=True)
+
+    def set_lifecycle_blocker(self, reason: str) -> None:
+        with self._lock:
+            self.lifecycle_blocker = str(reason or "")[:200]
+            self._persist(force=True)
 
     def due_at_for_index(self, index: int) -> float | None:
         with self._lock:
@@ -165,14 +224,35 @@ class LaunchScheduler:
             row.skew_ms = round((ts - row.due_at) * 1000.0, 1)
             if row.result == "pending":
                 row.result = "fired"
+            if index == 0:
+                self.first_launch_called_at = ts
+            elif index > 0:
+                prev = self._attempts[index - 1].fired_at
+                if prev is not None:
+                    self._launch_interval_observed_ms.append(
+                        round((ts - prev) * 1000.0, 1)
+                    )
             self._persist(force=True)
 
-    def record_command_started(self, index: int, *, started_at: float | None = None) -> None:
+    def record_command_started(
+        self,
+        index: int,
+        *,
+        started_at: float | None = None,
+        username: str = "",
+    ) -> None:
         ts = float(started_at if started_at is not None else time.monotonic())
         with self._lock:
             if 0 <= index < len(self._attempts):
-                self._attempts[index].command_started_at = ts
-                self._persist()
+                row = self._attempts[index]
+                row.command_started_at = ts
+                if username:
+                    row.username = username
+                if row.result in ("pending", "fired"):
+                    row.result = "launching"
+                if index == 0 and self.first_launch_called_at is None:
+                    self.first_launch_called_at = ts
+                self._persist(force=True)
 
     def record_command_finished(
         self,
@@ -180,6 +260,7 @@ class LaunchScheduler:
         *,
         finished_at: float | None = None,
         result: str,
+        error: str = "",
     ) -> None:
         ts = float(finished_at if finished_at is not None else time.monotonic())
         with self._lock:
@@ -187,7 +268,45 @@ class LaunchScheduler:
                 row = self._attempts[index]
                 row.command_finished_at = ts
                 row.result = result
+                row.error = str(error or "")[:200]
                 self._persist(force=True)
+
+    def _run_before_launch_bounded(
+        self,
+        callback: Callable[[int, str], None] | None,
+        index: int,
+        package: str,
+        *,
+        monotonic_fn: Callable[[], float],
+        sleep_fn: Callable[[float], None],
+    ) -> None:
+        if callback is None:
+            return
+        done = threading.Event()
+        exc_holder: list[BaseException] = []
+
+        def _invoke() -> None:
+            try:
+                callback(index, package)
+            except BaseException as exc:  # noqa: BLE001
+                exc_holder.append(exc)
+            finally:
+                done.set()
+
+        worker = threading.Thread(
+            target=_invoke,
+            name=f"before-launch-{index}",
+            daemon=True,
+        )
+        worker.start()
+        deadline = monotonic_fn() + max(0.05, float(self.before_launch_timeout_seconds))
+        while not done.is_set():
+            if monotonic_fn() >= deadline:
+                self.set_lifecycle_blocker(
+                    f"before_launch_timeout:{package}"
+                )
+                return
+            sleep_fn(0.02)
 
     def run_schedule(
         self,
@@ -198,12 +317,19 @@ class LaunchScheduler:
         stop_event: threading.Event | None = None,
         monotonic_fn: Callable[[], float] = time.monotonic,
         sleep_fn: Callable[[float], None] = time.sleep,
+        username_for_index: Callable[[int, str], str] | None = None,
     ) -> None:
-        """Fire each package at its due time (blocking caller thread)."""
+        """Fire each package at its due time (blocking caller thread).
+
+        Launch commands are dispatched on independent daemon threads so a slow
+        or hung ``launch_one`` never delays the next package's due time.
+        """
         with self._lock:
             self.scheduler_alive = True
             self._done_event.clear()
+            self.mark_scheduler_started(monotonic_now=monotonic_fn())
             self._persist(force=True)
+        workers: list[threading.Thread] = []
         try:
             for row in list(self._attempts):
                 if stop_event is not None and stop_event.is_set():
@@ -217,25 +343,73 @@ class LaunchScheduler:
                     break
                 fired_at = monotonic_fn()
                 self.record_fired(row.index, fired_at=fired_at)
-                if on_before_launch is not None:
+                username = ""
+                if username_for_index is not None:
                     try:
-                        on_before_launch(row.index, row.package)
+                        username = str(username_for_index(row.index, row.package) or "")
                     except Exception:  # noqa: BLE001
-                        pass
-                self.record_command_started(row.index, started_at=fired_at)
-                try:
-                    result = launch_one(row.index, row.package)
-                except Exception as exc:  # noqa: BLE001
-                    result = f"error:{str(exc)[:120]}"
-                self.record_command_finished(
-                    row.index, finished_at=monotonic_fn(), result=result
+                        username = ""
+                self.record_command_started(
+                    row.index,
+                    started_at=fired_at,
+                    username=username,
                 )
-                if on_after_launch is not None:
+                self._run_before_launch_bounded(
+                    on_before_launch,
+                    row.index,
+                    row.package,
+                    monotonic_fn=monotonic_fn,
+                    sleep_fn=sleep_fn,
+                )
+
+                def _worker(
+                    idx: int = row.index,
+                    pkg: str = row.package,
+                    uname: str = username,
+                ) -> None:
                     try:
-                        on_after_launch(row.index, row.package, result)
-                    except Exception:  # noqa: BLE001
-                        pass
+                        result = launch_one(idx, pkg)
+                    except Exception as exc:  # noqa: BLE001
+                        result = f"error:{str(exc)[:120]}"
+                        self.record_command_finished(
+                            idx,
+                            finished_at=monotonic_fn(),
+                            result=result,
+                            error=str(exc)[:200],
+                        )
+                        if on_after_launch is not None:
+                            try:
+                                on_after_launch(idx, pkg, result)
+                            except Exception:  # noqa: BLE001
+                                pass
+                        return
+                    err = ""
+                    if result.startswith("error:"):
+                        err = result[6:]
+                    elif result.startswith("failed:"):
+                        err = result[7:]
+                    self.record_command_finished(
+                        idx,
+                        finished_at=monotonic_fn(),
+                        result=result,
+                        error=err,
+                    )
+                    if on_after_launch is not None:
+                        try:
+                            on_after_launch(idx, pkg, result)
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                thread = threading.Thread(
+                    target=_worker,
+                    name=f"launch-worker-{row.index}-{row.package[:16]}",
+                    daemon=True,
+                )
+                thread.start()
+                workers.append(thread)
         finally:
+            for thread in workers:
+                thread.join()
             with self._lock:
                 self.scheduler_alive = False
                 self._done_event.set()
@@ -248,6 +422,7 @@ class LaunchScheduler:
         on_before_launch: Callable[[int, str], None] | None = None,
         on_after_launch: Callable[[int, str, str], None] | None = None,
         stop_event: threading.Event | None = None,
+        username_for_index: Callable[[int, str], str] | None = None,
     ) -> threading.Thread:
         """Run :meth:`run_schedule` on a daemon thread."""
         thread = threading.Thread(
@@ -257,6 +432,7 @@ class LaunchScheduler:
                 "on_before_launch": on_before_launch,
                 "on_after_launch": on_after_launch,
                 "stop_event": stop_event,
+                "username_for_index": username_for_index,
             },
             name=f"launch-scheduler-{self.session_id[:24]}",
             daemon=True,
@@ -268,18 +444,44 @@ class LaunchScheduler:
     def wait_until_complete(self, timeout: float | None = None) -> bool:
         return self._done_event.wait(timeout=timeout)
 
+    def first_launch_delay_from_clear_cache_start_ms(self) -> float | None:
+        with self._lock:
+            if self.clear_cache_started_at is None or self.first_launch_called_at is None:
+                return None
+            return round(
+                (self.first_launch_called_at - self.clear_cache_started_at) * 1000.0,
+                1,
+            )
+
+    def launch_calls_probe(self) -> list[dict[str, Any]]:
+        with self._lock:
+            anchor = self.clear_cache_started_at
+            return [row.to_probe_dict(anchor=anchor) for row in self._attempts]
+
     def probe_snapshot(self) -> dict[str, Any]:
         with self._lock:
             anchor = self.clear_cache_started_at
             return {
                 "session_id": self.session_id or None,
                 "clear_cache_started_at": anchor,
+                "clear_cache_finished_at": self.clear_cache_finished_at,
+                "clear_cache_duration_ms": self.clear_cache_duration_ms,
+                "clear_cache_timeout": self.clear_cache_timeout,
                 "first_launch_due_at": self.first_launch_due_at,
+                "launch_scheduler_started_at": self.launch_scheduler_started_at,
+                "first_launch_called_at": self.first_launch_called_at,
+                "first_launch_delay_from_clear_cache_start_ms": (
+                    self.first_launch_delay_from_clear_cache_start_ms()
+                ),
+                "checking_system_started_at": self.checking_system_started_at,
+                "lifecycle_blocker": self.lifecycle_blocker or None,
                 "interval_seconds": self.interval_seconds,
                 "first_launch_delay_seconds": self.first_launch_delay_seconds,
                 "scheduler_alive": self.scheduler_alive,
                 "blocked_by_clear_cache": self.blocked_by_clear_cache,
                 "blocked_by_online_wait": self.blocked_by_online_wait,
+                "launch_interval_observed_ms": list(self._launch_interval_observed_ms),
+                "launch_calls": self.launch_calls_probe(),
                 "launch_attempts": [
                     row.to_probe_dict(anchor=anchor) for row in self._attempts
                 ],
@@ -377,12 +579,22 @@ def probe_snapshot() -> dict[str, Any]:
     return {
         "session_id": None,
         "clear_cache_started_at": None,
+        "clear_cache_finished_at": None,
+        "clear_cache_duration_ms": None,
+        "clear_cache_timeout": False,
         "first_launch_due_at": None,
+        "launch_scheduler_started_at": None,
+        "first_launch_called_at": None,
+        "first_launch_delay_from_clear_cache_start_ms": None,
+        "checking_system_started_at": None,
+        "lifecycle_blocker": None,
         "interval_seconds": DEFAULT_INTERVAL_S,
         "first_launch_delay_seconds": DEFAULT_FIRST_LAUNCH_DELAY_S,
         "scheduler_alive": False,
         "blocked_by_clear_cache": False,
         "blocked_by_online_wait": False,
+        "launch_interval_observed_ms": [],
+        "launch_calls": [],
         "launch_attempts": [],
         "_source": "none",
     }
