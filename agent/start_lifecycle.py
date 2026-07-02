@@ -40,6 +40,10 @@ _getting_ready_finished_at: float | None = None
 _launching_started_at: float | None = None
 _all_packages_dispatched_at: float | None = None
 _monitoring_started_at: float | None = None
+_cleanup_kill_except_termux_started_at: float | None = None
+_cleanup_kill_except_termux_finished_at: float | None = None
+_header_phase: str = ""
+_first_launch_requested_at: float | None = None
 
 
 def reset_for_start(packages: list[str]) -> None:
@@ -57,6 +61,8 @@ def reset_for_start(packages: list[str]) -> None:
     global _clear_cache_command_started_at, _clear_cache_command_finished_at
     global _getting_ready_entered_at, _getting_ready_finished_at
     global _launching_started_at, _all_packages_dispatched_at, _monitoring_started_at
+    global _cleanup_kill_except_termux_started_at, _cleanup_kill_except_termux_finished_at
+    global _header_phase, _first_launch_requested_at
     with _lock:
         _cache_clear_closed = False
         _launch_scheduled_packages = {str(p).strip() for p in packages if str(p).strip()}
@@ -91,6 +97,10 @@ def reset_for_start(packages: list[str]) -> None:
         _launching_started_at = None
         _all_packages_dispatched_at = None
         _monitoring_started_at = None
+        _cleanup_kill_except_termux_started_at = None
+        _cleanup_kill_except_termux_finished_at = None
+        _header_phase = ""
+        _first_launch_requested_at = None
 
 
 def mark_start_pressed() -> None:
@@ -129,24 +139,59 @@ def mark_preparing_command_finished() -> None:
             _prepare_finished_at = now
 
 
-def mark_clearing_cache_entered() -> None:
-    global _clearing_cache_entered_at, _clear_cache_command_started_at
+def mark_header_phase(phase: str) -> None:
+    global _header_phase
     with _lock:
-        now = time.time()
+        _header_phase = str(phase or "")[:80]
+
+
+def mark_cleanup_kill_except_termux_started() -> None:
+    global _cleanup_kill_except_termux_started_at
+    with _lock:
+        if _cleanup_kill_except_termux_started_at is None:
+            _cleanup_kill_except_termux_started_at = time.time()
+
+
+def mark_cleanup_kill_except_termux_finished() -> None:
+    global _cleanup_kill_except_termux_finished_at
+    with _lock:
+        if _cleanup_kill_except_termux_finished_at is None:
+            _cleanup_kill_except_termux_finished_at = time.time()
+
+
+def mark_clearing_cache_entered() -> None:
+    global _clearing_cache_entered_at
+    with _lock:
         if _clearing_cache_entered_at is None:
-            _clearing_cache_entered_at = now
+            _clearing_cache_entered_at = time.time()
+
+
+def mark_clear_cache_command_started() -> None:
+    global _clear_cache_command_started_at
+    with _lock:
         if _clear_cache_command_started_at is None:
-            _clear_cache_command_started_at = now
+            _clear_cache_command_started_at = time.time()
+
+
+def mark_clear_cache_command_finished() -> None:
+    global _clear_cache_command_finished_at
+    with _lock:
+        if _clear_cache_command_finished_at is None:
+            _clear_cache_command_finished_at = time.time()
 
 
 def mark_clearing_cache_finished() -> None:
-    global _clearing_cache_finished_at, _clear_cache_command_finished_at
+    global _clearing_cache_finished_at
     with _lock:
-        now = time.time()
         if _clearing_cache_finished_at is None:
-            _clearing_cache_finished_at = now
-        if _clear_cache_command_finished_at is None:
-            _clear_cache_command_finished_at = now
+            _clearing_cache_finished_at = time.time()
+
+
+def mark_first_launch_requested() -> None:
+    global _first_launch_requested_at
+    with _lock:
+        if _first_launch_requested_at is None:
+            _first_launch_requested_at = time.time()
 
 
 def mark_getting_ready_entered() -> None:
@@ -337,7 +382,27 @@ def probe_snapshot() -> dict[str, Any]:
             _clearing_cache_entered_at,
             _clearing_cache_finished_at,
         )
+        clear_cmd_duration = _phase_duration_ms(
+            _clear_cache_command_started_at,
+            _clear_cache_command_finished_at,
+        )
+        cleanup_duration = _phase_duration_ms(
+            _cleanup_kill_except_termux_started_at,
+            _cleanup_kill_except_termux_finished_at,
+        )
+        getting_ready_duration = _phase_duration_ms(
+            _getting_ready_entered_at,
+            _getting_ready_finished_at,
+        )
+        first_launch_delay_after_clear_cache_ms = None
+        if _clearing_cache_finished_at is not None and _first_launch_requested_at is not None:
+            first_launch_delay_after_clear_cache_ms = round(
+                (_first_launch_requested_at - _clearing_cache_finished_at) * 1000.0,
+                1,
+            )
         return {
+            "header_is_single_row": True,
+            "header_phase": _header_phase or None,
             "start_pressed_at": _start_pressed_at,
             "preparing_entered_at": _preparing_entered_at,
             "preparing_finished_at": _preparing_finished_at,
@@ -347,10 +412,18 @@ def probe_snapshot() -> dict[str, Any]:
             "clearing_cache_entered_at": _clearing_cache_entered_at,
             "clearing_cache_finished_at": _clearing_cache_finished_at,
             "clearing_cache_duration_ms": cache_duration,
+            "clearing_cache_phase_duration_ms": cache_duration,
             "clear_cache_command_started_at": _clear_cache_command_started_at,
             "clear_cache_command_finished_at": _clear_cache_command_finished_at,
+            "clear_cache_command_duration_ms": clear_cmd_duration,
+            "cleanup_kill_except_termux_started_at": _cleanup_kill_except_termux_started_at,
+            "cleanup_kill_except_termux_finished_at": _cleanup_kill_except_termux_finished_at,
+            "cleanup_kill_except_termux_duration_ms": cleanup_duration,
             "getting_ready_entered_at": _getting_ready_entered_at,
             "getting_ready_finished_at": _getting_ready_finished_at,
+            "getting_ready_duration_ms": getting_ready_duration,
+            "first_launch_requested_at": _first_launch_requested_at,
+            "first_launch_delay_after_clear_cache_ms": first_launch_delay_after_clear_cache_ms,
             "launching_started_at": _launching_started_at,
             "all_packages_dispatched_at": _all_packages_dispatched_at,
             "monitoring_started_at": _monitoring_started_at,

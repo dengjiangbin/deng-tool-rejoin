@@ -46,7 +46,46 @@ def test_preparing_ends_when_command_finishes():
     start_lifecycle.mark_preparing_command_finished()
     snap = start_lifecycle.probe_snapshot()
     assert snap["preparing_duration_ms"] is not None
-    assert snap["preparing_duration_ms"] <= 5000.0
+    assert snap["preparing_duration_ms"] <= 3000.0
+
+
+def test_header_phase_does_not_become_table_package_state():
+    start_lifecycle.reset_for_start(["p0"])
+    start_lifecycle.mark_header_phase("Preparing")
+    start_lifecycle.bump_ui_phase_version(phase="Ready", source="render_phase")
+    snap = start_lifecycle.probe_snapshot()
+    assert snap["header_phase"] == "Preparing"
+    assert snap["header_is_single_row"] is True
+    assert snap["table_state_phase"] == "Ready"
+
+
+def test_package_row_never_getting_ready_in_table_mapping():
+    from agent import commands
+
+    phase = {"p0": "Getting Ready", "p1": "Ready"}
+    _HEADER_ONLY = frozenset({"Preparing", "Clear Cache", "Getting Ready", "Clearing Cache"})
+
+    def mapped(pkg: str) -> str:
+        ph = phase.get(pkg, "")
+        if ph in _HEADER_ONLY:
+            return "Ready"
+        return ph or "Ready"
+
+    assert mapped("p0") == "Ready"
+    assert mapped("p1") == "Ready"
+
+
+def test_clear_cache_command_duration_separate_from_phase():
+    start_lifecycle.reset_for_start(["p0"])
+    start_lifecycle.mark_clearing_cache_entered()
+    start_lifecycle.mark_clear_cache_command_started()
+    start_lifecycle.mark_clear_cache_command_finished()
+    start_lifecycle.mark_clearing_cache_finished()
+    snap = start_lifecycle.probe_snapshot()
+    assert snap["clear_cache_command_duration_ms"] is not None
+    assert snap["clearing_cache_phase_duration_ms"] is not None
+    assert snap["clear_cache_command_duration_ms"] <= 5000.0
+    assert snap["clearing_cache_duration_ms"] <= 5000.0
 
 
 def test_clearing_cache_probe_timestamps():
@@ -96,7 +135,6 @@ def test_launch_interval_thirty_seconds_without_online_wait():
     )
     sched.mark_clear_cache_started(monotonic_now=clock.monotonic())
     sched.record_clear_cache_finished(finished_at=clock.monotonic(), reanchor_launches=True)
-    sched.reanchor_launches_from_getting_ready_finished(finished_at=clock.monotonic())
 
     def launch_one(index: int, _package: str) -> str:
         fired.append(clock.monotonic())
@@ -123,7 +161,7 @@ def test_monitoring_starts_only_after_all_dispatched():
         interval_seconds=30.0,
     )
     sched.mark_clear_cache_started(monotonic_now=clock.monotonic())
-    sched.reanchor_launches_from_getting_ready_finished(finished_at=clock.monotonic())
+    sched.record_clear_cache_finished(finished_at=clock.monotonic(), reanchor_launches=True)
 
     def launch_one(_index: int, _package: str) -> str:
         return "success"

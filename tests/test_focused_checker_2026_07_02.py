@@ -332,9 +332,9 @@ def test_pointer_text_transitions():
     p.begin_opening("p1")
     assert p.state_pointer_text == checker_pointer.POINTER_OPENING
     p.begin_focus("p1", 1, now=0.0)
-    assert p.state_pointer_text.startswith("Checking ")
+    assert p.state_pointer_text.startswith("Monitoring ")
     p.update_focus_timer(3)
-    assert p.state_pointer_text == "Checking 3/7s"
+    assert p.state_pointer_text == "Monitoring 3/7s"
     p.mark_dead_detected("p1", "crash", "logcat", "FATAL")
     assert p.state_pointer_text == checker_pointer.POINTER_START_RECOVERY
     p.begin_recovery("p1")
@@ -353,20 +353,18 @@ def test_pointer_text_transitions():
     assert p.state_pointer_text == checker_pointer.POINTER_RESUME_CHECKING
 
 
-def test_table_two_row_state_header_only():
+def test_table_single_row_header_with_phase():
     from agent import commands
 
-    rows = [(1, "com.moons.litesc", "user1", "Online")]
-    with_ptr = commands.build_start_table(rows, use_color=False, pointer_text="Getting Ready..")
+    rows = [(1, "com.moons.litesc", "user1", "Ready")]
+    with_ptr = commands.build_start_table(rows, use_color=False, pointer_text="Preparing..")
     no_ptr = commands.build_start_table(rows, use_color=False)
     lp = with_ptr.splitlines()
     ln = no_ptr.splitlines()
-    # Pointer adds exactly one extra header row (the State-column second row).
-    assert len(lp) == len(ln) + 1
-    # The pointer text appears exactly once, in the header region.
-    assert sum("Getting Ready" in line for line in lp) == 1
-    # Legacy render (no pointer) must be unchanged — no second header row.
-    assert not any("Getting Ready" in line for line in ln)
+    assert len(lp) == len(ln)
+    assert sum("Preparing" in line for line in lp) == 1
+    assert not any("Preparing" in line for line in ln)
+    assert lp[1] == ln[1] or "Preparing" in lp[1]
 
 
 def test_table_pointer_timer_text():
@@ -397,31 +395,32 @@ def test_header_row_is_centered_and_yellow_bold():
     from agent import commands
 
     rows = [(1, "com.moons.litesc", "user1", "Online")]
-    out = commands.build_start_table(rows, use_color=True, pointer_text="Checking..")
-    header_line = next(ln for ln in out.splitlines() if "State" in ln and "Package" in ln)
-    # Yellow-bold ANSI wraps each header label.
+    out = commands.build_start_table(rows, use_color=True, pointer_text="Monitoring..")
+    header_line = next(ln for ln in out.splitlines() if "Package" in ln and "Monitoring" in ln)
     assert commands._ANSI_YELLOW in header_line
-    # Centered: the "State" label has leading padding (not flush-left in its cell).
     plain = commands._ANSI_RE.sub("", header_line)
-    state_cell = plain.split("│")[4]  # #, Package, Username, State, (trailing)
-    assert state_cell != state_cell.lstrip(), "State header should be centered, not left-biased"
+    phase_cell = plain.split("│")[4]
+    assert phase_cell != phase_cell.lstrip(), "Phase header should be centered, not left-biased"
 
 
-def test_pointer_second_row_is_bordered_box():
+def test_pointer_phase_in_single_header_row():
     from agent import commands
 
     rows = [(1, "com.moons.litesc", "user1", "Online")]
-    out = commands.build_start_table(rows, use_color=False, pointer_text="Checking..")
-    assert "[ Checking.. ]" in out
+    out = commands.build_start_table(rows, use_color=False, pointer_text="Monitoring..")
+    lines = out.splitlines()
+    assert len(lines) == 5
+    assert "Monitoring.." in lines[1]
+    assert not any("[ Monitoring" in ln for ln in lines)
 
 
 def test_pointer_checking_is_pink():
     from agent import commands
 
     rows = [(1, "com.moons.litesc", "user1", "Online")]
-    out = commands.build_start_table(rows, use_color=True, pointer_text="Checking..")
-    box_line = next(ln for ln in out.splitlines() if "Checking.." in ln)
-    assert commands._ANSI_PINK in box_line
+    out = commands.build_start_table(rows, use_color=True, pointer_text="Monitoring..")
+    header_line = next(ln for ln in out.splitlines() if "Monitoring.." in ln)
+    assert commands._ANSI_PINK in header_line
 
 
 def test_checking_status_colorized_pink():
@@ -437,10 +436,10 @@ def test_only_active_focus_package_marked_checking():
     p = CheckerPointerState()
     p.begin_getting_ready(["p1", "p2"])
     p.begin_focus("p1", 1, now=0.0)
-    assert p.display_state("p1") == "Checking"
+    assert p.display_state("p1") == "Monitoring"
     p.set_real_state("p1", "Online")
     p.begin_focus("p2", 2, now=1.0)
-    assert p.display_state("p2") == "Checking"
+    assert p.display_state("p2") == "Monitoring"
     # p1 is no longer "Checking" — shows its resolved real state.
     assert p.display_state("p1") == "Online"
     # Exactly one package is the active focus at a time.
@@ -450,7 +449,7 @@ def test_only_active_focus_package_marked_checking():
 def test_active_row_changes_from_checking_to_result():
     p = CheckerPointerState()
     p.begin_focus("p1", 1, now=0.0)
-    assert p.display_state("p1") == "Checking"
+    assert p.display_state("p1") == "Monitoring"
     p.set_real_state("p1", "No Heartbeat")
     assert p.display_state("p1") == "No Heartbeat"
     p.mark_dead_detected("p1", "crash", "logcat", "FATAL")
@@ -559,7 +558,7 @@ def test_render_sequence_getting_ready_then_opening_then_checking():
     seq.append(p.pointer_text())          # Checking..
     assert seq[0] == checker_pointer.POINTER_GETTING_READY
     assert seq[1] == checker_pointer.POINTER_OPENING
-    assert seq[2].startswith("Checking ")
+    assert seq[2].startswith("Monitoring ")
     # Getting Ready strictly precedes Opening.
     assert seq.index(checker_pointer.POINTER_GETTING_READY) < seq.index(
         checker_pointer.POINTER_OPENING
@@ -584,12 +583,12 @@ def test_header_all_columns_centered_like_state():
     from agent import commands
 
     rows = [(1, "com.moons.litesc", "user1", "Online")]
-    out = commands.build_start_table(rows, use_color=False, pointer_text="Checking..")
+    out = commands.build_start_table(rows, use_color=False, pointer_text="Monitoring..")
     header_line = next(
-        ln for ln in out.splitlines() if "Package" in ln and "State" in ln
+        ln for ln in out.splitlines() if "Package" in ln and "Monitoring" in ln
     )
-    cells = header_line.split("│")[1:-1]  # drop outer borders
-    labels = ["#", "Package", "Username", "State"]
+    cells = header_line.split("│")[1:-1]
+    labels = ["#", "Package", "Username", "Monitoring.."]
     for cell, label in zip(cells, labels):
         stripped = cell.strip()
         assert stripped == label
@@ -603,14 +602,11 @@ def test_header_yellow_bold_ansi_present_all_headers():
     from agent import commands
 
     rows = [(1, "com.moons.litesc", "user1", "Online")]
-    out_color = commands.build_start_table(rows, use_color=True, pointer_text="Checking..")
+    out_color = commands.build_start_table(rows, use_color=True, pointer_text="Monitoring..")
     out_plain = commands._ANSI_RE.sub("", out_color)
-    # ANSI-preserved: yellow-bold header code present; ANSI-stripped: clean text.
     assert commands._ANSI_YELLOW in out_color
-    assert "Package" in out_plain and "Username" in out_plain and "State" in out_plain
-    # Pink bordered Checking pointer present in the colored snapshot.
+    assert "Package" in out_plain and "Username" in out_plain and "Monitoring.." in out_plain
     assert commands._ANSI_PINK in out_color
-    assert "[ Checking.. ]" in out_plain
 
 
 def test_probe_snapshot_has_all_required_fields():
@@ -660,7 +656,7 @@ def test_probe_snapshot_has_all_required_fields():
         "raw_dead_evidence_pending",
     ):
         assert k in pp, k
-    assert pp["display_state"] == "Checking"  # p1 is the active focus
+    assert pp["display_state"] == "Monitoring"  # p1 is the active focus
     assert snap["valid_state_writer"] == "focused_checker_only"
     assert snap["focus_elapsed_s"] == pytest.approx(5.0, abs=0.01)
 

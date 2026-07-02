@@ -3001,6 +3001,62 @@ def kill_all_background_apps(keep_packages: list[str]) -> dict[str, list[str]]:
     return result
 
 
+def cleanup_kill_except_termux(
+    *,
+    extra_keep: list[str] | None = None,
+    detection_hints: list[str] | None = None,
+) -> dict[str, Any]:
+    """Force-stop third-party apps; keep Termux and system/shell packages.
+
+    Used during Start Preparing with a hard outer deadline (3s).  Never raises.
+    """
+    keep: set[str] = {
+        "com.termux",
+        "com.termux.boot",
+        "com.termux.api",
+        "android",
+        "com.android.systemui",
+        "com.android.shell",
+    }
+    for pkg in extra_keep or []:
+        text = str(pkg or "").strip()
+        if text:
+            keep.add(text)
+    result: dict[str, Any] = {
+        "killed_bg": [],
+        "force_stopped": [],
+        "skipped": sorted(keep),
+        "errors": [],
+    }
+    try:
+        bg = kill_all_background_apps(sorted(keep))
+        result["killed_bg"] = list(bg.get("killed_bg") or [])
+    except Exception as exc:  # noqa: BLE001
+        result["errors"].append(f"kill-all:{exc}"[:120])
+
+    root_info = detect_root()
+    stopped_roblox: list[str] = []
+    try:
+        stopped_roblox = force_stop_packages_except([], detection_hints)
+    except Exception as exc:  # noqa: BLE001
+        result["errors"].append(f"roblox_stop:{exc}"[:120])
+    result["force_stopped"].extend(stopped_roblox)
+
+    res = run_android_command(["pm", "list", "packages", "-3"], timeout=8, prefer_root=True)
+    third_party = _parse_packages(res.stdout or "") if res.ok else []
+    for pkg in third_party:
+        if _is_protected_system_or_launcher_package(pkg, keep):
+            continue
+        try:
+            fs = force_stop_package(pkg, root_info)
+            if fs.ok:
+                result["force_stopped"].append(pkg)
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"{pkg}:{exc}"[:80])
+    result["force_stopped"] = sorted(set(result["force_stopped"]))
+    return result
+
+
 _CLOUD_MEMORY_RECOVERY_COMMAND = "pm enable com.google.android.gms"
 _CLOUD_DISABLE_PACKAGES: frozenset[str] = frozenset({
     "com.google.android.gms",

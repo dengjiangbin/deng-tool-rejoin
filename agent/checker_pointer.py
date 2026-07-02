@@ -908,6 +908,7 @@ class CheckerPointerState:
             row = self._pkg(pkg)
             if row.launch_requested_at is None:
                 row.launch_requested_at = time.time()
+            row.display_state = "Launching"
             self._persist()
 
     def mark_launch_dispatched(

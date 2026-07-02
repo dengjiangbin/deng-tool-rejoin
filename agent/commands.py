@@ -5253,11 +5253,10 @@ def build_start_table(
     Runtime/usage telemetry may still be supplied by callers but is not shown
     in the user-visible Start table.
 
-    ``pointer_text`` is the *global* focused-checker pointer (e.g.
-    ``Getting Ready..``, ``Checking..``, ``3s``, ``Dead Detected``).  When
-    supplied it is rendered as a second header row under the ``State`` column
-    only; every other column is visually merged (blank second row) so the
-    table stays readable on Termux.
+    ``pointer_text`` is the global header phase label (e.g. ``Preparing..``,
+    ``Clearing Cache..``, ``Opening..``, ``Monitoring..``).  When supplied it
+    replaces the ``State`` column header text in the single header row — there
+    is no second header row.
 
     Every line is hard-clamped via ``termux_ui.fit_line()`` for narrow screens.
     Static package management lists use separate simplified renderers.
@@ -5281,34 +5280,28 @@ def build_start_table(
     if capped_total > data_budget:
         scale = data_budget / capped_total
         col_caps = [max(3, int(c * scale)) for c in col_caps]
+    state_header = str(headers[3])
+    if pointer_text:
+        state_header = _cap_plain_cell(str(pointer_text), max(3, col_caps[3] - 2))
+    display_headers = (headers[0], headers[1], headers[2], state_header)
     str_rows = [
         tuple(_cap_plain_cell(str_rows[i][j], col_caps[j]) for j in range(len(headers)))
         for i in range(len(str_rows))
     ]
 
-    # Global checker pointer (State column, row 2), rendered as a bordered
-    # box "[ Checking.. ]".  Cap to the State budget (leaving room for the
-    # "[ " + " ]" border) and fold its width into the State column.
-    pointer_cell = ""
-    pointer_box_plain = ""
-    if pointer_text:
-        _state_budget = max(3, col_caps[len(headers) - 1] - 4)
-        pointer_cell = _cap_plain_cell(str(pointer_text), _state_budget)
-        pointer_box_plain = f"[ {pointer_cell} ]"
-
     widths = [
-        max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
+        max(len(display_headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
         for i in range(len(headers))
     ]
-    if pointer_box_plain:
-        state_idx = len(headers) - 1
-        widths[state_idx] = max(widths[state_idx], _visible_len(pointer_box_plain))
     # Give every header at least 2 chars of horizontal breathing room so the
     # centered header labels (#, Package, Username, State) are all *visibly*
     # centered the same way — not left-biased in narrow data columns. Bounded
     # by col_caps + fit_line() so narrow Termux widths still degrade cleanly.
     for i in range(len(headers)):
-        widths[i] = min(col_caps[i], max(widths[i], len(headers[i]) + 2))
+        widths[i] = min(
+            col_caps[i],
+            max(widths[i], len(display_headers[i]) + 2),
+        )
 
     def _bold(text: str) -> str:
         if not use_color or not text:
@@ -5354,24 +5347,20 @@ def build_start_table(
         parts = [_cell(str(colored[i]), widths[i], str(raw[i])) for i in range(len(widths))]
         return "│" + "│".join(parts) + "│"
 
-    def _pointer_header_row() -> str:
-        # Second header row: a bordered pointer box under State only; every
-        # other column stays blank so it visually merges across both rows.
-        state_idx = len(headers) - 1
-        box_colored = pointer_box_plain
-        if use_color and pointer_box_plain:
-            box_colored = f"{_pointer_color(pointer_cell)}{pointer_box_plain}{_ANSI_RESET}"
+    state_idx = len(headers) - 1
+
+    def _header_row_render() -> str:
         parts = []
         for i in range(len(widths)):
-            if i == state_idx:
-                parts.append(_center_cell(box_colored, widths[i], pointer_box_plain))
+            text = display_headers[i]
+            if i == state_idx and pointer_text and use_color:
+                colored = f"{_pointer_color(text)}{text}{_ANSI_RESET}"
+                parts.append(_center_cell(colored, widths[i], text))
             else:
-                parts.append(_cell("", widths[i], ""))
+                parts.append(_header_cell(text, widths[i]))
         return "│" + "│".join(parts) + "│"
 
-    lines = [_hline("┌", "┬", "┐"), _header_row(headers)]
-    if pointer_box_plain:
-        lines.append(_pointer_header_row())
+    lines = [_hline("┌", "┬", "┐"), _header_row_render()]
     lines += [
         _hline("├", "┼", "┤"),
         *(_data_row(colored_rows[i], str_rows[i]) for i in range(len(colored_rows))),
@@ -6361,8 +6350,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         # over — so the user thought the tool was frozen.  We now re-
         # render the table after each prep phase with a distinct label.
 
-        # Per-package phase label.  Updated in place by _phase() below.
-        phase: dict[str, str] = {e["package"]: "Preparing" for e in entries}
+        # Per-package row state — lifecycle/presence only (never header phases).
+        phase: dict[str, str] = {e["package"]: "Ready" for e in entries}
+        _HEADER_ONLY_PHASES = frozenset(
+            {"Preparing", "Clear Cache", "Getting Ready", "Clearing Cache"}
+        )
 
         # Interval-mode stagger must never run slow hot-lane sync from the
         # launch scheduler thread (probe p-a5e6f62d28).
@@ -6463,17 +6455,20 @@ def cmd_start(args: argparse.Namespace) -> int:
                     return "Launching"
             if ph == "Waiting":
                 return "Waiting"
-                if sup_st == "Failed":
-                    return "Failed"
-                if sup_st:
-                    return sup_st
-                return "Launching"
-            if ph in ("Launching", "Failed", "Preparing", "Clear Cache"):
+            if sup_st == "Failed":
+                return "Failed"
+            if ph in _HEADER_ONLY_PHASES:
+                return "Ready"
+            if ph in ("Launching", "Failed"):
                 if _RELAY_GATE_ENABLED and ph == "Launching":
                     return "Opening"
                 return ph
+            if sup_st in ("Launching", "Waiting"):
+                return "Waiting" if sup_st == "Waiting" else "Launching"
             if sup_st == "Ready" or ph == "Ready":
                 return "Ready"
+            if sup_st:
+                return sup_st
             return ph or "Ready"
 
         _stagger_render_last = 0.0
@@ -6511,8 +6506,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             try:
                 from . import start_lifecycle as _sl_render
 
+                sample_pkg = entries[0]["package"] if entries else ""
+                table_label = _phase_table_state(sample_pkg) if entries else "Ready"
                 if not _sl_render.try_write_table_phase(
-                    str(phase.get(entries[0]["package"]) if entries else ""),
+                    table_label,
                     ver,
                     source="render_phase",
                 ):
@@ -6584,10 +6581,30 @@ def cmd_start(args: argparse.Namespace) -> int:
             _render_phase(_unused_note, phase_version=phase_version)
 
         def _set_all_phase(label: str, note: str = "") -> None:
+            if label in _HEADER_ONLY_PHASES:
+                _set_header_phase(label, note=note)
+                return
             _bump_ui_phase(label)
             for pkg in phase:
                 phase[pkg] = label
             _render_phase(note)
+
+        def _set_header_phase(label: str, *, note: str = "") -> None:
+            """Update header phase text only — package rows stay on lifecycle states."""
+            nonlocal _ui_phase_version
+            try:
+                from . import start_lifecycle as _sl_hdr
+
+                _sl_hdr.mark_header_phase(label)
+            except Exception:  # noqa: BLE001
+                pass
+            _ui_phase_version += 1
+            if _checker_pointer is not None:
+                try:
+                    _checker_pointer.get().touch_persist()
+                except Exception:  # noqa: BLE001
+                    pass
+            _render_phase(note, phase_version=_ui_phase_version)
 
         def _set_all_phase_labels(label: str) -> None:
             _bump_ui_phase(label)
@@ -6650,41 +6667,37 @@ def cmd_start(args: argparse.Namespace) -> int:
                     session_id=_start_session_id, pid=os.getpid()
                 )
                 _ptr_start.begin_preparing(package_names_early)
+                _start_lifecycle_prep.mark_header_phase("Preparing")
                 _render_phase()  # flush Preparing.. immediately
             except Exception:  # noqa: BLE001
                 pass
 
-        # 1) Preparing — quick stop of selected clones only (Termux protected).
+        # 1) Preparing — kill all apps except Termux/system (hard 3s deadline).
         _transition_lifecycle("PREPARING", "prepare_packages")
         _start_lifecycle_prep.mark_preparing_entered()
         _start_lifecycle_prep.mark_preparing_command_started()
-        _set_all_phase("Preparing", "Stopping selected packages...")
+        _start_lifecycle_prep.mark_cleanup_kill_except_termux_started()
+        _set_header_phase("Preparing", note="Stopping background apps...")
         packages_sl = package_names_early
-        keep_alive = ["com.termux"] + packages_sl
         _prep_root = android.detect_root()
 
         try:
-            _PREPARE_DEADLINE_S = max(
-                1.0,
-                float(os.environ.get("DENG_REJOIN_PREPARE_DEADLINE_SEC", "8") or "8"),
+            _PREPARE_DEADLINE_S = min(
+                3.0,
+                max(
+                    0.5,
+                    float(os.environ.get("DENG_REJOIN_PREPARE_DEADLINE_SEC", "3") or "3"),
+                ),
             )
         except ValueError:
-            _PREPARE_DEADLINE_S = 8.0
+            _PREPARE_DEADLINE_S = 3.0
 
         def _prep_commands() -> None:
+            android.cleanup_kill_except_termux(
+                extra_keep=packages_sl,
+                detection_hints=cfg.get("package_detection_hints"),
+            )
             _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
-            try:
-                _bg_stopped = android.force_stop_packages_except(
-                    packages_sl,
-                    cfg.get("package_detection_hints"),
-                )
-                if _bg_stopped:
-                    _start_log.info(
-                        "[DENG_REJOIN_PREP_STOP_BACKGROUND] stopped=%s",
-                        ",".join(_bg_stopped),
-                    )
-            except Exception as _exc:  # noqa: BLE001
-                _start_log.debug("start: background roblox stop error: %s", _exc)
 
         try:
             _prep_result, _prep_timed_out = run_callable_with_deadline(
@@ -6700,9 +6713,12 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_lifecycle_prep.note_prepare_blocker(f"prepare_error:{str(_exc)[:80]}")
             _start_log.debug("start: prepare command error (non-fatal): %s", _exc)
 
+        _start_lifecycle_prep.mark_cleanup_kill_except_termux_finished()
         _start_lifecycle_prep.mark_preparing_command_finished()
 
         # Heavy cloud-phone memory sweep runs async — must not block Clear Cache.
+        keep_alive = ["com.termux"] + packages_sl
+
         def _cloud_memory_bg() -> None:
             try:
                 _cloud_mem = android.optimize_cloud_phone_memory(keep_alive)
@@ -6746,7 +6762,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         prep_cache: dict[str, str] = {}
         package_names = package_names_early
         _start_lifecycle_prep.mark_clearing_cache_entered()
-        _set_all_phase("Clear Cache")
+        _set_header_phase("Clear Cache")
         _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
         safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
 
@@ -6790,6 +6806,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         # Bounded synchronous cache clear — must finish (or timeout) before launch.
         _ptr_cc = _checker_pointer.get() if _checker_pointer is not None else None
+        _start_lifecycle.mark_clear_cache_command_started()
         try:
             cc_out = run_start_mass_cache_clear_bounded(
                 package_names,
@@ -6811,31 +6828,12 @@ def cmd_start(args: argparse.Namespace) -> int:
             _cc_exit_reason = f"error:{str(_exc)[:80]}"
         finally:
             _start_session.mark("batch_clear_cache_done", package_count=len(entries))
+            _start_lifecycle.mark_clear_cache_command_finished()
 
         _start_lifecycle.mark_clearing_cache_finished()
         _start_lifecycle.exit_clear_cache_phase(_cc_exit_reason)
         _start_lifecycle.mark_cache_clear_closed()
         _start_lifecycle.mark_launch_scheduled(package_names)
-
-        # 3) Getting Ready — short bridge AFTER clear cache (max 1s), never before Preparing.
-        _start_lifecycle.mark_getting_ready_entered()
-        if _checker_pointer is not None:
-            try:
-                _checker_pointer.get().begin_getting_ready(
-                    package_names,
-                    interval_s=_FIRST_LAUNCH_INTERVAL_S,
-                )
-            except Exception:  # noqa: BLE001
-                pass
-        _gr_ver = _bump_ui_phase("Getting Ready", source="post_clear_cache_bridge")
-        for pkg in package_names:
-            phase[pkg] = "Getting Ready"
-        _render_phase("", phase_version=_gr_ver)
-        _gr_deadline = time.monotonic() + _GETTING_READY_DWELL_S
-        while time.monotonic() < _gr_deadline:
-            time.sleep(min(0.05, max(0.0, _gr_deadline - time.monotonic())))
-        _start_lifecycle.mark_getting_ready_finished()
-        _launch_sched.reanchor_launches_from_getting_ready_finished()
 
         if _checker_pointer is not None:
             try:
@@ -6900,10 +6898,13 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         def _sched_before_launch(index: int, package: str) -> None:
             launch_attempted[package] = True
+            try:
+                from . import start_lifecycle as _sl_launch
+
+                _sl_launch.mark_first_launch_requested()
+            except Exception:  # noqa: BLE001
+                pass
             sup = _supervisor_ref
-            if sup is not None:
-                for later in entries[index + 1 :]:
-                    phase[later["package"]] = "Getting Ready"
             if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
                 try:
                     import time as _t_open
@@ -7003,24 +7004,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_cfg_boot["supervisor"] = _sup_sub_boot
         _live_cfg_boot["start_session_id"] = _start_session_id
         _live_cfg_boot["screen_mode"] = str(cfg.get("screen_mode") or _start_screen_mode)
-        runtime_entries_boot = _ensure_presence_auth_for_entries(runtime_entries, cfg)
-        _boot_status = {e["package"]: _STATUS_WAITING for e in entries}
+        _boot_status = {e["package"]: _STATUS_READY for e in entries}
         _supervisor = WatchdogSupervisor(
-            runtime_entries_boot, _live_cfg_boot, initial_status=_boot_status
+            runtime_entries, _live_cfg_boot, initial_status=_boot_status
         )
         _supervisor_ref = _supervisor
-        try:
-            from . import monitor_autostart as _mon_auto_boot
-
-            _mon_auto_boot.set_active_supervisor(_supervisor)
-            _try_autostart_monitor_bridge(cfg)
-        except Exception:  # noqa: BLE001
-            pass
-        _supervisor.start_daemon(
-            display_interval=WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS,
-            render_callback=None,
-        )
-        _start_session.mark("watchdog_daemon_started", package_count=len(entries))
 
         _sched_thread: threading.Thread | None = None
         if _FIRST_LAUNCH_MODE == "interval":
@@ -7038,6 +7026,35 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _launch_sched.first_launch_due_at or 0.0,
                 _FIRST_LAUNCH_DELAY_S,
             )
+
+        def _supervisor_daemon_bg() -> None:
+            try:
+                runtime_entries_boot = _ensure_presence_auth_for_entries(
+                    runtime_entries, cfg
+                )
+                if runtime_entries_boot is not runtime_entries:
+                    _supervisor.entries = runtime_entries_boot
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: presence auth error (non-fatal): %s", _exc)
+            try:
+                from . import monitor_autostart as _mon_auto_boot
+
+                _mon_auto_boot.set_active_supervisor(_supervisor)
+                _try_autostart_monitor_bridge(cfg)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                _supervisor.start_daemon(
+                    display_interval=WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS,
+                    render_callback=None,
+                )
+                _start_session.mark("watchdog_daemon_started", package_count=len(entries))
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: watchdog daemon error (non-fatal): %s", _exc)
+
+        threading.Thread(
+            target=_supervisor_daemon_bg, name="start-supervisor-daemon", daemon=True
+        ).start()
 
         # Slow prep continues while scheduler runs (interval mode).
 
