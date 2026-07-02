@@ -67,6 +67,7 @@ POINTER_REOPENING = "Reopening"
 POINTER_RELAUNCHING = "Relaunching"
 POINTER_ONLINE = "Online"
 POINTER_RESUME_CHECKING = "Resume Checking.."
+POINTER_RESUME_CHECKER = "Resume Checker"
 
 
 @dataclass
@@ -91,6 +92,18 @@ class _PackagePointer:
     committed_presence_state: str = ""
     raw_online_evidence_pending: bool = False
     raw_dead_evidence_pending: bool = False
+    # ── Lifecycle / recovery tracking (probe + self-heal) ─────────────
+    launch_requested_at: float | None = None
+    launch_dispatched_at: float | None = None
+    waiting_entered_at: float | None = None
+    waiting_reason: str = ""
+    last_state_transition_reason: str = ""
+    dead_detected_at: float | None = None
+    recovery_requested_at: float | None = None
+    recovery_started_at: float | None = None
+    recovery_finished_at: float | None = None
+    recovery_attempt: int = 0
+    recovery_last_error: str = ""
 
 
 @dataclass
@@ -197,6 +210,11 @@ class CheckerPointerState:
 
     checker_status: str = "idle"
     checker_idle_reason: str = ""
+    checker_paused_reason: str = ""
+
+    header_action_source: str = ""
+    header_action_label: str = ""
+    last_state_transition_reason: str = ""
 
     _packages: dict[str, _PackagePointer] = field(default_factory=dict)
 
@@ -299,6 +317,10 @@ class CheckerPointerState:
             self.logcat_unavailable_fallback_active = False
             self.checker_status = "starting"
             self.checker_idle_reason = ""
+            self.checker_paused_reason = ""
+            self.header_action_source = ""
+            self.header_action_label = ""
+            self.last_state_transition_reason = ""
             self._persist(force=True)
 
     def heartbeat(self, *, reason: str = "") -> None:
@@ -489,8 +511,12 @@ class CheckerPointerState:
             self.last_dead_source = source
             self.last_dead_evidence = evidence
             if package:
+                row = self._pkg(package)
+                if row.dead_detected_at is None:
+                    row.dead_detected_at = time.time()
                 self.commit_presence_state(package, "Dead")
                 self.enqueue_recovery(package, reason=reason, persist=False)
+            self._refresh_header_action_locked()
             self._persist(force=True)
 
     def enqueue_recovery(
@@ -502,11 +528,18 @@ class CheckerPointerState:
         with self._lock:
             if pkg in self.unrecoverable_dead_packages:
                 return
+            row = self._pkg(pkg)
+            if row.recovery_requested_at is None:
+                row.recovery_requested_at = time.time()
+            if reason:
+                row.last_state_transition_reason = str(reason)[:200]
             if pkg not in self.recovery_queue and self.active_recovery_package != pkg:
                 self.recovery_queue.append(pkg)
             if reason:
                 self.last_dead_reason = str(reason)[:200]
+            self._recompute_dead_without_recovery_locked()
             if persist:
+                self._refresh_header_action_locked()
                 self._persist(force=True)
 
     def dequeue_recovery(self) -> str:
@@ -611,10 +644,17 @@ class CheckerPointerState:
             self.recovery_stage = "start"
             self.recovery_stage_started_at = time.time()
             self.recovery_stage_deadline_s = None
+            row = self._pkg(package)
+            row.recovery_attempt += 1
+            if row.recovery_started_at is None:
+                row.recovery_started_at = time.time()
+            if row.recovery_requested_at is None:
+                row.recovery_requested_at = time.time()
             self.checker_mode = MODE_DEAD_DETECTED
             self.state_pointer_text = POINTER_START_RECOVERY
             if reason:
                 self.last_dead_reason = reason
+            self._refresh_header_action_locked()
             self._persist(force=True)
 
     def set_recovery_stage(self, stage: str, *, deadline_s: float | None = None) -> None:
@@ -624,7 +664,7 @@ class CheckerPointerState:
             "relaunching": (MODE_RECOVERY_RELAUNCHING, POINTER_RELAUNCHING),
             "wait_online": (MODE_RECOVERY_WAIT_ONLINE, POINTER_RELAUNCHING),
             "online": (MODE_RECOVERY_WAIT_ONLINE, POINTER_ONLINE),
-            "recovery_failed": (MODE_RESUME_CHECKING, POINTER_RESUME_CHECKING),
+            "recovery_failed": (MODE_DEAD_DETECTED, POINTER_START_RECOVERY),
         }
         with self._lock:
             self.recovery_stage = stage
@@ -637,6 +677,8 @@ class CheckerPointerState:
             mode_text = _map.get(stage)
             if mode_text is not None:
                 self.checker_mode, self.state_pointer_text = mode_text
+            self.header_action_label = self.state_pointer_text
+            self.header_action_source = "recovery_stage"
             self._persist(force=True)
 
     def recovery_stage_elapsed_s(self) -> float | None:
@@ -701,20 +743,204 @@ class CheckerPointerState:
             self.recovery_stage_deadline_s = None
             self.recovery_last_result = "failed" if failed else "success"
             self.recovery_last_error = str(reason or "")[:200] if failed else ""
+            if failed_pkg:
+                row = self._pkg(failed_pkg)
+                row.recovery_finished_at = time.time()
+                if failed and reason:
+                    row.recovery_last_error = str(reason)[:200]
+                elif not failed:
+                    row.recovery_last_error = ""
+                    row.committed_presence_state = ""
+                    row.display_state = "Waiting"
+                    row.waiting_entered_at = time.time()
+                    row.waiting_reason = "recovery_handoff_waiting_for_checker"
+                    row.last_state_transition_reason = row.waiting_reason
+                    self.recovery_queue = [
+                        p for p in self.recovery_queue if p != failed_pkg
+                    ]
+                self.end_checking_focus(failed_pkg)
             if failed and reason:
                 self.last_dead_reason = str(reason)[:200]
-            if failed_pkg:
-                self.end_checking_focus(failed_pkg)
             if resume:
-                self.resume_checking()
+                self.resume_checking_if_safe()
+            else:
+                self._refresh_header_action_locked()
             self._recompute_dead_without_recovery_locked()
             self._persist(force=True)
 
-    def resume_checking(self) -> None:
-        with self._lock:
+    def _count_unrecovered_dead_locked(self) -> int:
+        count = 0
+        for pkg, row in self._packages.items():
+            if row.committed_presence_state != "Dead":
+                continue
+            if pkg in self.unrecoverable_dead_packages:
+                continue
+            if row.recovery_finished_at is not None and not row.recovery_last_error:
+                continue
+            count += 1
+        return count
+
+    def _refresh_header_action_locked(self) -> tuple[str, str]:
+        """Derive header label from recovery/dead state — never stale Resume alone."""
+        if self.recovery_in_progress and self.active_recovery_package:
+            stage = str(self.recovery_stage or "recovery").strip()
+            if stage == "start":
+                label = POINTER_START_RECOVERY
+            else:
+                label = f"Recovery {self.active_recovery_package} {stage}"[:120]
+            self.header_action_label = label
+            self.header_action_source = "recovery_in_progress"
+            self.state_pointer_text = label
+            return label, self.header_action_source
+
+        unrecovered = self._count_unrecovered_dead_locked()
+        pending = len(self.recovery_queue)
+        running = 1 if self.recovery_in_progress else 0
+
+        if pending > 0 or self.dead_without_recovery_queue or unrecovered > 0:
+            if pending > 0 or self.dead_without_recovery_queue:
+                label = POINTER_START_RECOVERY
+                source = "recovery_pending"
+            else:
+                label = POINTER_DEAD_DETECTED
+                source = "unrecovered_dead"
+            self.header_action_label = label
+            self.header_action_source = source
+            self.state_pointer_text = label
+            self.checker_mode = MODE_DEAD_DETECTED
+            self.checker_paused_reason = source
+            return label, source
+
+        if self.recovery_pause_checking:
+            label = POINTER_RESUME_CHECKING
+            source = "checker_paused_no_unrecovered_dead"
+            self.header_action_label = label
+            self.header_action_source = source
+            self.state_pointer_text = label
             self.checker_mode = MODE_RESUME_CHECKING
-            self.state_pointer_text = POINTER_RESUME_CHECKING
+            self.checker_paused_reason = source
+            return label, source
+
+        if self.checker_mode == MODE_CHECKING or self.checking_active_package:
+            label = self.state_pointer_text or POINTER_CHECKING
+            source = "checking_active"
+        else:
+            label = self.state_pointer_text or POINTER_CHECKING
+            source = "default"
+        self.header_action_label = label
+        self.header_action_source = source
+        return label, source
+
+    def resume_checking_if_safe(self) -> bool:
+        """Resume pointer only when no unrecovered Dead packages remain."""
+        with self._lock:
+            was_paused = bool(self.recovery_pause_checking)
+            self.recovery_pause_checking = False
+            safe = (
+                not self.recovery_in_progress
+                and not self.recovery_queue
+                and not self.dead_without_recovery_queue
+                and self._count_unrecovered_dead_locked() == 0
+            )
+            if was_paused and safe:
+                self.checker_mode = MODE_RESUME_CHECKING
+                self.state_pointer_text = POINTER_RESUME_CHECKING
+                self.header_action_label = POINTER_RESUME_CHECKING
+                self.header_action_source = "checker_paused_no_unrecovered_dead"
+                self.checker_paused_reason = self.header_action_source
+                self._persist(force=True)
+                return True
+            label, source = self._refresh_header_action_locked()
+            if label == POINTER_RESUME_CHECKING:
+                self.checker_mode = MODE_RESUME_CHECKING
+                self.state_pointer_text = POINTER_RESUME_CHECKING
+                self.checker_paused_reason = source
+                self._persist(force=True)
+                return True
+            if safe:
+                self.checker_mode = MODE_CHECKING
+                self.state_pointer_text = POINTER_CHECKING
+                self.header_action_label = POINTER_CHECKING
+                self.header_action_source = "recovery_complete"
+                self.checker_paused_reason = ""
+                self._persist(force=True)
+                return True
             self._persist(force=True)
+            return False
+
+    def resume_checking(self) -> None:
+        self.resume_checking_if_safe()
+
+    def mark_launch_requested(self, package: str) -> None:
+        pkg = str(package or "").strip()
+        if not pkg:
+            return
+        with self._lock:
+            row = self._pkg(pkg)
+            if row.launch_requested_at is None:
+                row.launch_requested_at = time.time()
+            self._persist()
+
+    def mark_launch_dispatched(
+        self, package: str, *, reason: str = "launch_dispatched_waiting_for_checker"
+    ) -> None:
+        pkg = str(package or "").strip()
+        if not pkg:
+            return
+        now = time.time()
+        with self._lock:
+            row = self._pkg(pkg)
+            if row.launch_requested_at is None:
+                row.launch_requested_at = now
+            row.launch_dispatched_at = now
+            row.waiting_entered_at = now
+            row.waiting_reason = str(reason or "")[:200]
+            row.last_state_transition_reason = row.waiting_reason
+            row.display_state = "Waiting"
+            row.committed_presence_state = ""
+            self.last_state_transition_reason = row.waiting_reason
+            self._persist(force=True)
+
+    def self_heal_missing_recovery_requests(self) -> list[str]:
+        """Dead packages without recovery_requested_at must enqueue recovery."""
+        healed: list[str] = []
+        with self._lock:
+            for pkg, row in self._packages.items():
+                if row.committed_presence_state != "Dead":
+                    continue
+                if pkg in self.unrecoverable_dead_packages:
+                    continue
+                if row.recovery_requested_at is not None:
+                    continue
+                if pkg in self.recovery_queue or self.active_recovery_package == pkg:
+                    row.recovery_requested_at = time.time()
+                    healed.append(pkg)
+                    continue
+                row.recovery_requested_at = time.time()
+                row.last_state_transition_reason = "self_heal_missing_recovery_request"
+                self.recovery_queue.append(pkg)
+                healed.append(pkg)
+            if healed:
+                self._recompute_dead_without_recovery_locked()
+                self._refresh_header_action_locked()
+                self._persist(force=True)
+        return healed
+
+    def header_pointer_text(self) -> str:
+        with self._lock:
+            label, _source = self._refresh_header_action_locked()
+            return label
+
+    def recovery_counts(self) -> dict[str, int]:
+        with self._lock:
+            unrecovered = self._count_unrecovered_dead_locked()
+            pending = len(self.recovery_queue)
+            running = 1 if self.recovery_in_progress else 0
+            return {
+                "unrecovered_dead_count": unrecovered,
+                "recovery_pending_count": pending,
+                "recovery_running_count": running,
+            }
 
     # ── per-package no-heartbeat counter ──────────────────────────────
     def increment_no_heartbeat(self, package: str) -> int:
@@ -901,6 +1127,17 @@ class CheckerPointerState:
                     "last_committed_presence_state": row.committed_presence_state or None,
                     "raw_online_evidence_pending": row.raw_online_evidence_pending,
                     "raw_dead_evidence_pending": row.raw_dead_evidence_pending,
+                    "launch_requested_at": row.launch_requested_at,
+                    "launch_dispatched_at": row.launch_dispatched_at,
+                    "waiting_entered_at": row.waiting_entered_at,
+                    "waiting_reason": row.waiting_reason or None,
+                    "last_state_transition_reason": row.last_state_transition_reason or None,
+                    "dead_detected_at": row.dead_detected_at,
+                    "recovery_requested_at": row.recovery_requested_at,
+                    "recovery_started_at": row.recovery_started_at,
+                    "recovery_finished_at": row.recovery_finished_at,
+                    "recovery_attempt": row.recovery_attempt,
+                    "recovery_last_error": row.recovery_last_error or None,
                 }
                 for pkg, row in self._packages.items()
             }
@@ -992,6 +1229,13 @@ class CheckerPointerState:
                 "logcat_unavailable_fallback_active": self.logcat_unavailable_fallback_active,
                 "checker_status": self.checker_status or None,
                 "checker_idle_reason": self.checker_idle_reason or None,
+                "checker_paused_reason": self.checker_paused_reason or None,
+                "header_action_source": self.header_action_source or None,
+                "header_action_label": self.header_action_label or None,
+                "last_state_transition_reason": self.last_state_transition_reason or None,
+                "unrecovered_dead_count": self._count_unrecovered_dead_locked(),
+                "recovery_pending_count": len(self.recovery_queue),
+                "recovery_running_count": 1 if self.recovery_in_progress else 0,
                 "per_package": per_package,
             }
         snap_out = dict(snap)

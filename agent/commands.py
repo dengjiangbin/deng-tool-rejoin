@@ -5143,15 +5143,11 @@ def _cap_plain_cell(raw: str, max_w: int) -> str:
 
 
 def _checker_pointer_text() -> str | None:
-    """Global focused-checker pointer text, or None when the checker is idle.
-
-    Returning None keeps the legacy single-row header (no regression) until
-    the focused checker publishes a pointer.
-    """
+    """Global focused-checker pointer text derived from live recovery/dead state."""
     try:
         from . import checker_pointer as _cp
 
-        text = _cp.get().pointer_text()
+        text = _cp.get().header_pointer_text()
         return text or None
     except Exception:  # noqa: BLE001
         return None
@@ -6434,7 +6430,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                         return "Relaunching"
                     return "Launching"
                 if sup_st in ("Launching", "Waiting", "Checking", "Pending", "Join Unconfirmed"):
+                    if sup_st == "Waiting":
+                        return "Waiting"
                     return "Launching"
+            if ph == "Waiting":
+                return "Waiting"
                 if sup_st == "Failed":
                     return "Failed"
                 if sup_st:
@@ -6854,6 +6854,13 @@ def cmd_start(args: argparse.Namespace) -> int:
                     pass
             _open_ver = _bump_ui_phase("Opening", source="first_launch")
             phase[package] = "Launching"
+            if _checker_pointer is not None:
+                try:
+                    _checker_pointer.get().mark_launch_requested(package)
+                except Exception:  # noqa: BLE001
+                    pass
+            if sup is not None:
+                sup._set_lifecycle_status(package, _STATUS_LAUNCHING)
             _render_phase("", phase_version=_open_ver)
 
         def _sched_after_launch(index: int, package: str, result: str) -> None:
@@ -6867,17 +6874,23 @@ def cmd_start(args: argparse.Namespace) -> int:
             if sup is not None:
                 if package not in sup._package_opened:
                     sup.mark_package_launched(package)
-                sup._set_status(package, _STATUS_WAITING)
+                sup._set_lifecycle_status(package, _STATUS_WAITING)
             phase[package] = _STATUS_WAITING
-            launch_ok[package] = True
-            launch_err[package] = ""
-            if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
+            if _checker_pointer is not None:
                 try:
-                    _checker_pointer.get().mark_supposedly_launched(package)
-                    _checker_pointer.get().note_launch_interval(_FIRST_LAUNCH_INTERVAL_S)
+                    _ptr_la = _checker_pointer.get()
+                    _ptr_la.mark_launch_dispatched(
+                        package,
+                        reason="launch_dispatched_waiting_for_checker",
+                    )
+                    _ptr_la.mark_supposedly_launched(package)
+                    _ptr_la.note_launch_interval(_FIRST_LAUNCH_INTERVAL_S)
                 except Exception:  # noqa: BLE001
                     pass
-            _defer_render("Launching...")
+            launch_ok[package] = True
+            launch_err[package] = ""
+            _wait_ver = _bump_ui_phase("Waiting", source="post_launch")
+            _render_phase("", phase_version=_wait_ver)
             _start_log.info(
                 "[DENG_REJOIN_SCHEDULED_LAUNCH] package=%s index=%d/%d result=%s"
                 " anchor=%.3f fired_skew_ms=%s",
@@ -7330,7 +7343,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Relaunching":      "Relaunching",
             "Launching":        "Launching",
             "No Heartbeat":     "No Heartbeat",
-            "Waiting":          "Launching",
+            "Waiting":          "Waiting",
             "Checking":         "Launching",
             "Pending":          "Launching",
             "Join Unconfirmed": "Launching",
@@ -7405,6 +7418,14 @@ def cmd_start(args: argparse.Namespace) -> int:
                 # only ever one row at a time (requirement 4).
                 if pkg == _active_focus_pkg:
                     return "Checking"
+                try:
+                    from . import checker_pointer as _cp_row
+
+                    row_disp = _cp_row.get().display_state(pkg)
+                    if row_disp == "Waiting":
+                        return "Waiting"
+                except Exception:  # noqa: BLE001
+                    pass
                 # ── Single-relay gate ──────────────────────────────────
                 # A final presence state (Online/No Heartbeat/Dead) is shown
                 # ONLY once the focused checker relay has committed it. Raw
@@ -7414,6 +7435,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                     if committed:
                         return committed
                     raw_state = str(_live_map.get(pkg, "") or "").strip()
+                    if raw_state == "Waiting":
+                        return "Waiting"
                     if not raw_state or raw_state == "Unknown":
                         return "Waiting Check"
                     disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Waiting Check"

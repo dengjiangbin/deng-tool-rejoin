@@ -39,6 +39,7 @@ class CheckingSystem:
         self._ensure_logcat(ptr)
         self._detect_stale_and_record(ptr)
         self.sync_dead_packages_into_recovery_queue()
+        ptr.self_heal_missing_recovery_requests()
         if ptr.recovery_pause_checking or ptr.recovery_in_progress:
             return True
         if ptr.recovery_queue:
@@ -155,6 +156,7 @@ class CheckingSystem:
         if not ptr.recovery_in_progress and pkg not in ptr.recovery_queue:
             ptr.enqueue_recovery(pkg, reason="focus_dead")
         ptr.recovery_pause_checking = True
+        ptr._refresh_header_action_locked()
         self._process_next_recovery(render_cb)
 
     def _timeout_decision(self, pkg: str) -> tuple[str, str, str]:
@@ -237,7 +239,8 @@ class CheckingSystem:
 
         ptr.recovery_pause_checking = False
         ptr.recovery_resume_package = pkg
-        ptr.set_mode(cp.MODE_CHECKING, pointer_text=cp.POINTER_RESUME_CHECKING)
+        if not ptr.resume_checking_if_safe():
+            ptr._refresh_header_action_locked()
         self._render(render_cb)
 
     def _ensure_logcat(self, ptr: cp.CheckerPointerState) -> None:

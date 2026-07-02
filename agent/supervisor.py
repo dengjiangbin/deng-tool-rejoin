@@ -1355,13 +1355,14 @@ class WatchdogSupervisor:
                     STATUS_RELAUNCHING,
                     STATUS_REOPENING,
                     STATUS_LAUNCHING,
-                    STATUS_WAITING,
                     STATUS_CHECKING,
                     "Launching",
                     "Reconnecting",
                     "Joining",
                 }:
                     self.status_map[pkg] = STATUS_LAUNCHING
+                elif value == STATUS_WAITING:
+                    self.status_map[pkg] = STATUS_WAITING
                 elif value in {STATUS_DISCONNECTED, STATUS_JOIN_FAILED, STATUS_FAILED}:
                     self.status_map[pkg] = value
                 elif value == STATUS_DEAD:
@@ -1624,9 +1625,23 @@ class WatchdogSupervisor:
         )
         self.stop_event.set()
 
+    def _set_lifecycle_status(self, pkg: str, status: str) -> None:
+        """Write lifecycle-only states (Waiting, Launching, etc.) to status_map."""
+        requested = str(status or "").strip()
+        if not requested:
+            return
+        with self._state_lock:
+            old = self.status_map.get(pkg)
+            self.status_map[pkg] = requested
+        if old != requested and callable(self.on_status_change):
+            self.on_status_change(pkg, requested)
+
     def _set_status(self, pkg: str, status: str) -> None:
         requested = str(status or "").strip()
-        if requested in {STATUS_CHECKING, STATUS_PENDING, STATUS_WAITING, "Joining"}:
+        if requested in {STATUS_CHECKING, STATUS_PENDING, "Joining"}:
+            return
+        if requested == STATUS_WAITING:
+            self._set_lifecycle_status(pkg, STATUS_WAITING)
             return
         if requested in {
             STATUS_PREPARING,
@@ -1798,6 +1813,8 @@ class WatchdogSupervisor:
                         state = STATUS_RELAUNCHING
                     elif cur == STATUS_FAILED:
                         state = STATUS_JOIN_FAILED
+                    elif cur == STATUS_WAITING:
+                        state = STATUS_WAITING
                     else:
                         state = STATUS_LAUNCHING
                 self._set_status(pkg, state)
@@ -1885,7 +1902,43 @@ class WatchdogSupervisor:
             self._rjn_monitor.note_launch_watchdog(pkg, relaunch=False)
         except Exception:  # noqa: BLE001
             pass
-        self._set_status(pkg, STATUS_LAUNCHING)
+        # Lifecycle Waiting is set by the launch callback after dispatch completes.
+
+    def enforce_stale_lifecycle_to_waiting(self, *, max_age_s: float = 2.0) -> None:
+        """Force Waiting when launch was dispatched but status stuck in prep/launch."""
+        try:
+            from . import checker_pointer as _cp
+
+            ptr = _cp.get()
+        except Exception:  # noqa: BLE001
+            return
+        now = time.time()
+        for pkg in self._opened_packages():
+            try:
+                row = ptr._packages.get(pkg)  # noqa: SLF001
+                if row is None or row.launch_dispatched_at is None:
+                    continue
+                if now - float(row.launch_dispatched_at) < max_age_s:
+                    continue
+                cur = str(self.status_map.get(pkg) or "").strip()
+                stale = {
+                    STATUS_PREPARING,
+                    STATUS_CLEAR_CACHE,
+                    STATUS_LAUNCHING,
+                    "Preparing",
+                    "Clear Cache",
+                }
+                if cur in stale or cur == "":
+                    self._set_lifecycle_status(
+                        pkg,
+                        STATUS_WAITING,
+                    )
+                    ptr.mark_launch_dispatched(
+                        pkg,
+                        reason="launch_dispatched_waiting_for_checker",
+                    )
+            except Exception:  # noqa: BLE001
+                continue
 
     def _mark_launched(self, pkg: str) -> None:
         """Record a fresh open/reopen and reset legacy recovery timing."""
@@ -4994,6 +5047,7 @@ class WatchdogSupervisor:
 
             if self._focused_checker_enabled():
                 self._refresh_evidence_cache()
+                self.enforce_stale_lifecycle_to_waiting()
                 _cs = self._checking_system()
                 if _cs is not None:
                     _cs.tick_round_start(

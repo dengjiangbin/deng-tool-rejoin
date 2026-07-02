@@ -319,7 +319,8 @@ def test_recovery_resumes_checking_after_online():
     checker = FocusedRoundRobinChecker(deps)
     ok = checker.run_recovery("p1")
     assert ok is True
-    assert deps.pointer.checker_mode == checker_pointer.MODE_RESUME_CHECKING
+    assert deps.pointer.checker_mode == checker_pointer.MODE_CHECKING
+    assert deps.pointer.state_pointer_text == checker_pointer.POINTER_CHECKING
     assert deps.pointer.recovery_in_progress is False
 
 
@@ -335,7 +336,7 @@ def test_pointer_text_transitions():
     p.update_focus_timer(3)
     assert p.state_pointer_text == "Checking 3/7s"
     p.mark_dead_detected("p1", "crash", "logcat", "FATAL")
-    assert p.state_pointer_text == checker_pointer.POINTER_DEAD_DETECTED
+    assert p.state_pointer_text == checker_pointer.POINTER_START_RECOVERY
     p.begin_recovery("p1")
     assert p.state_pointer_text == checker_pointer.POINTER_START_RECOVERY
     p.set_recovery_stage("clear_cache")
@@ -346,7 +347,9 @@ def test_pointer_text_transitions():
     assert p.state_pointer_text == checker_pointer.POINTER_RELAUNCHING
     p.set_recovery_stage("online")
     assert p.state_pointer_text == checker_pointer.POINTER_ONLINE
-    p.resume_checking()
+    p.end_recovery(failed=False, resume=False)
+    p.recovery_pause_checking = True
+    assert p.resume_checking_if_safe()
     assert p.state_pointer_text == checker_pointer.POINTER_RESUME_CHECKING
 
 

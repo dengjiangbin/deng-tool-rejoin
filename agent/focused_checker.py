@@ -252,6 +252,7 @@ class FocusedRoundRobinChecker:
             # Another recovery is already running — never interrupt it.
             self.d.pointer.set_loop_health(duplicate_loop_guard_status="recovery_busy")
             return False
+        online = False
         try:
             if self.d.pointer.recovery_in_progress:
                 return False
@@ -285,8 +286,8 @@ class FocusedRoundRobinChecker:
                 self._render()
             return online
         finally:
-            self.d.pointer.end_recovery()
-            self.d.pointer.resume_checking()
+            self.d.pointer.end_recovery(failed=not online)
+            self.d.pointer.resume_checking_if_safe()
             self._render()
             self._recovery_lock.release()
 
