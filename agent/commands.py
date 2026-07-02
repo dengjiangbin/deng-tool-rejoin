@@ -6462,6 +6462,52 @@ def cmd_start(args: argparse.Namespace) -> int:
             for pkg in phase:
                 phase[pkg] = label
 
+        # ── First-launch config (defined early so Getting Ready can render
+        # BEFORE any prep/cache/launch action — probe p-2606bd7609). ──────────
+        _FIRST_LAUNCH_MODE = (
+            os.environ.get("DENG_REJOIN_FIRST_LAUNCH_MODE", "interval") or "interval"
+        ).strip().lower()
+        try:
+            _FIRST_LAUNCH_INTERVAL_S = float(
+                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_INTERVAL_SEC", "30") or "30"
+            )
+        except ValueError:
+            _FIRST_LAUNCH_INTERVAL_S = 30.0
+        try:
+            _GETTING_READY_DWELL_S = max(
+                0.0,
+                float(os.environ.get("DENG_REJOIN_GETTING_READY_DWELL_SEC", "1.5") or "1.5"),
+            )
+        except ValueError:
+            _GETTING_READY_DWELL_S = 1.5
+        try:
+            from . import checker_pointer as _checker_pointer
+        except Exception:  # noqa: BLE001
+            _checker_pointer = None  # type: ignore[assignment]
+
+        # ── GETTING READY — render + flush IMMEDIATELY on 3. Start ────────────
+        # This must happen before Preparing / Clear Cache / any launch so the
+        # user actually sees "Getting Ready.." first (never skipped, never
+        # overwritten by Clear Cache/Opening in the same tick). Also resets ALL
+        # stale prior-session state and stamps a fresh session id.
+        if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
+            try:
+                _ptr_gr = _checker_pointer.get()
+                _ptr_gr.enable_persistence()
+                _ptr_gr.reset_for_new_start(
+                    session_id=_start_session_id, pid=os.getpid()
+                )
+                _ptr_gr.begin_getting_ready(
+                    [e["package"] for e in entries],
+                    interval_s=_FIRST_LAUNCH_INTERVAL_S,
+                )
+                _render_phase()  # flush Getting Ready.. to terminal now
+                _gr_deadline0 = time.monotonic() + _GETTING_READY_DWELL_S
+                while time.monotonic() < _gr_deadline0:
+                    time.sleep(0.1)
+            except Exception:  # noqa: BLE001
+                pass
+
         # 1) Preparing — quick stop of selected clones only (Termux protected).
         _transition_lifecycle("PREPARING", "prepare_packages")
         _start_session.mark("package_preparation_begin", package_count=len(entries))
@@ -6672,38 +6718,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         _ONLINE_GATE_TIMEOUT_S = 15.0
         _ONLINE_GATE_WARN_INTERVAL_S = 30.0  # print blocked_reason every 30s
 
-        # ── First-launch mode ────────────────────────────────────────────
-        # New default: fixed-interval first launch.  Package #2 is launched a
-        # fixed FIRST_LAUNCH_INTERVAL_S after #1 *regardless* of #1 Online
-        # status, so a slow/failed first Online can never block or slow the
-        # initial launch sequence (task spec).  Set
-        # DENG_REJOIN_FIRST_LAUNCH_MODE=online_gate to restore the old
-        # Online-gated stagger.
-        _FIRST_LAUNCH_MODE = (
-            os.environ.get("DENG_REJOIN_FIRST_LAUNCH_MODE", "interval") or "interval"
-        ).strip().lower()
-        try:
-            _FIRST_LAUNCH_INTERVAL_S = float(
-                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_INTERVAL_SEC", "30") or "30"
-            )
-        except ValueError:
-            _FIRST_LAUNCH_INTERVAL_S = 30.0
-
-        # How long the "Getting Ready.." pointer stays visible before the first
-        # package flips to "Opening.." (requirement 3).  Kept short so it never
-        # meaningfully delays the launch sequence.
-        try:
-            _GETTING_READY_DWELL_S = max(
-                0.0,
-                float(os.environ.get("DENG_REJOIN_GETTING_READY_DWELL_SEC", "1.5") or "1.5"),
-            )
-        except ValueError:
-            _GETTING_READY_DWELL_S = 1.5
-
-        try:
-            from . import checker_pointer as _checker_pointer
-        except Exception:  # noqa: BLE001
-            _checker_pointer = None  # type: ignore[assignment]
+        # (First-launch config + Getting Ready render moved earlier so the
+        # "Getting Ready.." pointer shows before Preparing/Clear Cache.)
 
         def _first_launch_interval_wait(pkg: str, idx: int, total: int) -> None:
             """Wait a fixed interval before launching the next package.
@@ -6841,34 +6857,15 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _final_st, expected_gen, _online_gen,
             )
 
+        # Getting Ready.. was already rendered at the top of Start. Here we just
+        # bring the detection session (logcat + force-close race detector) up so
+        # force_close_race.enabled is true for the whole session — the pointer
+        # stays "Getting Ready.." until the first package flips to "Opening..".
         if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
             try:
-                _ptr0 = _checker_pointer.get()
-                # Persist from this (Start) process so the separate dev-probe
-                # process sees the live lifecycle, not an idle singleton.
-                _ptr0.enable_persistence()
-                _ptr0.begin_getting_ready(
-                    [e["package"] for e in entries],
-                    interval_s=_FIRST_LAUNCH_INTERVAL_S,
-                )
-                # Bring the detection session (logcat reader + force-close race
-                # detector) up NOW so force_close_race.enabled is true for the
-                # whole Start session — not only after the first package opens.
-                try:
-                    _rjn_early = getattr(_supervisor, "_rjn_monitor", None)
-                    if _rjn_early is not None:
-                        _rjn_early.start_session()
-                except Exception:  # noqa: BLE001
-                    pass
-                # Render + a short visible dwell so "Getting Ready.." is shown
-                # to the user BEFORE the first package flips to "Opening.."
-                # (requirement 3).  Skipped if Start was already asked to stop.
-                _render_phase()
-                _gr_deadline = time.monotonic() + _GETTING_READY_DWELL_S
-                while time.monotonic() < _gr_deadline:
-                    if getattr(_supervisor, "stop_event", None) is not None and _supervisor.stop_event.is_set():
-                        break
-                    time.sleep(0.2)
+                _rjn_early = getattr(_supervisor, "_rjn_monitor", None)
+                if _rjn_early is not None:
+                    _rjn_early.start_session()
             except Exception:  # noqa: BLE001
                 pass
 

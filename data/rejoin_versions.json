@@ -143,6 +143,6 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "5cc89981abd29c3cc0c50be7c8de1ddc2043b5d68a498deb490e4a19fd304398"
+    "artifact_sha256": "a6b5a0b5bc2ea276b02140384fefa513bdd44a1522a99ac1df57f53318c6d3a7"
   }
 ]

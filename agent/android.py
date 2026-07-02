@@ -2381,6 +2381,7 @@ def clear_package_cache_for_start(
     package: str,
     *,
     root_tool: str,
+    timeout_s: int = 45,
 ) -> str:
     """Fast Start-time cache clear — one root shell per package, no size verify.
 
@@ -2406,7 +2407,11 @@ def clear_package_cache_for_start(
         f'[ -d "$p" ] && find "$p" -mindepth 1 -delete 2>/dev/null; '
         f"done"
     )
-    res = run_root_command(["sh", "-c", sh], root_tool=root_tool, timeout=45)
+    res = run_root_command(
+        ["sh", "-c", sh], root_tool=root_tool, timeout=max(5, int(timeout_s))
+    )
+    if getattr(res, "timed_out", False):
+        return "TimedOut"
     if res.ok or res.returncode in (0, 1):
         return "Cleared"
     return "Failed"
@@ -2416,6 +2421,7 @@ def clear_package_cache_safe(
     package: str,
     *,
     root_info: RootInfo | None = None,
+    timeout_s: int = 45,
 ) -> dict[str, object]:
     """Fast watchdog/recovery cache clear — one root shell, dict for logging."""
     try:
@@ -2426,6 +2432,7 @@ def clear_package_cache_safe(
             "skipped": True,
             "skipped_reason": "invalid_package",
             "method": "fast_start",
+            "command_kind": "invalid",
             "error": str(exc)[:120],
         }
     info = root_info or detect_root()
@@ -2435,17 +2442,31 @@ def clear_package_cache_safe(
             "skipped": True,
             "skipped_reason": "root_unavailable",
             "method": "fast_start",
+            "command_kind": "skipped_no_root",
             "error": "",
         }
     try:
-        label = clear_package_cache_for_start(pkg, root_tool=str(info.tool))
+        label = clear_package_cache_for_start(
+            pkg, root_tool=str(info.tool), timeout_s=timeout_s
+        )
     except Exception as exc:  # noqa: BLE001
         return {
             "success": False,
             "skipped": False,
             "skipped_reason": "",
             "method": "fast_start",
+            "command_kind": f"su_find_delete:{info.tool}",
             "error": str(exc)[:120],
+        }
+    if label == "TimedOut":
+        return {
+            "success": False,
+            "skipped": False,
+            "skipped_reason": "",
+            "method": "fast_start",
+            "command_kind": f"su_find_delete:{info.tool}",
+            "timed_out": True,
+            "error": "cache_clear_timed_out",
         }
     if label == "Skipped":
         return {
@@ -2453,6 +2474,7 @@ def clear_package_cache_safe(
             "skipped": True,
             "skipped_reason": "root_unavailable",
             "method": "fast_start",
+            "command_kind": "skipped_no_root",
             "error": "",
         }
     if label == "Cleared":
@@ -2461,6 +2483,7 @@ def clear_package_cache_safe(
             "skipped": False,
             "skipped_reason": "",
             "method": "fast_start",
+            "command_kind": f"su_find_delete:{info.tool}",
             "error": "",
         }
     return {
@@ -2468,6 +2491,7 @@ def clear_package_cache_safe(
         "skipped": False,
         "skipped_reason": "",
         "method": "fast_start",
+        "command_kind": f"su_find_delete:{info.tool}",
         "error": "clear_failed",
     }
 
@@ -2532,9 +2556,12 @@ def clear_package_cache_recovery(
     package: str,
     *,
     root_info: RootInfo | None = None,
+    timeout_s: int = 45,
 ) -> dict[str, object]:
     """Phase-2 recovery clear — one package, one root shell."""
-    result = clear_package_cache_safe(package, root_info=root_info)
+    result = clear_package_cache_safe(
+        package, root_info=root_info, timeout_s=timeout_s
+    )
     result["method"] = "recovery_single"
     return result
 

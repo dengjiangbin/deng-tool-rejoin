@@ -1372,6 +1372,9 @@ def collect_probe(
 
         _fc = _checker_pointer.probe_snapshot()
         out["focused_checker"] = _fc
+        # Current live session id/pid — used to flag stale prior-session data.
+        _cur_session_id = _fc.get("session_id")
+        _cur_checker_pid = _fc.get("checker_pid")
         # Top-level launch scheduler proof (single-relay architecture).
         out["launch_scheduler"] = {
             "blocked_reason": _fc.get("launch_blocked_reason"),
@@ -1382,16 +1385,33 @@ def collect_probe(
             "first_launch_next_package_at": _fc.get("first_launch_next_package_at"),
             "valid_state_writer": _fc.get("valid_state_writer"),
         }
+        # Stamp the current session onto start_crash_state for cross-checking.
+        if isinstance(out.get("start_crash_state"), dict):
+            out["start_crash_state"]["current_start_session_id"] = _cur_session_id
     except Exception as exc:  # noqa: BLE001
         errors.append({"step": "focused_checker", "error": str(exc)[:200]})
         out["focused_checker"] = {"error": str(exc)[:120]}
         out["launch_scheduler"] = {"error": str(exc)[:120]}
+        _cur_session_id = None
+        _cur_checker_pid = None
     try:
         from .launch_relaunch_trace import probe_snapshot as launch_probe_snapshot
 
         rjn = out.get("rjn_style_detection") or {}
         out["launch_relaunch"] = launch_probe_snapshot()
         lr = out["launch_relaunch"] if isinstance(out["launch_relaunch"], dict) else {}
+        # Flag stale prior-session launch/relaunch data (probe p-2606bd7609:
+        # old pid/action shown as current). Stale when the trace's process pid
+        # differs from the current live checker/Start pid.
+        if isinstance(out.get("launch_relaunch"), dict):
+            _lr_pid = lr.get("main_process_pid")
+            _is_stale = bool(
+                _cur_checker_pid is not None
+                and _lr_pid is not None
+                and str(_lr_pid) != str(_cur_checker_pid)
+            )
+            out["launch_relaunch"]["session_id"] = _cur_session_id
+            out["launch_relaunch"]["is_stale"] = _is_stale
         rjn_inner = rjn.get("rjn_style_detection") if isinstance(rjn, dict) else rjn
         if not isinstance(rjn_inner, dict):
             rjn_inner = {}

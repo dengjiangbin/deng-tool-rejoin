@@ -130,6 +130,33 @@ class CheckerPointerState:
     launch_waiting_for_online: bool = False
     launch_blocked_reason: str = ""
 
+    # ── Session / liveness / heartbeat (probe) ────────────────────────
+    session_id: str = ""
+    checker_pid: int | None = None
+    start_pressed_at: float | None = None            # wall-clock (time.time)
+    checker_last_heartbeat_at: float | None = None   # wall-clock (time.time)
+    checker_dead_reason: str = ""
+
+    # ── Bounded recovery stage timing (probe) ─────────────────────────
+    recovery_stage_started_at: float | None = None   # wall-clock
+    recovery_stage_deadline_s: float | None = None
+
+    # ── Cache-clear result (probe) ────────────────────────────────────
+    cache_clear_started_at: float | None = None
+    cache_clear_finished_at: float | None = None
+    cache_clear_duration_ms: float | None = None
+    cache_clear_command_kind: str = ""
+    cache_clear_exit_code: int | None = None
+    cache_clear_timed_out: bool = False
+    cache_clear_error: str = ""
+    cache_clear_status: str = ""
+
+    # ── Transition / pointer history (probe) ──────────────────────────
+    last_state_transition: str = ""
+    last_ui_pointer_history: list[str] = field(default_factory=list)
+    _last_history_mode: str = ""
+    _last_history_pointer: str = ""
+
     _packages: dict[str, _PackagePointer] = field(default_factory=dict)
 
     # Persistence is opt-in: only the Start/watchdog process enables it so a
@@ -160,6 +187,60 @@ class CheckerPointerState:
             self.recovery_in_progress = False
             self.active_recovery_package = ""
             self.recovery_stage = ""
+
+    def reset_for_new_start(
+        self,
+        *,
+        session_id: str,
+        pid: int | None = None,
+        start_pressed_at: float | None = None,
+    ) -> None:
+        """Clear ALL stale state from a previous Start and stamp a new session.
+
+        Every probe field that could leak old-session data (pointer text,
+        recovery stage, cache-clear result, first-launch lists) is wiped so a
+        fresh ``3. Start`` never shows a prior recovery's pid/stage as current.
+        """
+        with self._lock:
+            self.reset()
+            self.session_id = str(session_id or "")
+            self.checker_pid = int(pid) if pid is not None else None
+            now = time.time()
+            self.start_pressed_at = start_pressed_at if start_pressed_at is not None else now
+            self.checker_last_heartbeat_at = now
+            self.checker_dead_reason = ""
+            self.checker_loop_alive = True
+            # Wipe stale recovery + cache-clear result.
+            self.recovery_stage_started_at = None
+            self.recovery_stage_deadline_s = None
+            self.cache_clear_started_at = None
+            self.cache_clear_finished_at = None
+            self.cache_clear_duration_ms = None
+            self.cache_clear_command_kind = ""
+            self.cache_clear_exit_code = None
+            self.cache_clear_timed_out = False
+            self.cache_clear_error = ""
+            self.cache_clear_status = ""
+            self.last_state_transition = ""
+            self.last_ui_pointer_history = []
+            self._last_history_mode = ""
+            self._last_history_pointer = ""
+            self.last_launch_interval_s = None
+            self._persist(force=True)
+
+    def heartbeat(self, *, reason: str = "") -> None:
+        """Refresh the liveness timestamp so the probe can tell alive vs dead.
+
+        Called from the watchdog thread every round — independent of the main
+        Start thread — so a blocking launch/cache-clear can never make the
+        probe report the checker as idle/dead while the session is running.
+        """
+        with self._lock:
+            self.checker_last_heartbeat_at = time.time()
+            self.checker_loop_alive = True
+            if reason:
+                self.checker_dead_reason = ""
+            self._persist()
 
     def set_mode(self, mode: str, pointer_text: str | None = None) -> None:
         with self._lock:
@@ -259,35 +340,111 @@ class CheckerPointerState:
                 row.raw_dead_evidence_pending = False
             self._persist(force=True)
 
-    def begin_recovery(self, package: str) -> None:
+    # Per-stage watchdog deadlines (seconds). No stage may be infinite.
+    RECOVERY_STAGE_DEADLINES = {
+        "clear_cache": 30.0,
+        "reopening": 15.0,
+        "relaunching": 30.0,
+        "wait_online": 30.0,
+    }
+
+    def begin_recovery(self, package: str, *, reason: str = "") -> None:
         with self._lock:
             self.recovery_in_progress = True
             self.active_recovery_package = package
             self.recovery_stage = "start"
+            self.recovery_stage_started_at = time.time()
+            self.recovery_stage_deadline_s = None
             self.checker_mode = MODE_DEAD_DETECTED
             self.state_pointer_text = POINTER_START_RECOVERY
+            if reason:
+                self.last_dead_reason = reason
             self._persist(force=True)
 
-    def set_recovery_stage(self, stage: str) -> None:
+    def set_recovery_stage(self, stage: str, *, deadline_s: float | None = None) -> None:
         _map = {
             "clear_cache": (MODE_RECOVERY_CLEAR_CACHE, POINTER_CLEARING_CACHE),
             "reopening": (MODE_RECOVERY_REOPENING, POINTER_REOPENING),
             "relaunching": (MODE_RECOVERY_RELAUNCHING, POINTER_RELAUNCHING),
             "wait_online": (MODE_RECOVERY_WAIT_ONLINE, POINTER_RELAUNCHING),
             "online": (MODE_RECOVERY_WAIT_ONLINE, POINTER_ONLINE),
+            "recovery_failed": (MODE_RESUME_CHECKING, POINTER_RESUME_CHECKING),
         }
         with self._lock:
             self.recovery_stage = stage
+            self.recovery_stage_started_at = time.time()
+            self.recovery_stage_deadline_s = (
+                deadline_s
+                if deadline_s is not None
+                else self.RECOVERY_STAGE_DEADLINES.get(stage)
+            )
             mode_text = _map.get(stage)
             if mode_text is not None:
                 self.checker_mode, self.state_pointer_text = mode_text
             self._persist(force=True)
 
-    def end_recovery(self) -> None:
+    def recovery_stage_elapsed_s(self) -> float | None:
+        with self._lock:
+            if self.recovery_stage_started_at is None:
+                return None
+            return max(0.0, time.time() - self.recovery_stage_started_at)
+
+    def recovery_stage_expired(self) -> bool:
+        """True when the active recovery stage has blown its deadline."""
+        with self._lock:
+            if not self.recovery_in_progress:
+                return False
+            if self.recovery_stage_started_at is None or self.recovery_stage_deadline_s is None:
+                return False
+            return (time.time() - self.recovery_stage_started_at) > self.recovery_stage_deadline_s
+
+    def begin_cache_clear(self, *, command_kind: str = "") -> None:
+        with self._lock:
+            self.cache_clear_started_at = time.time()
+            self.cache_clear_finished_at = None
+            self.cache_clear_duration_ms = None
+            self.cache_clear_command_kind = command_kind
+            self.cache_clear_exit_code = None
+            self.cache_clear_timed_out = False
+            self.cache_clear_error = ""
+            self.cache_clear_status = "running"
+            self._persist(force=True)
+
+    def record_cache_clear_result(
+        self,
+        *,
+        status: str,
+        exit_code: int | None = None,
+        timed_out: bool = False,
+        error: str = "",
+        command_kind: str | None = None,
+        finished_at: float | None = None,
+    ) -> None:
+        with self._lock:
+            fin = finished_at if finished_at is not None else time.time()
+            self.cache_clear_finished_at = fin
+            if self.cache_clear_started_at is not None:
+                self.cache_clear_duration_ms = round(
+                    (fin - self.cache_clear_started_at) * 1000.0, 1
+                )
+            if command_kind is not None:
+                self.cache_clear_command_kind = command_kind
+            self.cache_clear_exit_code = exit_code
+            self.cache_clear_timed_out = bool(timed_out)
+            self.cache_clear_error = str(error or "")[:200]
+            self.cache_clear_status = status
+            self._persist(force=True)
+
+    def end_recovery(self, *, failed: bool = False, reason: str = "") -> None:
         with self._lock:
             self.recovery_in_progress = False
             self.active_recovery_package = ""
-            self.recovery_stage = ""
+            self.recovery_stage = "recovery_failed" if failed else ""
+            self.recovery_stage_started_at = None
+            self.recovery_stage_deadline_s = None
+            if failed and reason:
+                self.checker_dead_reason = ""  # process is alive; this is a stage failure
+                self.last_dead_reason = reason
             self._persist(force=True)
 
     def resume_checking(self) -> None:
@@ -398,8 +555,24 @@ class CheckerPointerState:
             self._persist_enabled = True
         self.write_state_file(force=True)
 
+    def _record_transition_locked(self) -> None:
+        """Track mode/pointer transitions for the probe (called under lock)."""
+        mode = self.checker_mode
+        ptr = self.state_pointer_text
+        if mode != self._last_history_mode:
+            ts = round(time.time(), 3)
+            self.last_state_transition = f"{self._last_history_mode or 'none'}->{mode}@{ts}"
+            self._last_history_mode = mode
+        if ptr and ptr != self._last_history_pointer:
+            self._last_history_pointer = ptr
+            self.last_ui_pointer_history.append(ptr)
+            # Keep only the most recent 16 pointer labels.
+            if len(self.last_ui_pointer_history) > 16:
+                self.last_ui_pointer_history = self.last_ui_pointer_history[-16:]
+
     def _persist(self, *, force: bool = False) -> None:
         """Throttled disk mirror; called while ``self._lock`` is held."""
+        self._record_transition_locked()
         if not self._persist_enabled:
             return
         now = time.time()
@@ -482,12 +655,37 @@ class CheckerPointerState:
                 "recovery_in_progress": self.recovery_in_progress,
                 "active_recovery_package": self.active_recovery_package or None,
                 "recovery_stage": self.recovery_stage or None,
+                "recovery_stage_started_at": self.recovery_stage_started_at,
+                "recovery_stage_elapsed_s": (
+                    None
+                    if self.recovery_stage_started_at is None
+                    else round(max(0.0, time.time() - self.recovery_stage_started_at), 2)
+                ),
+                "recovery_stage_deadline_s": self.recovery_stage_deadline_s,
                 "last_dead_reason": self.last_dead_reason or None,
                 "last_dead_source": self.last_dead_source or None,
                 "last_dead_evidence": self.last_dead_evidence or None,
                 "logcat_reader_alive": self.logcat_reader_alive,
                 "checker_loop_alive": self.checker_loop_alive,
                 "duplicate_loop_guard_status": self.duplicate_loop_guard_status,
+                # ── Session / liveness / heartbeat ────────────────────
+                "session_id": self.session_id or None,
+                "checker_pid": self.checker_pid,
+                "start_pressed_at": self.start_pressed_at,
+                "checker_last_heartbeat_at": self.checker_last_heartbeat_at,
+                "checker_dead_reason": self.checker_dead_reason or None,
+                # ── Cache-clear result (bounded recovery) ─────────────
+                "cache_clear_started_at": self.cache_clear_started_at,
+                "cache_clear_finished_at": self.cache_clear_finished_at,
+                "cache_clear_duration_ms": self.cache_clear_duration_ms,
+                "cache_clear_command_kind": self.cache_clear_command_kind or None,
+                "cache_clear_exit_code": self.cache_clear_exit_code,
+                "cache_clear_timed_out": self.cache_clear_timed_out,
+                "cache_clear_error": self.cache_clear_error or None,
+                "cache_clear_status": self.cache_clear_status or None,
+                # ── Transition / pointer history ──────────────────────
+                "last_state_transition": self.last_state_transition or None,
+                "last_ui_pointer_history": list(self.last_ui_pointer_history),
                 # ── Single-relay architecture proof ───────────────────
                 "valid_state_writer": "focused_checker_only",
                 "non_focused_evidence_cached": True,
@@ -513,12 +711,8 @@ def get() -> CheckerPointerState:
     return _INSTANCE
 
 
-def read_state_file(*, max_age_s: float = _STATE_MAX_AGE_S) -> dict[str, Any] | None:
-    """Read the persisted checker snapshot if it is fresh, else ``None``.
-
-    Used by the dev-probe process (which does not run the checker) so it can
-    reflect the real lifecycle owned by the live Start/watchdog process.
-    """
+def _read_state_file_raw() -> tuple[dict[str, Any], float, Any] | None:
+    """Return ``(snapshot, age_s, pid)`` from the state file regardless of age."""
     path = _state_file_path()
     if path is None:
         return None
@@ -533,15 +727,28 @@ def read_state_file(*, max_age_s: float = _STATE_MAX_AGE_S) -> dict[str, Any] | 
         age = time.time() - float(written_at)
     except (TypeError, ValueError):
         return None
-    if age > max_age_s:
-        return None
     snap = data.get("snapshot")
     if not isinstance(snap, dict):
         return None
-    snap = dict(snap)
+    return dict(snap), age, data.get("pid")
+
+
+def read_state_file(*, max_age_s: float = _STATE_MAX_AGE_S) -> dict[str, Any] | None:
+    """Read the persisted checker snapshot if it is fresh, else ``None``.
+
+    Used by the dev-probe process (which does not run the checker) so it can
+    reflect the real lifecycle owned by the live Start/watchdog process.
+    """
+    raw = _read_state_file_raw()
+    if raw is None:
+        return None
+    snap, age, pid = raw
+    if age > max_age_s:
+        return None
     snap["_source"] = "state_file"
     snap["_state_file_age_s"] = round(age, 2)
-    snap["_state_file_pid"] = data.get("pid")
+    snap["_state_file_pid"] = pid
+    snap["checker_state_file_age_s"] = round(age, 2)
     return snap
 
 
@@ -550,14 +757,31 @@ def probe_snapshot() -> dict[str, Any]:
 
     Prefers the live in-process singleton when it is actually running; when
     idle (the common case in a separate probe process) it falls back to the
-    persisted state file written by the live Start/watchdog process.
+    persisted state file.  A STALE state file means the Start/watchdog process
+    hung or died — surface that as a dead checker (with the last known session /
+    pid / stage) instead of a misleading ``idle``.
     """
     live = get().probe_snapshot()
     if live.get("checker_loop_alive") or live.get("checker_mode") != MODE_IDLE:
         live["_source"] = "live"
+        live["checker_state_file_age_s"] = 0.0
         return live
-    disk = read_state_file()
-    if disk is not None:
-        return disk
+    fresh = read_state_file()
+    if fresh is not None:
+        return fresh
+    raw = _read_state_file_raw()
+    if raw is not None:
+        snap, age, pid = raw
+        # File exists but is stale → the checker is not heartbeating.
+        snap["_source"] = "state_file_stale"
+        snap["_state_file_age_s"] = round(age, 2)
+        snap["_state_file_pid"] = pid
+        snap["checker_state_file_age_s"] = round(age, 2)
+        snap["checker_loop_alive"] = False
+        snap["checker_dead_reason"] = (
+            f"state_file_stale_{round(age, 1)}s_no_heartbeat"
+        )
+        return snap
     live["_source"] = "live_idle"
+    live["checker_state_file_age_s"] = None
     return live

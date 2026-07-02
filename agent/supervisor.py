@@ -4200,24 +4200,67 @@ class WatchdogSupervisor:
             self._relaunch_inflight.add(pkg)
             # When recovery fires, this package is no longer in its first launch.
             self._initial_launch_inflight.discard(pkg)
+            # ── Bounded recovery state machine (probe p-2606bd7609) ───────
+            # Only ONE package is recovered here; each stage is time-bounded so
+            # recovery can never freeze at Clearing Cache. Stages are published
+            # to the checker pointer so the probe shows real progress.
+            _ptr = self._checker_pointer()
+            if _ptr is not None:
+                try:
+                    _ptr.begin_recovery(pkg, reason=str(state).lower())
+                except Exception:  # noqa: BLE001
+                    pass
             self._set_status(pkg, STATUS_REOPENING)
-            from .cache_clear_phases import run_recovery_cache_clear
+            from .cache_clear_phases import run_recovery_cache_clear_bounded
 
-            cache_result = run_recovery_cache_clear(pkg, root_info=self._root_info)
+            if _ptr is not None:
+                try:
+                    _ptr.set_recovery_stage("clear_cache")
+                except Exception:  # noqa: BLE001
+                    pass
+            cache_result = run_recovery_cache_clear_bounded(
+                pkg, root_info=self._root_info, checker_pointer=_ptr,
+            )
             log_event(
                 logger, "info", "[DENG_REJOIN_DEAD_PACKAGE_CACHE_CLEAR]",
                 package=pkg,
                 success=str(bool(cache_result.get("success"))).lower(),
                 method=cache_result.get("method", ""),
+                cache_clear_status=cache_result.get("cache_clear_status", ""),
+                cache_clear_timed_out=str(
+                    bool(cache_result.get("cache_clear_timed_out"))
+                ).lower(),
+                cache_clear_duration_ms=cache_result.get("cache_clear_duration_ms"),
                 error=cache_result.get("error", ""),
             )
+            if _ptr is not None:
+                try:
+                    _ptr.set_recovery_stage("reopening")
+                except Exception:  # noqa: BLE001
+                    pass
             self._mark_launched(pkg)
             if callable(render_callback):
                 try:
                     render_callback()
                 except Exception:  # noqa: BLE001
                     pass
+            if _ptr is not None:
+                try:
+                    _ptr.set_recovery_stage("relaunching")
+                except Exception:  # noqa: BLE001
+                    pass
             success = self._do_launch(pkg, entry, "dead_recovery")
+            if _ptr is not None:
+                # Release the recovery lock immediately — this synchronous block
+                # is the whole recovery; Online is confirmed later by the checker.
+                try:
+                    if success:
+                        _ptr.set_recovery_stage("wait_online")
+                        _ptr.end_recovery()
+                    else:
+                        _ptr.end_recovery(failed=True, reason="relaunch_failed")
+                except Exception:  # noqa: BLE001
+                    pass
             if success:
                 self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
                 self._set_grace(pkg, now)
@@ -4851,7 +4894,10 @@ class WatchdogSupervisor:
                     _ptr.enable_persistence()
                 except Exception:  # noqa: BLE001
                     pass
-                _ptr.set_mode(_cp.MODE_CHECKING, _cp.POINTER_CHECKING)
+                # Do NOT force MODE_CHECKING here — the main Start thread owns
+                # the Getting Ready / Opening pointer during first launch. Only
+                # mark the loop alive so the probe never reads idle. The mode
+                # flips to checking once launches complete (in-loop below).
                 _ptr.set_loop_health(
                     checker_loop_alive=True,
                     duplicate_loop_guard_status="ok",
@@ -4867,6 +4913,25 @@ class WatchdogSupervisor:
             total = len(self.packages)
             round_robin_sec = float(self.PACKAGE_ROUND_ROBIN_SECONDS)
             self._watchdog_round_rate_limited = False
+            # Independent liveness beat: even if the main Start thread blocks on
+            # a launch/cache-clear command, this keeps the probe from reporting
+            # the checker as idle/dead during an active session (p-2606bd7609).
+            if self._focused_checker_enabled():
+                _hb_ptr = self._checker_pointer()
+                if _hb_ptr is not None:
+                    try:
+                        _hb_ptr.heartbeat()
+                        if (
+                            self._all_launches_completed
+                            and not _hb_ptr.recovery_in_progress
+                            and _hb_ptr.checker_mode
+                            in ("idle", "getting_ready", "first_launching")
+                        ):
+                            from . import checker_pointer as _cp_hb
+
+                            _hb_ptr.set_mode(_cp_hb.MODE_CHECKING, _cp_hb.POINTER_CHECKING)
+                    except Exception:  # noqa: BLE001
+                        pass
             self._keep_termux_session_alive()
             self._maybe_retry_pending_dead_webhooks()
 
