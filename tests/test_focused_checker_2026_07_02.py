@@ -331,9 +331,9 @@ def test_pointer_text_transitions():
     p.begin_opening("p1")
     assert p.state_pointer_text == checker_pointer.POINTER_OPENING
     p.begin_focus("p1", 1, now=0.0)
-    assert p.state_pointer_text == checker_pointer.POINTER_CHECKING
+    assert p.state_pointer_text.startswith("Checking ")
     p.update_focus_timer(3)
-    assert p.state_pointer_text == "3s"
+    assert p.state_pointer_text == "Checking 3/7s"
     p.mark_dead_detected("p1", "crash", "logcat", "FATAL")
     assert p.state_pointer_text == checker_pointer.POINTER_DEAD_DETECTED
     p.begin_recovery("p1")
@@ -556,7 +556,7 @@ def test_render_sequence_getting_ready_then_opening_then_checking():
     seq.append(p.pointer_text())          # Checking..
     assert seq[0] == checker_pointer.POINTER_GETTING_READY
     assert seq[1] == checker_pointer.POINTER_OPENING
-    assert seq[2] == checker_pointer.POINTER_CHECKING
+    assert seq[2].startswith("Checking ")
     # Getting Ready strictly precedes Opening.
     assert seq.index(checker_pointer.POINTER_GETTING_READY) < seq.index(
         checker_pointer.POINTER_OPENING

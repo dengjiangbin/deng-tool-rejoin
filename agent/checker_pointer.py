@@ -32,7 +32,7 @@ from typing import Any
 # small JSON file (exactly like RjnLifecycleMonitor.write_probe_file) and
 # have the probe read it when its own singleton is idle.
 _STATE_FILENAME = "focused-checker-state.json"
-_STATE_MAX_AGE_S = 20.0
+_STATE_MAX_AGE_S = 10.0
 _PERSIST_MIN_INTERVAL_S = 0.4
 
 
@@ -105,7 +105,7 @@ class CheckerPointerState:
     active_focus_package: str = ""
     active_focus_index: int = 0
     focus_started_at: float | None = None
-    focus_window_s: float = 10.0
+    focus_window_s: float = 7.0
 
     first_launch_phase: str = ""
     first_launch_next_package_at: float | None = None
@@ -159,6 +159,41 @@ class CheckerPointerState:
     last_ui_pointer_history: list[str] = field(default_factory=list)
     _last_history_mode: str = ""
     _last_history_pointer: str = ""
+
+    # ── Bounded checking (7s cap) ─────────────────────────────────────
+    checking_active_package: str = ""
+    checking_package_started_at: float | None = None
+    checking_elapsed_ms: float | None = None
+    checking_deadline_ms: float = 7000.0
+    checking_over_deadline: bool = False
+    checking_timeout_action: str = ""
+    checking_last_decision_package: str = ""
+    checking_last_decision_state: str = ""
+    checking_last_decision_reason: str = ""
+
+    # ── Presence ownership proof ──────────────────────────────────────
+    presence_state_writer: str = "checking_system"
+    invalid_presence_write_attempts: int = 0
+
+    # ── Recovery queue / handoff ────────────────────────────────────────
+    recovery_queue: list[str] = field(default_factory=list)
+    recovery_pause_checking: bool = False
+    recovery_resume_package: str = ""
+    recovery_last_result: str = ""
+    recovery_last_error: str = ""
+    unrecoverable_dead_packages: dict[str, str] = field(default_factory=dict)
+    dead_without_recovery_queue: list[str] = field(default_factory=list)
+
+    # ── Checker / logcat watchdog ───────────────────────────────────────
+    checker_watchdog_alive: bool = False
+    checker_restart_count: int = 0
+    checker_last_restart_at: float | None = None
+    checker_stale_detected_at: float | None = None
+    checker_stale_age_s: float | None = None
+    checker_restart_reason: str = ""
+    logcat_restart_count: int = 0
+    logcat_last_restart_at: float | None = None
+    logcat_unavailable_fallback_active: bool = False
 
     _packages: dict[str, _PackagePointer] = field(default_factory=dict)
 
@@ -232,6 +267,33 @@ class CheckerPointerState:
             self._last_history_mode = ""
             self._last_history_pointer = ""
             self.last_launch_interval_s = None
+            self.checking_active_package = ""
+            self.checking_package_started_at = None
+            self.checking_elapsed_ms = None
+            self.checking_deadline_ms = 7000.0
+            self.checking_over_deadline = False
+            self.checking_timeout_action = ""
+            self.checking_last_decision_package = ""
+            self.checking_last_decision_state = ""
+            self.checking_last_decision_reason = ""
+            self.presence_state_writer = "checking_system"
+            self.invalid_presence_write_attempts = 0
+            self.recovery_queue = []
+            self.recovery_pause_checking = False
+            self.recovery_resume_package = ""
+            self.recovery_last_result = ""
+            self.recovery_last_error = ""
+            self.unrecoverable_dead_packages = {}
+            self.dead_without_recovery_queue = []
+            self.checker_watchdog_alive = False
+            self.checker_restart_count = 0
+            self.checker_last_restart_at = None
+            self.checker_stale_detected_at = None
+            self.checker_stale_age_s = None
+            self.checker_restart_reason = ""
+            self.logcat_restart_count = 0
+            self.logcat_last_restart_at = None
+            self.logcat_unavailable_fallback_active = False
             self._persist(force=True)
 
     def heartbeat(self, *, reason: str = "") -> None:
@@ -323,28 +385,86 @@ class CheckerPointerState:
             self._persist(force=True)
 
     def begin_focus(self, package: str, index: int, *, now: float, window_s: float | None = None) -> None:
+        deadline = float(window_s if window_s is not None else self.focus_window_s)
+        self.begin_checking_package(package, index, now=now, deadline_s=deadline)
+
+    def begin_checking_package(
+        self,
+        package: str,
+        index: int,
+        *,
+        now: float,
+        deadline_s: float | None = None,
+    ) -> None:
         with self._lock:
+            deadline = float(deadline_s if deadline_s is not None else self.focus_window_s)
+            self.focus_window_s = deadline
+            self.checking_deadline_ms = round(deadline * 1000.0, 1)
             self.checker_mode = MODE_CHECKING
             self.active_focus_package = package
+            self.checking_active_package = package
             self.active_focus_index = index
             self.focus_started_at = now
-            if window_s is not None:
-                self.focus_window_s = float(window_s)
-            self.state_pointer_text = POINTER_CHECKING
-            # Only the focused package is "Checking"; clear any stale
-            # Checking marker left on a previously focused package.
+            self.checking_package_started_at = now
+            self.checking_elapsed_ms = 0.0
+            self.checking_over_deadline = False
+            self.checking_timeout_action = ""
+            self.state_pointer_text = f"Checking 0/{int(deadline)}s"
             for pkg, row in self._packages.items():
                 if row.display_state == "Checking" and pkg != package:
-                    row.display_state = row.last_real_state
+                    row.display_state = row.committed_presence_state or row.last_real_state
             self._pkg(package).display_state = "Checking"
             self._persist(force=True)
 
     def update_focus_timer(self, elapsed_s: float) -> None:
-        """Publish the ``1s``..``Ns`` countdown text during a focus window."""
+        """Legacy alias — publishes ``Checking N/Ns`` timer text."""
+        self.update_checking_timer(elapsed_s)
+
+    def update_checking_timer(
+        self, elapsed_s: float, *, deadline_s: float | None = None
+    ) -> None:
         with self._lock:
+            deadline = float(deadline_s if deadline_s is not None else self.focus_window_s)
             secs = max(0, int(elapsed_s))
-            self.state_pointer_text = f"{secs}s"
-            self._persist()
+            cap = max(1, int(deadline))
+            shown = min(secs, cap)
+            self.state_pointer_text = f"Checking {shown}/{cap}s"
+            self.checking_elapsed_ms = round(max(0.0, elapsed_s) * 1000.0, 1)
+            self.checking_over_deadline = elapsed_s >= deadline
+            self._persist(force=True)
+
+    def finish_checking_decision(
+        self,
+        package: str,
+        state: str,
+        reason: str,
+        *,
+        timeout_action: str = "",
+    ) -> None:
+        with self._lock:
+            self.checking_last_decision_package = package
+            self.checking_last_decision_state = state
+            self.checking_last_decision_reason = str(reason or "")[:200]
+            self.checking_timeout_action = str(timeout_action or "")[:120]
+            self.presence_state_writer = "checking_system"
+            row = self._pkg(package)
+            row.committed_presence_state = state
+            row.last_real_state = state
+            row.display_state = state
+            row.raw_online_evidence_pending = False
+            row.raw_dead_evidence_pending = False
+            self._persist(force=True)
+
+    def end_checking_focus(self, package: str) -> None:
+        with self._lock:
+            if self.active_focus_package == package:
+                self.active_focus_package = ""
+            if self.checking_active_package == package:
+                self.checking_active_package = ""
+            row = self._packages.get(package)
+            if row is not None and row.display_state == "Checking":
+                row.display_state = row.committed_presence_state or row.last_real_state
+            self._persist(force=True)
 
     def mark_dead_detected(self, package: str, reason: str, source: str, evidence: str) -> None:
         with self._lock:
@@ -354,11 +474,111 @@ class CheckerPointerState:
             self.last_dead_source = source
             self.last_dead_evidence = evidence
             if package:
-                row = self._pkg(package)
-                row.committed_presence_state = "Dead"
-                row.last_real_state = "Dead"
-                row.display_state = "Dead"
-                row.raw_dead_evidence_pending = False
+                self.commit_presence_state(package, "Dead")
+                self.enqueue_recovery(package, reason=reason, persist=False)
+            self._persist(force=True)
+
+    def enqueue_recovery(
+        self, package: str, *, reason: str = "", persist: bool = True
+    ) -> None:
+        pkg = str(package or "").strip()
+        if not pkg:
+            return
+        with self._lock:
+            if pkg in self.unrecoverable_dead_packages:
+                return
+            if pkg not in self.recovery_queue and self.active_recovery_package != pkg:
+                self.recovery_queue.append(pkg)
+            if reason:
+                self.last_dead_reason = str(reason)[:200]
+            if persist:
+                self._persist(force=True)
+
+    def dequeue_recovery(self) -> str:
+        with self._lock:
+            while self.recovery_queue:
+                pkg = self.recovery_queue.pop(0)
+                if pkg in self.unrecoverable_dead_packages:
+                    continue
+                return pkg
+            return ""
+
+    @property
+    def recovery_queue_size(self) -> int:
+        with self._lock:
+            return len(self.recovery_queue)
+
+    def is_unrecoverable(self, package: str) -> bool:
+        with self._lock:
+            return str(package or "").strip() in self.unrecoverable_dead_packages
+
+    def mark_unrecoverable(self, package: str, reason: str) -> None:
+        pkg = str(package or "").strip()
+        if not pkg:
+            return
+        with self._lock:
+            self.unrecoverable_dead_packages[pkg] = str(reason or "unrecoverable")[:200]
+            self.recovery_queue = [p for p in self.recovery_queue if p != pkg]
+            self._recompute_dead_without_recovery_locked()
+            self._persist(force=True)
+
+    def sync_dead_packages_into_recovery_queue(self) -> None:
+        with self._lock:
+            for pkg, row in self._packages.items():
+                if row.committed_presence_state != "Dead":
+                    continue
+                if pkg in self.unrecoverable_dead_packages:
+                    continue
+                if self.recovery_in_progress and self.active_recovery_package == pkg:
+                    continue
+                if pkg not in self.recovery_queue:
+                    self.recovery_queue.append(pkg)
+            self._recompute_dead_without_recovery_locked()
+            self._persist(force=True)
+
+    def _recompute_dead_without_recovery_locked(self) -> None:
+        missing: list[str] = []
+        for pkg, row in self._packages.items():
+            if row.committed_presence_state != "Dead":
+                continue
+            if pkg in self.unrecoverable_dead_packages:
+                continue
+            if self.recovery_in_progress and self.active_recovery_package == pkg:
+                continue
+            if pkg in self.recovery_queue:
+                continue
+            missing.append(pkg)
+        self.dead_without_recovery_queue = missing
+
+    def record_invalid_presence_write(
+        self, *, source: str, package: str, attempted_state: str
+    ) -> None:
+        with self._lock:
+            self.invalid_presence_write_attempts += 1
+            self.lifecycle_blocker = (
+                f"invalid_presence_write:{source}:{package}:{attempted_state}"[:200]
+            )
+            self._persist(force=True)
+
+    def record_checker_restart(self, reason: str) -> None:
+        with self._lock:
+            self.checker_restart_count += 1
+            self.checker_last_restart_at = time.time()
+            self.checker_restart_reason = str(reason or "")[:200]
+            self.checker_loop_alive = True
+            self.checker_watchdog_alive = True
+            self._persist(force=True)
+
+    def record_logcat_restart(self) -> None:
+        with self._lock:
+            self.logcat_restart_count += 1
+            self.logcat_last_restart_at = time.time()
+            self._persist(force=True)
+
+    def set_recovery_pointer(self, package: str, *, stage: str = "") -> None:
+        with self._lock:
+            label = str(stage or self.recovery_stage or "recovery").strip()
+            self.state_pointer_text = f"Recovery {package} {label}"[:120]
             self._persist(force=True)
 
     # Per-stage watchdog deadlines (seconds). No stage may be infinite.
@@ -456,16 +676,23 @@ class CheckerPointerState:
             self.cache_clear_status = status
             self._persist(force=True)
 
-    def end_recovery(self, *, failed: bool = False, reason: str = "") -> None:
+    def end_recovery(self, *, failed: bool = False, reason: str = "", resume: bool = True) -> None:
         with self._lock:
+            failed_pkg = self.active_recovery_package
             self.recovery_in_progress = False
             self.active_recovery_package = ""
             self.recovery_stage = "recovery_failed" if failed else ""
             self.recovery_stage_started_at = None
             self.recovery_stage_deadline_s = None
+            self.recovery_last_result = "failed" if failed else "success"
+            self.recovery_last_error = str(reason or "")[:200] if failed else ""
             if failed and reason:
-                self.checker_dead_reason = ""  # process is alive; this is a stage failure
-                self.last_dead_reason = reason
+                self.last_dead_reason = str(reason)[:200]
+            if failed_pkg:
+                self.end_checking_focus(failed_pkg)
+            if resume:
+                self.resume_checking()
+            self._recompute_dead_without_recovery_locked()
             self._persist(force=True)
 
     def resume_checking(self) -> None:
@@ -489,7 +716,9 @@ class CheckerPointerState:
         with self._lock:
             return self._pkg(package).consecutive_no_heartbeat_focus_count
 
-    def commit_presence_state(self, package: str, state: str) -> None:
+    def commit_presence_state(
+        self, package: str, state: str, *, writer: str = "checking_system"
+    ) -> None:
         """THE single writer of a package's visible presence state.
 
         Only the focused checker relay calls this.  Committing clears the
@@ -497,6 +726,7 @@ class CheckerPointerState:
         that package (the evidence has now been consumed by the relay).
         """
         with self._lock:
+            self.presence_state_writer = str(writer or "checking_system")[:80]
             row = self._pkg(package)
             row.committed_presence_state = state
             row.last_real_state = state
@@ -717,6 +947,34 @@ class CheckerPointerState:
                 "last_launch_interval_s": self.last_launch_interval_s,
                 "launch_waiting_for_online": self.launch_waiting_for_online,
                 "launch_blocked_reason": self.launch_blocked_reason or None,
+                "checking_active_package": self.checking_active_package or None,
+                "checking_package_started_at": self.checking_package_started_at,
+                "checking_elapsed_ms": self.checking_elapsed_ms,
+                "checking_deadline_ms": self.checking_deadline_ms,
+                "checking_over_deadline": self.checking_over_deadline,
+                "checking_timeout_action": self.checking_timeout_action or None,
+                "checking_last_decision_package": self.checking_last_decision_package or None,
+                "checking_last_decision_state": self.checking_last_decision_state or None,
+                "checking_last_decision_reason": self.checking_last_decision_reason or None,
+                "presence_state_writer": self.presence_state_writer or None,
+                "invalid_presence_write_attempts": self.invalid_presence_write_attempts,
+                "recovery_queue": list(self.recovery_queue),
+                "recovery_queue_size": len(self.recovery_queue),
+                "recovery_pause_checking": self.recovery_pause_checking,
+                "recovery_resume_package": self.recovery_resume_package or None,
+                "recovery_last_result": self.recovery_last_result or None,
+                "recovery_last_error": self.recovery_last_error or None,
+                "unrecoverable_dead_packages": dict(self.unrecoverable_dead_packages),
+                "dead_without_recovery_queue": list(self.dead_without_recovery_queue),
+                "checker_watchdog_alive": self.checker_watchdog_alive,
+                "checker_restart_count": self.checker_restart_count,
+                "checker_last_restart_at": self.checker_last_restart_at,
+                "checker_stale_detected_at": self.checker_stale_detected_at,
+                "checker_stale_age_s": self.checker_stale_age_s,
+                "checker_restart_reason": self.checker_restart_reason or None,
+                "logcat_restart_count": self.logcat_restart_count,
+                "logcat_last_restart_at": self.logcat_last_restart_at,
+                "logcat_unavailable_fallback_active": self.logcat_unavailable_fallback_active,
                 "per_package": per_package,
             }
 

@@ -1263,7 +1263,7 @@ class WatchdogSupervisor:
     # runs recovery immediately on confirmed Dead, and counts consecutive
     # no-heartbeat focus windows per package (NO_HEARTBEAT_FOCUS_LIMIT → recover).
     FOCUS_WINDOW_SECONDS: float = float(
-        os.environ.get("DENG_REJOIN_FOCUS_WINDOW_SEC", "10") or "10"
+        os.environ.get("DENG_REJOIN_FOCUS_WINDOW_SEC", "7") or "7"
     )
     FOCUS_POLL_SECONDS: float = float(
         os.environ.get("DENG_REJOIN_FOCUS_POLL_SEC", "0.5") or "0.5"
@@ -4210,6 +4210,12 @@ class WatchdogSupervisor:
                     _ptr.begin_recovery(pkg, reason=str(state).lower())
                 except Exception:  # noqa: BLE001
                     pass
+            _ptr_hb = _ptr
+            if _ptr_hb is not None:
+                try:
+                    _ptr_hb.heartbeat(reason="recovery")
+                except Exception:  # noqa: BLE001
+                    pass
             self._set_status(pkg, STATUS_REOPENING)
             from .cache_clear_phases import run_recovery_cache_clear_bounded
 
@@ -4251,14 +4257,25 @@ class WatchdogSupervisor:
                     pass
             success = self._do_launch(pkg, entry, "dead_recovery")
             if _ptr is not None:
+                try:
+                    _ptr.recovery_last_result = "success" if success else "failed"
+                    if not success:
+                        from .launch_relaunch_trace import probe_snapshot as _lr_probe
+
+                        _lr = _lr_probe() or {}
+                        _err = str(_lr.get("last_launch_error") or "relaunch_failed")
+                        _ptr.recovery_last_error = _err[:200]
+                except Exception:  # noqa: BLE001
+                    pass
                 # Release the recovery lock immediately — this synchronous block
                 # is the whole recovery; Online is confirmed later by the checker.
                 try:
                     if success:
                         _ptr.set_recovery_stage("wait_online")
-                        _ptr.end_recovery()
+                        _ptr.end_recovery(resume=True)
                     else:
-                        _ptr.end_recovery(failed=True, reason="relaunch_failed")
+                        _err = str(getattr(_ptr, "recovery_last_error", "") or "relaunch_failed")
+                        _ptr.end_recovery(failed=True, reason=_err[:200], resume=True)
                 except Exception:  # noqa: BLE001
                     pass
             if success:
@@ -4603,6 +4620,16 @@ class WatchdogSupervisor:
             from . import checker_pointer
 
             return checker_pointer.get()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _checking_system(self):
+        try:
+            from .checking_system import CheckingSystem
+
+            if not hasattr(self, "_checking_system_ref"):
+                self._checking_system_ref = CheckingSystem(self)
+            return self._checking_system_ref
         except Exception:  # noqa: BLE001
             return None
 
@@ -4967,6 +4994,11 @@ class WatchdogSupervisor:
 
             if self._focused_checker_enabled():
                 self._refresh_evidence_cache()
+                _cs = self._checking_system()
+                if _cs is not None:
+                    _cs.tick_round_start(
+                        lambda: _maybe_render(force=True),
+                    )
 
             try:
                 from .rjn_lifecycle_monitor import PRIMARY_HOT_LANE_ONLY
@@ -4991,9 +5023,6 @@ class WatchdogSupervisor:
                 opened_index += 1
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = ""
-
-                if self._focused_checker_enabled():
-                    self._publish_focus_pointer(pkg, opened_index, now=now)
 
                 _maybe_render(force=True)
                 check_started = time.monotonic()
@@ -5148,25 +5177,37 @@ class WatchdogSupervisor:
                 # package, so the next dead account is recovered on its turn and
                 # nothing extra happens when no package is dead.
                 if state not in {STATUS_WRONG_GAME, STATUS_UNKNOWN}:
-                    if state in _RECOVERY_TRIGGER_STATES:
-                        self._handle_state(
-                            pkg, entry, state, prev, now,
-                            render_callback=render_callback,
-                            detail=detail,
-                        )
-                    elif state == STATUS_NO_HEARTBEAT:
-                        self._handle_state(
-                            pkg, entry, state, prev, now,
-                            render_callback=render_callback,
-                            detail=detail,
-                        )
+                    if not self._focused_checker_enabled():
+                        if state in _RECOVERY_TRIGGER_STATES:
+                            self._handle_state(
+                                pkg, entry, state, prev, now,
+                                render_callback=render_callback,
+                                detail=detail,
+                            )
+                        elif state == STATUS_NO_HEARTBEAT:
+                            self._handle_state(
+                                pkg, entry, state, prev, now,
+                                render_callback=render_callback,
+                                detail=detail,
+                            )
                     elif state == STATUS_ONLINE:
                         self._handle_state(
                             pkg, entry, state, prev, now, render_callback=render_callback,
                             detail=detail,
                         )
+                    elif self._focused_checker_enabled() and state in _RECOVERY_TRIGGER_STATES:
+                        _dead_ptr = self._checker_pointer()
+                        if _dead_ptr is not None:
+                            try:
+                                _dead_ptr.cache_dead_evidence_pending(pkg, True)
+                            except Exception:  # noqa: BLE001
+                                pass
 
-                    if self.status_map.get(pkg) == STATUS_DEAD and state != STATUS_DEAD:
+                    if (
+                        not self._focused_checker_enabled()
+                        and self.status_map.get(pkg) == STATUS_DEAD
+                        and state != STATUS_DEAD
+                    ):
                         self._handle_state(
                             pkg, entry, STATUS_DEAD, prev, now, render_callback=render_callback,
                             detail=detail,
@@ -5183,24 +5224,38 @@ class WatchdogSupervisor:
                         tail_pause_sec=0.0 if fast_pkg else self._round_robin_tail_seconds(),
                     )
                     if self._focused_checker_enabled():
-                        # Focused window replaces the cosmetic tail pause: an
-                        # already-Online package returns instantly; a pending one
-                        # is watched for up to FOCUS_WINDOW_SECONDS, advancing the
-                        # moment Online is confirmed or recovering the moment Dead
-                        # is confirmed.  Recovery-on-dead is handled inline here.
-                        outcome = self._focused_dwell(
-                            pkg, entry, opened_index, now,
-                            lambda: _maybe_render(force=True),
-                        )
+                        _cs = self._checking_system()
+                        if _cs is not None:
+                            outcome = _cs.focus_package(
+                                pkg,
+                                entry,
+                                opened_index,
+                                now,
+                                lambda: _maybe_render(force=True),
+                            )
+                        else:
+                            outcome = self._focused_dwell(
+                                pkg, entry, opened_index, now,
+                                lambda: _maybe_render(force=True),
+                            )
                         from . import focused_checker as _fc
 
-                        if outcome == _fc.OUTCOME_DEAD and self.status_map.get(pkg) != STATUS_DEAD:
-                            self._set_status(pkg, STATUS_DEAD)
-                            self._handle_state(
-                                pkg, entry, STATUS_DEAD,
-                                self._prev_state.get(pkg, ""), now,
-                                render_callback=render_callback, detail={"reason": "focus_dead"},
-                            )
+                        if outcome == _fc.OUTCOME_DEAD:
+                            if _cs is not None:
+                                _cs.handle_focus_dead(
+                                    pkg,
+                                    entry,
+                                    now,
+                                    lambda: _maybe_render(force=True),
+                                )
+                            elif self.status_map.get(pkg) != STATUS_DEAD:
+                                self._set_status(pkg, STATUS_DEAD)
+                                self._handle_state(
+                                    pkg, entry, STATUS_DEAD,
+                                    self._prev_state.get(pkg, ""), now,
+                                    render_callback=render_callback,
+                                    detail={"reason": "focus_dead"},
+                                )
                     elif not fast_pkg:
                         self._interruptible_sleep(self._round_robin_tail_seconds())
 

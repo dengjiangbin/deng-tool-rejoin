@@ -185,6 +185,7 @@ class FocusedRoundRobinChecker:
             online = self._online_evidence(package)
             if online is not None:
                 self.d.pointer.set_online_evidence(package, online.source, online.age_ms)
+                self.d.pointer.commit_presence_state(package, "Online")
                 self.d.pointer.set_pointer_text(checker_pointer.POINTER_ONLINE)
                 self._render()
                 return OUTCOME_ONLINE_EARLY

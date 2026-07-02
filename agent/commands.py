@@ -5168,7 +5168,9 @@ def _checker_active_focus_package() -> str | None:
 
         ptr = _cp.get()
         with ptr._lock:  # noqa: SLF001 — same-process read of authoritative state
-            if ptr.checker_mode != _cp.MODE_CHECKING:
+            if ptr.recovery_pause_checking or ptr.recovery_in_progress:
+                return None
+            if ptr.checker_mode not in (_cp.MODE_CHECKING, _cp.MODE_RESUME_CHECKING):
                 return None
             return ptr.active_focus_package or None
     except Exception:  # noqa: BLE001
@@ -5232,7 +5234,11 @@ def _pointer_color(text: str) -> str:
         return _ANSI_GREEN
     if t in ("Dead Detected", "Start Recovery"):
         return _ANSI_RED
-    if t == "Checking.." or (t.endswith("s") and t[:-1].isdigit()):
+    if t == "Checking.." or (t.startswith("Checking ") and "/" in t and t.endswith("s")):
+        return _ANSI_PINK
+    if t.startswith("Recovery "):
+        return _ANSI_YELLOW
+    if t.endswith("s") and t[:-1].isdigit():
         return _ANSI_PINK
     return _ANSI_YELLOW
 
