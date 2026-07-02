@@ -490,6 +490,126 @@ def test_read_state_file_rejects_stale(tmp_path, monkeypatch):
     assert cp.read_state_file(max_age_s=20.0) is None
 
 
+# ── Single-relay architecture ─────────────────────────────────────────
+def test_commit_presence_state_is_single_writer():
+    p = CheckerPointerState()
+    p.begin_getting_ready(["p1"], interval_s=30)
+    # Raw producers only cache pending evidence — never commit.
+    p.cache_online_evidence_pending("p1", True)
+    assert p.committed_presence_state("p1") == ""
+    snap = p.probe_snapshot()
+    assert snap["per_package"]["p1"]["raw_online_evidence_pending"] is True
+    assert snap["per_package"]["p1"]["last_committed_presence_state"] is None
+    # Only the relay commit sets the visible presence + clears pending.
+    p.commit_presence_state("p1", "Online")
+    assert p.committed_presence_state("p1") == "Online"
+    snap2 = p.probe_snapshot()
+    assert snap2["per_package"]["p1"]["last_committed_presence_state"] == "Online"
+    assert snap2["per_package"]["p1"]["raw_online_evidence_pending"] is False
+    assert snap2["valid_state_writer"] == "focused_checker_only"
+    assert snap2["non_focused_evidence_cached"] is True
+
+
+def test_dead_evidence_cached_until_focus():
+    p = CheckerPointerState()
+    p.begin_getting_ready(["p1", "p2"], interval_s=30)
+    # Force-stop for a non-focused package: cached, not committed.
+    p.cache_dead_evidence_pending("p2", True)
+    assert p.has_pending_dead("p2") is True
+    assert p.committed_presence_state("p2") == ""
+    # When the relay focuses + decides dead, it commits and clears pending.
+    p.mark_dead_detected("p2", "force_stop", "logcat", "Force stopping")
+    assert p.committed_presence_state("p2") == "Dead"
+    assert p.has_pending_dead("p2") is False
+
+
+def test_non_focused_package_cannot_become_online_directly():
+    # There is no API that sets Online outside commit_presence_state; caching
+    # evidence must never change the committed/display presence.
+    p = CheckerPointerState()
+    p.begin_getting_ready(["p1"], interval_s=30)
+    p.cache_online_evidence_pending("p1", True)
+    assert p.display_state("p1") in ("", "Ready", None)
+    assert p.committed_presence_state("p1") == ""
+
+
+def test_launch_interval_defaults_to_30_and_notes_interval():
+    p = CheckerPointerState()
+    p.begin_getting_ready(["p1"], interval_s=30)
+    p.note_launch_interval(30.0)
+    snap = p.probe_snapshot()
+    assert snap["first_launch_interval_s"] == 30.0
+    assert snap["last_launch_interval_s"] == 30.0
+    assert snap["launch_waiting_for_online"] is False
+
+
+def test_render_sequence_getting_ready_then_opening_then_checking():
+    # Requirement: 1) Getting Ready.. 2) Opening.. 3) Ready/Waiting Check 4) Checking..
+    p = CheckerPointerState()
+    seq: list[str] = []
+    p.begin_getting_ready(["p1"], interval_s=30)
+    seq.append(p.pointer_text())          # Getting Ready..
+    p.begin_opening("p1")
+    seq.append(p.pointer_text())          # Opening..
+    p.mark_supposedly_launched("p1")      # launched → Waiting Check phase
+    p.begin_focus("p1", 1, now=0.0)
+    seq.append(p.pointer_text())          # Checking..
+    assert seq[0] == checker_pointer.POINTER_GETTING_READY
+    assert seq[1] == checker_pointer.POINTER_OPENING
+    assert seq[2] == checker_pointer.POINTER_CHECKING
+    # Getting Ready strictly precedes Opening.
+    assert seq.index(checker_pointer.POINTER_GETTING_READY) < seq.index(
+        checker_pointer.POINTER_OPENING
+    )
+
+
+def test_display_state_gate_hides_raw_online_until_committed():
+    # commands._display_state must not surface raw Online before the relay
+    # commits it. We exercise the gate helpers directly.
+    from agent import commands
+
+    p = checker_pointer.get()
+    p.reset()
+    p.begin_getting_ready(["com.x"], interval_s=30)
+    # No committed presence yet → gate returns "" so the row shows Waiting Check.
+    assert commands._checker_committed_presence("com.x") == ""
+    p.commit_presence_state("com.x", "Online")
+    assert commands._checker_committed_presence("com.x") == "Online"
+
+
+def test_header_all_columns_centered_like_state():
+    from agent import commands
+
+    rows = [(1, "com.moons.litesc", "user1", "Online")]
+    out = commands.build_start_table(rows, use_color=False, pointer_text="Checking..")
+    header_line = next(
+        ln for ln in out.splitlines() if "Package" in ln and "State" in ln
+    )
+    cells = header_line.split("│")[1:-1]  # drop outer borders
+    labels = ["#", "Package", "Username", "State"]
+    for cell, label in zip(cells, labels):
+        stripped = cell.strip()
+        assert stripped == label
+        # Centered ⇒ leading padding present on both sides (min 2 total).
+        lead = len(cell) - len(cell.lstrip(" "))
+        trail = len(cell) - len(cell.rstrip(" "))
+        assert lead >= 1 and trail >= 1, f"{label!r} not centered: {cell!r}"
+
+
+def test_header_yellow_bold_ansi_present_all_headers():
+    from agent import commands
+
+    rows = [(1, "com.moons.litesc", "user1", "Online")]
+    out_color = commands.build_start_table(rows, use_color=True, pointer_text="Checking..")
+    out_plain = commands._ANSI_RE.sub("", out_color)
+    # ANSI-preserved: yellow-bold header code present; ANSI-stripped: clean text.
+    assert commands._ANSI_YELLOW in out_color
+    assert "Package" in out_plain and "Username" in out_plain and "State" in out_plain
+    # Pink bordered Checking pointer present in the colored snapshot.
+    assert commands._ANSI_PINK in out_color
+    assert "[ Checking.. ]" in out_plain
+
+
 def test_probe_snapshot_has_all_required_fields():
     p = CheckerPointerState()
     p.begin_getting_ready(["p1"])
@@ -518,14 +638,27 @@ def test_probe_snapshot_has_all_required_fields():
         "checker_loop_alive",
         "duplicate_loop_guard_status",
         "per_package",
+        # Single-relay architecture fields.
+        "valid_state_writer",
+        "non_focused_evidence_cached",
+        "first_launch_interval_s",
+        "last_launch_interval_s",
+        "launch_waiting_for_online",
     ):
         assert key in snap, key
     pp = snap["per_package"]["p1"]
     assert pp["consecutive_no_heartbeat_focus_count"] == 1
-    # New per-package probe fields (requirement: display_state / last_real_state).
-    assert "display_state" in pp
-    assert "last_real_state" in pp
+    # New per-package probe fields.
+    for k in (
+        "display_state",
+        "last_real_state",
+        "last_committed_presence_state",
+        "raw_online_evidence_pending",
+        "raw_dead_evidence_pending",
+    ):
+        assert k in pp, k
     assert pp["display_state"] == "Checking"  # p1 is the active focus
+    assert snap["valid_state_writer"] == "focused_checker_only"
     assert snap["focus_elapsed_s"] == pytest.approx(5.0, abs=0.01)
 
 

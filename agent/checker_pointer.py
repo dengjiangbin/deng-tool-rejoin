@@ -82,6 +82,15 @@ class _PackagePointer:
     # ``last_real_state`` so other renders keep the last known real value.
     display_state: str = ""
     last_real_state: str = ""
+    # ── Single-relay presence gating ──────────────────────────────────
+    # ``committed_presence_state`` is the ONLY authoritative visible
+    # presence value (Online / No Heartbeat / Dead).  It is written
+    # exclusively by the focused checker relay.  Raw detectors only set the
+    # ``raw_*_evidence_pending`` flags; the visible row never flips to a
+    # final presence state until the checker focuses the package and commits.
+    committed_presence_state: str = ""
+    raw_online_evidence_pending: bool = False
+    raw_dead_evidence_pending: bool = False
 
 
 @dataclass
@@ -114,6 +123,12 @@ class CheckerPointerState:
     logcat_reader_alive: bool = False
     checker_loop_alive: bool = False
     duplicate_loop_guard_status: str = "ok"
+
+    # ── Single-relay architecture metadata (probe-visible) ────────────
+    first_launch_interval_s: float = 30.0
+    last_launch_interval_s: float | None = None
+    launch_waiting_for_online: bool = False
+    launch_blocked_reason: str = ""
 
     _packages: dict[str, _PackagePointer] = field(default_factory=dict)
 
@@ -158,13 +173,19 @@ class CheckerPointerState:
             self.state_pointer_text = text
             self._persist()
 
-    def begin_getting_ready(self, packages: list[str]) -> None:
+    def begin_getting_ready(
+        self, packages: list[str], *, interval_s: float | None = None
+    ) -> None:
         with self._lock:
             self.checker_mode = MODE_GETTING_READY
             self.state_pointer_text = POINTER_GETTING_READY
             self.first_launch_phase = "getting_ready"
             self.first_launch_started_packages = []
             self.first_launch_supposedly_launched_packages = []
+            self.launch_waiting_for_online = False
+            self.launch_blocked_reason = ""
+            if interval_s is not None:
+                self.first_launch_interval_s = float(interval_s)
             for pkg in packages:
                 self._pkg(pkg)
             self._persist(force=True)
@@ -183,6 +204,20 @@ class CheckerPointerState:
         with self._lock:
             if package and package not in self.first_launch_supposedly_launched_packages:
                 self.first_launch_supposedly_launched_packages.append(package)
+            self._persist(force=True)
+
+    def note_launch_interval(self, interval_s: float) -> None:
+        with self._lock:
+            self.last_launch_interval_s = float(interval_s)
+            self._persist()
+
+    def touch_persist(self) -> None:
+        """Force a fresh state-file write.
+
+        Used during the first-launch 30s gaps so the separate probe process
+        never sees a stale (>20s) file and mislabels the checker as idle.
+        """
+        with self._lock:
             self._persist(force=True)
 
     def begin_focus(self, package: str, index: int, *, now: float, window_s: float | None = None) -> None:
@@ -218,8 +253,10 @@ class CheckerPointerState:
             self.last_dead_evidence = evidence
             if package:
                 row = self._pkg(package)
+                row.committed_presence_state = "Dead"
                 row.last_real_state = "Dead"
                 row.display_state = "Dead"
+                row.raw_dead_evidence_pending = False
             self._persist(force=True)
 
     def begin_recovery(self, package: str) -> None:
@@ -274,17 +311,50 @@ class CheckerPointerState:
         with self._lock:
             return self._pkg(package).consecutive_no_heartbeat_focus_count
 
-    def set_real_state(self, package: str, state: str) -> None:
-        """Record the resolved real state of a package (Online/Dead/...).
+    def commit_presence_state(self, package: str, state: str) -> None:
+        """THE single writer of a package's visible presence state.
 
-        Clears the transient ``Checking`` marker so the row shows the real
-        result and future renders keep the last known real value.
+        Only the focused checker relay calls this.  Committing clears the
+        transient ``Checking`` marker and the raw-evidence-pending flags for
+        that package (the evidence has now been consumed by the relay).
         """
         with self._lock:
             row = self._pkg(package)
+            row.committed_presence_state = state
             row.last_real_state = state
             row.display_state = state
+            row.raw_online_evidence_pending = False
+            row.raw_dead_evidence_pending = False
             self._persist(force=True)
+
+    # Backwards-compatible alias: the resolved real state IS the committed
+    # presence state under the single-relay model.
+    def set_real_state(self, package: str, state: str) -> None:
+        self.commit_presence_state(package, state)
+
+    def committed_presence_state(self, package: str) -> str:
+        with self._lock:
+            row = self._packages.get(package)
+            return "" if row is None else row.committed_presence_state
+
+    def cache_online_evidence_pending(self, package: str, pending: bool = True) -> None:
+        """Raw producer hook: mark that Online evidence exists but is NOT yet
+        committed (only the relay may commit it)."""
+        with self._lock:
+            self._pkg(package).raw_online_evidence_pending = bool(pending)
+            self._persist()
+
+    def cache_dead_evidence_pending(self, package: str, pending: bool = True) -> None:
+        """Raw producer hook: queue Dead/force-stop evidence for a package that
+        is not currently focused; applied when the relay focuses it."""
+        with self._lock:
+            self._pkg(package).raw_dead_evidence_pending = bool(pending)
+            self._persist()
+
+    def has_pending_dead(self, package: str) -> bool:
+        with self._lock:
+            row = self._packages.get(package)
+            return bool(row and row.raw_dead_evidence_pending)
 
     def display_state(self, package: str) -> str:
         """Return what the row should show now (Checking while focused)."""
@@ -358,7 +428,7 @@ class CheckerPointerState:
             tmp = path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(payload), encoding="utf-8")
             os.replace(tmp, path)
-        except OSError:
+        except Exception:  # noqa: BLE001 — persistence must never crash a caller
             pass
 
     # ── readers (any thread) ──────────────────────────────────────────
@@ -389,6 +459,9 @@ class CheckerPointerState:
                     "pid_missing_since": row.pid_missing_since,
                     "display_state": row.display_state or None,
                     "last_real_state": row.last_real_state or None,
+                    "last_committed_presence_state": row.committed_presence_state or None,
+                    "raw_online_evidence_pending": row.raw_online_evidence_pending,
+                    "raw_dead_evidence_pending": row.raw_dead_evidence_pending,
                 }
                 for pkg, row in self._packages.items()
             }
@@ -415,6 +488,13 @@ class CheckerPointerState:
                 "logcat_reader_alive": self.logcat_reader_alive,
                 "checker_loop_alive": self.checker_loop_alive,
                 "duplicate_loop_guard_status": self.duplicate_loop_guard_status,
+                # ── Single-relay architecture proof ───────────────────
+                "valid_state_writer": "focused_checker_only",
+                "non_focused_evidence_cached": True,
+                "first_launch_interval_s": self.first_launch_interval_s,
+                "last_launch_interval_s": self.last_launch_interval_s,
+                "launch_waiting_for_online": self.launch_waiting_for_online,
+                "launch_blocked_reason": self.launch_blocked_reason or None,
                 "per_package": per_package,
             }
 

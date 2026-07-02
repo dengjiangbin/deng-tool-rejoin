@@ -184,7 +184,12 @@ class ForceCloseRaceDetector:
             pass
 
     def _write_state_file(self, *, force: bool = False) -> None:
-        """Throttled cross-process mirror of the live snapshot."""
+        """Throttled cross-process mirror of the live snapshot.
+
+        Must NEVER raise: this runs inside the poll loop and an escaping
+        exception would kill the detector thread (root cause of p-7330eb8158:
+        force_close_race showed disabled while logcat events kept arriving).
+        """
         now = self._clock()
         if not force and (now - self._last_state_write_at) < RACE_STATE_WRITE_MIN_INTERVAL_SECONDS:
             return
@@ -199,7 +204,7 @@ class ForceCloseRaceDetector:
             tmp = RACE_STATE_PATH.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(payload), encoding="utf-8")
             os.replace(tmp, RACE_STATE_PATH)
-        except OSError:
+        except Exception:  # noqa: BLE001 — persistence must never crash the poll loop
             pass
 
     def _probe_adb_once(self) -> None:
@@ -464,7 +469,10 @@ class ForceCloseRaceDetector:
                         self._adb_poll_once(pkg, now)
                 except Exception:  # noqa: BLE001
                     pass
-            self._write_state_file()
+            try:
+                self._write_state_file()
+            except Exception:  # noqa: BLE001
+                pass
             self._stop_event.wait(interval)
 
     def _parse_logcat_epoch(self, line: str) -> float:

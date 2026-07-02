@@ -4630,6 +4630,55 @@ class WatchdogSupervisor:
             pass
         return None
 
+    def _refresh_evidence_cache(self) -> None:
+        """Cache raw Online/Dead evidence for NON-focused packages.
+
+        Single-relay rule: raw detectors are evidence producers only.  This
+        records *pending* evidence flags (probe-visible) without committing
+        any visible presence state — only the focused checker commits.
+        Read-only and cheap: never triggers ingest/scrape.
+        """
+        ptr = self._checker_pointer()
+        if ptr is None:
+            return
+        try:
+            from .rjn_lifecycle_monitor import STATE_ONLINE_CONFIRMED
+        except Exception:  # noqa: BLE001
+            return
+        active = ptr.active_focus_package
+        race = None
+        try:
+            from .force_close_race import get_active_force_close_race_detector
+
+            race = get_active_force_close_race_detector()
+        except Exception:  # noqa: BLE001
+            race = None
+        for pkg in self.packages:
+            if pkg == active:
+                continue
+            online_pending = False
+            try:
+                with self._rjn_monitor._lock:
+                    row = self._rjn_monitor._states.get(pkg)
+                    if row is not None and row.internal_state == STATE_ONLINE_CONFIRMED:
+                        online_pending = True
+            except Exception:  # noqa: BLE001
+                pass
+            dead_pending = False
+            if race is not None:
+                try:
+                    with race._lock:
+                        r = race._packages.get(pkg)
+                        if r is not None and r.status == "dead":
+                            dead_pending = True
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                ptr.cache_online_evidence_pending(pkg, online_pending)
+                ptr.cache_dead_evidence_pending(pkg, dead_pending)
+            except Exception:  # noqa: BLE001
+                pass
+
     def _publish_focus_pointer(self, pkg: str, index: int, *, now: float) -> None:
         ptr = self._checker_pointer()
         if ptr is None:
@@ -4842,6 +4891,9 @@ class WatchdogSupervisor:
                 self._rjn_monitor.write_probe_file()
             except Exception:  # noqa: BLE001
                 pass
+
+            if self._focused_checker_enabled():
+                self._refresh_evidence_cache()
 
             try:
                 from .rjn_lifecycle_monitor import PRIMARY_HOT_LANE_ONLY

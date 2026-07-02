@@ -5037,6 +5037,8 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         ("Join " + "Unconfirmed"):  _ANSI_YELLOW,   # legacy alias
         "Ready":             _ANSI_YELLOW,
         "Starting":          _ANSI_YELLOW,
+        "Opening":           _ANSI_YELLOW,   # first-launch: launch in progress
+        "Waiting Check":     _ANSI_YELLOW,   # launched, awaiting focused checker
         "Launching":         _ANSI_WHITE,
         "Relaunching":       _ANSI_WHITE,
         "No Heartbeat":      _ANSI_ORANGE,
@@ -5126,6 +5128,52 @@ def _checker_active_focus_package() -> str | None:
         return None
 
 
+# Single-relay display gate: raw detectors may collect evidence, but a final
+# presence state (Online / No Heartbeat / Dead) must NEVER reach the visible
+# row until the focused checker commits it.  Env kill-switch retained.
+_RELAY_GATE_ENABLED = (
+    os.environ.get("DENG_REJOIN_RELAY_GATE", "1") or "1"
+).strip().lower() not in {"0", "false", "no", "off"}
+_FINAL_PRESENCE_STATES = frozenset({"Online", "Dead", "No Heartbeat"})
+# Raw monitor states that imply a *final* presence verdict — these must be
+# gated behind the relay and never shown until the checker commits.
+_RAW_FINAL_STATES = frozenset({
+    "Online", "In Lobby", "In Game", "Launched", "In Server", "Background",
+    "No Heartbeat", "Dead", "Join Failed", "Disconnected", "Offline",
+    "Unknown", "Wrong Game / Wrong Server",
+})
+
+
+def _checker_committed_presence(pkg: str) -> str:
+    """Relay-committed visible presence for ``pkg`` ('' if not yet decided)."""
+    try:
+        from . import checker_pointer as _cp
+
+        return _cp.get().committed_presence_state(pkg)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _checker_first_launch_current() -> str:
+    """The package whose first-launch is currently in progress ('' if none)."""
+    try:
+        from . import checker_pointer as _cp
+
+        ptr = _cp.get()
+        with ptr._lock:  # noqa: SLF001
+            started = ptr.first_launch_started_packages
+            supposed = set(ptr.first_launch_supposedly_launched_packages)
+            # Only the package whose launch command is in-flight (started but
+            # not yet supposedly-launched) is "Opening". During the 30s gap no
+            # package is opening → launched ones show Waiting Check.
+            for pkg in reversed(started):
+                if pkg not in supposed:
+                    return pkg
+            return ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _pointer_color(text: str) -> str:
     """ANSI colour for the State pointer box based on its content.
 
@@ -5203,6 +5251,12 @@ def build_start_table(
     if pointer_box_plain:
         state_idx = len(headers) - 1
         widths[state_idx] = max(widths[state_idx], _visible_len(pointer_box_plain))
+    # Give every header at least 2 chars of horizontal breathing room so the
+    # centered header labels (#, Package, Username, State) are all *visibly*
+    # centered the same way — not left-biased in narrow data columns. Bounded
+    # by col_caps + fit_line() so narrow Termux widths still degrade cleanly.
+    for i in range(len(headers)):
+        widths[i] = min(col_caps[i], max(widths[i], len(headers[i]) + 2))
 
     def _bold(text: str) -> str:
         if not use_color or not text:
@@ -6285,8 +6339,31 @@ def cmd_start(args: argparse.Namespace) -> int:
             opened = pkg in getattr(_supervisor_ref, "_package_opened", set())
             sup_st = str(_supervisor_ref.status_map.get(pkg) or "").strip()
             if getattr(_supervisor_ref, "_all_launches_completed", False):
+                # Focused checking has begun — defer to the single relay.
+                if _RELAY_GATE_ENABLED:
+                    committed = _checker_committed_presence(pkg)
+                    if committed:
+                        return committed
+                    if sup_st in _RAW_FINAL_STATES:
+                        return "Waiting Check"
+                    return sup_st or ph or "Waiting Check"
                 return sup_st or ph or "Checking..."
             if opened:
+                if sup_st == "Failed":
+                    return "Failed"
+                # ── Single-relay gate (first launch) ───────────────────
+                # No final presence state (Online/No Heartbeat/Dead) may show
+                # during first launch. The launched package is Opening (while
+                # its launch is in progress) then Waiting Check until the
+                # focused checker evaluates it. Evidence is cached meanwhile.
+                if _RELAY_GATE_ENABLED:
+                    current = _checker_first_launch_current()
+                    if pkg == current and sup_st in (
+                        "", "Launching", "Waiting", "Checking", "Pending",
+                        "Join Unconfirmed",
+                    ):
+                        return "Opening"
+                    return "Waiting Check"
                 if sup_st in ("Online", "In Lobby", "In Game", "Launched", "In Server", "Background"):
                     return "Online"
                 if sup_st == "No Heartbeat":
@@ -6307,6 +6384,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                     return sup_st
                 return "Launching"
             if ph in ("Launching", "Failed", "Preparing", "Clear Cache"):
+                if _RELAY_GATE_ENABLED and ph == "Launching":
+                    return "Opening"
                 return ph
             if sup_st == "Ready" or ph == "Ready":
                 return "Ready"
@@ -6640,9 +6719,23 @@ def cmd_start(args: argparse.Namespace) -> int:
                 " interval_sec=%.0f (no Online gate)",
                 pkg, idx, total, _FIRST_LAUNCH_INTERVAL_S,
             )
+            if _checker_pointer is not None:
+                try:
+                    _checker_pointer.get().note_launch_interval(_FIRST_LAUNCH_INTERVAL_S)
+                except Exception:  # noqa: BLE001
+                    pass
+            _last_touch = 0.0
             while _t.monotonic() < deadline:
                 if getattr(_supervisor, "stop_event", None) is not None and _supervisor.stop_event.is_set():
                     return
+                # Keep the persisted state file fresh during the 30s gap so the
+                # separate probe process never sees a stale (idle) checker.
+                if _checker_pointer is not None and (_t.monotonic() - _last_touch) >= 3.0:
+                    _last_touch = _t.monotonic()
+                    try:
+                        _checker_pointer.get().touch_persist()
+                    except Exception:  # noqa: BLE001
+                        pass
                 _render_phase_throttled()
                 _t.sleep(0.5)
 
@@ -6754,7 +6847,19 @@ def cmd_start(args: argparse.Namespace) -> int:
                 # Persist from this (Start) process so the separate dev-probe
                 # process sees the live lifecycle, not an idle singleton.
                 _ptr0.enable_persistence()
-                _ptr0.begin_getting_ready([e["package"] for e in entries])
+                _ptr0.begin_getting_ready(
+                    [e["package"] for e in entries],
+                    interval_s=_FIRST_LAUNCH_INTERVAL_S,
+                )
+                # Bring the detection session (logcat reader + force-close race
+                # detector) up NOW so force_close_race.enabled is true for the
+                # whole Start session — not only after the first package opens.
+                try:
+                    _rjn_early = getattr(_supervisor, "_rjn_monitor", None)
+                    if _rjn_early is not None:
+                        _rjn_early.start_session()
+                except Exception:  # noqa: BLE001
+                    pass
                 # Render + a short visible dwell so "Getting Ready.." is shown
                 # to the user BEFORE the first package flips to "Opening.."
                 # (requirement 3).  Skipped if Start was already asked to stop.
@@ -7142,6 +7247,22 @@ def cmd_start(args: argparse.Namespace) -> int:
                 # only ever one row at a time (requirement 4).
                 if pkg == _active_focus_pkg:
                     return "Checking"
+                # ── Single-relay gate ──────────────────────────────────
+                # A final presence state (Online/No Heartbeat/Dead) is shown
+                # ONLY once the focused checker relay has committed it. Raw
+                # detector state in status_map never bypasses the checker.
+                if _RELAY_GATE_ENABLED:
+                    committed = _checker_committed_presence(pkg)
+                    if committed:
+                        return committed
+                    raw_state = str(_live_map.get(pkg, "") or "").strip()
+                    if not raw_state or raw_state == "Unknown":
+                        return "Waiting Check"
+                    disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Waiting Check"
+                    # Not yet committed by the relay → never show a final state.
+                    if disp in _FINAL_PRESENCE_STATES:
+                        return "Waiting Check"
+                    return disp
                 raw_state = str(_live_map.get(pkg, "") or "").strip()
                 if not raw_state or raw_state == "Unknown":
                     return "Checking..."

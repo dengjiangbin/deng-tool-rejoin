@@ -1370,10 +1370,22 @@ def collect_probe(
     try:
         from . import checker_pointer as _checker_pointer
 
-        out["focused_checker"] = _checker_pointer.probe_snapshot()
+        _fc = _checker_pointer.probe_snapshot()
+        out["focused_checker"] = _fc
+        # Top-level launch scheduler proof (single-relay architecture).
+        out["launch_scheduler"] = {
+            "blocked_reason": _fc.get("launch_blocked_reason"),
+            "waiting_for_online": bool(_fc.get("launch_waiting_for_online", False)),
+            "first_launch_interval_s": _fc.get("first_launch_interval_s"),
+            "last_launch_interval_s": _fc.get("last_launch_interval_s"),
+            "first_launch_phase": _fc.get("first_launch_phase"),
+            "first_launch_next_package_at": _fc.get("first_launch_next_package_at"),
+            "valid_state_writer": _fc.get("valid_state_writer"),
+        }
     except Exception as exc:  # noqa: BLE001
         errors.append({"step": "focused_checker", "error": str(exc)[:200]})
         out["focused_checker"] = {"error": str(exc)[:120]}
+        out["launch_scheduler"] = {"error": str(exc)[:120]}
     try:
         from .launch_relaunch_trace import probe_snapshot as launch_probe_snapshot
 
@@ -1676,7 +1688,7 @@ _PROBE_PINNED_FIELDS = frozenset({
     "last_start_diagnostics", "start_crash_state", "last_failing_command", "webhook_debug",
     "rjn_detection_only", "online_detection", "decision", "state_machine",
     "dead_detection", "launch_relaunch", "relaunch", "account_dead_webhook",
-    "resize_debug", "focused_checker",
+    "resize_debug", "focused_checker", "launch_scheduler", "force_close_race",
 })
 
 
