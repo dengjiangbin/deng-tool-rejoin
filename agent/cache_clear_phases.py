@@ -35,9 +35,8 @@ START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S = 3
 
 
 def _settle_before_start_cache_clear() -> None:
-    """Brief pause so the force-stop prep burst settles before cache clear."""
-    if android.is_termux():
-        time.sleep(0.8)
+    """No artificial pause — cache clear starts immediately after prep force-stop."""
+    return
 
 
 def run_start_mass_cache_clear(

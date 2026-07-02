@@ -24,8 +24,9 @@ _STATE_FILENAME = "launch-schedule-state.json"
 _PERSIST_MIN_INTERVAL_S = 0.25
 _STATE_MAX_AGE_S = 600.0
 
-DEFAULT_FIRST_LAUNCH_DELAY_S = 5.0
+DEFAULT_FIRST_LAUNCH_DELAY_S = 1.0
 DEFAULT_INTERVAL_S = 30.0
+DEFAULT_POST_CLEAR_CACHE_MAX_DELAY_S = 1.0
 DEFAULT_COMMAND_TIMEOUT_S = 5.0
 DEFAULT_BEFORE_LAUNCH_TIMEOUT_S = 0.5
 
@@ -102,6 +103,10 @@ class LaunchScheduler:
     launch_scheduler_aborted_reason: str | None = None
     scheduler_survived_ui_failure: bool = False
     all_packages_dispatched_at: float | None = None
+    all_packages_launched_at: float | None = None
+    post_clear_cache_delay_ms: float | None = None
+    first_launch_delay_from_clear_cache_finish_ms: float | None = None
+    launch_anchor_mode: str = "clear_cache_start"
 
     _attempts: list[LaunchAttemptRecord] = field(default_factory=list)
     _launch_interval_observed_ms: list[float] = field(default_factory=list)
@@ -155,6 +160,7 @@ class LaunchScheduler:
         finished_at: float | None = None,
         duration_ms: float | None = None,
         timed_out: bool = False,
+        reanchor_launches: bool = True,
     ) -> None:
         with self._lock:
             self.clear_cache_finished_at = float(
@@ -169,7 +175,29 @@ class LaunchScheduler:
                 )
             self.clear_cache_timeout = bool(timed_out)
             self.blocked_by_clear_cache = False
+            if reanchor_launches:
+                self._reanchor_launches_from_cache_finish_locked()
             self._persist(force=True)
+
+    def _reanchor_launches_from_cache_finish_locked(self) -> None:
+        """Schedule first launch from cache-finish + delay (not cache-start + delay)."""
+        finish = self.clear_cache_finished_at
+        if finish is None:
+            return
+        delay = min(
+            max(0.0, float(self.first_launch_delay_seconds)),
+            DEFAULT_POST_CLEAR_CACHE_MAX_DELAY_S,
+        )
+        self.launch_anchor_mode = "clear_cache_finish"
+        self.first_launch_due_at = finish + delay
+        for i, row in enumerate(self._attempts):
+            row.due_at = finish + delay + (i * self.interval_seconds)
+            row.fired_at = None
+            row.skew_ms = None
+            row.command_started_at = None
+            row.command_finished_at = None
+            row.result = "pending"
+            row.error = ""
 
     def mark_scheduler_started(self, *, monotonic_now: float | None = None) -> None:
         with self._lock:
@@ -229,6 +257,13 @@ class LaunchScheduler:
                 row.result = "fired"
             if index == 0:
                 self.first_launch_called_at = ts
+                if self.clear_cache_finished_at is not None:
+                    self.first_launch_delay_from_clear_cache_finish_ms = round(
+                        (ts - self.clear_cache_finished_at) * 1000.0, 1
+                    )
+                    self.post_clear_cache_delay_ms = (
+                        self.first_launch_delay_from_clear_cache_finish_ms
+                    )
             elif index > 0:
                 prev = self._attempts[index - 1].fired_at
                 if prev is not None:
@@ -414,8 +449,9 @@ class LaunchScheduler:
                 thread.start()
                 workers.append(thread)
             with self._lock:
-                self.all_packages_dispatched_at = monotonic_fn()
-                self.mark_checking_system_started(monotonic_now=monotonic_fn())
+                dispatched_at = monotonic_fn()
+                self.all_packages_dispatched_at = dispatched_at
+                self.all_packages_launched_at = dispatched_at
                 self._persist(force=True)
         except BaseException as exc:  # noqa: BLE001
             with self._lock:
@@ -426,6 +462,7 @@ class LaunchScheduler:
             for thread in workers:
                 thread.join()
             with self._lock:
+                self.mark_checking_system_started(monotonic_now=monotonic_fn())
                 self.scheduler_alive = False
                 self._done_event.set()
                 self._persist(force=True)
@@ -499,6 +536,12 @@ class LaunchScheduler:
                 "launch_scheduler_aborted_reason": self.launch_scheduler_aborted_reason,
                 "scheduler_survived_ui_failure": self.scheduler_survived_ui_failure,
                 "all_packages_dispatched_at": self.all_packages_dispatched_at,
+                "all_packages_launched_at": self.all_packages_launched_at,
+                "post_clear_cache_delay_ms": self.post_clear_cache_delay_ms,
+                "first_launch_delay_from_clear_cache_finish_ms": (
+                    self.first_launch_delay_from_clear_cache_finish_ms
+                ),
+                "launch_anchor_mode": self.launch_anchor_mode,
                 "launch_interval_observed_ms": list(self._launch_interval_observed_ms),
                 "launch_calls": self.launch_calls_probe(),
                 "launch_attempts": [

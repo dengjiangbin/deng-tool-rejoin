@@ -6449,8 +6449,26 @@ def cmd_start(args: argparse.Namespace) -> int:
             return ph or "Ready"
 
         _stagger_render_last = 0.0
+        _ui_phase_version = 0
 
-        def _render_phase(_unused_note: str = "") -> None:
+        def _bump_ui_phase(label: str, *, source: str = "cmd_start") -> int:
+            nonlocal _ui_phase_version
+            try:
+                from . import start_lifecycle as _sl_ui
+
+                _ui_phase_version = _sl_ui.bump_ui_phase_version(
+                    phase=label, source=source
+                )
+            except Exception:  # noqa: BLE001
+                _ui_phase_version += 1
+            if _checker_pointer is not None:
+                try:
+                    _checker_pointer.get().touch_persist()
+                except Exception:  # noqa: BLE001
+                    pass
+            return _ui_phase_version
+
+        def _render_phase(_unused_note: str = "", *, phase_version: int | None = None) -> None:
             """Atomically redraw the dashboard with the current phase per package.
 
             Shows only: logo + available RAM + table.
@@ -6461,6 +6479,18 @@ def cmd_start(args: argparse.Namespace) -> int:
             from prior phases never bleed through on slow Termux terminals.
             """
             nonlocal _stagger_render_last
+            ver = phase_version if phase_version is not None else _ui_phase_version
+            try:
+                from . import start_lifecycle as _sl_render
+
+                if not _sl_render.try_write_table_phase(
+                    str(phase.get(entries[0]["package"]) if entries else ""),
+                    ver,
+                    source="render_phase",
+                ):
+                    return
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 if (
                     _supervisor_ref is not None
@@ -6515,7 +6545,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 except Exception:  # noqa: BLE001
                     pass
 
-        def _render_phase_throttled(_unused_note: str = "") -> None:
+        def _render_phase_throttled(_unused_note: str = "", *, phase_version: int | None = None) -> None:
             nonlocal _stagger_render_last
             import time as _rt
 
@@ -6523,14 +6553,16 @@ def cmd_start(args: argparse.Namespace) -> int:
             if now - _stagger_render_last < 0.35:
                 return
             _stagger_render_last = now
-            _render_phase(_unused_note)
+            _render_phase(_unused_note, phase_version=phase_version)
 
         def _set_all_phase(label: str, note: str = "") -> None:
+            _bump_ui_phase(label)
             for pkg in phase:
                 phase[pkg] = label
             _render_phase(note)
 
         def _set_all_phase_labels(label: str) -> None:
+            _bump_ui_phase(label)
             for pkg in phase:
                 phase[pkg] = label
 
@@ -6598,31 +6630,40 @@ def cmd_start(args: argparse.Namespace) -> int:
         # 1) Preparing — quick stop of selected clones only (Termux protected).
         _transition_lifecycle("PREPARING", "prepare_packages")
         _start_session.mark("package_preparation_begin", package_count=len(entries))
+        from . import start_lifecycle as _start_lifecycle_prep
+
+        _start_lifecycle_prep.mark_prepare_started()
         packages_sl = [e["package"] for e in entries]
         keep_alive = ["com.termux"] + packages_sl
         _prep_root = android.detect_root()
 
         _set_all_phase("Preparing", "Stopping selected packages...")
-        try:
-            _cloud_mem = android.optimize_cloud_phone_memory(keep_alive)
-            if not _cloud_mem.get("cooldown_skipped"):
-                _start_log.info(
-                    "[DENG_REJOIN_CLOUD_PHONE_MEMORY] disabled=%s stopped=%s skipped=%s"
-                    " failed=%s recovery=%s cooldown_skipped=%s uninstall_used=false",
-                    ",".join(str(p) for p in _cloud_mem.get("disabled") or []) or "none",
-                    ",".join(str(p) for p in _cloud_mem.get("stopped") or []) or "none",
-                    json.dumps(_cloud_mem.get("skipped") or [], separators=(",", ":")),
-                    json.dumps(_cloud_mem.get("failed") or [], separators=(",", ":")),
-                    _cloud_mem.get("recovery_command", "pm enable com.google.android.gms"),
-                    str(_cloud_mem.get("cooldown_skipped", False)).lower(),
-                )
-                _start_log.info("[*] Recovery: %s", _cloud_mem.get("recovery_command"))
-            else:
-                _start_log.info(
-                    "[DENG_REJOIN_CLOUD_PHONE_MEMORY] cooldown_skipped=true action=skip_heavy_scan",
-                )
-        except Exception as _exc:  # noqa: BLE001
-            _start_log.debug("cloud phone memory optimization error (non-fatal): %s", _exc)
+        # Heavy cloud-phone memory sweep runs async — must not block Clear Cache.
+        def _cloud_memory_bg() -> None:
+            try:
+                _cloud_mem = android.optimize_cloud_phone_memory(keep_alive)
+                if not _cloud_mem.get("cooldown_skipped"):
+                    _start_log.info(
+                        "[DENG_REJOIN_CLOUD_PHONE_MEMORY] disabled=%s stopped=%s skipped=%s"
+                        " failed=%s recovery=%s cooldown_skipped=%s uninstall_used=false",
+                        ",".join(str(p) for p in _cloud_mem.get("disabled") or []) or "none",
+                        ",".join(str(p) for p in _cloud_mem.get("stopped") or []) or "none",
+                        json.dumps(_cloud_mem.get("skipped") or [], separators=(",", ":")),
+                        json.dumps(_cloud_mem.get("failed") or [], separators=(",", ":")),
+                        _cloud_mem.get("recovery_command", "pm enable com.google.android.gms"),
+                        str(_cloud_mem.get("cooldown_skipped", False)).lower(),
+                    )
+                    _start_log.info("[*] Recovery: %s", _cloud_mem.get("recovery_command"))
+                else:
+                    _start_log.info(
+                        "[DENG_REJOIN_CLOUD_PHONE_MEMORY] cooldown_skipped=true action=skip_heavy_scan",
+                    )
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("cloud phone memory optimization error (non-fatal): %s", _exc)
+
+        threading.Thread(
+            target=_cloud_memory_bg, name="start-cloud-memory", daemon=True
+        ).start()
 
         _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
 
@@ -6638,6 +6679,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 )
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("start: background roblox stop error: %s", _exc)
+
+        _start_lifecycle_prep.mark_prepare_finished()
 
         # 2) Clear Cache — anchor monotonic schedule NOW; cache clear must never
         # block launch due times (probe p-bf0b2feb55).
@@ -6660,12 +6703,15 @@ def cmd_start(args: argparse.Namespace) -> int:
         safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
 
         try:
-            _FIRST_LAUNCH_DELAY_S = max(
-                0.0,
-                float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "5") or "5"),
+            _FIRST_LAUNCH_DELAY_S = min(
+                1.0,
+                max(
+                    0.0,
+                    float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "1") or "1"),
+                ),
             )
         except ValueError:
-            _FIRST_LAUNCH_DELAY_S = 5.0
+            _FIRST_LAUNCH_DELAY_S = 1.0
 
         _launch_sched = LaunchScheduler(
             session_id=_start_session_id,
@@ -6708,12 +6754,13 @@ def cmd_start(args: argparse.Namespace) -> int:
             _launch_sched.record_clear_cache_finished(
                 duration_ms=cc_out.get("cache_clear_duration_ms"),
                 timed_out=bool(cc_out.get("cache_clear_timeout")),
+                reanchor_launches=True,
             )
             _cc_exit_reason = str(cc_out.get("cache_clear_status") or "done")
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("start: batch cache clear error: %s", _exc)
             prep_cache.update({pkg: "Failed" for pkg in package_names})
-            _launch_sched.record_clear_cache_finished(timed_out=True)
+            _launch_sched.record_clear_cache_finished(timed_out=True, reanchor_launches=True)
             _cc_exit_reason = f"error:{str(_exc)[:80]}"
         finally:
             _start_session.mark("batch_clear_cache_done", package_count=len(entries))
@@ -6721,8 +6768,17 @@ def cmd_start(args: argparse.Namespace) -> int:
         _start_lifecycle.exit_clear_cache_phase(_cc_exit_reason)
         _start_lifecycle.mark_cache_clear_closed()
         _start_lifecycle.mark_launch_scheduled(package_names)
+        _exit_ver = _bump_ui_phase("Ready", source="post_clear_cache")
         for pkg in package_names:
             phase[pkg] = "Ready"
+        _render_phase("", phase_version=_exit_ver)
+        if _checker_pointer is not None:
+            try:
+                _checker_pointer.get().set_checker_idle_during_first_launch(
+                    reason="first_launch_scheduler_active"
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
@@ -6763,11 +6819,13 @@ def cmd_start(args: argparse.Namespace) -> int:
                 return "success"
             return f"failed:{launch_err[package] or 'unknown'}"
 
-        def _defer_render(note: str = "") -> None:
+        def _defer_render(note: str = "", *, phase_version: int | None = None) -> None:
+            ver = phase_version if phase_version is not None else _ui_phase_version
             try:
                 threading.Thread(
                     target=_render_phase_throttled,
                     args=(note,),
+                    kwargs={"phase_version": ver},
                     name="start-phase-render",
                     daemon=True,
                 ).start()
@@ -6794,8 +6852,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                     )
                 except Exception:  # noqa: BLE001
                     pass
+            _open_ver = _bump_ui_phase("Opening", source="first_launch")
             phase[package] = "Launching"
-            _defer_render()
+            _render_phase("", phase_version=_open_ver)
 
         def _sched_after_launch(index: int, package: str, result: str) -> None:
             sup = _supervisor_ref
@@ -6855,9 +6914,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                 username_for_index=_username_for_launch,
             )
             _start_log.info(
-                "[DENG_REJOIN_LAUNCH_SCHEDULER_STARTED] anchor=%.3f first_due=%.3f",
-                _launch_sched.clear_cache_started_at or 0.0,
+                "[DENG_REJOIN_LAUNCH_SCHEDULER_STARTED] anchor_finish=%.3f first_due=%.3f"
+                " post_clear_delay_cap_sec=%.1f",
+                _launch_sched.clear_cache_finished_at or 0.0,
                 _launch_sched.first_launch_due_at or 0.0,
+                _FIRST_LAUNCH_DELAY_S,
             )
 
         # Bootstrap watchdog while the launch scheduler runs (interval mode).

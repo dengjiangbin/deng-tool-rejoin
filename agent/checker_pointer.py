@@ -195,6 +195,9 @@ class CheckerPointerState:
     logcat_last_restart_at: float | None = None
     logcat_unavailable_fallback_active: bool = False
 
+    checker_status: str = "idle"
+    checker_idle_reason: str = ""
+
     _packages: dict[str, _PackagePointer] = field(default_factory=dict)
 
     # Persistence is opt-in: only the Start/watchdog process enables it so a
@@ -294,6 +297,8 @@ class CheckerPointerState:
             self.logcat_restart_count = 0
             self.logcat_last_restart_at = None
             self.logcat_unavailable_fallback_active = False
+            self.checker_status = "starting"
+            self.checker_idle_reason = ""
             self._persist(force=True)
 
     def heartbeat(self, *, reason: str = "") -> None:
@@ -341,12 +346,22 @@ class CheckerPointerState:
                 self._pkg(pkg)
             self._persist(force=True)
 
+    def set_checker_idle_during_first_launch(self, *, reason: str = "") -> None:
+        with self._lock:
+            self.checker_status = "idle_until_all_packages_launched"
+            self.checker_idle_reason = str(reason or "first_launch_scheduler_active")[:200]
+            self.checker_loop_alive = True
+            self.checker_dead_reason = ""
+            self._persist(force=True)
+
     def mark_checking_system_started(self) -> None:
         with self._lock:
             if self.checking_system_started_at is None:
                 self.checking_system_started_at = time.time()
             self.checker_mode = MODE_CHECKING
             self.state_pointer_text = POINTER_CHECKING
+            self.checker_status = "checking"
+            self.checker_idle_reason = ""
             self._persist(force=True)
 
     def set_lifecycle_blocker(self, reason: str) -> None:
@@ -889,7 +904,7 @@ class CheckerPointerState:
                 }
                 for pkg, row in self._packages.items()
             }
-            return {
+            snap = {
                 "checker_mode": self.checker_mode,
                 "state_pointer_text": self.state_pointer_text,
                 "active_focus_package": self.active_focus_package or None,
@@ -975,8 +990,18 @@ class CheckerPointerState:
                 "logcat_restart_count": self.logcat_restart_count,
                 "logcat_last_restart_at": self.logcat_last_restart_at,
                 "logcat_unavailable_fallback_active": self.logcat_unavailable_fallback_active,
+                "checker_status": self.checker_status or None,
+                "checker_idle_reason": self.checker_idle_reason or None,
                 "per_package": per_package,
             }
+        snap_out = dict(snap)
+        try:
+            from . import start_lifecycle as _start_lifecycle
+
+            snap_out.update(_start_lifecycle.probe_snapshot())
+        except Exception:  # noqa: BLE001
+            pass
+        return snap_out
 
 
 _INSTANCE: CheckerPointerState | None = None

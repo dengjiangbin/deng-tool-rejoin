@@ -18,6 +18,14 @@ _launch_scheduler_aborted_reason: str | None = None
 _start_cache_clear_abort = False
 _blocked_force_stop_count = 0
 _last_blocked_force_stop: str = ""
+_prepare_started_at: float | None = None
+_prepare_finished_at: float | None = None
+_prepare_wait_reasons: list[str] = []
+_prepare_blockers: list[str] = []
+_table_state_phase: str = ""
+_table_state_source: str = "lifecycle"
+_ui_phase_version: int = 0
+_stale_ui_write_ignored_count: int = 0
 
 
 def reset_for_start(packages: list[str]) -> None:
@@ -27,6 +35,8 @@ def reset_for_start(packages: list[str]) -> None:
     global _last_ui_render_error, _scheduler_survived_ui_failure
     global _launch_scheduler_aborted_reason, _start_cache_clear_abort
     global _blocked_force_stop_count, _last_blocked_force_stop
+    global _prepare_started_at, _prepare_finished_at, _prepare_wait_reasons, _prepare_blockers
+    global _table_state_phase, _table_state_source, _ui_phase_version, _stale_ui_write_ignored_count
     with _lock:
         _cache_clear_closed = False
         _launch_scheduled_packages = {str(p).strip() for p in packages if str(p).strip()}
@@ -39,6 +49,14 @@ def reset_for_start(packages: list[str]) -> None:
         _start_cache_clear_abort = False
         _blocked_force_stop_count = 0
         _last_blocked_force_stop = ""
+        _prepare_started_at = None
+        _prepare_finished_at = None
+        _prepare_wait_reasons = []
+        _prepare_blockers = []
+        _table_state_phase = ""
+        _table_state_source = "lifecycle"
+        _ui_phase_version = 0
+        _stale_ui_write_ignored_count = 0
 
 
 def mark_launch_scheduled(packages: list[str]) -> None:
@@ -115,8 +133,72 @@ def set_launch_scheduler_aborted_reason(reason: str) -> None:
         _launch_scheduler_aborted_reason = str(reason or "")[:200] or None
 
 
+def mark_prepare_started() -> None:
+    global _prepare_started_at
+    with _lock:
+        if _prepare_started_at is None:
+            _prepare_started_at = time.time()
+
+
+def mark_prepare_finished() -> None:
+    global _prepare_finished_at
+    with _lock:
+        _prepare_finished_at = time.time()
+
+
+def note_prepare_wait(reason: str) -> None:
+    text = str(reason or "").strip()[:120]
+    if not text:
+        return
+    with _lock:
+        if text not in _prepare_wait_reasons:
+            _prepare_wait_reasons.append(text)
+
+
+def note_prepare_blocker(reason: str) -> None:
+    text = str(reason or "").strip()[:120]
+    if not text:
+        return
+    with _lock:
+        if text not in _prepare_blockers:
+            _prepare_blockers.append(text)
+
+
+def bump_ui_phase_version(*, phase: str, source: str = "lifecycle") -> int:
+    global _ui_phase_version, _table_state_phase, _table_state_source
+    with _lock:
+        _ui_phase_version += 1
+        _table_state_phase = str(phase or "")[:80]
+        _table_state_source = str(source or "lifecycle")[:80]
+        return _ui_phase_version
+
+
+def try_write_table_phase(phase: str, version: int, *, source: str = "lifecycle") -> bool:
+    """Return False when an older phase tries to overwrite a newer table state."""
+    global _stale_ui_write_ignored_count, _table_state_phase, _table_state_source, _ui_phase_version
+    with _lock:
+        if version < _ui_phase_version:
+            _stale_ui_write_ignored_count += 1
+            return False
+        if version > _ui_phase_version:
+            _ui_phase_version = version
+        _table_state_phase = str(phase or "")[:80]
+        _table_state_source = str(source or "lifecycle")[:80]
+        return True
+
+
+def prepare_duration_ms() -> float | None:
+    with _lock:
+        if _prepare_started_at is None or _prepare_finished_at is None:
+            return None
+        return round((_prepare_finished_at - _prepare_started_at) * 1000.0, 1)
+
+
 def probe_snapshot() -> dict[str, Any]:
     with _lock:
+        duration = None
+        if _prepare_started_at is not None and _prepare_finished_at is not None:
+            duration = round((_prepare_finished_at - _prepare_started_at) * 1000.0, 1)
         return {
             "cache_clear_closed": bool(_cache_clear_closed),
             "clear_cache_phase_exited_at": _clear_cache_phase_exited_at,
@@ -128,4 +210,13 @@ def probe_snapshot() -> dict[str, Any]:
             "launch_scheduled_packages": sorted(_launch_scheduled_packages),
             "blocked_force_stop_count": int(_blocked_force_stop_count),
             "last_blocked_force_stop": _last_blocked_force_stop or None,
+            "prepare_started_at": _prepare_started_at,
+            "prepare_finished_at": _prepare_finished_at,
+            "prepare_duration_ms": duration,
+            "prepare_wait_reasons": list(_prepare_wait_reasons),
+            "prepare_blockers": list(_prepare_blockers),
+            "table_state_phase": _table_state_phase or None,
+            "table_state_source": _table_state_source or None,
+            "ui_phase_version": int(_ui_phase_version),
+            "stale_ui_write_ignored_count": int(_stale_ui_write_ignored_count),
         }

@@ -39,6 +39,8 @@ def test_render_oserror_does_not_abort_scheduler(monkeypatch):
         interval_seconds=30.0,
     )
     sched.mark_clear_cache_started(monotonic_now=clock.monotonic())
+    clock.advance(3.5)
+    sched.record_clear_cache_finished(finished_at=clock.monotonic(), reanchor_launches=True)
     launched: list[str] = []
 
     def launch_one(_index: int, package: str) -> str:
@@ -59,7 +61,7 @@ def test_render_oserror_does_not_abort_scheduler(monkeypatch):
 
     assert launched == ["p0", "p1"]
     snap = sched.probe_snapshot()
-    assert snap["first_launch_delay_from_clear_cache_start_ms"] == 5000.0
+    assert snap["first_launch_delay_from_clear_cache_finish_ms"] == 1000.0
     assert snap["launch_interval_observed_ms"] == [30000.0]
     assert snap["checking_system_started_at"] is not None
     assert record_err.called
@@ -75,6 +77,8 @@ def test_command_started_before_slow_username_lookup():
         interval_seconds=30.0,
     )
     sched.mark_clear_cache_started(monotonic_now=0.0)
+    clock.advance(3.5)
+    sched.record_clear_cache_finished(finished_at=clock.monotonic(), reanchor_launches=True)
     gate = threading.Event()
 
     def slow_username(_index: int, _package: str) -> str:
@@ -94,13 +98,13 @@ def test_command_started_before_slow_username_lookup():
         daemon=True,
     )
     worker.start()
-    clock.advance(5.0)
+    clock.advance(1.0)
     time.sleep(0.05)
     row0 = sched.probe_snapshot()["launch_calls"][0]
-    assert row0["command_started_at"] == 5.0
+    assert row0["command_started_at"] == 4.5
     gate.set()
     worker.join(timeout=3.0)
-    assert sched.probe_snapshot()["launch_calls"][1]["command_started_at"] == 35.0
+    assert sched.probe_snapshot()["launch_calls"][1]["command_started_at"] == 34.5
 
 
 def test_cache_clear_timeout_aborts_leftover_batch(monkeypatch):
@@ -155,6 +159,8 @@ def test_multi_package_thirty_second_cadence_all_dispatched():
         interval_seconds=30.0,
     )
     sched.mark_clear_cache_started(monotonic_now=0.0)
+    clock.advance(3.5)
+    sched.record_clear_cache_finished(finished_at=clock.monotonic(), reanchor_launches=True)
     fired: list[tuple[str, float]] = []
 
     def launch_one(_index: int, package: str) -> str:
@@ -167,7 +173,7 @@ def test_multi_package_thirty_second_cadence_all_dispatched():
         sleep_fn=clock.sleep,
     )
     assert [p for p, _ in fired] == packages
-    assert [t for _, t in fired] == [5.0, 35.0, 65.0, 95.0, 125.0]
+    assert [t for _, t in fired] == [4.5, 34.5, 64.5, 94.5, 124.5]
     snap = sched.probe_snapshot()
     assert snap["blocked_by_online_wait"] is False
     assert snap["checking_system_started_at"] is not None

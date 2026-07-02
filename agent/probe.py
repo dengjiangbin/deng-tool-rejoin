@@ -1388,6 +1388,17 @@ def collect_probe(
             "getting_ready_at": _fc.get("getting_ready_at"),
             "checking_system_started_at": _fc.get("checking_system_started_at"),
             "lifecycle_blocker": _fc.get("lifecycle_blocker"),
+            "checker_status": _fc.get("checker_status"),
+            "checker_idle_reason": _fc.get("checker_idle_reason"),
+            "prepare_started_at": _fc.get("prepare_started_at"),
+            "prepare_finished_at": _fc.get("prepare_finished_at"),
+            "prepare_duration_ms": _fc.get("prepare_duration_ms"),
+            "prepare_wait_reasons": _fc.get("prepare_wait_reasons"),
+            "prepare_blockers": _fc.get("prepare_blockers"),
+            "table_state_phase": _fc.get("table_state_phase"),
+            "table_state_source": _fc.get("table_state_source"),
+            "ui_phase_version": _fc.get("ui_phase_version"),
+            "stale_ui_write_ignored_count": _fc.get("stale_ui_write_ignored_count"),
         }
         try:
             from .launch_scheduler import probe_snapshot as _launch_schedule_probe

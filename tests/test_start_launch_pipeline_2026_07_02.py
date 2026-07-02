@@ -62,14 +62,16 @@ def test_start_cache_clear_exception_still_records(monkeypatch):
     assert "exploded" in str(out.get("cache_clear_error") or "")
 
 
-def test_first_launch_within_five_seconds_of_clear_cache_start():
+def test_first_launch_within_one_second_of_clear_cache_finish():
     clock = FakeClock(100.0)
     sched = LaunchScheduler(
         session_id="s-delay",
         packages=["p0"],
-        first_launch_delay_seconds=5.0,
+        first_launch_delay_seconds=1.0,
     )
     sched.mark_clear_cache_started(monotonic_now=clock.monotonic())
+    clock.advance(3.5)
+    sched.record_clear_cache_finished(finished_at=clock.monotonic(), reanchor_launches=True)
 
     def launch_one(_index: int, _package: str) -> str:
         return "success"
@@ -80,8 +82,8 @@ def test_first_launch_within_five_seconds_of_clear_cache_start():
         sleep_fn=clock.sleep,
     )
     snap = sched.probe_snapshot()
-    assert snap["first_launch_delay_from_clear_cache_start_ms"] == 5000.0
-    assert snap["first_launch_called_at"] == 105.0
+    assert snap["first_launch_delay_from_clear_cache_finish_ms"] == 1000.0
+    assert snap["first_launch_called_at"] == 104.5
 
 
 def test_multiple_packages_fire_every_thirty_seconds_without_waiting_for_online():
@@ -96,6 +98,8 @@ def test_multiple_packages_fire_every_thirty_seconds_without_waiting_for_online(
         interval_seconds=30.0,
     )
     sched.mark_clear_cache_started(monotonic_now=clock.monotonic())
+    clock.advance(3.5)
+    sched.record_clear_cache_finished(finished_at=clock.monotonic(), reanchor_launches=True)
     fired_at: list[float] = []
 
     def launch_one(index: int, package: str) -> str:
@@ -109,7 +113,7 @@ def test_multiple_packages_fire_every_thirty_seconds_without_waiting_for_online(
         monotonic_fn=clock.monotonic,
         sleep_fn=clock.sleep,
     )
-    assert fired_at == [5.0, 35.0, 65.0]
+    assert fired_at == [4.5, 34.5, 64.5]
     intervals = sched.probe_snapshot()["launch_interval_observed_ms"]
     assert intervals == [30000.0, 30000.0]
 
