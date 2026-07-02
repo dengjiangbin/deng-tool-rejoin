@@ -32,6 +32,19 @@ class FakeClock:
         self._t += float(seconds)
 
 
+def test_begin_prepare_immediately_stamps_start_and_prepare_together():
+    start_lifecycle.reset_for_start(["p0"])
+    stamp = start_lifecycle.begin_prepare_immediately()
+    snap = start_lifecycle.probe_snapshot()
+    assert snap["start_pressed_at"] is not None
+    assert snap["prepare_started_at"] is not None
+    assert snap["preparing_command_started_at"] is not None
+    assert abs(snap["prepare_started_at"] - snap["start_pressed_at"]) <= 0.001
+    assert abs(snap["prepare_started_at"] - stamp) <= 0.001
+    gap_ms = (snap["prepare_started_at"] - snap["start_pressed_at"]) * 1000.0
+    assert gap_ms <= 500.0
+
+
 def test_start_pressed_enters_preparing_not_getting_ready():
     ptr = CheckerPointerState()
     ptr.begin_preparing(["p0"])

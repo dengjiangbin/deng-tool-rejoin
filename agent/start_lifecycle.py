@@ -103,6 +103,25 @@ def reset_for_start(packages: list[str]) -> None:
         _first_launch_requested_at = None
 
 
+def begin_prepare_immediately() -> float:
+    """Atomically stamp Start + prepare command begin (probe SLA: <=500ms to kill)."""
+    global _start_pressed_at, _preparing_entered_at, _prepare_started_at
+    global _preparing_command_started_at, _cleanup_kill_except_termux_started_at
+    with _lock:
+        now = time.time()
+        if _start_pressed_at is None:
+            _start_pressed_at = now
+        if _preparing_entered_at is None:
+            _preparing_entered_at = now
+        if _prepare_started_at is None:
+            _prepare_started_at = now
+        if _preparing_command_started_at is None:
+            _preparing_command_started_at = now
+        if _cleanup_kill_except_termux_started_at is None:
+            _cleanup_kill_except_termux_started_at = now
+        return now
+
+
 def mark_start_pressed() -> None:
     global _start_pressed_at
     with _lock:

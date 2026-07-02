@@ -6153,71 +6153,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         _start_lock = None
 
     _start_session.mark("config_load_begin")
-    _clear_terminal(clear_scrollback=True)
     try:
         _transition_lifecycle("STARTING", "cmd_start")
         cfg = load_config()
         _start_session.mark("config_load_done")
-        cfg = _ensure_install_id_saved(cfg)
-        try:
-            from .build_info import collect_version_info
-            _version_info = collect_version_info()
-        except Exception:  # noqa: BLE001
-            _version_info = {}
-        _enforce_configured_screen_mode(cfg, phase="before_start")
         _start_screen_mode = str(cfg.get("screen_mode") or "auto")
         safe_io.set_crash_context(
             phase="starting",
             session_id=_start_session_id,
             screen_mode=_start_screen_mode,
-            package_count=len(enabled_package_entries(cfg)),
-            git_commit=_version_info.get("git_commit_short", ""),
-            artifact_sha=_version_info.get("artifact_sha256_short", ""),
-            build_probe_id=_version_info.get("probe_id", ""),
         )
-        _enforce_termux_left_layout(cfg)
-        if previous_crash_notice:
-            try:
-                from .logger import configure_logging, log_event
-                log_event(
-                    configure_logging(),
-                    "warning",
-                    "[DENG_REJOIN_PREVIOUS_START_CRASH]",
-                    message=previous_crash_notice,
-                )
-            except Exception:  # noqa: BLE001
-                pass
-
-        # ── License gate (re-validated on every Start, BEFORE any launch) ──────
-        # This runs before package detection, watchdog/supervisor, webhook
-        # reporter, private-server URL launch and any Android VIEW intent, so an
-        # expired / wrong-device / invalid key can never reach a package launch
-        # even if the menu was left open. Server time is authoritative (the
-        # remote check returns server_now/expires_at), so changing the device
-        # clock cannot bypass the 48-hour expiry.
-        if is_test_license_bypass_active():
-            _print_test_license_bypass_active(use_color)
-        elif not keystore.DEV_MODE:
-            license_cfg = cfg.get("license") or {}
-            if not license_cfg.get("disabled_by_user") and license_cfg.get("enabled", True):
-                if str(license_cfg.get("mode") or "remote").strip().lower() == "local":
-                    _key = (license_cfg.get("key") or "").strip() or (cfg.get("license_key") or "").strip()
-                    if _key:
-                        ok, msg = keystore.verify_key(_key)
-                        if not ok:
-                            _print_license_err(f"License key error: {msg}", use_color)
-                            print_beginner_license_gate_help()
-                            _start_session.finish("license_failed")
-                            return 1
-                    else:
-                        _print_license_err("No License Key Found", use_color)
-                        print_beginner_license_gate_help()
-                        _start_session.finish("license_missing")
-                        return 1
-                else:
-                    if not verify_remote_license_noninteractive(cfg, use_color=use_color):
-                        _start_session.finish("license_failed")
-                        return 1
 
         entries = enabled_package_entries(cfg)
         safe_io.set_crash_context(package_count=len(entries))
@@ -6238,23 +6183,68 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_session.finish("no_packages")
             return 2
 
-        def _screen_mode_before_start_bg() -> None:
+        import logging as _logging
+        _start_log = _logging.getLogger("deng.rejoin.start")
+        package_names_early = [e["package"] for e in entries]
+        from . import start_lifecycle as _start_lifecycle_prep
+
+        try:
+            from . import checker_pointer as _checker_pointer
+        except Exception:  # noqa: BLE001
+            _checker_pointer = None  # type: ignore[assignment]
+
+        # ── IMMEDIATE PREP (real command, not UI-only) ─────────────────────
+        _start_lifecycle_prep.reset_for_start(package_names_early)
+        _prep_stamp = _start_lifecycle_prep.begin_prepare_immediately()
+        if _checker_pointer is not None:
             try:
-                _enforce_configured_screen_mode(
-                    cfg, [entry["package"] for entry in entries], phase="before_start"
-                )
-            except Exception as _exc:  # noqa: BLE001
-                import logging as _logging_sm
+                from .launch_relaunch_trace import record_start_pressed as _record_start_pressed
 
-                _logging_sm.getLogger("deng.rejoin.start").debug(
-                    "start: before_start screen mode error (non-fatal): %s", _exc
+                _record_start_pressed()
+                _ptr_prep = _checker_pointer.get()
+                _ptr_prep.enable_persistence()
+                _ptr_prep.reset_for_new_start(
+                    session_id=_start_session_id,
+                    pid=os.getpid(),
+                    start_pressed_at=_prep_stamp,
                 )
+                _ptr_prep.begin_preparing(package_names_early)
+                _ptr_prep.heartbeat(reason="prepare_immediate_begin")
+                _ptr_prep.touch_persist()
+            except Exception:  # noqa: BLE001
+                pass
 
-        threading.Thread(
-            target=_screen_mode_before_start_bg,
-            name="start-screen-mode-before",
-            daemon=True,
-        ).start()
+        _prep_root = android.detect_root()
+
+        def _prep_commands_immediate() -> None:
+            android.cleanup_kill_except_termux(
+                extra_keep=package_names_early,
+                detection_hints=cfg.get("package_detection_hints"),
+            )
+            _fast_force_stop_selected_packages(
+                package_names_early, _prep_root, logger=_start_log
+            )
+
+        try:
+            _, _prep_timed_out = run_callable_with_deadline(_prep_commands_immediate, 3.0)
+            if _prep_timed_out:
+                _start_lifecycle_prep.note_prepare_blocker("prepare_command_timeout")
+                _start_log.warning(
+                    "[DENG_REJOIN_PREPARE_TIMEOUT] deadline_sec=3.0 continuing_to_clear_cache"
+                )
+        except Exception as _exc:  # noqa: BLE001
+            _start_lifecycle_prep.note_prepare_blocker(f"prepare_error:{str(_exc)[:80]}")
+            _start_log.debug("start: immediate prepare error (non-fatal): %s", _exc)
+
+        _start_lifecycle_prep.mark_cleanup_kill_except_termux_finished()
+        _start_lifecycle_prep.mark_preparing_command_finished()
+        if _checker_pointer is not None:
+            try:
+                _checker_pointer.get().heartbeat(reason="prepare_immediate_done")
+                _start_lifecycle_prep.flush_probe_checkpoint(_checker_pointer, None)
+            except Exception:  # noqa: BLE001
+                pass
+
         _start_session.mark("package_preparation_begin", package_count=len(entries))
 
         try:
@@ -6295,6 +6285,76 @@ def cmd_start(args: argparse.Namespace) -> int:
             print(f"Could not create Start lock: {exc}")
             _start_session.finish("lock_failed")
             return 1
+
+        cfg = _ensure_install_id_saved(cfg)
+        try:
+            from .build_info import collect_version_info
+            _version_info = collect_version_info()
+        except Exception:  # noqa: BLE001
+            _version_info = {}
+        safe_io.set_crash_context(
+            git_commit=_version_info.get("git_commit_short", ""),
+            artifact_sha=_version_info.get("artifact_sha256_short", ""),
+            build_probe_id=_version_info.get("probe_id", ""),
+        )
+
+        def _screen_mode_before_start_bg() -> None:
+            try:
+                _enforce_configured_screen_mode(
+                    cfg, package_names_early, phase="before_start"
+                )
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug(
+                    "start: before_start screen mode error (non-fatal): %s", _exc
+                )
+
+        threading.Thread(
+            target=_screen_mode_before_start_bg,
+            name="start-screen-mode-before",
+            daemon=True,
+        ).start()
+
+        try:
+            _enforce_termux_left_layout(cfg)
+        except Exception:  # noqa: BLE001
+            pass
+        if previous_crash_notice:
+            try:
+                log_event(
+                    configure_logging(),
+                    "warning",
+                    "[DENG_REJOIN_PREVIOUS_START_CRASH]",
+                    message=previous_crash_notice,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        # License gate before launch (after real prep — never blocks kill-all).
+        if is_test_license_bypass_active():
+            _print_test_license_bypass_active(use_color)
+        elif not keystore.DEV_MODE:
+            license_cfg = cfg.get("license") or {}
+            if not license_cfg.get("disabled_by_user") and license_cfg.get("enabled", True):
+                if str(license_cfg.get("mode") or "remote").strip().lower() == "local":
+                    _key = (license_cfg.get("key") or "").strip() or (cfg.get("license_key") or "").strip()
+                    if _key:
+                        ok, msg = keystore.verify_key(_key)
+                        if not ok:
+                            _print_license_err(f"License key error: {msg}", use_color)
+                            print_beginner_license_gate_help()
+                            _start_session.finish("license_failed")
+                            return 1
+                    else:
+                        _print_license_err("No License Key Found", use_color)
+                        print_beginner_license_gate_help()
+                        _start_session.finish("license_missing")
+                        return 1
+                else:
+                    if not verify_remote_license_noninteractive(cfg, use_color=use_color):
+                        _start_session.finish("license_failed")
+                        return 1
+
+        _clear_terminal(clear_scrollback=True)
 
         # Start launch selection is driven only by URL presence.
         # [DENG_REJOIN_PRIVATE_URL_LAUNCH] probe_id=p-ea167faf5f
@@ -6644,73 +6704,16 @@ def cmd_start(args: argparse.Namespace) -> int:
             )
         except ValueError:
             _FIRST_LAUNCH_LAUNCH_DEADLINE_S = 5.0
-        try:
-            from . import checker_pointer as _checker_pointer
-        except Exception:  # noqa: BLE001
-            _checker_pointer = None  # type: ignore[assignment]
-
-        # ── START lifecycle — Preparing FIRST (never Getting Ready here) ─────
-        from . import start_lifecycle as _start_lifecycle_prep
-
-        package_names_early = [e["package"] for e in entries]
-        _start_lifecycle_prep.reset_for_start(package_names_early)
-
-        if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
-            try:
-                from .launch_relaunch_trace import record_start_pressed as _record_start_pressed
-
-                _record_start_pressed()
-                _start_lifecycle_prep.mark_start_pressed()
-                _ptr_start = _checker_pointer.get()
-                _ptr_start.enable_persistence()
-                _ptr_start.reset_for_new_start(
-                    session_id=_start_session_id, pid=os.getpid()
-                )
-                _ptr_start.begin_preparing(package_names_early)
-                _start_lifecycle_prep.mark_header_phase("Preparing")
-                _render_phase()  # flush Preparing.. immediately
-            except Exception:  # noqa: BLE001
-                pass
-
-        # 1) Preparing — kill all apps except Termux/system (hard 3s deadline).
+        # Prep kill-all already ran immediately after Start press; UI follows now.
         _transition_lifecycle("PREPARING", "prepare_packages")
-        _start_lifecycle_prep.mark_preparing_entered()
-        _start_lifecycle_prep.mark_preparing_command_started()
-        _start_lifecycle_prep.mark_cleanup_kill_except_termux_started()
+        _start_lifecycle_prep.mark_header_phase("Preparing")
         _set_header_phase("Preparing", note="Stopping background apps...")
         packages_sl = package_names_early
-        _prep_root = android.detect_root()
-
-        _PREPARE_DEADLINE_S = 3.0
-
-        def _prep_commands() -> None:
-            android.cleanup_kill_except_termux(
-                extra_keep=packages_sl,
-                detection_hints=cfg.get("package_detection_hints"),
-            )
-            _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
-
-        try:
-            _prep_result, _prep_timed_out = run_callable_with_deadline(
-                _prep_commands, _PREPARE_DEADLINE_S
-            )
-            if _prep_timed_out:
-                _start_lifecycle_prep.note_prepare_blocker("prepare_command_timeout")
-                _start_log.warning(
-                    "[DENG_REJOIN_PREPARE_TIMEOUT] deadline_sec=%.1f continuing_to_clear_cache",
-                    _PREPARE_DEADLINE_S,
-                )
-        except Exception as _exc:  # noqa: BLE001
-            _start_lifecycle_prep.note_prepare_blocker(f"prepare_error:{str(_exc)[:80]}")
-            _start_log.debug("start: prepare command error (non-fatal): %s", _exc)
-
-        _start_lifecycle_prep.mark_cleanup_kill_except_termux_finished()
-        _start_lifecycle_prep.mark_preparing_command_finished()
-        if _checker_pointer is not None:
-            try:
-                _checker_pointer.get().heartbeat(reason="preparing_finished")
-            except Exception:  # noqa: BLE001
-                pass
+        threading.Thread(
+            target=_render_phase,
+            name="start-preparing-render",
+            daemon=True,
+        ).start()
 
         # Heavy cloud-phone memory sweep runs async — must not block Clear Cache.
         keep_alive = ["com.termux"] + packages_sl
