@@ -1385,6 +1385,12 @@ def collect_probe(
             "first_launch_next_package_at": _fc.get("first_launch_next_package_at"),
             "valid_state_writer": _fc.get("valid_state_writer"),
         }
+        try:
+            from .launch_scheduler import probe_snapshot as _launch_schedule_probe
+
+            out["launch_schedule"] = _launch_schedule_probe()
+        except Exception as _ls_exc:  # noqa: BLE001
+            out["launch_schedule"] = {"error": str(_ls_exc)[:120]}
         # Stamp the current session onto start_crash_state for cross-checking.
         if isinstance(out.get("start_crash_state"), dict):
             out["start_crash_state"]["current_start_session_id"] = _cur_session_id
@@ -1708,7 +1714,7 @@ _PROBE_PINNED_FIELDS = frozenset({
     "last_start_diagnostics", "start_crash_state", "last_failing_command", "webhook_debug",
     "rjn_detection_only", "online_detection", "decision", "state_machine",
     "dead_detection", "launch_relaunch", "relaunch", "account_dead_webhook",
-    "resize_debug", "focused_checker", "launch_scheduler", "force_close_race",
+    "resize_debug", "focused_checker", "launch_scheduler", "launch_schedule", "force_close_race",
 })
 
 

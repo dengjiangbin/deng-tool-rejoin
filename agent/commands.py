@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from datetime import datetime, timezone
@@ -6590,90 +6591,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("start: background roblox stop error: %s", _exc)
 
-        # 2) Clear Cache — visible phase BEFORE root cache shells (segfault-safe).
-        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
-        prep_gfx: dict[str, str] = {}
-        prep_cache: dict[str, str] = {}
-        package_names = [entry["package"] for entry in entries]
-        _set_all_phase("Clear Cache")
-        _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
-        safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
-        try:
-            prep_cache = _run_start_batch_cache_clear(
-                package_names,
-                root_info=_prep_root,
-            )
-        except Exception as _exc:  # noqa: BLE001
-            _start_log.debug("start: batch cache clear error: %s", _exc)
-            prep_cache = {pkg: "Failed" for pkg in package_names}
-        _start_session.mark("batch_clear_cache_done", package_count=len(entries))
-        _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
-        try:
-            if _prep_root.available:
-                _trim_ok = android.trim_page_cache_after_mass_clear(root_info=_prep_root)
-                _start_log.info(
-                    "[DENG_REJOIN_PREP_TRIM_PAGE_CACHE] ok=%s",
-                    str(_trim_ok).lower(),
-                )
-        except Exception as _exc:  # noqa: BLE001
-            _start_log.debug("start: page cache trim error: %s", _exc)
-        _start_session.mark("batch_low_graphics_begin", package_count=len(entries))
-        for entry in entries:
-            package = entry["package"]
-            low = bool(opt.get("low_graphics_enabled", True)) and bool(
-                entry.get("low_graphics_enabled", True)
-            )
-            try:
-                prep_gfx[package] = android.apply_low_graphics_optimization(
-                    package, enabled=low
-                )
-            except Exception:  # noqa: BLE001
-                prep_gfx[package] = "error"
-        _start_session.mark("package_preparation_done", package_count=len(entries))
-
-        # 3) Silent post-cache setup (layout / Termux dock — no Preparing flash).
-        try:
-            _start_session.mark("layout_begin")
-            cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
-            _start_session.mark("layout_done", note=_layout_note)
-            _start_log.debug("start: layout note=%s", _layout_note)
-        except Exception as _exc:  # noqa: BLE001
-            _start_log.debug("start: layout error (non-fatal): %s", _exc)
-            _start_session.mark("layout_done", error=str(_exc)[:160])
-
-        # 4) Dock Termux silently (no public phase change).
-        _termux_minimize_result: dict[str, Any] = {}
-        try:
-            _dock_enabled = bool(cfg.get("termux_dock_enabled", False))
-            if _dock_enabled:
-                _termux_minimize_result = _enforce_termux_left_layout(cfg)
-                _start_log.debug("termux_minimize: %s", _termux_minimize_result)
-            else:
-                _termux_minimize_result = {"ok": False, "skipped": True,
-                                           "reason": "disabled by config"}
-        except Exception as _exc:  # noqa: BLE001
-            _start_log.debug("termux_minimize error (non-fatal): %s", _exc)
-            _termux_minimize_result = {"ok": False, "skipped": True,
-                                       "reason": f"exception: {_exc}"}
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
-        for entry in entries:
-            start_times[entry["package"]] = now_iso
-        cfg["package_start_times"] = start_times
-        cfg["monitor_started_at"] = time.time()
-
-        # ── Launch URL confirmation (safe — never expose the raw URL) ────────
-        _any_url = any(
-            str(effective_private_server_url(entry, runtime_cfg) or "").strip()
-            for entry in runtime_entries
-        )
-        if _any_url:
-            _start_log.info("start: Launch URL configured — sending private server deep link to each clone")
-        else:
-            _start_log.info("start: No launch URL configured — clones will open Roblox home")
-
-        # ── Bootstrap watchdog daemon BEFORE staggered launch ─────────────────
+        # 2) Clear Cache — anchor monotonic schedule NOW; cache clear must never
+        # block launch due times (probe p-bf0b2feb55).
         from .supervisor import (
             STATUS_FAILED as _STATUS_FAILED,
             STATUS_LAUNCHING as _STATUS_LAUNCHING,
@@ -6682,6 +6601,192 @@ def cmd_start(args: argparse.Namespace) -> int:
             STATUS_READY as _STATUS_READY,
             STATUS_WAITING as _STATUS_WAITING,
         )
+        from .launch_scheduler import LaunchScheduler, set_active as _set_launch_scheduler
+
+        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
+        prep_gfx: dict[str, str] = {}
+        prep_cache: dict[str, str] = {}
+        package_names = [entry["package"] for entry in entries]
+        _set_all_phase("Clear Cache")
+        _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
+        safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
+
+        try:
+            _FIRST_LAUNCH_DELAY_S = max(
+                0.0,
+                float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "5") or "5"),
+            )
+        except ValueError:
+            _FIRST_LAUNCH_DELAY_S = 5.0
+
+        _launch_sched = LaunchScheduler(
+            session_id=_start_session_id,
+            packages=package_names,
+            first_launch_delay_seconds=_FIRST_LAUNCH_DELAY_S,
+            interval_seconds=_FIRST_LAUNCH_INTERVAL_S,
+            command_timeout_seconds=_FIRST_LAUNCH_LAUNCH_DEADLINE_S,
+        )
+        _launch_sched.enable_persistence()
+        _set_launch_scheduler(_launch_sched)
+        _launch_sched.mark_clear_cache_started()
+        _start_log.info(
+            "[DENG_REJOIN_LAUNCH_SCHEDULE_ANCHOR] clear_cache_started_at=%.3f"
+            " first_due_at=%.3f interval_sec=%.0f first_delay_sec=%.0f",
+            _launch_sched.clear_cache_started_at or 0.0,
+            _launch_sched.first_launch_due_at or 0.0,
+            _FIRST_LAUNCH_INTERVAL_S,
+            _FIRST_LAUNCH_DELAY_S,
+        )
+
+        # Cache clear runs independently — never blocks the launch schedule.
+        def _cache_clear_bg() -> None:
+            try:
+                prep_cache.update(
+                    _run_start_batch_cache_clear(
+                        package_names,
+                        root_info=_prep_root,
+                    )
+                )
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: batch cache clear error: %s", _exc)
+                prep_cache.update({pkg: "Failed" for pkg in package_names})
+            finally:
+                _start_session.mark("batch_clear_cache_done", package_count=len(entries))
+
+        threading.Thread(
+            target=_cache_clear_bg, name="start-cache-clear", daemon=True
+        ).start()
+
+        _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
+
+        launch_ok: dict[str, bool] = {}
+        launch_err: dict[str, str] = {}
+        launch_attempted: dict[str, bool] = {}
+        _transition_lifecycle("LAUNCHING", "launch_packages")
+        _start_session.mark("package_launch_begin", package_count=len(entries))
+
+        def _on_stagger_launch_sent(launched_pkg: str) -> None:
+            sup = _supervisor_ref
+            if sup is None:
+                return
+            if launched_pkg not in sup._package_opened:
+                sup.mark_package_launched(launched_pkg)
+
+        def _sched_launch_one(index: int, package: str) -> str:
+            runtime_entry = runtime_entry_by_pkg.get(package, entries[index])
+            package_cfg = dict(runtime_cfg)
+            package_cfg["roblox_package"] = package
+            package_cfg["__on_launch_sent"] = _on_stagger_launch_sent
+            try:
+                result, timed_out = run_callable_with_deadline(
+                    lambda: perform_rejoin(
+                        package_cfg, reason="start", package_entry=runtime_entry
+                    ),
+                    _FIRST_LAUNCH_LAUNCH_DEADLINE_S,
+                )
+            except Exception as _exc:  # noqa: BLE001
+                launch_ok[package] = False
+                launch_err[package] = str(_exc)[:200]
+                return f"error:{launch_err[package]}"
+            if timed_out or result is None:
+                launch_ok[package] = True
+                launch_err[package] = ""
+                return "timeout_dispatched"
+            launch_ok[package] = bool(result.success)
+            launch_err[package] = result.error or ""
+            if result.success:
+                return "success"
+            return f"failed:{launch_err[package] or 'unknown'}"
+
+        def _sched_before_launch(index: int, package: str) -> None:
+            launch_attempted[package] = True
+            sup = _supervisor_ref
+            if sup is not None:
+                for later in entries[index + 1 :]:
+                    phase[later["package"]] = "Ready"
+                    sup._set_status(later["package"], _STATUS_READY)
+            if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
+                try:
+                    import time as _t_open
+
+                    _next_due = _launch_sched.due_at_for_index(index + 1)
+                    _checker_pointer.get().begin_opening(
+                        package,
+                        next_package_at=_next_due or (
+                            _t_open.monotonic() + _FIRST_LAUNCH_INTERVAL_S
+                        ),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            phase[package] = "Launching"
+            nonlocal _stagger_render_last
+            _stagger_render_last = 0.0
+            _render_phase_throttled()
+
+        def _sched_after_launch(index: int, package: str, result: str) -> None:
+            sup = _supervisor_ref
+            if result.startswith("failed") or result.startswith("error"):
+                phase[package] = "Failed"
+                if sup is not None:
+                    sup._set_status(package, _STATUS_FAILED)
+                _render_phase()
+                return
+            if sup is not None:
+                if package not in sup._package_opened:
+                    sup.mark_package_launched(package)
+                sup._set_status(package, _STATUS_WAITING)
+            phase[package] = _STATUS_WAITING
+            launch_ok[package] = True
+            launch_err[package] = ""
+            if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
+                try:
+                    _checker_pointer.get().mark_supposedly_launched(package)
+                    _checker_pointer.get().note_launch_interval(_FIRST_LAUNCH_INTERVAL_S)
+                except Exception:  # noqa: BLE001
+                    pass
+            _render_phase("Launching...")
+            _start_log.info(
+                "[DENG_REJOIN_SCHEDULED_LAUNCH] package=%s index=%d/%d result=%s"
+                " anchor=%.3f fired_skew_ms=%s",
+                package,
+                index + 1,
+                len(entries),
+                result,
+                _launch_sched.clear_cache_started_at or 0.0,
+                str(
+                    (_launch_sched.probe_snapshot().get("launch_attempts") or [{}])[index].get(
+                        "skew_ms"
+                    )
+                ),
+            )
+
+        _sched_thread: threading.Thread | None = None
+        if _FIRST_LAUNCH_MODE == "interval":
+            _sched_thread = _launch_sched.start_background(
+                _sched_launch_one,
+                on_before_launch=_sched_before_launch,
+                on_after_launch=_sched_after_launch,
+                stop_event=None,
+            )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
+        for entry in entries:
+            start_times[entry["package"]] = now_iso
+        cfg["package_start_times"] = start_times
+        cfg["monitor_started_at"] = time.time()
+
+        # ── Bootstrap watchdog ASAP (before first launch due at T+5) ─────────
+        _any_url = any(
+            str(effective_private_server_url(entry, runtime_cfg) or "").strip()
+            for entry in runtime_entries
+        )
+        if _any_url:
+            _start_log.info(
+                "start: Launch URL configured — sending private server deep link to each clone"
+            )
+        else:
+            _start_log.info("start: No launch URL configured — clones will open Roblox home")
 
         _live_cfg_boot = dict(runtime_cfg)
         _live_cfg_boot["package_start_times"] = dict(start_times)
@@ -6700,6 +6805,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _supervisor_ref = _supervisor
         try:
             from . import monitor_autostart as _mon_auto_boot
+
             _mon_auto_boot.set_active_supervisor(_supervisor)
             _try_autostart_monitor_bridge(cfg)
         except Exception:  # noqa: BLE001
@@ -6730,175 +6836,67 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 pass
 
-        # ── PHASE 2: sequential stagger launch (Ready queue → Launching) ───
-        launch_ok: dict[str, bool] = {}
-        launch_err: dict[str, str] = {}
-        launch_attempted: dict[str, bool] = {}
-        _transition_lifecycle("LAUNCHING", "launch_packages")
-        _start_session.mark("package_launch_begin", package_count=len(entries))
-        _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
-
-        def _on_stagger_launch_sent(launched_pkg: str) -> None:
-            # Mark opened only — never run detection here; perform_rejoin calls
-            # this synchronously right after am start and must return immediately
-            # so clones 2–6 are not blocked behind slow scrape/lock contention.
-            if launched_pkg not in _supervisor._package_opened:
-                _supervisor.mark_package_launched(launched_pkg)
-
-        # Online-gated stagger: wait for each package to confirm Online before
-        # launching the next one.  Prevents all clones from fighting for RAM/CPU
-        # while loading simultaneously (probe p-1a7fcce102 problem #1 — 3-4 min
-        # gaps caused by resource contention, not deliberate timer).
-        # Timeout: 15 s per package (same as old fixed LAUNCH_STAGGER_SECONDS=15).
-        # If Online is detected fast (<15s), gate opens immediately for <2s next-launch.
-        # If Roblox hasn't joined by 15s, we proceed anyway (like the old fixed stagger).
-        # 120s was causing 5-minute stalls when the gate failed to detect Online.
-        _ONLINE_GATE_TIMEOUT_S = 15.0
-        _ONLINE_GATE_WARN_INTERVAL_S = 30.0  # print blocked_reason every 30s
-
-        # (First-launch config + Getting Ready render moved earlier so the
-        # "Getting Ready.." pointer shows before Preparing/Clear Cache.)
-
-        def _first_launch_interval_wait(pkg: str, idx: int, total: int) -> None:
-            """Wait a fixed interval before launching the next package.
-
-            Never inspects Online status — a crashed/slow package can never
-            block the scheduled launch order.
-            """
-            import time as _t
-
-            deadline = _t.monotonic() + _FIRST_LAUNCH_INTERVAL_S
-            _start_log.info(
-                "[DENG_REJOIN_FIRST_LAUNCH_INTERVAL] package=%s index=%d/%d"
-                " interval_sec=%.0f (no Online gate)",
-                pkg, idx, total, _FIRST_LAUNCH_INTERVAL_S,
-            )
-            if _checker_pointer is not None:
+        # Slow prep (graphics/layout/dock) — background only; must not block schedule.
+        def _slow_prep_bg() -> None:
+            try:
+                if _prep_root.available:
+                    _trim_ok = android.trim_page_cache_after_mass_clear(root_info=_prep_root)
+                    _start_log.info(
+                        "[DENG_REJOIN_PREP_TRIM_PAGE_CACHE] ok=%s",
+                        str(_trim_ok).lower(),
+                    )
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: page cache trim error: %s", _exc)
+            _start_session.mark("batch_low_graphics_begin", package_count=len(entries))
+            for _entry in entries:
+                _pkg = _entry["package"]
+                _low = bool(opt.get("low_graphics_enabled", True)) and bool(
+                    _entry.get("low_graphics_enabled", True)
+                )
                 try:
-                    _checker_pointer.get().note_launch_interval(_FIRST_LAUNCH_INTERVAL_S)
+                    prep_gfx[_pkg] = android.apply_low_graphics_optimization(
+                        _pkg, enabled=_low
+                    )
                 except Exception:  # noqa: BLE001
-                    pass
-            _last_touch = 0.0
-            while _t.monotonic() < deadline:
-                if getattr(_supervisor, "stop_event", None) is not None and _supervisor.stop_event.is_set():
-                    return
-                # Keep the persisted state file fresh during the 30s gap so the
-                # separate probe process never sees a stale (idle) checker.
-                if _checker_pointer is not None and (_t.monotonic() - _last_touch) >= 3.0:
-                    _last_touch = _t.monotonic()
-                    try:
-                        _checker_pointer.get().touch_persist()
-                    except Exception:  # noqa: BLE001
-                        pass
-                _render_phase_throttled()
-                _t.sleep(0.5)
+                    prep_gfx[_pkg] = "error"
+            _start_session.mark("package_preparation_done", package_count=len(entries))
+            try:
+                _start_session.mark("layout_begin")
+                nonlocal cfg
+                cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
+                _start_session.mark("layout_done", note=_layout_note)
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: layout error (non-fatal): %s", _exc)
+                _start_session.mark("layout_done", error=str(_exc)[:160])
+            try:
+                if bool(cfg.get("termux_dock_enabled", False)):
+                    _enforce_termux_left_layout(cfg)
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("termux_minimize error (non-fatal): %s", _exc)
+
+        _termux_minimize_result: dict[str, Any] = {"ok": False, "skipped": True, "reason": "background"}
+        threading.Thread(target=_slow_prep_bg, name="start-slow-prep", daemon=True).start()
+
+        _ONLINE_GATE_TIMEOUT_S = 15.0
 
         def _wait_for_package_online(pkg: str, idx: int, total: int) -> None:
-            """Block until pkg has current-generation Online proof or timeout.
-
-            Polls every 0.25s for sub-second responsiveness.  Prints a visible
-            ``blocked_reason`` line every 30s so the operator can see why the
-            stagger is waiting instead of silently hanging.
-            """
+            """Legacy online_gate stagger only — interval mode never calls this."""
             import time as _t
-            # Read the generation counter immediately after launch.  The stagger
-            # must only unblock on Online that was confirmed for THIS launch
-            # generation — not a stale Online from a previous session that somehow
-            # persisted in status_map.
+
             _rjn = getattr(_supervisor, "_rjn_monitor", None)
             expected_gen = _rjn.get_launch_generation(pkg) if _rjn else 0
             start_mono = _t.monotonic()
             deadline = start_mono + _ONLINE_GATE_TIMEOUT_S
-            _last_warn = start_mono
-            _start_log.info(
-                "[DENG_REJOIN_STAGGER_ONLINE_GATE] package=%s index=%d/%d"
-                " waiting_for=Online generation=%d timeout_sec=%.0f",
-                pkg, idx, total, expected_gen, _ONLINE_GATE_TIMEOUT_S,
-            )
             while _t.monotonic() < deadline:
                 current_st = _supervisor.status_map.get(pkg, "")
-                # FAST PATH: check rjn_monitor state directly for sub-100ms unblocking.
-                # sync_stagger_display_status propagates STATE_ONLINE_CONFIRMED → status_map,
-                # but reading the monitor directly avoids the 0.25s render cycle delay.
-                if _rjn is not None and current_st != _STATUS_ONLINE:
-                    try:
-                        from .rjn_lifecycle_monitor import STATE_ONLINE_CONFIRMED as _SOC
-                        _row = _rjn._states.get(pkg)
-                        if (
-                            _row is not None
-                            and _row.internal_state == _SOC
-                            and _row.online_confirmed_generation >= expected_gen
-                        ):
-                            # Promote status_map immediately so stagger proceeds
-                            _supervisor._set_status(pkg, _STATUS_ONLINE)
-                            current_st = _STATUS_ONLINE
-                    except Exception:  # noqa: BLE001
-                        pass
-                # For current-generation proof: check Online confirmed in the same
-                # generation as this launch.  If no lifecycle monitor is available
-                # fall back to status_map alone (same as before).
                 if current_st == _STATUS_ONLINE:
-                    if _rjn is None:
-                        _start_log.info(
-                            "[DENG_REJOIN_STAGGER_ONLINE_GATE_DONE] package=%s"
-                            " index=%d/%d state=Online (no gen check) waited=%.1fs",
-                            pkg, idx, total, _t.monotonic() - start_mono,
-                        )
+                    if _rjn is None or _rjn.get_online_generation(pkg) >= expected_gen:
                         return
-                    online_gen = _rjn.get_online_generation(pkg)
-                    if online_gen >= expected_gen:
-                        elapsed = _t.monotonic() - start_mono
-                        _start_log.info(
-                            "[DENG_REJOIN_STAGGER_ONLINE_GATE_DONE] package=%s"
-                            " index=%d/%d state=Online generation=%d waited=%.1fs",
-                            pkg, idx, total, online_gen, elapsed,
-                        )
-                        return
-                # Print visible blocked_reason every 30s so operator can diagnose.
-                now_mono = _t.monotonic()
-                if now_mono - _last_warn >= _ONLINE_GATE_WARN_INTERVAL_S:
-                    _last_warn = now_mono
-                    waited = now_mono - start_mono
-                    cur_detail: dict = {}
-                    if _rjn is not None:
-                        try:
-                            from .rjn_lifecycle_monitor import RjnLifecycleMonitor as _RLM
-                            ev = _rjn.evaluate_package(pkg, hot_lane_only=False)
-                            cur_detail = ev.detail if ev else {}
-                        except Exception:  # noqa: BLE001
-                            pass
-                    blocked_reason = (
-                        cur_detail.get("last_state_change_reason")
-                        or cur_detail.get("last_rejected_signal_reason")
-                        or cur_detail.get("reason")
-                        or current_st
-                        or "unknown"
-                    )
-                    cur_online_gen = _rjn.get_online_generation(pkg) if _rjn else -1
-                    _start_log.warning(
-                        "[DENG_REJOIN_STAGGER_ONLINE_GATE_WAITING] package=%s"
-                        " index=%d/%d waited=%.0fs state=%s gen=%d/%d"
-                        " blocked_reason=%s",
-                        pkg, idx, total, waited, current_st,
-                        cur_online_gen, expected_gen, blocked_reason,
-                    )
                 _render_phase_throttled()
-                _t.sleep(0.25)  # 0.25s poll for sub-second Online → next-launch response
-            _elapsed = _t.monotonic() - start_mono
-            _final_st = _supervisor.status_map.get(pkg, "unknown")
-            _online_gen = _rjn.get_online_generation(pkg) if _rjn else -1
-            _start_log.warning(
-                "[DENG_REJOIN_STAGGER_ONLINE_GATE_TIMEOUT] package=%s index=%d/%d"
-                " timeout_sec=%.0f elapsed=%.1fs last_state=%s"
-                " expected_gen=%d online_gen=%d blocked_reason=timeout",
-                pkg, idx, total, _ONLINE_GATE_TIMEOUT_S, _elapsed,
-                _final_st, expected_gen, _online_gen,
-            )
+                _t.sleep(0.25)
 
-        # Getting Ready.. was already rendered at the top of Start. Here we just
-        # bring the detection session (logcat + force-close race detector) up so
-        # force_close_race.enabled is true for the whole session — the pointer
-        # stays "Getting Ready.." until the first package flips to "Opening..".
+        _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
+
         if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
             try:
                 _rjn_early = getattr(_supervisor, "_rjn_monitor", None)
@@ -6907,34 +6905,11 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 pass
 
-        def _bounded_first_launch(pkg_cfg, runtime_entry, deadline_s):
-            """Run perform_rejoin under a hard deadline.
-
-            The launch command (am start / force-stop) is dispatched inside a
-            worker; if it does not return within ``deadline_s`` the sequence
-            treats the launch as dispatched (returns ``None``) and advances to
-            the next package so launching starts right after the first cache
-            clear and never hangs (probe p-5dacb6657a).
-            """
-            try:
-                result, timed_out = run_callable_with_deadline(
-                    lambda: perform_rejoin(
-                        pkg_cfg, reason="start", package_entry=runtime_entry
-                    ),
-                    deadline_s,
-                )
-            except Exception as _exc:  # noqa: BLE001
-                return RejoinResult(False, root_used=False, error=str(_exc)[:200])
-            if timed_out:
-                _start_log.warning(
-                    "[DENG_REJOIN_FIRST_LAUNCH_DEADLINE] package=%s deadline_sec=%.1f"
-                    " action=advance_launch_dispatched",
-                    str(pkg_cfg.get("roblox_package")), float(deadline_s),
-                )
-                return None
-            return result
-
-        try:
+        if _FIRST_LAUNCH_MODE == "interval":
+            if _sched_thread is not None:
+                _sched_thread.join()
+        else:
+            # Legacy online_gate: sequential loop (unchanged fallback).
             for index, entry in enumerate(entries, start=1):
                 package = entry["package"]
                 runtime_entry = runtime_entry_by_pkg.get(package, entry)
@@ -6942,81 +6917,30 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for later in entries[index:]:
                     phase[later["package"]] = "Ready"
                     _supervisor._set_status(later["package"], _STATUS_READY)
-                if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
-                    try:
-                        import time as _t_open
-
-                        _checker_pointer.get().begin_opening(
-                            package,
-                            next_package_at=_t_open.monotonic() + _FIRST_LAUNCH_INTERVAL_S,
-                        )
-                    except Exception:  # noqa: BLE001
-                        pass
                 phase[package] = "Launching"
-                _stagger_render_last = 0.0
                 _render_phase_throttled()
                 package_cfg = dict(runtime_cfg)
                 package_cfg["roblox_package"] = package
                 package_cfg["__on_launch_sent"] = _on_stagger_launch_sent
-                from .config import private_url_launch_context as _purl_ctx
-                _url_context = _purl_ctx(runtime_entry, runtime_cfg)
-                _has_url = _url_context.get("url_mode") == "private_url"
-                if _FIRST_LAUNCH_MODE == "interval":
-                    result = _bounded_first_launch(
-                        package_cfg, runtime_entry, _FIRST_LAUNCH_LAUNCH_DEADLINE_S
-                    )
-                else:
-                    result = perform_rejoin(
-                        package_cfg, reason="start", package_entry=runtime_entry
-                    )
-                # ``None`` == launch dispatched but still running past the hard
-                # deadline: advance as if launched so the interval scheduler
-                # keeps going (never stuck at Opening..).
-                if result is None:
-                    launch_ok[package] = True
-                    launch_err[package] = ""
-                else:
-                    launch_ok[package] = result.success
-                    launch_err[package] = result.error or ""
-                    if not result.success:
-                        phase[package] = "Failed"
-                        _supervisor._set_status(package, _STATUS_FAILED)
-                        _render_phase()
-                        continue
-
+                result = perform_rejoin(
+                    package_cfg, reason="start", package_entry=runtime_entry
+                )
+                launch_ok[package] = result.success
+                launch_err[package] = result.error or ""
+                if not result.success:
+                    phase[package] = "Failed"
+                    _supervisor._set_status(package, _STATUS_FAILED)
+                    _render_phase()
+                    continue
                 if package not in _supervisor._package_opened:
                     _supervisor.mark_package_launched(package)
                 _supervisor._set_status(package, _STATUS_WAITING)
                 phase[package] = _STATUS_WAITING
-                launch_ok[package] = True
-                launch_err[package] = ""
-                if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
-                    try:
-                        _checker_pointer.get().mark_supposedly_launched(package)
-                    except Exception:  # noqa: BLE001
-                        pass
-                _render_phase("Launching...")
-                _start_log.info(
-                    "[DENG_REJOIN_STAGGERED_LAUNCH] package=%s index=%d/%d"
-                    " launcher=%s phase=launching success=true watchdog_daemon=%s",
-                    package,
-                    index,
-                    len(entries),
-                    "private_url" if _has_url else "app_only",
-                    str(_supervisor.watchdog_thread_alive()).lower(),
-                )
-
-                # First-launch pacing: fixed interval (default) never waits for
-                # Online; online_gate mode restores the legacy behaviour.  Skip
-                # the wait for the last package (nothing left to pace).
                 if index < len(entries):
-                    if _FIRST_LAUNCH_MODE == "online_gate":
-                        _wait_for_package_online(package, index, len(entries))
-                    else:
-                        _first_launch_interval_wait(package, index, len(entries))
-        finally:
-            if not getattr(_supervisor, "_all_launches_completed", False):
-                _supervisor.mark_all_launches_completed()
+                    _wait_for_package_online(package, index, len(entries))
+
+        if not getattr(_supervisor, "_all_launches_completed", False):
+            _supervisor.mark_all_launches_completed()
 
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
         _start_session.mark("all_launches_completed", package_count=len(entries))
