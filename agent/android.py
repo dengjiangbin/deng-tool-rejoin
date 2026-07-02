@@ -1204,6 +1204,20 @@ def force_stop_package(package: str, root_info: RootInfo | None = None) -> Comma
             "",
             f"protected package: {package}",
         )
+    try:
+        from . import start_lifecycle as _start_lifecycle
+
+        if _start_lifecycle.should_block_force_stop(
+            package, source="force_stop_package"
+        ):
+            return CommandResult(
+                ("am", "force-stop", package),
+                127,
+                "",
+                f"blocked after launch schedule: {package}",
+            )
+    except Exception:  # noqa: BLE001
+        pass
     info = root_info or detect_root()
     if not info.available:
         return CommandResult(("am", "force-stop", package), 126, "", "root unavailable")
@@ -2534,6 +2548,14 @@ def clear_packages_cache_mass_batch(
     root_tool = str(info.tool)
     pkg_timeout = max(2, int(per_package_timeout_s))
     for pkg in package_list:
+        try:
+            from . import start_lifecycle as _start_lifecycle
+
+            if _start_lifecycle.start_cache_clear_abort_requested():
+                results.setdefault(pkg, "Aborted")
+                continue
+        except Exception:  # noqa: BLE001
+            pass
         try:
             results[pkg] = clear_package_cache_for_start(
                 pkg, root_tool=root_tool, timeout_s=pkg_timeout

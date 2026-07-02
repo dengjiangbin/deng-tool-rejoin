@@ -99,6 +99,9 @@ class LaunchScheduler:
     scheduler_alive: bool = False
     blocked_by_clear_cache: bool = False
     blocked_by_online_wait: bool = False
+    launch_scheduler_aborted_reason: str | None = None
+    scheduler_survived_ui_failure: bool = False
+    all_packages_dispatched_at: float | None = None
 
     _attempts: list[LaunchAttemptRecord] = field(default_factory=list)
     _launch_interval_observed_ms: list[float] = field(default_factory=list)
@@ -343,17 +346,20 @@ class LaunchScheduler:
                     break
                 fired_at = monotonic_fn()
                 self.record_fired(row.index, fired_at=fired_at)
+                self.record_command_started(row.index, started_at=fired_at, username="")
                 username = ""
                 if username_for_index is not None:
                     try:
-                        username = str(username_for_index(row.index, row.package) or "")
+                        username = str(
+                            username_for_index(row.index, row.package) or ""
+                        )
                     except Exception:  # noqa: BLE001
                         username = ""
-                self.record_command_started(
-                    row.index,
-                    started_at=fired_at,
-                    username=username,
-                )
+                    if username:
+                        with self._lock:
+                            if 0 <= row.index < len(self._attempts):
+                                self._attempts[row.index].username = username
+                                self._persist(force=True)
                 self._run_before_launch_bounded(
                     on_before_launch,
                     row.index,
@@ -407,6 +413,15 @@ class LaunchScheduler:
                 )
                 thread.start()
                 workers.append(thread)
+            with self._lock:
+                self.all_packages_dispatched_at = monotonic_fn()
+                self.mark_checking_system_started(monotonic_now=monotonic_fn())
+                self._persist(force=True)
+        except BaseException as exc:  # noqa: BLE001
+            with self._lock:
+                self.launch_scheduler_aborted_reason = str(exc)[:200]
+                self._persist(force=True)
+            raise
         finally:
             for thread in workers:
                 thread.join()
@@ -461,7 +476,7 @@ class LaunchScheduler:
     def probe_snapshot(self) -> dict[str, Any]:
         with self._lock:
             anchor = self.clear_cache_started_at
-            return {
+            snap = {
                 "session_id": self.session_id or None,
                 "clear_cache_started_at": anchor,
                 "clear_cache_finished_at": self.clear_cache_finished_at,
@@ -478,14 +493,25 @@ class LaunchScheduler:
                 "interval_seconds": self.interval_seconds,
                 "first_launch_delay_seconds": self.first_launch_delay_seconds,
                 "scheduler_alive": self.scheduler_alive,
+                "launch_scheduler_alive": self.scheduler_alive,
                 "blocked_by_clear_cache": self.blocked_by_clear_cache,
                 "blocked_by_online_wait": self.blocked_by_online_wait,
+                "launch_scheduler_aborted_reason": self.launch_scheduler_aborted_reason,
+                "scheduler_survived_ui_failure": self.scheduler_survived_ui_failure,
+                "all_packages_dispatched_at": self.all_packages_dispatched_at,
                 "launch_interval_observed_ms": list(self._launch_interval_observed_ms),
                 "launch_calls": self.launch_calls_probe(),
                 "launch_attempts": [
                     row.to_probe_dict(anchor=anchor) for row in self._attempts
                 ],
             }
+        try:
+            from . import start_lifecycle as _start_lifecycle
+
+            snap.update(_start_lifecycle.probe_snapshot())
+        except Exception:  # noqa: BLE001
+            pass
+        return snap
 
     def _persist(self, *, force: bool = False) -> None:
         if not self._persist_enabled:
@@ -593,6 +619,9 @@ def probe_snapshot() -> dict[str, Any]:
         "scheduler_alive": False,
         "blocked_by_clear_cache": False,
         "blocked_by_online_wait": False,
+        "launch_scheduler_aborted_reason": None,
+        "scheduler_survived_ui_failure": False,
+        "all_packages_dispatched_at": None,
         "launch_interval_observed_ms": [],
         "launch_calls": [],
         "launch_attempts": [],

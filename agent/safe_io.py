@@ -73,6 +73,18 @@ def terminal_columns(*, fallback: int = 80) -> int:
         return max(40, fallback)
 
 
+_UI_IO_ERRORS = (OSError, BrokenPipeError, EOFError)
+
+
+def _record_ui_io_error(exc: BaseException) -> None:
+    try:
+        from . import start_lifecycle as _start_lifecycle
+
+        _start_lifecycle.record_ui_render_error(exc)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def write_stdout(text: str = "", *, end: str = "\n", flush: bool = True) -> None:
     """Write one frame to STDOUT without blocking locks (Termux-safe)."""
     payload = text if end == "" else f"{text}{end}"
@@ -81,14 +93,19 @@ def write_stdout(text: str = "", *, end: str = "\n", flush: bool = True) -> None
         if flush:
             sys.stdout.flush()
     except UnicodeEncodeError:
-        if hasattr(sys.stdout, "buffer"):
-            sys.stdout.buffer.write(payload.encode("utf-8", errors="replace"))
-            if flush:
-                sys.stdout.buffer.flush()
-        else:
-            sys.stdout.write(payload.encode("ascii", errors="replace").decode("ascii"))
-            if flush:
-                sys.stdout.flush()
+        try:
+            if hasattr(sys.stdout, "buffer"):
+                sys.stdout.buffer.write(payload.encode("utf-8", errors="replace"))
+                if flush:
+                    sys.stdout.buffer.flush()
+            else:
+                sys.stdout.write(payload.encode("ascii", errors="replace").decode("ascii"))
+                if flush:
+                    sys.stdout.flush()
+        except _UI_IO_ERRORS as exc:
+            _record_ui_io_error(exc)
+    except _UI_IO_ERRORS as exc:
+        _record_ui_io_error(exc)
 
 
 def write_stdout_block(text: str, *, flush: bool = True) -> None:
@@ -98,10 +115,15 @@ def write_stdout_block(text: str, *, flush: bool = True) -> None:
         if flush:
             sys.stdout.flush()
     except UnicodeEncodeError:
-        if hasattr(sys.stdout, "buffer"):
-            sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
-            if flush:
-                sys.stdout.buffer.flush()
+        try:
+            if hasattr(sys.stdout, "buffer"):
+                sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
+                if flush:
+                    sys.stdout.buffer.flush()
+        except _UI_IO_ERRORS as exc:
+            _record_ui_io_error(exc)
+    except _UI_IO_ERRORS as exc:
+        _record_ui_io_error(exc)
 
 
 @contextmanager

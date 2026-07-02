@@ -985,6 +985,15 @@ def _fast_force_stop_selected_packages(
     log = logger
     for pkg in packages:
         try:
+            from . import start_lifecycle as _start_lifecycle
+
+            if _start_lifecycle.should_block_force_stop(pkg, source="fast_force_stop"):
+                if log is not None:
+                    log.info(
+                        "[DENG_REJOIN_FORCE_STOP_BLOCKED] package=%s source=fast_force_stop",
+                        pkg,
+                    )
+                continue
             android.force_stop_package(pkg, root_info)
         except Exception as exc:  # noqa: BLE001
             if log is not None:
@@ -993,6 +1002,10 @@ def _fast_force_stop_selected_packages(
     survivors: list[str] = []
     for pkg in packages:
         try:
+            from . import start_lifecycle as _start_lifecycle
+
+            if _start_lifecycle.is_cache_clear_closed():
+                continue
             if android.get_package_pid(pkg, root_info):
                 survivors.append(pkg)
         except Exception:  # noqa: BLE001
@@ -1000,6 +1013,12 @@ def _fast_force_stop_selected_packages(
     if survivors:
         for pkg in survivors:
             try:
+                from . import start_lifecycle as _start_lifecycle
+
+                if _start_lifecycle.should_block_force_stop(
+                    pkg, source="fast_force_stop_retry"
+                ):
+                    continue
                 android.force_stop_package(pkg, root_info)
             except Exception:  # noqa: BLE001
                 pass
@@ -6436,45 +6455,59 @@ def cmd_start(args: argparse.Namespace) -> int:
             from prior phases never bleed through on slow Termux terminals.
             """
             nonlocal _stagger_render_last
-            if (
-                _supervisor_ref is not None
-                and not getattr(_supervisor_ref, "_all_launches_completed", False)
-                and not _launch_cfg.get("interval_mode", False)
-            ):
+            try:
+                if (
+                    _supervisor_ref is not None
+                    and not getattr(_supervisor_ref, "_all_launches_completed", False)
+                    and not _launch_cfg.get("interval_mode", False)
+                ):
+                    try:
+                        _supervisor_ref.sync_stagger_display_status()
+                    except Exception:  # noqa: BLE001
+                        pass
+                rows = [
+                    (
+                        i + 1,
+                        e["package"],
+                        _account_username_for_table(e),
+                        _phase_table_state(e["package"]),
+                        "0s",
+                        "0 MB",
+                    )
+                    for i, e in enumerate(entries)
+                ]
+                lines = [banner_text(use_color=use_color), ""]
                 try:
-                    _supervisor_ref.sync_stagger_display_status()
+                    ram = _get_ram_label()
+                    if ram:
+                        for _ram_line in ram.split("\n"):
+                            lines.append(f"  {_ram_line}")
+                        lines.append("")
                 except Exception:  # noqa: BLE001
                     pass
-            rows = [
-                (
-                    i + 1,
-                    e["package"],
-                    _account_username_for_table(e),
-                    _phase_table_state(e["package"]),
-                    "0s",
-                    "0 MB",
+                lines.append(
+                    build_start_table(
+                        rows, use_color=use_color, pointer_text=_checker_pointer_text()
+                    )
                 )
-                for i, e in enumerate(entries)
-            ]
-            lines = [banner_text(use_color=use_color), ""]
-            try:
-                ram = _get_ram_label()
-                if ram:
-                    for _ram_line in ram.split("\n"):
-                        lines.append(f"  {_ram_line}")
-                    lines.append("")
-            except Exception:  # noqa: BLE001
-                pass
-            lines.append(
-                build_start_table(
-                    rows, use_color=use_color, pointer_text=_checker_pointer_text()
-                )
-            )
-            try:
                 _clear_terminal(clear_scrollback=True)
                 safe_io.write_stdout_block("\n".join(lines) + "\n")
-            except OSError:
-                pass
+            except (OSError, BrokenPipeError, EOFError) as _ui_exc:
+                try:
+                    from . import start_lifecycle as _start_lifecycle
+
+                    _start_lifecycle.record_ui_render_error(_ui_exc)
+                    if _launch_cfg.get("interval_mode", False):
+                        _start_lifecycle.mark_scheduler_survived_ui_failure()
+                except Exception:  # noqa: BLE001
+                    pass
+            except Exception as _ui_exc:  # noqa: BLE001
+                try:
+                    from . import start_lifecycle as _start_lifecycle
+
+                    _start_lifecycle.record_ui_render_error(_ui_exc)
+                except Exception:  # noqa: BLE001
+                    pass
 
         def _render_phase_throttled(_unused_note: str = "") -> None:
             nonlocal _stagger_render_last
@@ -6647,38 +6680,43 @@ def cmd_start(args: argparse.Namespace) -> int:
             _FIRST_LAUNCH_DELAY_S,
         )
 
-        # Cache clear runs independently — never blocks the launch schedule.
-        def _cache_clear_bg() -> None:
-            from .cache_clear_phases import (
-                START_CACHE_CLEAR_DEADLINE_S,
-                run_start_mass_cache_clear_bounded,
+        from . import start_lifecycle as _start_lifecycle
+        from .cache_clear_phases import (
+            START_CACHE_CLEAR_DEADLINE_S,
+            run_start_mass_cache_clear_bounded,
+        )
+
+        _start_lifecycle.reset_for_start(package_names)
+        _cc_exit_reason = "unknown"
+
+        # Bounded synchronous cache clear — must finish (or timeout) before launch.
+        _ptr_cc = _checker_pointer.get() if _checker_pointer is not None else None
+        try:
+            cc_out = run_start_mass_cache_clear_bounded(
+                package_names,
+                root_info=_prep_root,
+                deadline_s=START_CACHE_CLEAR_DEADLINE_S,
+                checker_pointer=_ptr_cc,
             )
+            prep_cache.update(dict(cc_out.get("results") or {}))
+            _launch_sched.record_clear_cache_finished(
+                duration_ms=cc_out.get("cache_clear_duration_ms"),
+                timed_out=bool(cc_out.get("cache_clear_timeout")),
+            )
+            _cc_exit_reason = str(cc_out.get("cache_clear_status") or "done")
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("start: batch cache clear error: %s", _exc)
+            prep_cache.update({pkg: "Failed" for pkg in package_names})
+            _launch_sched.record_clear_cache_finished(timed_out=True)
+            _cc_exit_reason = f"error:{str(_exc)[:80]}"
+        finally:
+            _start_session.mark("batch_clear_cache_done", package_count=len(entries))
 
-            _ptr_cc = _checker_pointer.get() if _checker_pointer is not None else None
-            try:
-                cc_out = run_start_mass_cache_clear_bounded(
-                    package_names,
-                    root_info=_prep_root,
-                    deadline_s=START_CACHE_CLEAR_DEADLINE_S,
-                    checker_pointer=_ptr_cc,
-                )
-                prep_cache.update(dict(cc_out.get("results") or {}))
-                _launch_sched.record_clear_cache_finished(
-                    duration_ms=cc_out.get("cache_clear_duration_ms"),
-                    timed_out=bool(cc_out.get("cache_clear_timeout")),
-                )
-            except Exception as _exc:  # noqa: BLE001
-                _start_log.debug("start: batch cache clear error: %s", _exc)
-                prep_cache.update({pkg: "Failed" for pkg in package_names})
-                _launch_sched.record_clear_cache_finished(timed_out=True)
-            finally:
-                _start_session.mark("batch_clear_cache_done", package_count=len(entries))
-
-        threading.Thread(
-            target=_cache_clear_bg, name="start-cache-clear", daemon=True
-        ).start()
-
-        _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
+        _start_lifecycle.exit_clear_cache_phase(_cc_exit_reason)
+        _start_lifecycle.mark_cache_clear_closed()
+        _start_lifecycle.mark_launch_scheduled(package_names)
+        for pkg in package_names:
+            phase[pkg] = "Ready"
 
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
@@ -6801,7 +6839,22 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg["package_start_times"] = start_times
         cfg["monitor_started_at"] = time.time()
 
-        # ── Bootstrap watchdog BEFORE first launch due at T+5 ────────────────
+        _sched_thread: threading.Thread | None = None
+        if _FIRST_LAUNCH_MODE == "interval":
+            _sched_thread = _launch_sched.start_background(
+                _sched_launch_one,
+                on_before_launch=_sched_before_launch,
+                on_after_launch=_sched_after_launch,
+                stop_event=None,
+                username_for_index=_username_for_launch,
+            )
+            _start_log.info(
+                "[DENG_REJOIN_LAUNCH_SCHEDULER_STARTED] anchor=%.3f first_due=%.3f",
+                _launch_sched.clear_cache_started_at or 0.0,
+                _launch_sched.first_launch_due_at or 0.0,
+            )
+
+        # Bootstrap watchdog while the launch scheduler runs (interval mode).
         _any_url = any(
             str(effective_private_server_url(entry, runtime_cfg) or "").strip()
             for entry in runtime_entries
@@ -6841,24 +6894,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
         _start_session.mark("watchdog_daemon_started", package_count=len(entries))
 
-        _sched_thread: threading.Thread | None = None
-        if _FIRST_LAUNCH_MODE == "interval":
-            _sched_thread = _launch_sched.start_background(
-                _sched_launch_one,
-                on_before_launch=_sched_before_launch,
-                on_after_launch=_sched_after_launch,
-                stop_event=None,
-                username_for_index=_username_for_launch,
-            )
-
         try:
             from .termux_session import ensure_termux_session_alive as _ensure_termux_alive
 
             _ensure_termux_alive(cfg)
         except Exception:  # noqa: BLE001
             pass
-        for _boot_entry in entries:
-            phase[_boot_entry["package"]] = "Ready"
 
         for _prep_entry in entries:
             try:
@@ -6913,6 +6954,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         _termux_minimize_result: dict[str, Any] = {"ok": False, "skipped": True, "reason": "background"}
         threading.Thread(target=_slow_prep_bg, name="start-slow-prep", daemon=True).start()
 
+        def _screen_mode_bg() -> None:
+            try:
+                _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: screen mode error (non-fatal): %s", _exc)
+
+        threading.Thread(
+            target=_screen_mode_bg, name="start-screen-mode", daemon=True
+        ).start()
+
         _ONLINE_GATE_TIMEOUT_S = 15.0
 
         def _wait_for_package_online(pkg: str, idx: int, total: int) -> None:
@@ -6931,19 +6982,23 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _render_phase_throttled()
                 _t.sleep(0.25)
 
-        _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
-
-        if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
+        if _FIRST_LAUNCH_MODE == "interval":
+            try:
+                _launch_sched.wait_until_complete()
+            except Exception as _sched_exc:  # noqa: BLE001
+                _start_log.debug("launch scheduler wait error: %s", _sched_exc)
+                _start_lifecycle.set_launch_scheduler_aborted_reason(str(_sched_exc)[:200])
+            if _checker_pointer is not None:
+                try:
+                    _checker_pointer.get().mark_checking_system_started()
+                except Exception:  # noqa: BLE001
+                    pass
             try:
                 _rjn_early = getattr(_supervisor, "_rjn_monitor", None)
                 if _rjn_early is not None:
                     _rjn_early.start_session()
             except Exception:  # noqa: BLE001
                 pass
-
-        if _FIRST_LAUNCH_MODE == "interval":
-            if _sched_thread is not None:
-                _sched_thread.join()
         else:
             # Legacy online_gate: sequential loop (unchanged fallback).
             for index, entry in enumerate(entries, start=1):

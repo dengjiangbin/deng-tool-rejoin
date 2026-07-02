@@ -133,6 +133,12 @@ def run_start_mass_cache_clear_bounded(
     worker.join(max(0.5, float(deadline_s)))
 
     if worker.is_alive():
+        try:
+            from . import start_lifecycle as _start_lifecycle
+
+            _start_lifecycle.request_abort_start_cache_clear()
+        except Exception:  # noqa: BLE001
+            pass
         partial = dict(holder.get("results") or {})
         for pkg in packages:
             partial.setdefault(str(pkg), "TimedOut")
