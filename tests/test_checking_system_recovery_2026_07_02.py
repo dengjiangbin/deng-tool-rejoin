@@ -94,7 +94,7 @@ def test_checking_timer_header_format():
     ptr = CheckerPointerState()
     ptr.begin_checking_package("p0", 1, now=1000.0, deadline_s=7.0)
     ptr.update_checking_timer(3.2, deadline_s=7.0)
-    assert ptr.pointer_text() == "Checking 3/7s"
+    assert ptr.pointer_text() == "Monitoring 3/7s"
 
 
 def test_invalid_presence_write_attempts_recorded():

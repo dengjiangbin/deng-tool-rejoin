@@ -133,15 +133,24 @@ def test_launch_callback_does_not_set_online_in_scheduler():
     assert row["result"] != "Online"
 
 
-def test_getting_ready_emitted_immediately_on_start():
+def test_preparing_emitted_immediately_on_start():
     p = CheckerPointerState()
     before = time.time()
-    p.reset_for_new_start(session_id="s-gr", pid=42)
+    p.reset_for_new_start(session_id="s-prep", pid=42)
+    p.begin_preparing(["com.moons.litesc"])
+    snap = p.probe_snapshot()
+    assert snap["state_pointer_text"] == "Preparing.."
+    assert snap["first_launch_phase"] == "preparing"
+    assert snap["checker_mode"] == checker_pointer.MODE_GETTING_READY
+    assert snap["start_pressed_at"] is None or snap["start_pressed_at"] >= before - 1.0
+
+
+def test_getting_ready_bridge_after_cache():
+    p = CheckerPointerState()
     p.begin_getting_ready(["com.moons.litesc"], interval_s=30.0)
     snap = p.probe_snapshot()
     assert snap["state_pointer_text"] == checker_pointer.POINTER_GETTING_READY
     assert snap["getting_ready_at"] is not None
-    assert snap["getting_ready_at"] >= before
     assert snap["checker_mode"] == checker_pointer.MODE_GETTING_READY
 
 

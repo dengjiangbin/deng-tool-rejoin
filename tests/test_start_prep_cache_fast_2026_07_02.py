@@ -87,12 +87,12 @@ def test_stale_clear_cache_ui_write_ignored():
     assert snap["stale_ui_write_ignored_count"] >= 1
 
 
-def test_first_package_launches_within_one_second_after_cache_finish():
+def test_first_package_launches_immediately_after_getting_ready_bridge():
     clock = FakeClock(100.0)
     sched = LaunchScheduler(
         session_id="s-fast",
         packages=["p0"],
-        first_launch_delay_seconds=1.0,
+        first_launch_delay_seconds=0.0,
         interval_seconds=30.0,
     )
     sched.mark_clear_cache_started(monotonic_now=clock.monotonic())
@@ -102,6 +102,8 @@ def test_first_package_launches_within_one_second_after_cache_finish():
         duration_ms=3500.0,
         reanchor_launches=True,
     )
+    clock.advance(0.8)
+    sched.reanchor_launches_from_getting_ready_finished(finished_at=clock.monotonic())
 
     def launch_one(_index: int, _package: str) -> str:
         return "success"
@@ -112,9 +114,8 @@ def test_first_package_launches_within_one_second_after_cache_finish():
         sleep_fn=clock.sleep,
     )
     snap = sched.probe_snapshot()
-    assert snap["first_launch_delay_from_clear_cache_finish_ms"] == 1000.0
-    assert snap["post_clear_cache_delay_ms"] == 1000.0
-    assert snap["launch_anchor_mode"] == "clear_cache_finish"
+    assert snap["first_launch_delay_from_clear_cache_finish_ms"] == 800.0
+    assert snap["launch_anchor_mode"] == "getting_ready_finish"
 
 
 def test_five_packages_launch_every_thirty_seconds():

@@ -135,7 +135,7 @@ def test_probe_snapshot_fields_present():
         "launch_attempts",
     ):
         assert key in snap
-    assert snap["first_launch_delay_seconds"] == 1.0
+    assert snap["first_launch_delay_seconds"] == 0.0
     assert snap["interval_seconds"] == 30.0
     assert len(snap["launch_attempts"]) == 2
 

@@ -48,10 +48,10 @@ def test_self_heal_missing_recovery_request():
 
 def test_launch_dispatched_enters_waiting_without_online():
     ptr = CheckerPointerState()
-    ptr.mark_launch_dispatched("com.moons.litesc", reason="launch_dispatched_waiting_for_checker")
+    ptr.mark_launch_dispatched("com.moons.litesc", reason="launch_dispatched_waiting_for_monitoring")
     row = ptr.probe_snapshot()["per_package"]["com.moons.litesc"]
     assert row["waiting_entered_at"] is not None
-    assert row["waiting_reason"] == "launch_dispatched_waiting_for_checker"
+    assert row["waiting_reason"] == "launch_dispatched_waiting_for_monitoring"
     assert ptr.display_state("com.moons.litesc") == "Waiting"
 
 

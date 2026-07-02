@@ -1387,6 +1387,8 @@ def collect_probe(
             "start_pressed_at": _fc.get("start_pressed_at"),
             "getting_ready_at": _fc.get("getting_ready_at"),
             "checking_system_started_at": _fc.get("checking_system_started_at"),
+            "monitoring_started_at": _fc.get("monitoring_started_at"),
+            "monitoring_paused_reason": _fc.get("monitoring_paused_reason"),
             "lifecycle_blocker": _fc.get("lifecycle_blocker"),
             "checker_status": _fc.get("checker_status"),
             "checker_idle_reason": _fc.get("checker_idle_reason"),

@@ -24,11 +24,11 @@ _STATE_FILENAME = "launch-schedule-state.json"
 _PERSIST_MIN_INTERVAL_S = 0.25
 _STATE_MAX_AGE_S = 600.0
 
-DEFAULT_FIRST_LAUNCH_DELAY_S = 1.0
+DEFAULT_FIRST_LAUNCH_DELAY_S = 0.0
 DEFAULT_INTERVAL_S = 30.0
 DEFAULT_POST_CLEAR_CACHE_MAX_DELAY_S = 1.0
 DEFAULT_COMMAND_TIMEOUT_S = 5.0
-DEFAULT_BEFORE_LAUNCH_TIMEOUT_S = 0.5
+DEFAULT_BEFORE_LAUNCH_TIMEOUT_S = 2.0
 
 
 def _state_file_path():
@@ -199,6 +199,24 @@ class LaunchScheduler:
             row.result = "pending"
             row.error = ""
 
+    def reanchor_launches_from_getting_ready_finished(
+        self, *, finished_at: float | None = None
+    ) -> None:
+        """Schedule first launch immediately after the post-cache Getting Ready bridge."""
+        now = float(finished_at if finished_at is not None else time.monotonic())
+        with self._lock:
+            self.launch_anchor_mode = "getting_ready_finish"
+            self.first_launch_due_at = now
+            for i, row in enumerate(self._attempts):
+                row.due_at = now + (i * self.interval_seconds)
+                row.fired_at = None
+                row.skew_ms = None
+                row.command_started_at = None
+                row.command_finished_at = None
+                row.result = "pending"
+                row.error = ""
+            self._persist(force=True)
+
     def mark_scheduler_started(self, *, monotonic_now: float | None = None) -> None:
         with self._lock:
             self.launch_scheduler_started_at = float(
@@ -212,6 +230,9 @@ class LaunchScheduler:
                 monotonic_now if monotonic_now is not None else time.monotonic()
             )
             self._persist(force=True)
+
+    def mark_monitoring_started(self, *, monotonic_now: float | None = None) -> None:
+        self.mark_checking_system_started(monotonic_now=monotonic_now)
 
     def set_lifecycle_blocker(self, reason: str) -> None:
         with self._lock:
@@ -453,6 +474,12 @@ class LaunchScheduler:
                 self.all_packages_dispatched_at = dispatched_at
                 self.all_packages_launched_at = dispatched_at
                 self._persist(force=True)
+            try:
+                from . import start_lifecycle as _start_lifecycle
+
+                _start_lifecycle.mark_all_packages_dispatched()
+            except Exception:  # noqa: BLE001
+                pass
         except BaseException as exc:  # noqa: BLE001
             with self._lock:
                 self.launch_scheduler_aborted_reason = str(exc)[:200]
@@ -462,7 +489,7 @@ class LaunchScheduler:
             for thread in workers:
                 thread.join()
             with self._lock:
-                self.mark_checking_system_started(monotonic_now=monotonic_fn())
+                self.mark_monitoring_started(monotonic_now=monotonic_fn())
                 self.scheduler_alive = False
                 self._done_event.set()
                 self._persist(force=True)
@@ -551,7 +578,17 @@ class LaunchScheduler:
         try:
             from . import start_lifecycle as _start_lifecycle
 
-            snap.update(_start_lifecycle.probe_snapshot())
+            lifecycle = _start_lifecycle.probe_snapshot()
+            dispatched_mono = self.all_packages_dispatched_at
+            checking_mono = self.checking_system_started_at
+            snap.update(lifecycle)
+            snap["all_packages_dispatched_at"] = dispatched_mono
+            if checking_mono is not None:
+                snap["checking_system_started_at"] = checking_mono
+            if lifecycle.get("all_packages_dispatched_at") is not None:
+                snap["all_packages_dispatched_at_wall"] = lifecycle[
+                    "all_packages_dispatched_at"
+                ]
         except Exception:  # noqa: BLE001
             pass
         return snap

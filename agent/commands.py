@@ -5102,7 +5102,8 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Layout":       _ANSI_CYAN,   # internal only (not shown in public UI)
         "Docking":      _ANSI_CYAN,   # internal only
         "Waiting":      _ANSI_CYAN,
-        "Checking":     _ANSI_PINK,   # active focused package (requirement 5)
+        "Monitoring":     _ANSI_PINK,   # active focused package
+        "Checking":     _ANSI_PINK,   # legacy alias
         "Resizing":     _ANSI_CYAN,
         "Optimizing":   _ANSI_CYAN,
         "Reconnecting": _ANSI_CYAN,
@@ -5230,7 +5231,9 @@ def _pointer_color(text: str) -> str:
         return _ANSI_GREEN
     if t in ("Dead Detected", "Start Recovery"):
         return _ANSI_RED
-    if t == "Checking.." or (t.startswith("Checking ") and "/" in t and t.endswith("s")):
+    if t == "Monitoring.." or t == "Checking.." or (
+        (t.startswith("Monitoring ") or t.startswith("Checking ")) and "/" in t and t.endswith("s")
+    ):
         return _ANSI_PINK
     if t.startswith("Recovery "):
         return _ANSI_YELLOW
@@ -6245,7 +6248,24 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run Setup / Edit Config, then choose Roblox Package Setup.")
             _start_session.finish("no_packages")
             return 2
-        _enforce_configured_screen_mode(cfg, [entry["package"] for entry in entries], phase="before_start")
+
+        def _screen_mode_before_start_bg() -> None:
+            try:
+                _enforce_configured_screen_mode(
+                    cfg, [entry["package"] for entry in entries], phase="before_start"
+                )
+            except Exception as _exc:  # noqa: BLE001
+                import logging as _logging_sm
+
+                _logging_sm.getLogger("deng.rejoin.start").debug(
+                    "start: before_start screen mode error (non-fatal): %s", _exc
+                )
+
+        threading.Thread(
+            target=_screen_mode_before_start_bg,
+            name="start-screen-mode-before",
+            daemon=True,
+        ).start()
         _start_session.mark("package_preparation_begin", package_count=len(entries))
 
         try:
@@ -6294,28 +6314,36 @@ def cmd_start(args: argparse.Namespace) -> int:
         runtime_entries = entries
         runtime_entry_by_pkg = {entry["package"]: entry for entry in runtime_entries}
 
-        # ── Detect packages (silently; go to debug log only) ─────────────────
+        # ── Detect packages (background; must not delay Preparing UI) ───────
         import logging as _logging
         _start_log = _logging.getLogger("deng.rejoin.start")
 
-        hints2, inc_launch, det_en = _package_detection_options(cfg)
-        detected_n = len(
-            android.discover_roblox_package_candidates(
-                hints2,
-                include_launchable_only=inc_launch,
-                detection_enabled=det_en,
-            )
-        )
-        _start_log.debug(
-            "start: detected_packages=%d configured_packages=%d",
-            detected_n,
-            len(entries),
-        )
-        if detected_n == 0:
-            _start_log.info(
-                "start: live package scan found 0 candidates; using %d persisted package(s)",
-                len(entries),
-            )
+        def _discover_packages_bg() -> None:
+            try:
+                hints2, inc_launch, det_en = _package_detection_options(cfg)
+                detected_n = len(
+                    android.discover_roblox_package_candidates(
+                        hints2,
+                        include_launchable_only=inc_launch,
+                        detection_enabled=det_en,
+                    )
+                )
+                _start_log.debug(
+                    "start: detected_packages=%d configured_packages=%d",
+                    detected_n,
+                    len(entries),
+                )
+                if detected_n == 0:
+                    _start_log.info(
+                        "start: live package scan found 0 candidates; using %d persisted package(s)",
+                        len(entries),
+                    )
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: package discovery error (non-fatal): %s", _exc)
+
+        threading.Thread(
+            target=_discover_packages_bg, name="start-package-discover", daemon=True
+        ).start()
 
         if cfg.get("root_mode_enabled"):
             root_info = android.detect_root()
@@ -6579,12 +6607,15 @@ def cmd_start(args: argparse.Namespace) -> int:
         except ValueError:
             _FIRST_LAUNCH_INTERVAL_S = 30.0
         try:
-            _GETTING_READY_DWELL_S = max(
-                0.0,
-                float(os.environ.get("DENG_REJOIN_GETTING_READY_DWELL_SEC", "1.5") or "1.5"),
+            _GETTING_READY_DWELL_S = min(
+                1.0,
+                max(
+                    0.0,
+                    float(os.environ.get("DENG_REJOIN_GETTING_READY_DWELL_SEC", "1") or "1"),
+                ),
             )
         except ValueError:
-            _GETTING_READY_DWELL_S = 1.5
+            _GETTING_READY_DWELL_S = 1.0
         # Hard deadline for a single first-launch perform_rejoin. If the launch
         # command blocks (root prompt, busy activity manager, etc.), the loop
         # must still advance so launching starts right after the first cache
@@ -6601,43 +6632,76 @@ def cmd_start(args: argparse.Namespace) -> int:
         except Exception:  # noqa: BLE001
             _checker_pointer = None  # type: ignore[assignment]
 
-        # ── GETTING READY — render + flush IMMEDIATELY on 3. Start ────────────
-        # This must happen before Preparing / Clear Cache / any launch so the
-        # user actually sees "Getting Ready.." first (never skipped, never
-        # overwritten by Clear Cache/Opening in the same tick). Also resets ALL
-        # stale prior-session state and stamps a fresh session id.
+        # ── START lifecycle — Preparing FIRST (never Getting Ready here) ─────
+        from . import start_lifecycle as _start_lifecycle_prep
+
+        package_names_early = [e["package"] for e in entries]
+        _start_lifecycle_prep.reset_for_start(package_names_early)
+
         if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
             try:
                 from .launch_relaunch_trace import record_start_pressed as _record_start_pressed
 
                 _record_start_pressed()
-                _ptr_gr = _checker_pointer.get()
-                _ptr_gr.enable_persistence()
-                _ptr_gr.reset_for_new_start(
+                _start_lifecycle_prep.mark_start_pressed()
+                _ptr_start = _checker_pointer.get()
+                _ptr_start.enable_persistence()
+                _ptr_start.reset_for_new_start(
                     session_id=_start_session_id, pid=os.getpid()
                 )
-                _ptr_gr.begin_getting_ready(
-                    [e["package"] for e in entries],
-                    interval_s=_FIRST_LAUNCH_INTERVAL_S,
-                )
-                _render_phase()  # flush Getting Ready.. to terminal now
-                _gr_deadline0 = time.monotonic() + _GETTING_READY_DWELL_S
-                while time.monotonic() < _gr_deadline0:
-                    time.sleep(0.1)
+                _ptr_start.begin_preparing(package_names_early)
+                _render_phase()  # flush Preparing.. immediately
             except Exception:  # noqa: BLE001
                 pass
 
         # 1) Preparing — quick stop of selected clones only (Termux protected).
         _transition_lifecycle("PREPARING", "prepare_packages")
-        _start_session.mark("package_preparation_begin", package_count=len(entries))
-        from . import start_lifecycle as _start_lifecycle_prep
-
-        _start_lifecycle_prep.mark_prepare_started()
-        packages_sl = [e["package"] for e in entries]
+        _start_lifecycle_prep.mark_preparing_entered()
+        _start_lifecycle_prep.mark_preparing_command_started()
+        _set_all_phase("Preparing", "Stopping selected packages...")
+        packages_sl = package_names_early
         keep_alive = ["com.termux"] + packages_sl
         _prep_root = android.detect_root()
 
-        _set_all_phase("Preparing", "Stopping selected packages...")
+        try:
+            _PREPARE_DEADLINE_S = max(
+                1.0,
+                float(os.environ.get("DENG_REJOIN_PREPARE_DEADLINE_SEC", "8") or "8"),
+            )
+        except ValueError:
+            _PREPARE_DEADLINE_S = 8.0
+
+        def _prep_commands() -> None:
+            _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
+            try:
+                _bg_stopped = android.force_stop_packages_except(
+                    packages_sl,
+                    cfg.get("package_detection_hints"),
+                )
+                if _bg_stopped:
+                    _start_log.info(
+                        "[DENG_REJOIN_PREP_STOP_BACKGROUND] stopped=%s",
+                        ",".join(_bg_stopped),
+                    )
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: background roblox stop error: %s", _exc)
+
+        try:
+            _prep_result, _prep_timed_out = run_callable_with_deadline(
+                _prep_commands, _PREPARE_DEADLINE_S
+            )
+            if _prep_timed_out:
+                _start_lifecycle_prep.note_prepare_blocker("prepare_command_timeout")
+                _start_log.warning(
+                    "[DENG_REJOIN_PREPARE_TIMEOUT] deadline_sec=%.1f continuing_to_clear_cache",
+                    _PREPARE_DEADLINE_S,
+                )
+        except Exception as _exc:  # noqa: BLE001
+            _start_lifecycle_prep.note_prepare_blocker(f"prepare_error:{str(_exc)[:80]}")
+            _start_log.debug("start: prepare command error (non-fatal): %s", _exc)
+
+        _start_lifecycle_prep.mark_preparing_command_finished()
+
         # Heavy cloud-phone memory sweep runs async — must not block Clear Cache.
         def _cloud_memory_bg() -> None:
             try:
@@ -6665,23 +6729,6 @@ def cmd_start(args: argparse.Namespace) -> int:
             target=_cloud_memory_bg, name="start-cloud-memory", daemon=True
         ).start()
 
-        _fast_force_stop_selected_packages(packages_sl, _prep_root, logger=_start_log)
-
-        try:
-            _bg_stopped = android.force_stop_packages_except(
-                packages_sl,
-                cfg.get("package_detection_hints"),
-            )
-            if _bg_stopped:
-                _start_log.info(
-                    "[DENG_REJOIN_PREP_STOP_BACKGROUND] stopped=%s",
-                    ",".join(_bg_stopped),
-                )
-        except Exception as _exc:  # noqa: BLE001
-            _start_log.debug("start: background roblox stop error: %s", _exc)
-
-        _start_lifecycle_prep.mark_prepare_finished()
-
         # 2) Clear Cache — anchor monotonic schedule NOW; cache clear must never
         # block launch due times (probe p-bf0b2feb55).
         from .supervisor import (
@@ -6697,21 +6744,22 @@ def cmd_start(args: argparse.Namespace) -> int:
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         prep_gfx: dict[str, str] = {}
         prep_cache: dict[str, str] = {}
-        package_names = [entry["package"] for entry in entries]
+        package_names = package_names_early
+        _start_lifecycle_prep.mark_clearing_cache_entered()
         _set_all_phase("Clear Cache")
         _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
         safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
 
         try:
             _FIRST_LAUNCH_DELAY_S = min(
-                1.0,
+                0.0,
                 max(
                     0.0,
-                    float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "1") or "1"),
+                    float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "0") or "0"),
                 ),
             )
         except ValueError:
-            _FIRST_LAUNCH_DELAY_S = 1.0
+            _FIRST_LAUNCH_DELAY_S = 0.0
 
         _launch_sched = LaunchScheduler(
             session_id=_start_session_id,
@@ -6738,7 +6786,6 @@ def cmd_start(args: argparse.Namespace) -> int:
             run_start_mass_cache_clear_bounded,
         )
 
-        _start_lifecycle.reset_for_start(package_names)
         _cc_exit_reason = "unknown"
 
         # Bounded synchronous cache clear — must finish (or timeout) before launch.
@@ -6765,13 +6812,31 @@ def cmd_start(args: argparse.Namespace) -> int:
         finally:
             _start_session.mark("batch_clear_cache_done", package_count=len(entries))
 
+        _start_lifecycle.mark_clearing_cache_finished()
         _start_lifecycle.exit_clear_cache_phase(_cc_exit_reason)
         _start_lifecycle.mark_cache_clear_closed()
         _start_lifecycle.mark_launch_scheduled(package_names)
-        _exit_ver = _bump_ui_phase("Ready", source="post_clear_cache")
+
+        # 3) Getting Ready — short bridge AFTER clear cache (max 1s), never before Preparing.
+        _start_lifecycle.mark_getting_ready_entered()
+        if _checker_pointer is not None:
+            try:
+                _checker_pointer.get().begin_getting_ready(
+                    package_names,
+                    interval_s=_FIRST_LAUNCH_INTERVAL_S,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        _gr_ver = _bump_ui_phase("Getting Ready", source="post_clear_cache_bridge")
         for pkg in package_names:
-            phase[pkg] = "Ready"
-        _render_phase("", phase_version=_exit_ver)
+            phase[pkg] = "Getting Ready"
+        _render_phase("", phase_version=_gr_ver)
+        _gr_deadline = time.monotonic() + _GETTING_READY_DWELL_S
+        while time.monotonic() < _gr_deadline:
+            time.sleep(min(0.05, max(0.0, _gr_deadline - time.monotonic())))
+        _start_lifecycle.mark_getting_ready_finished()
+        _launch_sched.reanchor_launches_from_getting_ready_finished()
+
         if _checker_pointer is not None:
             try:
                 _checker_pointer.get().set_checker_idle_during_first_launch(
@@ -6783,6 +6848,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
         launch_attempted: dict[str, bool] = {}
+        _start_lifecycle.mark_launching_started()
         _transition_lifecycle("LAUNCHING", "launch_packages")
         _start_session.mark("package_launch_begin", package_count=len(entries))
 
@@ -6837,8 +6903,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             sup = _supervisor_ref
             if sup is not None:
                 for later in entries[index + 1 :]:
-                    phase[later["package"]] = "Ready"
-                    sup._set_status(later["package"], _STATUS_READY)
+                    phase[later["package"]] = "Getting Ready"
             if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
                 try:
                     import time as _t_open
@@ -6861,7 +6926,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     pass
             if sup is not None:
                 sup._set_lifecycle_status(package, _STATUS_LAUNCHING)
-            _render_phase("", phase_version=_open_ver)
+            _defer_render("", phase_version=_open_ver)
 
         def _sched_after_launch(index: int, package: str, result: str) -> None:
             sup = _supervisor_ref
@@ -6881,7 +6946,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     _ptr_la = _checker_pointer.get()
                     _ptr_la.mark_launch_dispatched(
                         package,
-                        reason="launch_dispatched_waiting_for_checker",
+                        reason="launch_dispatched_waiting_for_monitoring",
                     )
                     _ptr_la.mark_supposedly_launched(package)
                     _ptr_la.note_launch_interval(_FIRST_LAUNCH_INTERVAL_S)
@@ -6890,7 +6955,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             launch_ok[package] = True
             launch_err[package] = ""
             _wait_ver = _bump_ui_phase("Waiting", source="post_launch")
-            _render_phase("", phase_version=_wait_ver)
+            _defer_render("", phase_version=_wait_ver)
             _start_log.info(
                 "[DENG_REJOIN_SCHEDULED_LAUNCH] package=%s index=%d/%d result=%s"
                 " anchor=%.3f fired_skew_ms=%s",
@@ -6917,24 +6982,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg["package_start_times"] = start_times
         cfg["monitor_started_at"] = time.time()
 
-        _sched_thread: threading.Thread | None = None
-        if _FIRST_LAUNCH_MODE == "interval":
-            _sched_thread = _launch_sched.start_background(
-                _sched_launch_one,
-                on_before_launch=_sched_before_launch,
-                on_after_launch=_sched_after_launch,
-                stop_event=None,
-                username_for_index=_username_for_launch,
-            )
-            _start_log.info(
-                "[DENG_REJOIN_LAUNCH_SCHEDULER_STARTED] anchor_finish=%.3f first_due=%.3f"
-                " post_clear_delay_cap_sec=%.1f",
-                _launch_sched.clear_cache_finished_at or 0.0,
-                _launch_sched.first_launch_due_at or 0.0,
-                _FIRST_LAUNCH_DELAY_S,
-            )
-
-        # Bootstrap watchdog while the launch scheduler runs (interval mode).
+        # Bootstrap watchdog BEFORE launch scheduler so lifecycle callbacks can update rows.
         _any_url = any(
             str(effective_private_server_url(entry, runtime_cfg) or "").strip()
             for entry in runtime_entries
@@ -6956,7 +7004,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_cfg_boot["start_session_id"] = _start_session_id
         _live_cfg_boot["screen_mode"] = str(cfg.get("screen_mode") or _start_screen_mode)
         runtime_entries_boot = _ensure_presence_auth_for_entries(runtime_entries, cfg)
-        _boot_status = {e["package"]: _STATUS_READY for e in entries}
+        _boot_status = {e["package"]: _STATUS_WAITING for e in entries}
         _supervisor = WatchdogSupervisor(
             runtime_entries_boot, _live_cfg_boot, initial_status=_boot_status
         )
@@ -6973,6 +7021,25 @@ def cmd_start(args: argparse.Namespace) -> int:
             render_callback=None,
         )
         _start_session.mark("watchdog_daemon_started", package_count=len(entries))
+
+        _sched_thread: threading.Thread | None = None
+        if _FIRST_LAUNCH_MODE == "interval":
+            _sched_thread = _launch_sched.start_background(
+                _sched_launch_one,
+                on_before_launch=_sched_before_launch,
+                on_after_launch=_sched_after_launch,
+                stop_event=None,
+                username_for_index=_username_for_launch,
+            )
+            _start_log.info(
+                "[DENG_REJOIN_LAUNCH_SCHEDULER_STARTED] anchor_finish=%.3f first_due=%.3f"
+                " post_clear_delay_cap_sec=%.1f",
+                _launch_sched.clear_cache_finished_at or 0.0,
+                _launch_sched.first_launch_due_at or 0.0,
+                _FIRST_LAUNCH_DELAY_S,
+            )
+
+        # Slow prep continues while scheduler runs (interval mode).
 
         try:
             from .termux_session import ensure_termux_session_alive as _ensure_termux_alive
@@ -7070,7 +7137,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _start_lifecycle.set_launch_scheduler_aborted_reason(str(_sched_exc)[:200])
             if _checker_pointer is not None:
                 try:
-                    _checker_pointer.get().mark_checking_system_started()
+                    _checker_pointer.get().mark_monitoring_started()
+                    from . import start_lifecycle as _start_lifecycle_mon
+
+                    _start_lifecycle_mon.mark_monitoring_started()
                 except Exception:  # noqa: BLE001
                     pass
             try:
@@ -7344,6 +7414,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Launching":        "Launching",
             "No Heartbeat":     "No Heartbeat",
             "Waiting":          "Waiting",
+            "Monitoring":         "Launching",
             "Checking":         "Launching",
             "Pending":          "Launching",
             "Join Unconfirmed": "Launching",
@@ -7398,7 +7469,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
                 if disp in ("Dead", "Failed"):
                     return "N/A"
-                if disp in ("Preparing", "Clear Cache", "Launching", "Waiting", "Relaunching", "Checking", "Checking..."):
+                if disp in ("Preparing", "Clear Cache", "Getting Ready", "Launching", "Waiting", "Relaunching", "Monitoring", "Checking", "Checking..."):
                     return "0 MB"
                 cached = _usage_cache.get(pkg)
                 if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:

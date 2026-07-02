@@ -59,15 +59,17 @@ MODE_RESUME_CHECKING = "resume_checking"
 # ── Pointer text labels (State column, row 2) ──────────────────────────
 POINTER_GETTING_READY = "Getting Ready.."
 POINTER_OPENING = "Opening.."
-POINTER_CHECKING = "Checking.."
+POINTER_CHECKING = "Monitoring.."
+POINTER_MONITORING = POINTER_CHECKING
 POINTER_DEAD_DETECTED = "Dead Detected"
 POINTER_START_RECOVERY = "Start Recovery"
 POINTER_CLEARING_CACHE = "Clearing Cache.."
 POINTER_REOPENING = "Reopening"
 POINTER_RELAUNCHING = "Relaunching"
 POINTER_ONLINE = "Online"
-POINTER_RESUME_CHECKING = "Resume Checking.."
-POINTER_RESUME_CHECKER = "Resume Checker"
+POINTER_RESUME_CHECKING = "Resume Monitoring.."
+POINTER_RESUME_MONITORING = POINTER_RESUME_CHECKING
+POINTER_RESUME_CHECKER = "Resume Monitoring"
 
 
 @dataclass
@@ -149,6 +151,7 @@ class CheckerPointerState:
     start_pressed_at: float | None = None            # wall-clock (time.time)
     getting_ready_at: float | None = None            # wall-clock (time.time)
     checking_system_started_at: float | None = None  # wall-clock (time.time)
+    monitoring_started_at: float | None = None
     lifecycle_blocker: str = ""
     checker_last_heartbeat_at: float | None = None   # wall-clock (time.time)
     checker_dead_reason: str = ""
@@ -268,6 +271,7 @@ class CheckerPointerState:
             self.start_pressed_at = start_pressed_at if start_pressed_at is not None else now
             self.getting_ready_at = None
             self.checking_system_started_at = None
+            self.monitoring_started_at = None
             self.lifecycle_blocker = ""
             self.checker_last_heartbeat_at = now
             self.checker_dead_reason = ""
@@ -366,6 +370,23 @@ class CheckerPointerState:
                 self.first_launch_interval_s = float(interval_s)
             for pkg in packages:
                 self._pkg(pkg)
+            self._refresh_header_action_locked()
+            self._persist(force=True)
+
+    def begin_preparing(self, packages: list[str]) -> None:
+        """Header/table enter Preparing immediately after Start is pressed."""
+        with self._lock:
+            self.checker_mode = MODE_GETTING_READY
+            self.state_pointer_text = "Preparing.."
+            self.first_launch_phase = "preparing"
+            self.getting_ready_at = None
+            self.launch_waiting_for_online = False
+            self.launch_blocked_reason = ""
+            self.lifecycle_blocker = ""
+            for pkg in packages:
+                self._pkg(pkg)
+            self.header_action_label = "Preparing.."
+            self.header_action_source = "start_preparing"
             self._persist(force=True)
 
     def set_checker_idle_during_first_launch(self, *, reason: str = "") -> None:
@@ -378,13 +399,21 @@ class CheckerPointerState:
 
     def mark_checking_system_started(self) -> None:
         with self._lock:
+            now = time.time()
             if self.checking_system_started_at is None:
-                self.checking_system_started_at = time.time()
+                self.checking_system_started_at = now
+            if self.monitoring_started_at is None:
+                self.monitoring_started_at = now
             self.checker_mode = MODE_CHECKING
             self.state_pointer_text = POINTER_CHECKING
-            self.checker_status = "checking"
+            self.checker_status = "monitoring"
             self.checker_idle_reason = ""
+            self._refresh_header_action_locked()
             self._persist(force=True)
+
+    def mark_monitoring_started(self) -> None:
+        """User-facing alias for the monitoring phase after all launches dispatch."""
+        self.mark_checking_system_started()
 
     def set_lifecycle_blocker(self, reason: str) -> None:
         with self._lock:
@@ -446,11 +475,11 @@ class CheckerPointerState:
             self.checking_elapsed_ms = 0.0
             self.checking_over_deadline = False
             self.checking_timeout_action = ""
-            self.state_pointer_text = f"Checking 0/{int(deadline)}s"
+            self.state_pointer_text = f"Monitoring 0/{int(deadline)}s"
             for pkg, row in self._packages.items():
-                if row.display_state == "Checking" and pkg != package:
+                if row.display_state in ("Checking", "Monitoring") and pkg != package:
                     row.display_state = row.committed_presence_state or row.last_real_state
-            self._pkg(package).display_state = "Checking"
+            self._pkg(package).display_state = "Monitoring"
             self._persist(force=True)
 
     def update_focus_timer(self, elapsed_s: float) -> None:
@@ -465,7 +494,7 @@ class CheckerPointerState:
             secs = max(0, int(elapsed_s))
             cap = max(1, int(deadline))
             shown = min(secs, cap)
-            self.state_pointer_text = f"Checking {shown}/{cap}s"
+            self.state_pointer_text = f"Monitoring {shown}/{cap}s"
             self.checking_elapsed_ms = round(max(0.0, elapsed_s) * 1000.0, 1)
             self.checking_over_deadline = elapsed_s >= deadline
             self._persist(force=True)
@@ -499,7 +528,7 @@ class CheckerPointerState:
             if self.checking_active_package == package:
                 self.checking_active_package = ""
             row = self._packages.get(package)
-            if row is not None and row.display_state == "Checking":
+            if row is not None and row.display_state in ("Checking", "Monitoring"):
                 row.display_state = row.committed_presence_state or row.last_real_state
             self._persist(force=True)
 
@@ -1123,6 +1152,7 @@ class CheckerPointerState:
                     "last_pid": row.last_pid or None,
                     "pid_missing_since": row.pid_missing_since,
                     "display_state": row.display_state or None,
+                    "state": row.display_state or row.last_real_state or None,
                     "last_real_state": row.last_real_state or None,
                     "last_committed_presence_state": row.committed_presence_state or None,
                     "raw_online_evidence_pending": row.raw_online_evidence_pending,
@@ -1177,6 +1207,7 @@ class CheckerPointerState:
                 "start_pressed_at": self.start_pressed_at,
                 "getting_ready_at": self.getting_ready_at,
                 "checking_system_started_at": self.checking_system_started_at,
+                "monitoring_started_at": self.monitoring_started_at,
                 "lifecycle_blocker": self.lifecycle_blocker or None,
                 "checker_last_heartbeat_at": self.checker_last_heartbeat_at,
                 "checker_dead_reason": self.checker_dead_reason or None,
@@ -1230,6 +1261,7 @@ class CheckerPointerState:
                 "checker_status": self.checker_status or None,
                 "checker_idle_reason": self.checker_idle_reason or None,
                 "checker_paused_reason": self.checker_paused_reason or None,
+                "monitoring_paused_reason": self.checker_paused_reason or None,
                 "header_action_source": self.header_action_source or None,
                 "header_action_label": self.header_action_label or None,
                 "last_state_transition_reason": self.last_state_transition_reason or None,

@@ -26,6 +26,20 @@ _table_state_phase: str = ""
 _table_state_source: str = "lifecycle"
 _ui_phase_version: int = 0
 _stale_ui_write_ignored_count: int = 0
+_start_pressed_at: float | None = None
+_preparing_entered_at: float | None = None
+_preparing_finished_at: float | None = None
+_preparing_command_started_at: float | None = None
+_preparing_command_finished_at: float | None = None
+_clearing_cache_entered_at: float | None = None
+_clearing_cache_finished_at: float | None = None
+_clear_cache_command_started_at: float | None = None
+_clear_cache_command_finished_at: float | None = None
+_getting_ready_entered_at: float | None = None
+_getting_ready_finished_at: float | None = None
+_launching_started_at: float | None = None
+_all_packages_dispatched_at: float | None = None
+_monitoring_started_at: float | None = None
 
 
 def reset_for_start(packages: list[str]) -> None:
@@ -37,6 +51,12 @@ def reset_for_start(packages: list[str]) -> None:
     global _blocked_force_stop_count, _last_blocked_force_stop
     global _prepare_started_at, _prepare_finished_at, _prepare_wait_reasons, _prepare_blockers
     global _table_state_phase, _table_state_source, _ui_phase_version, _stale_ui_write_ignored_count
+    global _start_pressed_at, _preparing_entered_at, _preparing_finished_at
+    global _preparing_command_started_at, _preparing_command_finished_at
+    global _clearing_cache_entered_at, _clearing_cache_finished_at
+    global _clear_cache_command_started_at, _clear_cache_command_finished_at
+    global _getting_ready_entered_at, _getting_ready_finished_at
+    global _launching_started_at, _all_packages_dispatched_at, _monitoring_started_at
     with _lock:
         _cache_clear_closed = False
         _launch_scheduled_packages = {str(p).strip() for p in packages if str(p).strip()}
@@ -57,6 +77,111 @@ def reset_for_start(packages: list[str]) -> None:
         _table_state_source = "lifecycle"
         _ui_phase_version = 0
         _stale_ui_write_ignored_count = 0
+        _start_pressed_at = None
+        _preparing_entered_at = None
+        _preparing_finished_at = None
+        _preparing_command_started_at = None
+        _preparing_command_finished_at = None
+        _clearing_cache_entered_at = None
+        _clearing_cache_finished_at = None
+        _clear_cache_command_started_at = None
+        _clear_cache_command_finished_at = None
+        _getting_ready_entered_at = None
+        _getting_ready_finished_at = None
+        _launching_started_at = None
+        _all_packages_dispatched_at = None
+        _monitoring_started_at = None
+
+
+def mark_start_pressed() -> None:
+    global _start_pressed_at
+    with _lock:
+        if _start_pressed_at is None:
+            _start_pressed_at = time.time()
+
+
+def mark_preparing_entered() -> None:
+    global _preparing_entered_at, _prepare_started_at
+    with _lock:
+        now = time.time()
+        if _preparing_entered_at is None:
+            _preparing_entered_at = now
+        if _prepare_started_at is None:
+            _prepare_started_at = now
+
+
+def mark_preparing_command_started() -> None:
+    global _preparing_command_started_at
+    with _lock:
+        if _preparing_command_started_at is None:
+            _preparing_command_started_at = time.time()
+
+
+def mark_preparing_command_finished() -> None:
+    global _preparing_command_finished_at, _preparing_finished_at, _prepare_finished_at
+    with _lock:
+        now = time.time()
+        if _preparing_command_finished_at is None:
+            _preparing_command_finished_at = now
+        if _preparing_finished_at is None:
+            _preparing_finished_at = now
+        if _prepare_finished_at is None:
+            _prepare_finished_at = now
+
+
+def mark_clearing_cache_entered() -> None:
+    global _clearing_cache_entered_at, _clear_cache_command_started_at
+    with _lock:
+        now = time.time()
+        if _clearing_cache_entered_at is None:
+            _clearing_cache_entered_at = now
+        if _clear_cache_command_started_at is None:
+            _clear_cache_command_started_at = now
+
+
+def mark_clearing_cache_finished() -> None:
+    global _clearing_cache_finished_at, _clear_cache_command_finished_at
+    with _lock:
+        now = time.time()
+        if _clearing_cache_finished_at is None:
+            _clearing_cache_finished_at = now
+        if _clear_cache_command_finished_at is None:
+            _clear_cache_command_finished_at = now
+
+
+def mark_getting_ready_entered() -> None:
+    global _getting_ready_entered_at
+    with _lock:
+        if _getting_ready_entered_at is None:
+            _getting_ready_entered_at = time.time()
+
+
+def mark_getting_ready_finished() -> None:
+    global _getting_ready_finished_at
+    with _lock:
+        if _getting_ready_finished_at is None:
+            _getting_ready_finished_at = time.time()
+
+
+def mark_launching_started() -> None:
+    global _launching_started_at
+    with _lock:
+        if _launching_started_at is None:
+            _launching_started_at = time.time()
+
+
+def mark_all_packages_dispatched() -> None:
+    global _all_packages_dispatched_at
+    with _lock:
+        if _all_packages_dispatched_at is None:
+            _all_packages_dispatched_at = time.time()
+
+
+def mark_monitoring_started() -> None:
+    global _monitoring_started_at
+    with _lock:
+        if _monitoring_started_at is None:
+            _monitoring_started_at = time.time()
 
 
 def mark_launch_scheduled(packages: list[str]) -> None:
@@ -189,17 +314,46 @@ def try_write_table_phase(phase: str, version: int, *, source: str = "lifecycle"
 
 def prepare_duration_ms() -> float | None:
     with _lock:
-        if _prepare_started_at is None or _prepare_finished_at is None:
+        start = _preparing_entered_at or _prepare_started_at
+        finish = _preparing_finished_at or _prepare_finished_at
+        if start is None or finish is None:
             return None
-        return round((_prepare_finished_at - _prepare_started_at) * 1000.0, 1)
+        return round((finish - start) * 1000.0, 1)
+
+
+def _phase_duration_ms(start: float | None, finish: float | None) -> float | None:
+    if start is None or finish is None:
+        return None
+    return round((finish - start) * 1000.0, 1)
 
 
 def probe_snapshot() -> dict[str, Any]:
     with _lock:
-        duration = None
-        if _prepare_started_at is not None and _prepare_finished_at is not None:
-            duration = round((_prepare_finished_at - _prepare_started_at) * 1000.0, 1)
+        prep_duration = _phase_duration_ms(
+            _preparing_entered_at or _prepare_started_at,
+            _preparing_finished_at or _prepare_finished_at,
+        )
+        cache_duration = _phase_duration_ms(
+            _clearing_cache_entered_at,
+            _clearing_cache_finished_at,
+        )
         return {
+            "start_pressed_at": _start_pressed_at,
+            "preparing_entered_at": _preparing_entered_at,
+            "preparing_finished_at": _preparing_finished_at,
+            "preparing_duration_ms": prep_duration,
+            "preparing_command_started_at": _preparing_command_started_at,
+            "preparing_command_finished_at": _preparing_command_finished_at,
+            "clearing_cache_entered_at": _clearing_cache_entered_at,
+            "clearing_cache_finished_at": _clearing_cache_finished_at,
+            "clearing_cache_duration_ms": cache_duration,
+            "clear_cache_command_started_at": _clear_cache_command_started_at,
+            "clear_cache_command_finished_at": _clear_cache_command_finished_at,
+            "getting_ready_entered_at": _getting_ready_entered_at,
+            "getting_ready_finished_at": _getting_ready_finished_at,
+            "launching_started_at": _launching_started_at,
+            "all_packages_dispatched_at": _all_packages_dispatched_at,
+            "monitoring_started_at": _monitoring_started_at,
             "cache_clear_closed": bool(_cache_clear_closed),
             "clear_cache_phase_exited_at": _clear_cache_phase_exited_at,
             "clear_cache_phase_exit_reason": _clear_cache_phase_exit_reason or None,
@@ -212,7 +366,7 @@ def probe_snapshot() -> dict[str, Any]:
             "last_blocked_force_stop": _last_blocked_force_stop or None,
             "prepare_started_at": _prepare_started_at,
             "prepare_finished_at": _prepare_finished_at,
-            "prepare_duration_ms": duration,
+            "prepare_duration_ms": prep_duration,
             "prepare_wait_reasons": list(_prepare_wait_reasons),
             "prepare_blockers": list(_prepare_blockers),
             "table_state_phase": _table_state_phase or None,
