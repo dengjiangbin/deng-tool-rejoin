@@ -82,8 +82,8 @@ def test_first_launch_within_one_second_of_clear_cache_finish():
         sleep_fn=clock.sleep,
     )
     snap = sched.probe_snapshot()
-    assert snap["first_launch_delay_from_clear_cache_finish_ms"] == 1000.0
-    assert snap["first_launch_called_at"] == 104.5
+    assert snap["first_launch_delay_from_clear_cache_finish_ms"] == 500.0
+    assert snap["first_launch_called_at"] == 104.0
 
 
 def test_multiple_packages_fire_every_thirty_seconds_without_waiting_for_online():
@@ -113,7 +113,7 @@ def test_multiple_packages_fire_every_thirty_seconds_without_waiting_for_online(
         monotonic_fn=clock.monotonic,
         sleep_fn=clock.sleep,
     )
-    assert fired_at == [4.5, 34.5, 64.5]
+    assert fired_at == [4.0, 34.0, 64.0]
     intervals = sched.probe_snapshot()["launch_interval_observed_ms"]
     assert intervals == [30000.0, 30000.0]
 

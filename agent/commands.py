@@ -6681,16 +6681,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         packages_sl = package_names_early
         _prep_root = android.detect_root()
 
-        try:
-            _PREPARE_DEADLINE_S = min(
-                3.0,
-                max(
-                    0.5,
-                    float(os.environ.get("DENG_REJOIN_PREPARE_DEADLINE_SEC", "3") or "3"),
-                ),
-            )
-        except ValueError:
-            _PREPARE_DEADLINE_S = 3.0
+        _PREPARE_DEADLINE_S = 3.0
 
         def _prep_commands() -> None:
             android.cleanup_kill_except_termux(
@@ -6715,6 +6706,11 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         _start_lifecycle_prep.mark_cleanup_kill_except_termux_finished()
         _start_lifecycle_prep.mark_preparing_command_finished()
+        if _checker_pointer is not None:
+            try:
+                _checker_pointer.get().heartbeat(reason="preparing_finished")
+            except Exception:  # noqa: BLE001
+                pass
 
         # Heavy cloud-phone memory sweep runs async — must not block Clear Cache.
         keep_alive = ["com.termux"] + packages_sl
@@ -6768,7 +6764,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         try:
             _FIRST_LAUNCH_DELAY_S = min(
-                0.0,
+                0.5,
                 max(
                     0.0,
                     float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "0") or "0"),
@@ -6834,21 +6830,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         _start_lifecycle.exit_clear_cache_phase(_cc_exit_reason)
         _start_lifecycle.mark_cache_clear_closed()
         _start_lifecycle.mark_launch_scheduled(package_names)
-
-        if _checker_pointer is not None:
-            try:
-                _checker_pointer.get().set_checker_idle_during_first_launch(
-                    reason="first_launch_scheduler_active"
-                )
-            except Exception:  # noqa: BLE001
-                pass
+        _start_lifecycle.flush_probe_checkpoint(_checker_pointer, _launch_sched)
 
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
         launch_attempted: dict[str, bool] = {}
-        _start_lifecycle.mark_launching_started()
-        _transition_lifecycle("LAUNCHING", "launch_packages")
-        _start_session.mark("package_launch_begin", package_count=len(entries))
 
         def _on_stagger_launch_sent(launched_pkg: str) -> None:
             sup = _supervisor_ref
@@ -6922,9 +6908,15 @@ def cmd_start(args: argparse.Namespace) -> int:
             phase[package] = "Launching"
             if _checker_pointer is not None:
                 try:
-                    _checker_pointer.get().mark_launch_requested(package)
+                    _ptr_bl = _checker_pointer.get()
+                    _ptr_bl.mark_launch_requested(package)
+                    _ptr_bl.mark_launch_command_sent(package)
                 except Exception:  # noqa: BLE001
                     pass
+            try:
+                _start_lifecycle.flush_probe_checkpoint(_checker_pointer, _launch_sched)
+            except Exception:  # noqa: BLE001
+                pass
             if sup is not None:
                 sup._set_lifecycle_status(package, _STATUS_LAUNCHING)
             _defer_render("", phase_version=_open_ver)
@@ -6957,6 +6949,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             launch_err[package] = ""
             _wait_ver = _bump_ui_phase("Waiting", source="post_launch")
             _defer_render("", phase_version=_wait_ver)
+            try:
+                _start_lifecycle.flush_probe_checkpoint(_checker_pointer, _launch_sched)
+            except Exception:  # noqa: BLE001
+                pass
             _start_log.info(
                 "[DENG_REJOIN_SCHEDULED_LAUNCH] package=%s index=%d/%d result=%s"
                 " anchor=%.3f fired_skew_ms=%s",
@@ -6975,6 +6971,20 @@ def cmd_start(args: argparse.Namespace) -> int:
         def _username_for_launch(index: int, package: str) -> str:
             entry = runtime_entry_by_pkg.get(package, entries[index])
             return _account_username_for_table(entry)
+
+        _first_pkg = package_names[0] if package_names else ""
+        _start_lifecycle.bootstrap_first_launch_after_cache(
+            _first_pkg,
+            checker_pointer=_checker_pointer,
+            launch_scheduler=_launch_sched,
+            interval_s=_FIRST_LAUNCH_INTERVAL_S,
+        )
+        if _first_pkg:
+            phase[_first_pkg] = "Launching"
+        _transition_lifecycle("LAUNCHING", "launch_packages")
+        _start_session.mark("package_launch_begin", package_count=len(entries))
+        _set_header_phase("Opening")
+        _render_phase("", phase_version=_ui_phase_version)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
@@ -7005,10 +7015,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_cfg_boot["start_session_id"] = _start_session_id
         _live_cfg_boot["screen_mode"] = str(cfg.get("screen_mode") or _start_screen_mode)
         _boot_status = {e["package"]: _STATUS_READY for e in entries}
-        _supervisor = WatchdogSupervisor(
-            runtime_entries, _live_cfg_boot, initial_status=_boot_status
-        )
-        _supervisor_ref = _supervisor
 
         _sched_thread: threading.Thread | None = None
         if _FIRST_LAUNCH_MODE == "interval":
@@ -7019,6 +7025,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 stop_event=None,
                 username_for_index=_username_for_launch,
             )
+            _start_lifecycle.flush_probe_checkpoint(_checker_pointer, _launch_sched)
             _start_log.info(
                 "[DENG_REJOIN_LAUNCH_SCHEDULER_STARTED] anchor_finish=%.3f first_due=%.3f"
                 " post_clear_delay_cap_sec=%.1f",
@@ -7028,23 +7035,32 @@ def cmd_start(args: argparse.Namespace) -> int:
             )
 
         def _supervisor_daemon_bg() -> None:
+            nonlocal _supervisor_ref
+            try:
+                _sup = WatchdogSupervisor(
+                    runtime_entries, _live_cfg_boot, initial_status=_boot_status
+                )
+                _supervisor_ref = _sup
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("start: supervisor init error (non-fatal): %s", _exc)
+                return
             try:
                 runtime_entries_boot = _ensure_presence_auth_for_entries(
                     runtime_entries, cfg
                 )
                 if runtime_entries_boot is not runtime_entries:
-                    _supervisor.entries = runtime_entries_boot
+                    _sup.entries = runtime_entries_boot
             except Exception as _exc:  # noqa: BLE001
                 _start_log.debug("start: presence auth error (non-fatal): %s", _exc)
             try:
                 from . import monitor_autostart as _mon_auto_boot
 
-                _mon_auto_boot.set_active_supervisor(_supervisor)
+                _mon_auto_boot.set_active_supervisor(_sup)
                 _try_autostart_monitor_bridge(cfg)
             except Exception:  # noqa: BLE001
                 pass
             try:
-                _supervisor.start_daemon(
+                _sup.start_daemon(
                     display_interval=WatchdogSupervisor.DASHBOARD_RENDER_INTERVAL_SECONDS,
                     render_callback=None,
                 )

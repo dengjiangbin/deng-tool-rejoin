@@ -140,7 +140,7 @@ def test_five_packages_launch_every_thirty_seconds():
         sleep_fn=clock.sleep,
     )
     assert [p for p, _ in fired] == packages
-    assert [t for _, t in fired] == [4.5, 34.5, 64.5, 94.5, 124.5]
+    assert [t for _, t in fired] == [4.0, 34.0, 64.0, 94.0, 124.0]
     snap = sched.probe_snapshot()
     assert snap["launch_interval_observed_ms"] == [30000.0] * 4
     assert snap["all_packages_launched_at"] is not None

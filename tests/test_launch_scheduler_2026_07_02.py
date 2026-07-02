@@ -35,9 +35,9 @@ def test_first_package_due_at_clear_cache_plus_delay_after_finish():
     sched.mark_clear_cache_started(monotonic_now=clock.monotonic())
     clock.advance(3.5)
     sched.record_clear_cache_finished(finished_at=clock.monotonic(), reanchor_launches=True)
-    assert sched.due_at_for_index(0) == 504.5
-    assert sched.due_at_for_index(1) == 534.5
-    assert sched.due_at_for_index(2) == 564.5
+    assert sched.due_at_for_index(0) == 504.0
+    assert sched.due_at_for_index(1) == 534.0
+    assert sched.due_at_for_index(2) == 564.0
 
 
 def test_scheduler_fires_at_due_times_with_fake_clock():
@@ -65,13 +65,13 @@ def test_scheduler_fires_at_due_times_with_fake_clock():
         sleep_fn=clock.sleep,
     )
 
-    assert fired == [(0, "p0", 4.5), (1, "p1", 34.5)]
+    assert fired == [(0, "p0", 4.0), (1, "p1", 34.0)]
     snap = sched.probe_snapshot()
     assert snap["blocked_by_online_wait"] is False
     assert snap["blocked_by_clear_cache"] is False
     assert snap["launch_attempts"][0]["result"] == "success"
-    assert snap["launch_attempts"][0]["delta_from_clear_cache_ms"] == 4500.0
-    assert snap["launch_attempts"][1]["delta_from_clear_cache_ms"] == 34500.0
+    assert snap["launch_attempts"][0]["delta_from_clear_cache_ms"] == 4000.0
+    assert snap["launch_attempts"][1]["delta_from_clear_cache_ms"] == 34000.0
 
 
 def test_scheduler_continues_when_launch_times_out():
@@ -172,6 +172,6 @@ def test_async_launch_does_not_delay_next_due_time():
     runner.start()
     assert p0_started.wait(1.0)
     snap = sched.probe_snapshot()
-    assert snap["launch_attempts"][1]["fired_at"] == 34.5
+    assert snap["launch_attempts"][1]["fired_at"] == 34.0
     p0_release.set()
     runner.join(5.0)

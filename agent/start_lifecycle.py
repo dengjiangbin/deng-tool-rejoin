@@ -215,6 +215,65 @@ def mark_launching_started() -> None:
             _launching_started_at = time.time()
 
 
+def flush_probe_checkpoint(
+    checker_pointer: Any | None = None,
+    launch_scheduler: Any | None = None,
+) -> None:
+    """Persist lifecycle + scheduler snapshots for cross-process probe reads."""
+    if checker_pointer is not None:
+        try:
+            ptr = checker_pointer.get()
+            ptr.heartbeat(reason="start_lifecycle_checkpoint")
+            ptr.checker_loop_alive = True
+            ptr.checker_dead_reason = ""
+            ptr.touch_persist()
+        except Exception:  # noqa: BLE001
+            pass
+    if launch_scheduler is not None:
+        try:
+            launch_scheduler.write_state_file(force=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def bootstrap_first_launch_after_cache(
+    first_package: str,
+    *,
+    checker_pointer: Any | None = None,
+    launch_scheduler: Any | None = None,
+    interval_s: float = 30.0,
+) -> None:
+    """Record first-launch intent immediately after clear-cache phase exits."""
+    mark_first_launch_requested()
+    mark_launching_started()
+    mark_header_phase("Opening")
+    if checker_pointer is not None:
+        try:
+            ptr = checker_pointer.get()
+            ptr.heartbeat(reason="first_launch_bootstrap")
+            ptr.checker_loop_alive = True
+            ptr.checker_dead_reason = ""
+            ptr.set_checker_idle_during_first_launch(
+                reason="first_launch_scheduler_active"
+            )
+            next_at = None
+            if launch_scheduler is not None:
+                try:
+                    next_at = launch_scheduler.due_at_for_index(1)
+                except Exception:  # noqa: BLE001
+                    next_at = None
+            ptr.begin_opening(
+                str(first_package or ""),
+                next_package_at=next_at,
+            )
+            ptr.mark_launch_requested(str(first_package or ""))
+            ptr.mark_launch_command_sent(str(first_package or ""))
+            ptr.note_launch_interval(float(interval_s))
+        except Exception:  # noqa: BLE001
+            pass
+    flush_probe_checkpoint(checker_pointer, launch_scheduler)
+
+
 def mark_all_packages_dispatched() -> None:
     global _all_packages_dispatched_at
     with _lock:
@@ -395,9 +454,10 @@ def probe_snapshot() -> dict[str, Any]:
             _getting_ready_finished_at,
         )
         first_launch_delay_after_clear_cache_ms = None
-        if _clearing_cache_finished_at is not None and _first_launch_requested_at is not None:
+        cache_exit = _clear_cache_phase_exited_at or _clearing_cache_finished_at
+        if cache_exit is not None and _first_launch_requested_at is not None:
             first_launch_delay_after_clear_cache_ms = round(
-                (_first_launch_requested_at - _clearing_cache_finished_at) * 1000.0,
+                (_first_launch_requested_at - cache_exit) * 1000.0,
                 1,
             )
         return {

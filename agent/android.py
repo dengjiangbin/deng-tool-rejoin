@@ -3010,6 +3010,9 @@ def cleanup_kill_except_termux(
 
     Used during Start Preparing with a hard outer deadline (3s).  Never raises.
     """
+    import time as _time
+
+    deadline = _time.monotonic() + 2.5
     keep: set[str] = {
         "com.termux",
         "com.termux.boot",
@@ -3034,25 +3037,29 @@ def cleanup_kill_except_termux(
     except Exception as exc:  # noqa: BLE001
         result["errors"].append(f"kill-all:{exc}"[:120])
 
-    root_info = detect_root()
-    stopped_roblox: list[str] = []
-    try:
-        stopped_roblox = force_stop_packages_except([], detection_hints)
-    except Exception as exc:  # noqa: BLE001
-        result["errors"].append(f"roblox_stop:{exc}"[:120])
-    result["force_stopped"].extend(stopped_roblox)
+    if _time.monotonic() >= deadline:
+        return result
 
-    res = run_android_command(["pm", "list", "packages", "-3"], timeout=8, prefer_root=True)
-    third_party = _parse_packages(res.stdout or "") if res.ok else []
-    for pkg in third_party:
-        if _is_protected_system_or_launcher_package(pkg, keep):
+    root_info = detect_root()
+    for pkg in list(extra_keep or []):
+        text = str(pkg or "").strip()
+        if not text or text in keep:
             continue
         try:
-            fs = force_stop_package(pkg, root_info)
+            fs = force_stop_package(text, root_info)
             if fs.ok:
-                result["force_stopped"].append(pkg)
+                result["force_stopped"].append(text)
         except Exception as exc:  # noqa: BLE001
-            result["errors"].append(f"{pkg}:{exc}"[:80])
+            result["errors"].append(f"{text}:{exc}"[:80])
+        if _time.monotonic() >= deadline:
+            return result
+
+    try:
+        stopped_roblox = force_stop_packages_except(list(extra_keep or []), detection_hints)
+        result["force_stopped"].extend(stopped_roblox)
+    except Exception as exc:  # noqa: BLE001
+        result["errors"].append(f"roblox_stop:{exc}"[:120])
+
     result["force_stopped"] = sorted(set(result["force_stopped"]))
     return result
 

@@ -116,6 +116,42 @@ def test_launch_before_dispatch_sets_launching():
     assert ptr.state_pointer_text == "Opening.."
 
 
+def test_launch_command_sent_records_dispatch_without_waiting():
+    ptr = CheckerPointerState()
+    ptr.mark_launch_command_sent("p0")
+    row = ptr.probe_snapshot()["per_package"]["p0"]
+    assert row["launch_requested_at"] is not None
+    assert row["launch_dispatched_at"] is not None
+    assert row["state"] == "Launching"
+
+
+def test_bootstrap_first_launch_after_cache_sets_probe_fields():
+    start_lifecycle.reset_for_start(["p0"])
+    start_lifecycle.mark_clearing_cache_entered()
+    start_lifecycle.exit_clear_cache_phase("done")
+    ptr = CheckerPointerState()
+    sched = LaunchScheduler(session_id="s-boot", packages=["p0"])
+
+    class _PtrHolder:
+        def get(self):
+            return ptr
+
+    start_lifecycle.bootstrap_first_launch_after_cache(
+        "p0",
+        checker_pointer=_PtrHolder(),
+        launch_scheduler=sched,
+        interval_s=30.0,
+    )
+    snap = start_lifecycle.probe_snapshot()
+    assert snap["first_launch_requested_at"] is not None
+    assert snap["launching_started_at"] is not None
+    assert snap["header_phase"] == "Opening"
+    pkg = ptr.probe_snapshot()["per_package"]["p0"]
+    assert pkg["launch_requested_at"] is not None
+    assert pkg["launch_dispatched_at"] is not None
+    assert "p0" in ptr.probe_snapshot()["first_launch_started_packages"]
+
+
 def test_launch_dispatched_enters_waiting_immediately():
     ptr = CheckerPointerState()
     ptr.mark_launch_dispatched("p0", reason="launch_dispatched_waiting_for_monitoring")

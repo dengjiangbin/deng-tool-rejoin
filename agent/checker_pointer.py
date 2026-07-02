@@ -911,6 +911,27 @@ class CheckerPointerState:
             row.display_state = "Launching"
             self._persist()
 
+    def mark_launch_command_sent(
+        self, package: str, *, reason: str = "launch_command_dispatched"
+    ) -> None:
+        """Record launch dispatch timestamps while package row stays Launching."""
+        pkg = str(package or "").strip()
+        if not pkg:
+            return
+        now = time.time()
+        with self._lock:
+            row = self._pkg(pkg)
+            if row.launch_requested_at is None:
+                row.launch_requested_at = now
+            if row.launch_dispatched_at is None:
+                row.launch_dispatched_at = now
+            row.display_state = "Launching"
+            row.last_state_transition_reason = str(reason or "")[:200]
+            self.last_state_transition = f"{pkg}:launch_command_sent"
+            if pkg and pkg not in self.first_launch_started_packages:
+                self.first_launch_started_packages.append(pkg)
+            self._persist(force=True)
+
     def mark_launch_dispatched(
         self, package: str, *, reason: str = "launch_dispatched_waiting_for_checker"
     ) -> None:
