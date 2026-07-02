@@ -62,7 +62,7 @@ class CheckerDeps:
     pointer: checker_pointer.CheckerPointerState
     on_render: Callable[[], None] | None = None
 
-    first_launch_interval_s: float = 60.0
+    first_launch_interval_s: float = 30.0
     focus_window_s: float = 10.0
     focus_poll_s: float = 0.25
     no_heartbeat_limit: int = 7

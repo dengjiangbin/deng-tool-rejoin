@@ -62,7 +62,7 @@ def _make_deps(packages, clock, **overrides):
         dead_evidence=overrides.get("dead_evidence", lambda p: None),
         clear_cache=clear_cache,
         pointer=overrides.get("pointer") or CheckerPointerState(),
-        first_launch_interval_s=overrides.get("first_launch_interval_s", 60.0),
+        first_launch_interval_s=overrides.get("first_launch_interval_s", 30.0),
         focus_window_s=overrides.get("focus_window_s", 10.0),
         focus_poll_s=overrides.get("focus_poll_s", 0.5),
         no_heartbeat_limit=overrides.get("no_heartbeat_limit", 7),
@@ -74,7 +74,23 @@ def _make_deps(packages, clock, **overrides):
 
 
 # ── First launch interval ─────────────────────────────────────────────
-def test_first_launch_second_package_after_60s_without_online():
+def test_checker_deps_default_interval_is_30s():
+    # Requirement 7: first-time launch interval changed 60s → 30s.
+    deps = CheckerDeps(
+        packages=["p1"],
+        clock=lambda: 0.0,
+        sleep=lambda s: None,
+        should_stop=lambda: False,
+        launch=lambda p: True,
+        online_evidence=lambda p: None,
+        dead_evidence=lambda p: None,
+        clear_cache=lambda p: None,
+        pointer=CheckerPointerState(),
+    )
+    assert deps.first_launch_interval_s == 30.0
+
+
+def test_first_launch_second_package_after_30s_without_online():
     clock = VirtualClock()
     deps = _make_deps(["p1", "p2"], clock)
     checker = FocusedRoundRobinChecker(deps)
@@ -83,7 +99,8 @@ def test_first_launch_second_package_after_60s_without_online():
     launches = deps._launches  # type: ignore[attr-defined]
     assert [p for p, _ in launches] == ["p1", "p2"]
     assert launches[0][1] == pytest.approx(0.0, abs=1.0)
-    assert launches[1][1] == pytest.approx(60.0, abs=1.0)
+    # p2 launches 30s after p1 even though p1 never became Online.
+    assert launches[1][1] == pytest.approx(30.0, abs=1.0)
 
 
 def test_first_launch_all_ok_starts_checking_immediately_after_last():
@@ -91,11 +108,11 @@ def test_first_launch_all_ok_starts_checking_immediately_after_last():
     deps = _make_deps(["p1", "p2"], clock)
     checker = FocusedRoundRobinChecker(deps)
     checker.run_first_launch()
-    # p1 at 0, wait 60, p2 at 60; all ok → no extra 60s wait.
-    assert clock.now() == pytest.approx(60.0, abs=1.0)
+    # p1 at 0, wait 30, p2 at 30; all ok → no extra 30s wait.
+    assert clock.now() == pytest.approx(30.0, abs=1.0)
 
 
-def test_first_launch_checking_starts_60s_after_last_supposed_launch_on_crash():
+def test_first_launch_checking_starts_30s_after_last_supposed_launch_on_crash():
     clock = VirtualClock()
 
     def launch_result(pkg):
@@ -104,8 +121,8 @@ def test_first_launch_checking_starts_60s_after_last_supposed_launch_on_crash():
     deps = _make_deps(["p1", "p2"], clock, launch_result=launch_result)
     checker = FocusedRoundRobinChecker(deps)
     checker.run_first_launch()
-    # p1 at 0, wait 60, p2 (crash) at 60, then wait 60 more → ~120.
-    assert clock.now() == pytest.approx(120.0, abs=1.0)
+    # p1 at 0, wait 30, p2 (crash) at 30, then wait 30 more → ~60.
+    assert clock.now() == pytest.approx(60.0, abs=1.0)
 
 
 def test_first_launch_duplicate_start_guard():
@@ -357,6 +374,122 @@ def test_table_pointer_timer_text():
     assert any(line.strip().endswith("3s │") or " 3s " in line for line in out.splitlines())
 
 
+def test_getting_ready_pointer_appears_before_opening():
+    # Requirement 3: after 3.Start the FIRST visible pointer text must be
+    # "Getting Ready..", and only then may it become "Opening..".
+    p = CheckerPointerState()
+    seen: list[str] = []
+    p.begin_getting_ready(["p1", "p2"])
+    seen.append(p.pointer_text())
+    p.begin_opening("p1")
+    seen.append(p.pointer_text())
+    assert seen[0] == checker_pointer.POINTER_GETTING_READY
+    assert seen[1] == checker_pointer.POINTER_OPENING
+    assert seen.index(checker_pointer.POINTER_GETTING_READY) < seen.index(
+        checker_pointer.POINTER_OPENING
+    )
+
+
+def test_header_row_is_centered_and_yellow_bold():
+    from agent import commands
+
+    rows = [(1, "com.moons.litesc", "user1", "Online")]
+    out = commands.build_start_table(rows, use_color=True, pointer_text="Checking..")
+    header_line = next(ln for ln in out.splitlines() if "State" in ln and "Package" in ln)
+    # Yellow-bold ANSI wraps each header label.
+    assert commands._ANSI_YELLOW in header_line
+    # Centered: the "State" label has leading padding (not flush-left in its cell).
+    plain = commands._ANSI_RE.sub("", header_line)
+    state_cell = plain.split("│")[4]  # #, Package, Username, State, (trailing)
+    assert state_cell != state_cell.lstrip(), "State header should be centered, not left-biased"
+
+
+def test_pointer_second_row_is_bordered_box():
+    from agent import commands
+
+    rows = [(1, "com.moons.litesc", "user1", "Online")]
+    out = commands.build_start_table(rows, use_color=False, pointer_text="Checking..")
+    assert "[ Checking.. ]" in out
+
+
+def test_pointer_checking_is_pink():
+    from agent import commands
+
+    rows = [(1, "com.moons.litesc", "user1", "Online")]
+    out = commands.build_start_table(rows, use_color=True, pointer_text="Checking..")
+    box_line = next(ln for ln in out.splitlines() if "Checking.." in ln)
+    assert commands._ANSI_PINK in box_line
+
+
+def test_checking_status_colorized_pink():
+    from agent import commands
+
+    colored = commands._colorize_status("Checking", use_color=True)
+    assert commands._ANSI_PINK in colored
+
+
+def test_only_active_focus_package_marked_checking():
+    # Requirement 4: only the focused package's row shows "Checking"; the
+    # previously focused package reverts to its last real state.
+    p = CheckerPointerState()
+    p.begin_getting_ready(["p1", "p2"])
+    p.begin_focus("p1", 1, now=0.0)
+    assert p.display_state("p1") == "Checking"
+    p.set_real_state("p1", "Online")
+    p.begin_focus("p2", 2, now=1.0)
+    assert p.display_state("p2") == "Checking"
+    # p1 is no longer "Checking" — shows its resolved real state.
+    assert p.display_state("p1") == "Online"
+    # Exactly one package is the active focus at a time.
+    assert p.active_focus_package == "p2"
+
+
+def test_active_row_changes_from_checking_to_result():
+    p = CheckerPointerState()
+    p.begin_focus("p1", 1, now=0.0)
+    assert p.display_state("p1") == "Checking"
+    p.set_real_state("p1", "No Heartbeat")
+    assert p.display_state("p1") == "No Heartbeat"
+    p.mark_dead_detected("p1", "crash", "logcat", "FATAL")
+    assert p.display_state("p1") == "Dead"
+
+
+def test_state_file_roundtrip_reflects_running_checker(tmp_path, monkeypatch):
+    # Root-cause fix: the probe process reads the persisted state file so it
+    # never reports "idle" while a Start session is live in another process.
+    import agent.checker_pointer as cp
+
+    state_file = tmp_path / "focused-checker-state.json"
+    monkeypatch.setattr(cp, "_state_file_path", lambda: state_file)
+
+    p = cp.CheckerPointerState()
+    p.enable_persistence()
+    p.set_loop_health(checker_loop_alive=True, logcat_reader_alive=True)
+    p.begin_getting_ready(["p1"])
+    p.begin_focus("p1", 1, now=100.0)
+
+    disk = cp.read_state_file()
+    assert disk is not None
+    assert disk["checker_loop_alive"] is True
+    assert disk["active_focus_package"] == "p1"
+    assert disk["checker_mode"] == cp.MODE_CHECKING
+    assert disk["_source"] == "state_file"
+
+
+def test_read_state_file_rejects_stale(tmp_path, monkeypatch):
+    import json as _json
+    import agent.checker_pointer as cp
+
+    state_file = tmp_path / "focused-checker-state.json"
+    state_file.write_text(
+        _json.dumps({"written_at": 0.0, "snapshot": {"checker_mode": "checking"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cp, "_state_file_path", lambda: state_file)
+    # written_at=0 is ancient → treated as stale and ignored.
+    assert cp.read_state_file(max_age_s=20.0) is None
+
+
 def test_probe_snapshot_has_all_required_fields():
     p = CheckerPointerState()
     p.begin_getting_ready(["p1"])
@@ -387,5 +520,35 @@ def test_probe_snapshot_has_all_required_fields():
         "per_package",
     ):
         assert key in snap, key
-    assert snap["per_package"]["p1"]["consecutive_no_heartbeat_focus_count"] == 1
+    pp = snap["per_package"]["p1"]
+    assert pp["consecutive_no_heartbeat_focus_count"] == 1
+    # New per-package probe fields (requirement: display_state / last_real_state).
+    assert "display_state" in pp
+    assert "last_real_state" in pp
+    assert pp["display_state"] == "Checking"  # p1 is the active focus
     assert snap["focus_elapsed_s"] == pytest.approx(5.0, abs=0.01)
+
+
+def test_force_close_race_state_file_reports_enabled(tmp_path, monkeypatch):
+    # Root-cause fix for p-aeafb00ced: force_close_race.enabled must be true
+    # during an active session even when read from a separate probe process.
+    import json as _json
+    import agent.force_close_race as fcr
+
+    state_file = tmp_path / "force-close-detector-state.json"
+    monkeypatch.setattr(fcr, "RACE_STATE_PATH", state_file)
+    state_file.write_text(
+        _json.dumps(
+            {
+                "written_at": __import__("time").time(),
+                "pid": 4321,
+                "snapshot": {"enabled": True, "packages": {"p1": {"status": "tracking"}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(fcr, "get_active_force_close_race_detector", lambda: None)
+    snap = fcr.probe_force_close_race_snapshot()
+    assert snap["enabled"] is True
+    assert snap["source"] == "state_file"
+    assert "p1" in snap["packages"]

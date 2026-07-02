@@ -147,6 +147,7 @@ COMMANDS = {
 _ANSI_GREEN   = "\033[1;92m"   # bold bright green
 _ANSI_YELLOW  = "\033[1;93m"   # bold bright yellow
 _ANSI_ORANGE  = "\033[1;38;5;208m"  # bold orange (No Heartbeat — matches APK Warning)
+_ANSI_PINK    = "\033[1;38;5;213m"  # bold pink (active "Checking" focus marker)
 _ANSI_RED     = "\033[1;91m"   # bold bright red
 _ANSI_CYAN    = "\033[1;96m"   # bold bright cyan
 _ANSI_WHITE   = "\033[1;97m"   # bold bright white
@@ -5052,7 +5053,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Layout":       _ANSI_CYAN,   # internal only (not shown in public UI)
         "Docking":      _ANSI_CYAN,   # internal only
         "Waiting":      _ANSI_CYAN,
-        "Checking":     _ANSI_YELLOW,
+        "Checking":     _ANSI_PINK,   # active focused package (requirement 5)
         "Resizing":     _ANSI_CYAN,
         "Optimizing":   _ANSI_CYAN,
         "Reconnecting": _ANSI_CYAN,
@@ -5107,6 +5108,40 @@ def _checker_pointer_text() -> str | None:
         return None
 
 
+def _checker_active_focus_package() -> str | None:
+    """Package currently being focus-checked, or None.
+
+    Used so the live table can render ``Checking`` in that one package's row
+    (and only that row) while the focused round-robin checker is running.
+    """
+    try:
+        from . import checker_pointer as _cp
+
+        ptr = _cp.get()
+        with ptr._lock:  # noqa: SLF001 — same-process read of authoritative state
+            if ptr.checker_mode != _cp.MODE_CHECKING:
+                return None
+            return ptr.active_focus_package or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _pointer_color(text: str) -> str:
+    """ANSI colour for the State pointer box based on its content.
+
+    ``Checking..`` and the ``Ns`` focus timer are PINK (requirement 5);
+    dead/recovery is red, Online is green, everything else yellow.
+    """
+    t = str(text or "").strip()
+    if t == "Online":
+        return _ANSI_GREEN
+    if t in ("Dead Detected", "Start Recovery"):
+        return _ANSI_RED
+    if t == "Checking.." or (t.endswith("s") and t[:-1].isdigit()):
+        return _ANSI_PINK
+    return _ANSI_YELLOW
+
+
 def build_start_table(
     rows: list[tuple], *, use_color: bool = False, pointer_text: str | None = None
 ) -> str:
@@ -5151,19 +5186,23 @@ def build_start_table(
         for i in range(len(str_rows))
     ]
 
-    # Global checker pointer (State column, row 2).  Cap to the State column
-    # budget and fold its width into the State column so it never overflows.
+    # Global checker pointer (State column, row 2), rendered as a bordered
+    # box "[ Checking.. ]".  Cap to the State budget (leaving room for the
+    # "[ " + " ]" border) and fold its width into the State column.
     pointer_cell = ""
+    pointer_box_plain = ""
     if pointer_text:
-        pointer_cell = _cap_plain_cell(str(pointer_text), col_caps[len(headers) - 1])
+        _state_budget = max(3, col_caps[len(headers) - 1] - 4)
+        pointer_cell = _cap_plain_cell(str(pointer_text), _state_budget)
+        pointer_box_plain = f"[ {pointer_cell} ]"
 
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
         for i in range(len(headers))
     ]
-    if pointer_cell:
+    if pointer_box_plain:
         state_idx = len(headers) - 1
-        widths[state_idx] = max(widths[state_idx], _visible_len(pointer_cell))
+        widths[state_idx] = max(widths[state_idx], _visible_len(pointer_box_plain))
 
     def _bold(text: str) -> str:
         if not use_color or not text:
@@ -5184,13 +5223,25 @@ def build_start_table(
         pad = w - _visible_len(raw if raw is not None else s)
         return f" {s}{' ' * max(0, pad)} "
 
+    def _center_cell(s: str, w: int, raw: str | None = None) -> str:
+        # Horizontally centre ``raw`` within ``w`` (extra space goes right).
+        pad = w - _visible_len(raw if raw is not None else s)
+        pad = max(0, pad)
+        left = pad // 2
+        right = pad - left
+        return f" {' ' * left}{s}{' ' * right} "
+
     def _hline(left: str, mid: str, right: str) -> str:
         return left + mid.join("─" * (w + 2) for w in widths) + right
 
+    def _header_cell(text: str, w: int) -> str:
+        # Centred + YELLOW BOLD header (requirement 1).
+        colored = f"{_ANSI_YELLOW}{text}{_ANSI_RESET}" if (use_color and text) else text
+        return _center_cell(colored, w, text)
+
     def _header_row(cells: tuple[str, ...]) -> str:
         return "│" + "│".join(
-            _cell(_bold(str(cells[i])), widths[i], str(cells[i]))
-            for i in range(len(widths))
+            _header_cell(str(cells[i]), widths[i]) for i in range(len(widths))
         ) + "│"
 
     def _data_row(colored: tuple[str, ...], raw: tuple[str, ...]) -> str:
@@ -5198,19 +5249,22 @@ def build_start_table(
         return "│" + "│".join(parts) + "│"
 
     def _pointer_header_row() -> str:
-        # Second header row: blank for all columns except State so the other
-        # columns visually merge across both header rows.
-        cells = ["" for _ in range(len(widths))]
+        # Second header row: a bordered pointer box under State only; every
+        # other column stays blank so it visually merges across both rows.
         state_idx = len(headers) - 1
-        cells[state_idx] = _colorize_status(pointer_cell, use_color=use_color)
-        parts = [
-            _cell(cells[i], widths[i], "" if i != state_idx else pointer_cell)
-            for i in range(len(widths))
-        ]
+        box_colored = pointer_box_plain
+        if use_color and pointer_box_plain:
+            box_colored = f"{_pointer_color(pointer_cell)}{pointer_box_plain}{_ANSI_RESET}"
+        parts = []
+        for i in range(len(widths)):
+            if i == state_idx:
+                parts.append(_center_cell(box_colored, widths[i], pointer_box_plain))
+            else:
+                parts.append(_cell("", widths[i], ""))
         return "│" + "│".join(parts) + "│"
 
     lines = [_hline("┌", "┬", "┐"), _header_row(headers)]
-    if pointer_cell:
+    if pointer_box_plain:
         lines.append(_pointer_header_row())
     lines += [
         _hline("├", "┼", "┤"),
@@ -6551,10 +6605,21 @@ def cmd_start(args: argparse.Namespace) -> int:
         ).strip().lower()
         try:
             _FIRST_LAUNCH_INTERVAL_S = float(
-                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_INTERVAL_SEC", "60") or "60"
+                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_INTERVAL_SEC", "30") or "30"
             )
         except ValueError:
-            _FIRST_LAUNCH_INTERVAL_S = 60.0
+            _FIRST_LAUNCH_INTERVAL_S = 30.0
+
+        # How long the "Getting Ready.." pointer stays visible before the first
+        # package flips to "Opening.." (requirement 3).  Kept short so it never
+        # meaningfully delays the launch sequence.
+        try:
+            _GETTING_READY_DWELL_S = max(
+                0.0,
+                float(os.environ.get("DENG_REJOIN_GETTING_READY_DWELL_SEC", "1.5") or "1.5"),
+            )
+        except ValueError:
+            _GETTING_READY_DWELL_S = 1.5
 
         try:
             from . import checker_pointer as _checker_pointer
@@ -6685,7 +6750,20 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         if _checker_pointer is not None and _FIRST_LAUNCH_MODE == "interval":
             try:
-                _checker_pointer.get().begin_getting_ready([e["package"] for e in entries])
+                _ptr0 = _checker_pointer.get()
+                # Persist from this (Start) process so the separate dev-probe
+                # process sees the live lifecycle, not an idle singleton.
+                _ptr0.enable_persistence()
+                _ptr0.begin_getting_ready([e["package"] for e in entries])
+                # Render + a short visible dwell so "Getting Ready.." is shown
+                # to the user BEFORE the first package flips to "Opening.."
+                # (requirement 3).  Skipped if Start was already asked to stop.
+                _render_phase()
+                _gr_deadline = time.monotonic() + _GETTING_READY_DWELL_S
+                while time.monotonic() < _gr_deadline:
+                    if getattr(_supervisor, "stop_event", None) is not None and _supervisor.stop_event.is_set():
+                        break
+                    time.sleep(0.2)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -7020,6 +7098,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 setattr(_live_dashboard, "_usage_cache", _usage_cache)
 
             _metric_states = {"Online", "In Lobby", "No Heartbeat"}
+            _active_focus_pkg = _checker_active_focus_package()
 
             def _get_runtime(pkg: str) -> str:
                 raw_state = _live_map.get(pkg, "Unknown")
@@ -7059,6 +7138,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                 return label
 
             def _display_state(pkg: str) -> str:
+                # The active focused package shows literal "Checking" (pink);
+                # only ever one row at a time (requirement 4).
+                if pkg == _active_focus_pkg:
+                    return "Checking"
                 raw_state = str(_live_map.get(pkg, "") or "").strip()
                 if not raw_state or raw_state == "Unknown":
                     return "Checking..."

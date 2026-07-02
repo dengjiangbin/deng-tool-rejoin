@@ -4676,6 +4676,7 @@ class WatchdogSupervisor:
                 if ptr is not None:
                     ptr.set_online_evidence(pkg, online[0], online[1])
                     ptr.reset_no_heartbeat(pkg)
+                    ptr.set_real_state(pkg, "Online")
                     from . import checker_pointer as _cp
 
                     ptr.set_pointer_text(_cp.POINTER_ONLINE)
@@ -4695,6 +4696,7 @@ class WatchdogSupervisor:
 
         # Window completed without Online / Dead → count a no-heartbeat window.
         if ptr is not None:
+            ptr.set_real_state(pkg, "No Heartbeat")
             count = ptr.increment_no_heartbeat(pkg)
             if count >= self.NO_HEARTBEAT_FOCUS_LIMIT and not ptr.recovery_in_progress:
                 try:
@@ -4793,9 +4795,20 @@ class WatchdogSupervisor:
             if _ptr is not None:
                 from . import checker_pointer as _cp
 
+                # Opt-in cross-process persistence so the separate dev-probe
+                # process can see this live checker instead of an idle
+                # singleton (root cause of p-aeafb00ced showing idle).
+                try:
+                    _ptr.enable_persistence()
+                except Exception:  # noqa: BLE001
+                    pass
                 _ptr.set_mode(_cp.MODE_CHECKING, _cp.POINTER_CHECKING)
                 _ptr.set_loop_health(
-                    checker_loop_alive=True, duplicate_loop_guard_status="ok"
+                    checker_loop_alive=True,
+                    duplicate_loop_guard_status="ok",
+                    logcat_reader_alive=bool(
+                        getattr(self._rjn_monitor, "_logcat_stream_alive", False)
+                    ),
                 )
 
         while not self.stop_event.is_set():

@@ -19,6 +19,13 @@ from typing import Any, Callable
 from .constants import DATA_DIR
 
 RACE_TRACE_PATH = DATA_DIR / "force-close-detector-race.jsonl"
+# Cross-process mirror of the live detector snapshot: the watchdog process
+# owns the detector, but the dev-probe runs separately and would otherwise
+# always report enabled=false / session_inactive.  The detector writes this
+# small file while a session is active and the probe reads it when fresh.
+RACE_STATE_PATH = DATA_DIR / "force-close-detector-state.json"
+RACE_STATE_MAX_AGE_SECONDS = 20.0
+RACE_STATE_WRITE_MIN_INTERVAL_SECONDS = 1.0
 MAX_EVENTS_PER_PACKAGE = 200
 PROCESS_POLL_INTERVAL_SECONDS = float(
     os.environ.get("DENG_REJOIN_FORCE_CLOSE_RACE_POLL_SEC", "0.5") or "0.5"
@@ -133,6 +140,7 @@ class ForceCloseRaceDetector:
         self._fatal_block_pkg: str | None = None
         self._fatal_block_pid: str | None = None
         self._fatal_block_lines: list[str] = []
+        self._last_state_write_at = 0.0
 
     def start(self) -> None:
         with self._lock:
@@ -154,6 +162,7 @@ class ForceCloseRaceDetector:
             )
             self._logcat_thread.start()
             set_active_force_close_race_detector(self)
+        self._write_state_file(force=True)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -167,6 +176,31 @@ class ForceCloseRaceDetector:
             self._session_active = False
         if get_active_force_close_race_detector() is self:
             set_active_force_close_race_detector(None)
+        # Remove the cross-process mirror so a stale file can never make the
+        # probe believe a session is still active after Start exits.
+        try:
+            RACE_STATE_PATH.unlink()
+        except OSError:
+            pass
+
+    def _write_state_file(self, *, force: bool = False) -> None:
+        """Throttled cross-process mirror of the live snapshot."""
+        now = self._clock()
+        if not force and (now - self._last_state_write_at) < RACE_STATE_WRITE_MIN_INTERVAL_SECONDS:
+            return
+        self._last_state_write_at = now
+        try:
+            RACE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "written_at": time.time(),
+                "pid": os.getpid(),
+                "snapshot": self.probe_snapshot(),
+            }
+            tmp = RACE_STATE_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(tmp, RACE_STATE_PATH)
+        except OSError:
+            pass
 
     def _probe_adb_once(self) -> None:
         adb = shutil.which("adb")
@@ -430,6 +464,7 @@ class ForceCloseRaceDetector:
                         self._adb_poll_once(pkg, now)
                 except Exception:  # noqa: BLE001
                     pass
+            self._write_state_file()
             self._stop_event.wait(interval)
 
     def _parse_logcat_epoch(self, line: str) -> float:
@@ -777,11 +812,45 @@ def load_recent_trace_events(
     return out
 
 
+def read_race_state_file(
+    *, max_age_s: float = RACE_STATE_MAX_AGE_SECONDS
+) -> dict[str, Any] | None:
+    """Return the persisted force-close snapshot if fresh, else ``None``.
+
+    Lets the separate dev-probe process report the live detector state owned
+    by the running Start/watchdog process.
+    """
+    try:
+        data = json.loads(RACE_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        age = time.time() - float(data.get("written_at"))
+    except (TypeError, ValueError):
+        return None
+    if age > max_age_s:
+        return None
+    snap = data.get("snapshot")
+    if not isinstance(snap, dict):
+        return None
+    snap = dict(snap)
+    snap["source"] = "state_file"
+    snap["state_file_age_s"] = round(age, 2)
+    snap["state_file_pid"] = data.get("pid")
+    return snap
+
+
 def probe_force_close_race_snapshot(clock: Callable[[], float] | None = None) -> dict[str, Any]:
-    """Probe entry: prefer live detector, else reconstruct from JSONL trace."""
+    """Probe entry: prefer live detector, else the persisted cross-process
+    state file, else reconstruct from the JSONL trace."""
     live = get_active_force_close_race_detector()
     if live is not None and live._session_active:
         return live.probe_snapshot()
+    disk = read_race_state_file()
+    if disk is not None:
+        return disk
     events = load_recent_trace_events(clock=clock)
     return {
         "enabled": False,
