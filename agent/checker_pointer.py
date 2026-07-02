@@ -389,13 +389,33 @@ class CheckerPointerState:
             self.header_action_source = "start_preparing"
             self._persist(force=True)
 
-    def set_checker_idle_during_first_launch(self, *, reason: str = "") -> None:
+    def mirror_start_launch_phase(
+        self,
+        package: str = "",
+        *,
+        next_package_at: float | None = None,
+        reason: str = "",
+    ) -> None:
+        """Display-only mirror of Start launch phase — never gates lifecycle."""
         with self._lock:
-            self.checker_status = "idle_until_all_packages_launched"
-            self.checker_idle_reason = str(reason or "first_launch_scheduler_active")[:200]
+            self.checker_status = "launching"
+            self.checker_idle_reason = ""
             self.checker_loop_alive = True
             self.checker_dead_reason = ""
+            if package:
+                self.checker_mode = MODE_FIRST_LAUNCHING
+                self.state_pointer_text = POINTER_OPENING
+                self.first_launch_phase = "first_launching"
+                self.first_launch_next_package_at = next_package_at
+                if package not in self.first_launch_started_packages:
+                    self.first_launch_started_packages.append(package)
+            elif reason:
+                self.last_state_transition_reason = str(reason)[:200]
             self._persist(force=True)
+
+    def set_checker_idle_during_first_launch(self, *, reason: str = "") -> None:
+        """Deprecated alias — display-only; Start owns lifecycle, not checker."""
+        self.mirror_start_launch_phase("", reason=reason)
 
     def mark_checking_system_started(self) -> None:
         with self._lock:

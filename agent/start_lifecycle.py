@@ -251,20 +251,16 @@ def bootstrap_first_launch_after_cache(
         try:
             ptr = checker_pointer.get()
             ptr.heartbeat(reason="first_launch_bootstrap")
-            ptr.checker_loop_alive = True
-            ptr.checker_dead_reason = ""
-            ptr.set_checker_idle_during_first_launch(
-                reason="first_launch_scheduler_active"
-            )
             next_at = None
             if launch_scheduler is not None:
                 try:
                     next_at = launch_scheduler.due_at_for_index(1)
                 except Exception:  # noqa: BLE001
                     next_at = None
-            ptr.begin_opening(
+            ptr.mirror_start_launch_phase(
                 str(first_package or ""),
                 next_package_at=next_at,
+                reason="start_launch_bootstrap",
             )
             ptr.mark_launch_requested(str(first_package or ""))
             ptr.mark_launch_command_sent(str(first_package or ""))

@@ -6763,15 +6763,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
 
         try:
-            _FIRST_LAUNCH_DELAY_S = min(
-                0.5,
-                max(
-                    0.0,
-                    float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "0") or "0"),
-                ),
+            _env_launch_delay = float(
+                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "0") or "0"
             )
         except ValueError:
-            _FIRST_LAUNCH_DELAY_S = 0.0
+            _env_launch_delay = 0.0
+        _FIRST_LAUNCH_DELAY_S = min(0.5, max(0.0, _env_launch_delay))
 
         _launch_sched = LaunchScheduler(
             session_id=_start_session_id,
@@ -6896,7 +6893,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     import time as _t_open
 
                     _next_due = _launch_sched.due_at_for_index(index + 1)
-                    _checker_pointer.get().begin_opening(
+                    _checker_pointer.get().mirror_start_launch_phase(
                         package,
                         next_package_at=_next_due or (
                             _t_open.monotonic() + _FIRST_LAUNCH_INTERVAL_S
@@ -6984,7 +6981,25 @@ def cmd_start(args: argparse.Namespace) -> int:
         _transition_lifecycle("LAUNCHING", "launch_packages")
         _start_session.mark("package_launch_begin", package_count=len(entries))
         _set_header_phase("Opening")
-        _render_phase("", phase_version=_ui_phase_version)
+        _defer_render("", phase_version=_ui_phase_version)
+
+        _sched_thread: threading.Thread | None = None
+        if _FIRST_LAUNCH_MODE == "interval":
+            _sched_thread = _launch_sched.start_background(
+                _sched_launch_one,
+                on_before_launch=_sched_before_launch,
+                on_after_launch=_sched_after_launch,
+                stop_event=None,
+                username_for_index=_username_for_launch,
+            )
+            _start_lifecycle.flush_probe_checkpoint(_checker_pointer, _launch_sched)
+            _start_log.info(
+                "[DENG_REJOIN_LAUNCH_SCHEDULER_STARTED] anchor_finish=%.3f first_due=%.3f"
+                " post_clear_delay_cap_sec=%.1f",
+                _launch_sched.clear_cache_finished_at or 0.0,
+                _launch_sched.first_launch_due_at or 0.0,
+                _FIRST_LAUNCH_DELAY_S,
+            )
 
         now_iso = datetime.now(timezone.utc).isoformat()
         start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
@@ -6993,7 +7008,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg["package_start_times"] = start_times
         cfg["monitor_started_at"] = time.time()
 
-        # Bootstrap watchdog BEFORE launch scheduler so lifecycle callbacks can update rows.
         _any_url = any(
             str(effective_private_server_url(entry, runtime_cfg) or "").strip()
             for entry in runtime_entries
@@ -7015,24 +7029,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_cfg_boot["start_session_id"] = _start_session_id
         _live_cfg_boot["screen_mode"] = str(cfg.get("screen_mode") or _start_screen_mode)
         _boot_status = {e["package"]: _STATUS_READY for e in entries}
-
-        _sched_thread: threading.Thread | None = None
-        if _FIRST_LAUNCH_MODE == "interval":
-            _sched_thread = _launch_sched.start_background(
-                _sched_launch_one,
-                on_before_launch=_sched_before_launch,
-                on_after_launch=_sched_after_launch,
-                stop_event=None,
-                username_for_index=_username_for_launch,
-            )
-            _start_lifecycle.flush_probe_checkpoint(_checker_pointer, _launch_sched)
-            _start_log.info(
-                "[DENG_REJOIN_LAUNCH_SCHEDULER_STARTED] anchor_finish=%.3f first_due=%.3f"
-                " post_clear_delay_cap_sec=%.1f",
-                _launch_sched.clear_cache_finished_at or 0.0,
-                _launch_sched.first_launch_due_at or 0.0,
-                _FIRST_LAUNCH_DELAY_S,
-            )
 
         def _supervisor_daemon_bg() -> None:
             nonlocal _supervisor_ref
@@ -7072,7 +7068,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             target=_supervisor_daemon_bg, name="start-supervisor-daemon", daemon=True
         ).start()
 
-        # Slow prep continues while scheduler runs (interval mode).
+        # Start owns lifecycle; checker/monitoring display only after all launches.
 
         try:
             from .termux_session import ensure_termux_session_alive as _ensure_termux_alive
@@ -7168,6 +7164,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception as _sched_exc:  # noqa: BLE001
                 _start_log.debug("launch scheduler wait error: %s", _sched_exc)
                 _start_lifecycle.set_launch_scheduler_aborted_reason(str(_sched_exc)[:200])
+            _sup_wait_deadline = time.monotonic() + 120.0
+            while _supervisor_ref is None and time.monotonic() < _sup_wait_deadline:
+                time.sleep(0.05)
+            _supervisor = _supervisor_ref
             if _checker_pointer is not None:
                 try:
                     _checker_pointer.get().mark_monitoring_started()
@@ -7176,14 +7176,21 @@ def cmd_start(args: argparse.Namespace) -> int:
                     _start_lifecycle_mon.mark_monitoring_started()
                 except Exception:  # noqa: BLE001
                     pass
-            try:
-                _rjn_early = getattr(_supervisor, "_rjn_monitor", None)
-                if _rjn_early is not None:
-                    _rjn_early.start_session()
-            except Exception:  # noqa: BLE001
-                pass
+            if _supervisor is not None:
+                try:
+                    _rjn_early = getattr(_supervisor, "_rjn_monitor", None)
+                    if _rjn_early is not None:
+                        _rjn_early.start_session()
+                except Exception:  # noqa: BLE001
+                    pass
+            if (
+                _supervisor is not None
+                and not getattr(_supervisor, "_all_launches_completed", False)
+            ):
+                _supervisor.mark_all_launches_completed()
         else:
             # Legacy online_gate: sequential loop (unchanged fallback).
+            _supervisor = _supervisor_ref
             for index, entry in enumerate(entries, start=1):
                 package = entry["package"]
                 runtime_entry = runtime_entry_by_pkg.get(package, entry)
@@ -7213,32 +7220,39 @@ def cmd_start(args: argparse.Namespace) -> int:
                 if index < len(entries):
                     _wait_for_package_online(package, index, len(entries))
 
-        if not getattr(_supervisor, "_all_launches_completed", False):
-            _supervisor.mark_all_launches_completed()
+        if (
+            _supervisor_ref is not None
+            and not getattr(_supervisor_ref, "_all_launches_completed", False)
+            and _FIRST_LAUNCH_MODE != "interval"
+        ):
+            _supervisor_ref.mark_all_launches_completed()
+        _supervisor = _supervisor_ref
 
         _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
         _start_session.mark("all_launches_completed", package_count=len(entries))
         _transition_lifecycle("MONITORING", "all_launch_commands_sent")
 
-        # 6) Grace wait before verifying layout — keep packages shown as
-        #    "Launching" (no "Waiting" label shown in public UI).
-        grace_wait = int(sup.get("launch_grace_seconds", 15))
-        import time as _time
-        _time.sleep(max(0.0, max(5, grace_wait)))
+        def _post_launch_verify_bg() -> None:
+            grace_wait = int(sup.get("launch_grace_seconds", 15))
+            import time as _time_bg
 
-        # 8) Verify layout silently — no "Resizing" label shown (user feedback:
-        #    showing "Resizing" after launching is confusing/useless; the
-        #    supervisor's real-time detection will update the state next).
+            _time_bg.sleep(max(0.0, min(3.0, float(grace_wait))))
+            try:
+                _start_session.mark("layout_begin", phase="post_launch_verify")
+                _verify_layout_post_launch(cfg, entries)
+                _start_session.mark("layout_done", phase="post_launch_verify")
+            except Exception as _exc:  # noqa: BLE001
+                _start_log.debug("post-launch verify error: %s", _exc)
+                _start_session.mark(
+                    "layout_done", phase="post_launch_verify", error=str(_exc)[:160]
+                )
+
+        threading.Thread(
+            target=_post_launch_verify_bg, name="start-post-launch-verify", daemon=True
+        ).start()
+
         _layout_verify: dict[str, bool] = {}
         _layout_diag: list[dict[str, Any]] = []
-        try:
-            _start_session.mark("layout_begin", phase="post_launch_verify")
-            _layout_verify, _layout_diag = _verify_layout_post_launch(cfg, entries)
-            _start_session.mark("layout_done", phase="post_launch_verify")
-            _start_log.debug("post-launch layout verify: %s", _layout_verify)
-        except Exception as _exc:  # noqa: BLE001
-            _start_log.debug("post-launch verify error: %s", _exc)
-            _start_session.mark("layout_done", phase="post_launch_verify", error=str(_exc)[:160])
 
         _home_landscape_state: dict[str, Any] = {}
         try:
@@ -7415,6 +7429,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_cfg["supervisor"] = _sup_sub
         _live_cfg["start_session_id"] = _start_session_id
         _live_cfg["screen_mode"] = _start_screen_mode
+        _supervisor = _supervisor_ref
+        if _supervisor is None:
+            _start_log.error("start: supervisor unavailable — cannot enter monitoring dashboard")
+            _release_start_lock("normal_exit")
+            _start_session.finish("supervisor_missing")
+            return 1
         _supervisor.cfg = _live_cfg
         safe_io.set_crash_context(
             phase="supervisor_start",

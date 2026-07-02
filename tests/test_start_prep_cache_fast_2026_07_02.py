@@ -147,14 +147,28 @@ def test_five_packages_launch_every_thirty_seconds():
     assert snap["checking_system_started_at"] is not None
 
 
-def test_checker_idle_until_all_packages_launched():
+def test_checker_mirror_start_launch_display_only():
     p = CheckerPointerState()
     p.reset_for_new_start(session_id="s-idle", pid=1)
-    p.set_checker_idle_during_first_launch(reason="first_launch_scheduler_active")
+    p.mirror_start_launch_phase(
+        "com.moons.litesc",
+        reason="start_launch_bootstrap",
+    )
     snap = p.probe_snapshot()
-    assert snap["checker_status"] == "idle_until_all_packages_launched"
-    assert snap["checker_idle_reason"] == "first_launch_scheduler_active"
+    assert snap["checker_status"] == "launching"
+    assert snap["checker_idle_reason"] in ("", None)
     assert snap["checker_loop_alive"] is True
+    assert "com.moons.litesc" in snap["first_launch_started_packages"]
+    assert snap["state_pointer_text"] == "Opening.."
+
+
+def test_deprecated_idle_alias_is_display_only():
+    p = CheckerPointerState()
+    p.reset_for_new_start(session_id="s-alias", pid=1)
+    p.set_checker_idle_during_first_launch(reason="legacy_alias")
+    snap = p.probe_snapshot()
+    assert snap["checker_status"] == "launching"
+    assert snap["checker_idle_reason"] in ("", None)
 
 
 def test_probe_launch_calls_from_scheduler_state():
