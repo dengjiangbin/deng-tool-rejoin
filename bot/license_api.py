@@ -705,6 +705,7 @@ def _route_public_install(
                 token_endpoint="/install/test/latest2/package-token",
                 installer_endpoint="/install/test/latest2",
                 requested_channel="test/latest2",
+                source_version=_source,
             )
             return (
                 script.encode("utf-8"),

@@ -60,12 +60,13 @@
       "channel": "test-latest2",
       "installer_endpoint": "/install/test/latest2",
       "artifact_path": "releases/test-latest2/deng-tool-rejoin-test-latest2.tar.gz",
-      "artifact_sha256": "2d81caaf05261c68deeecd8b1daa5cbfe701ecfff1f2b43acc1e19eb67f8ef56",
+      "artifact_sha256": "b3233e4dc44fedd451686a45ce55ac343044f119d93e9a7a0bbef432eac56851",
       "source_version": "v1.3.0",
-      "git_commit": "02277ef70269",
-      "built_at_iso": "2026-07-03T09:05:23Z",
+      "git_commit": "8bce60cd4458",
+      "built_at_iso": "2026-07-03T10:10:01Z",
       "license_gate": "key-free (test/latest2 only)",
-      "build_mode": "lime_detection",
+      "build_mode": "lime_on_v130",
+      "base_git_commit": "8bce60cd4458",
       "stable_latest": false
     }
   ]

@@ -276,6 +276,7 @@ def render_direct_install_bootstrap(
     token_endpoint: str = "/install/test/package-token",
     installer_endpoint: str = "/install/test/latest",
     requested_channel: str | None = None,
+    source_version: str = "",
 ) -> str:
     """Generate a compact POSIX installer for a protected package."""
     base = base_url.rstrip("/")
@@ -289,6 +290,10 @@ def render_direct_install_bootstrap(
             f'  "resolved_version": "{safe_version}",\n'
             f'  "requested_channel": "{safe_requested_channel}",\n'
         )
+    source_metadata_part = ""
+    if source_version:
+        safe_source = _escape_double(source_version.strip())
+        source_metadata_part = f'  "source_version": "{safe_source}",\n'
     safe_token_endpoint = _escape_double("/" + token_endpoint.strip("/"))
     safe_installer_endpoint = _escape_double("/" + installer_endpoint.strip("/"))
     # Test-only key-free bypass marker. Emitted unconditionally for dev/test
@@ -377,6 +382,7 @@ def render_direct_install_bootstrap(
         '  "probe_id": "$_PROBE_ID",\n'
         f'  "version": "{safe_version}",\n'
         f"{requested_metadata_part}"
+        f"{source_metadata_part}"
         f'  "channel": "{safe_channel}",\n'
         '  "install_time_iso": "$_INSTALL_TIME_ISO",\n'
         '  "install_api": "$u",\n'

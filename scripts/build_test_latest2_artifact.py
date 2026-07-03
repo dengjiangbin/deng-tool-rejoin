@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Build or seed the isolated test/latest2 channel artifact.
 
-Phase 1 (baseline proof):
+Phase 1 (baseline proof — exact stable v1.3.0 bytes):
   python scripts/build_test_latest2_artifact.py --copy-v130
 
-Phase 2 (Lime detection build):
-  python scripts/build_test_latest2_artifact.py
+Phase 2 (Lime detection on v1.3.0 source — NOT main-dev HEAD):
+  python scripts/build_test_latest2_artifact.py --lime-on-v130
+
+Never use the default no-flag build: that compiles current main HEAD and
+behaves like test/latest.  Always pass --copy-v130 or --lime-on-v130.
 """
 
 from __future__ import annotations
@@ -14,7 +17,10 @@ import argparse
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,8 +37,21 @@ _V130_REL = "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz"
 _MANIFEST_VERSION = "test-latest2"
 _SOURCE_VERSION = "v1.3.0"
 
+# Lime-only overlay onto the v1.3.0 source tree.  Do NOT overlay commands.py,
+# start_lifecycle.py, or other main-dev deltas — those make test/latest2 behave
+# like test/latest.
+_LIME_OVERLAY_FILES = (
+    "agent/lime_channel.py",
+    "agent/lime_detection_speed.py",
+    "agent/rjn_lifecycle_monitor.py",
+    "agent/detection_speed_test.py",
+    "agent/probe.py",
+    "agent/license.py",
+    "agent/build_info.py",
+)
 
-def _update_manifest(repo: Path, *, sha: str, mode: str) -> None:
+
+def _update_manifest(repo: Path, *, sha: str, mode: str, base_git_commit: str = "") -> None:
     manifest = repo / "data" / "rejoin_versions.json"
     rows = json.loads(manifest.read_text(encoding="utf-8"))
     for row in rows:
@@ -44,6 +63,8 @@ def _update_manifest(repo: Path, *, sha: str, mode: str) -> None:
         row["source_version"] = _SOURCE_VERSION
         row["enabled"] = True
         row["build_mode"] = mode
+        if base_git_commit:
+            row["base_git_commit"] = base_git_commit
         break
     manifest.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
     print(f"Updated {manifest} test-latest2 artifact_sha256={sha} mode={mode}")
@@ -53,33 +74,90 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def copy_v130_baseline(repo: Path, out: Path) -> str:
+def _v130_build_commit(repo: Path) -> str:
+    """Git commit embedded in the published stable v1.3.0 tarball."""
+    src = repo / _V130_REL
+    if not src.is_file():
+        raise FileNotFoundError(f"Missing v1.3.0 artifact: {src}")
+    with tarfile.open(src, mode="r:gz") as tf:
+        bi = json.loads(tf.extractfile("BUILD-INFO.json").read().decode("utf-8"))
+    commit = str(bi.get("git_commit") or "").strip()
+    if not commit:
+        raise RuntimeError("v1.3.0 BUILD-INFO.json missing git_commit")
+    return commit
+
+
+def _v130_artifact_sha(repo: Path) -> str:
+    for row in json.loads((repo / "data" / "rejoin_versions.json").read_text(encoding="utf-8")):
+        if str(row.get("version") or "") == _SOURCE_VERSION:
+            return str(row.get("artifact_sha256") or "").strip()
+    return ""
+
+
+def copy_v130_baseline(repo: Path, out: Path) -> tuple[str, str]:
     src = repo / _V130_REL
     if not src.is_file():
         raise FileNotFoundError(f"Missing v1.3.0 artifact: {src}")
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, out)
     sha = _sha256_file(out)
-    v130_sha = ""
-    for row in json.loads((repo / "data" / "rejoin_versions.json").read_text(encoding="utf-8")):
-        if str(row.get("version") or "") == _SOURCE_VERSION:
-            v130_sha = str(row.get("artifact_sha256") or "").strip()
-            break
+    v130_sha = _v130_artifact_sha(repo)
     if v130_sha and sha != v130_sha:
         raise RuntimeError(f"test/latest2 copy sha {sha} != v1.3.0 manifest sha {v130_sha}")
-    return sha
+    base_commit = _v130_build_commit(repo)
+    return sha, base_commit
 
 
-def build_lime_channel(repo: Path, out: Path) -> str:
-    sha = build_internal_test_tarball(
-        repo,
-        out,
-        channel="test-latest2",
-        version=_MANIFEST_VERSION,
-        source_version=_SOURCE_VERSION,
-    )
-    verify_tarball_exclusions(out.read_bytes(), require_license_gate_strings=False)
-    return sha
+def _overlay_lime_files(source_repo: Path, worktree: Path) -> None:
+    for rel in _LIME_OVERLAY_FILES:
+        src = source_repo / rel
+        dst = worktree / rel
+        if not src.is_file():
+            raise FileNotFoundError(f"Lime overlay missing: {rel}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+
+
+def build_lime_on_v130(repo: Path, out: Path) -> tuple[str, str]:
+    """Compile v1.3.0 source + lime-only overlay — never current main HEAD."""
+    base_commit = _v130_build_commit(repo)
+    with tempfile.TemporaryDirectory(prefix="deng-test-latest2-") as tmp:
+        wt = Path(tmp) / "worktree"
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", str(wt), base_commit],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        try:
+            _overlay_lime_files(repo, wt)
+            sha = build_internal_test_tarball(
+                wt,
+                out,
+                channel="test-latest2",
+                version=_MANIFEST_VERSION,
+                source_version=_SOURCE_VERSION,
+            )
+            verify_tarball_exclusions(out.read_bytes(), require_license_gate_strings=False)
+            with tarfile.open(out, mode="r:gz") as tf:
+                bi = json.loads(tf.extractfile("BUILD-INFO.json").read().decode("utf-8"))
+            built_from = str(bi.get("git_commit") or "")
+            if not built_from.startswith(base_commit[:8]):
+                raise RuntimeError(
+                    f"test/latest2 lime build git_commit {built_from!r} != v1.3.0 base {base_commit!r}"
+                )
+            if str(bi.get("source_version") or "") != _SOURCE_VERSION:
+                raise RuntimeError("BUILD-INFO missing source_version=v1.3.0")
+            return sha, base_commit
+        finally:
+            subprocess.run(
+                ["git", "worktree", "remove", str(wt), "--force"],
+                cwd=str(repo),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
 
 
 def main() -> int:
@@ -91,24 +169,32 @@ def main() -> int:
         default=None,
         help=f"Output tarball (default: <repo>/{TEST_LATEST2_ARCHIVE_REL_PATH}).",
     )
-    ap.add_argument(
+    mode_group = ap.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument(
         "--copy-v130",
         action="store_true",
-        help="Seed test/latest2 as an exact byte copy of the v1.3.0 tarball.",
+        help="Exact byte copy of stable v1.3.0 tarball (channel proof baseline).",
+    )
+    mode_group.add_argument(
+        "--lime-on-v130",
+        action="store_true",
+        help="Build v1.3.0 source + lime-only overlay (NOT main-dev HEAD).",
     )
     args = ap.parse_args()
     repo = args.repo_root.resolve()
     out = (args.out or (repo / TEST_LATEST2_ARCHIVE_REL_PATH)).resolve()
 
     if args.copy_v130:
-        sha = copy_v130_baseline(repo, out)
+        sha, base_commit = copy_v130_baseline(repo, out)
         mode = "v1.3.0_copy"
     else:
-        sha = build_lime_channel(repo, out)
-        mode = "lime_detection"
-    _update_manifest(repo, sha=sha, mode=mode)
+        sha, base_commit = build_lime_on_v130(repo, out)
+        mode = "lime_on_v130"
+
+    _update_manifest(repo, sha=sha, mode=mode, base_git_commit=base_commit)
     print(f"Wrote {out}")
     print(f"artifact_sha256={sha}")
+    print(f"base_git_commit={base_commit}")
     print(f"installer_endpoint=/install/test/latest2")
     return 0
 
