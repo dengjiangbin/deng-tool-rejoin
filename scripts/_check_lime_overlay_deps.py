@@ -18,6 +18,13 @@ OVERLAY = (
     "agent/ocr_screen_detector.py",
     "agent/webhook.py",
     "agent/detection_speed_test.py",
+    "agent/lime_cli_dispatch.py",
+    "agent/test_latest2_runtime_patch.py",
+    "agent/test_latest2_monitoring_relay.py",
+    "agent/lime_package_discovery.py",
+    "agent/launcher.py",
+    "agent/banner.py",
+    "agent/package_online_evidence.py",
     "agent/probe.py",
     "agent/license.py",
     "agent/build_info.py",
@@ -31,13 +38,27 @@ BASE = subprocess.run(
 ).stdout.strip()
 
 
+def _resolve_import_from(path: Path, node: ast.ImportFrom) -> str | None:
+    mod = str(node.module or "")
+    if mod.startswith("agent."):
+        return "agent/" + mod[len("agent.") :].replace(".", "/") + ".py"
+    if node.level and path.parent.name == "agent" and node.level == 1:
+        if mod:
+            return f"agent/{mod.replace('.', '/')}.py"
+        if len(node.names) == 1 and node.names[0].name != "*":
+            return f"agent/{node.names[0].name}.py"
+    return None
+
+
 def _agent_imports(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     out: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("agent."):
-            rel = "agent/" + node.module[len("agent.") :].replace(".", "/") + ".py"
-            out.add(rel)
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        dep = _resolve_import_from(path, node)
+        if dep:
+            out.add(dep)
     return out
 
 
@@ -47,6 +68,8 @@ def _check_overlay_imports() -> list[str]:
     for rel in OVERLAY:
         for dep in _agent_imports(ROOT / rel):
             if dep in overlay_set:
+                continue
+            if (ROOT / dep).is_file():
                 continue
             r = subprocess.run(
                 ["git", "cat-file", "-e", f"{BASE}:{dep}"],

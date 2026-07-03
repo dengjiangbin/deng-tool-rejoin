@@ -49,6 +49,13 @@ _LIME_OVERLAY_FILES = (
     "agent/ocr_screen_detector.py",
     "agent/webhook.py",
     "agent/detection_speed_test.py",
+    "agent/lime_cli_dispatch.py",
+    "agent/test_latest2_runtime_patch.py",
+    "agent/test_latest2_monitoring_relay.py",
+    "agent/lime_package_discovery.py",
+    "agent/launcher.py",
+    "agent/banner.py",
+    "agent/package_online_evidence.py",
     "agent/probe.py",
     "agent/license.py",
     "agent/build_info.py",
@@ -184,10 +191,22 @@ def _validate_v130_supervisor_webhook_api(worktree: Path) -> None:
 
 
 def _validate_lime_overlay_deps(worktree: Path) -> None:
-    """Ensure overlaid modules do not import missing agent.* files on v1.3.0 base."""
+    """Ensure overlaid modules do not import missing agent files on v1.3.0 base."""
     import ast
 
     overlay_set = set(_LIME_OVERLAY_FILES)
+
+    def _resolve(path: Path, node: ast.ImportFrom) -> str | None:
+        mod = str(node.module or "")
+        if mod.startswith("agent."):
+            return "agent/" + mod[len("agent.") :].replace(".", "/") + ".py"
+        if node.level and path.parent.name == "agent" and node.level == 1:
+            if mod:
+                return f"agent/{mod.replace('.', '/')}.py"
+            if len(node.names) == 1 and node.names[0].name != "*":
+                return f"agent/{node.names[0].name}.py"
+        return None
+
     missing: set[str] = set()
     for rel in _LIME_OVERLAY_FILES:
         path = worktree / rel
@@ -195,11 +214,8 @@ def _validate_lime_overlay_deps(worktree: Path) -> None:
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom):
                 continue
-            mod = str(node.module or "")
-            if not mod.startswith("agent."):
-                continue
-            dep = "agent/" + mod[len("agent.") :].replace(".", "/") + ".py"
-            if dep in overlay_set or (worktree / dep).is_file():
+            dep = _resolve(path, node)
+            if not dep or dep in overlay_set or (worktree / dep).is_file():
                 continue
             missing.add(dep.replace("\\", "/"))
     if missing:

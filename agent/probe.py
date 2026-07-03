@@ -1387,6 +1387,36 @@ def collect_probe(
         errors.append({"step": "force_close_race", "error": str(exc)[:200]})
         out["force_close_race"] = {"enabled": False, "error": str(exc)[:120]}
     try:
+        from .lime_package_discovery import probe_package_discovery_snapshot
+
+        out["lime_package_discovery"] = probe_package_discovery_snapshot()
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "lime_package_discovery", "error": str(exc)[:200]})
+        out["lime_package_discovery"] = {"error": str(exc)[:120]}
+    try:
+        from .test_latest2_monitoring_relay import probe_monitoring_relay_snapshot
+
+        mon_snap = probe_monitoring_relay_snapshot()
+        out["test_latest2_monitoring"] = mon_snap
+        out["monitoring_relay"] = mon_snap
+        build_info = out.get("build") if isinstance(out.get("build"), dict) else {}
+        installed_info = (
+            out.get("installed_build") if isinstance(out.get("installed_build"), dict) else {}
+        )
+        out["monitoring_relay_proof"] = {
+            "channel": build_info.get("channel") or installed_info.get("channel") or "test/latest2",
+            "relay_version": mon_snap.get("relay_version"),
+            "detector_mode": mon_snap.get("detector_mode"),
+            "last_tick_at": mon_snap.get("last_tick_at"),
+            "last_tick_duration_ms": mon_snap.get("last_tick_duration_ms"),
+            "tick_interval_s": mon_snap.get("tick_interval_s"),
+            "package_count": mon_snap.get("package_count"),
+            "live_process": mon_snap.get("live_process"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "test_latest2_monitoring", "error": str(exc)[:200]})
+        out["test_latest2_monitoring"] = {"enabled": False, "error": str(exc)[:120]}
+    try:
         from .lime_detection_speed import probe_lime_detection_speed_snapshot
 
         lime_snap = probe_lime_detection_speed_snapshot()
@@ -1418,8 +1448,9 @@ def collect_probe(
         errors.append({"step": "lime_detection_speed", "error": str(exc)[:200]})
         out["lime_detection_speed"] = {"enabled": False, "error": str(exc)[:120]}
     try:
-        from . import checker_pointer as _checker_pointer
+        import importlib
 
+        _checker_pointer = importlib.import_module(".checker_pointer", __package__)
         _fc = _checker_pointer.probe_snapshot()
         out["focused_checker"] = _fc
         # Current live session id/pid — used to flag stale prior-session data.
@@ -1460,8 +1491,9 @@ def collect_probe(
             "stale_ui_write_ignored_count": _fc.get("stale_ui_write_ignored_count"),
         }
         try:
-            from .launch_scheduler import probe_snapshot as _launch_schedule_probe
-
+            _launch_schedule_probe = importlib.import_module(
+                ".launch_scheduler", __package__
+            ).probe_snapshot
             out["launch_schedule"] = _launch_schedule_probe()
         except Exception as _ls_exc:  # noqa: BLE001
             out["launch_schedule"] = {"error": str(_ls_exc)[:120]}
@@ -1790,6 +1822,7 @@ _PROBE_PINNED_FIELDS = frozenset({
     "dead_detection", "launch_relaunch", "relaunch", "account_dead_webhook",
     "resize_debug", "focused_checker", "launch_scheduler", "launch_schedule", "force_close_race",
     "lime_detection_speed", "lime_detection_speed_proof",
+    "lime_package_discovery", "test_latest2_monitoring", "monitoring_relay", "monitoring_relay_proof",
 })
 
 

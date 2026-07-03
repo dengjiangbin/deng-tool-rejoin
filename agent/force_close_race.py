@@ -71,6 +71,22 @@ def _notify_lime_process_dead(package: str, at: float) -> None:
             lime.note_process_dead(package, at=at)
     except Exception:  # noqa: BLE001
         pass
+    try:
+        from .lime_channel import lime_detection_enabled
+
+        if lime_detection_enabled():
+            from .test_latest2_monitoring_relay import submit_raw_evidence
+
+            submit_raw_evidence(
+                package,
+                hint="dead",
+                source="process",
+                evidence="force_close_process_poll",
+                at=at,
+                process_exists=False,
+            )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _notify_lime_logcat_dead(package: str, at: float, evidence: str) -> None:
@@ -80,6 +96,23 @@ def _notify_lime_logcat_dead(package: str, at: float, evidence: str) -> None:
         lime = get_active_lime_tracker()
         if lime is not None:
             lime.note_logcat_dead(package, at=at, evidence=evidence)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from .lime_channel import lime_detection_enabled
+
+        if lime_detection_enabled():
+            from .test_latest2_monitoring_relay import submit_raw_evidence
+
+            hint = "kicked" if "kick" in str(evidence or "").lower() else "dead"
+            submit_raw_evidence(
+                package,
+                hint=hint,
+                source="logcat",
+                evidence=str(evidence or "")[:120],
+                at=at,
+                logcat_result=str(evidence or "")[:120],
+            )
     except Exception:  # noqa: BLE001
         pass
 
@@ -366,8 +399,16 @@ class ForceCloseRaceDetector:
             return
 
         if race.last_process_present_at <= 0:
-            race.process_poll.not_seen_reason = "never_seen_present_this_session"
-            return
+            launched = False
+            launch_age = 0.0
+            with monitor._lock:
+                mrow = monitor._states.get(pkg)
+                if mrow is not None and mrow.launch_started_at > 0:
+                    launched = True
+                    launch_age = now - mrow.launch_started_at
+            if not launched or launch_age < 8.0:
+                race.process_poll.not_seen_reason = "never_seen_present_this_session"
+                return
 
         rec = race.process_poll
         if rec.first_at <= 0 and definitive:

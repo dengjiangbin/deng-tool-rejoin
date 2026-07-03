@@ -127,8 +127,10 @@ def banner_text(
         logo = "\n".join(colored_lines)
     else:
         logo = ASCII_DENG
-    logo_width = max(visible_width(line) for line in ASCII_DENG.splitlines())
-    subtitle_text = f"{PRODUCT_NAME.replace('DENG Tool: ', 'Tool: ')} {_display_version(version) or runtime_display_version()}"
+    subtitle_text = (
+        f"{PRODUCT_NAME.replace('DENG Tool: ', 'Tool: ')} "
+        f"{_display_version(version) or runtime_display_version()}"
+    )
     gap = " " * 8
     if use_color:
         line = f"{BOLD}MONS{RESET}{gap}{BLUE}{subtitle_text}{RESET}"

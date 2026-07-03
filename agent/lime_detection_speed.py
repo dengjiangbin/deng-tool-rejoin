@@ -294,8 +294,26 @@ class LimeDetectionSpeedTracker:
 
     def _should_run_ocr(self, package: str) -> bool:
         try:
-            from . import checker_pointer as cp
+            from .lime_channel import lime_detection_enabled
 
+            if lime_detection_enabled():
+                from .test_latest2_monitoring_relay import get_active_relay
+
+                relay = get_active_relay()
+                if relay is not None:
+                    focused = str(
+                        getattr(relay, "_focus_package", "") or ""
+                    ).strip()
+                    if focused == package:
+                        return True
+                    if relay.has_pending_dead(package):
+                        return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            import importlib
+
+            cp = importlib.import_module(".checker_pointer", __package__)
             ptr = cp.get()
             focused = str(ptr.checking_active_package or ptr.active_focus_package or "").strip()
             if focused == package:
@@ -324,6 +342,24 @@ class LimeDetectionSpeedTracker:
 
     def _on_ocr_match(self, package: str, at: float, match: OcrMatch) -> None:
         self.note_ocr_dead(package, at=at, phrase=match.phrase)
+        try:
+            from .lime_channel import lime_detection_enabled
+
+            if lime_detection_enabled():
+                from .test_latest2_monitoring_relay import submit_raw_evidence
+
+                phrase = str(getattr(match, "phrase", "") or "")
+                hint = "kicked" if any(x in phrase.lower() for x in ("kick", "left", "disconnect")) else "dead"
+                submit_raw_evidence(
+                    package,
+                    hint=hint,
+                    source="ocr",
+                    evidence=phrase[:120],
+                    at=at,
+                    ocr_result=phrase[:120],
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _package_probe_row(self, pkg: str, row: PackageSpeedTimestamps) -> dict[str, Any]:
         race_pkg = {}

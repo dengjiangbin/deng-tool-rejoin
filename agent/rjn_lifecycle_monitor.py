@@ -469,8 +469,27 @@ def _process_missing_dead_eligible(pkg: str, row: PackageRjnState) -> bool:
     proved the process was alive but not uploading.  Killing it is not the same
     as a live client with a silent script.
     """
-    if row.process_seen_since_launch:
+    now = time.time()
+    launch_age = (now - row.launch_started_at) if row.launch_started_at > 0 else 0.0
+    had_online = (
+        row.last_positive_online_evidence_at > 0
+        or row.ingame_hb_ever
+        or row.online_since > 0
+        or row.internal_state == STATE_ONLINE_CONFIRMED
+    )
+    # First-launch process flicker during Roblox load must not become Dead /
+    # recovery relaunch (probe p-5e86495d7b / p-56da9dd633).
+    if row.watchdog_active and not row.relaunching and not had_online:
+        if launch_age < LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS:
+            return False
+    if row.launch_started_at > 0 and launch_age >= 8.0 and (had_online or row.relaunching):
         return True
+    if row.process_seen_since_launch:
+        if had_online or row.relaunching:
+            return True
+        if launch_age >= LAUNCH_ONLINE_FALLBACK_MIN_AGE_SECONDS:
+            return True
+        return False
     if row.last_positive_online_evidence_at > 0 or row.ingame_hb_ever or row.online_since > 0:
         return True
     if row.watchdog_active and row.process_seen_since_launch:
@@ -478,8 +497,9 @@ def _process_missing_dead_eligible(pkg: str, row: PackageRjnState) -> bool:
     if row.pids or str(row.current_pid or "").strip():
         return True
     try:
-        from . import checker_pointer as cp
+        import importlib
 
+        cp = importlib.import_module(".checker_pointer", __package__)
         ptr = cp.get()
         committed = str(ptr.committed_presence_state(pkg) or "").strip()
         if committed in {"No Heartbeat", "Online"}:
@@ -493,10 +513,27 @@ def _process_missing_dead_eligible(pkg: str, row: PackageRjnState) -> bool:
 
 
 def _sync_committed_dead_from_process_missing(pkg: str) -> None:
-    """Mirror authoritative process-missing Dead into the checker relay."""
+    """Mirror authoritative process-missing Dead into the central Monitoring relay."""
     try:
-        from . import checker_pointer as cp
+        from .lime_channel import lime_detection_enabled
 
+        if lime_detection_enabled():
+            from .test_latest2_monitoring_relay import submit_raw_evidence
+
+            submit_raw_evidence(
+                pkg,
+                hint="dead",
+                source="process",
+                evidence="process_missing",
+                process_exists=False,
+            )
+            return
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import importlib
+
+        cp = importlib.import_module(".checker_pointer", __package__)
         cp.get().commit_presence_state(pkg, "Dead", writer="process_missing")
     except Exception:  # noqa: BLE001
         pass
@@ -638,6 +675,12 @@ class RjnLifecycleMonitor:
 
     def start_session(self) -> None:
         """Detection-only session start: clear logcat, build UID map, start reader."""
+        try:
+            from .test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+            apply_test_latest2_runtime_patches()
+        except Exception:  # noqa: BLE001
+            pass
         with self._lock:
             if self._session_started:
                 return
@@ -793,7 +836,8 @@ class RjnLifecycleMonitor:
         if not row.dead_lane_enabled:
             return False
         if row.watchdog_active and not row.process_seen_since_launch:
-            return False
+            if row.launch_started_at <= 0 or (time.time() - row.launch_started_at) < 8.0:
+                return False
         return bool(
             self._was_ever_online_confirmed(row)
             or row.watchdog_active
@@ -877,7 +921,9 @@ class RjnLifecycleMonitor:
                     if row is None or not self._dead_lane_armed_for(row):
                         continue
                     if row.watchdog_active and not row.process_seen_since_launch:
-                        continue
+                        launch_age = now - row.launch_started_at if row.launch_started_at > 0 else 0.0
+                        if launch_age < 8.0:
+                            continue
                 self.try_mark_force_close_dead(pkg, at=now)
                 continue
 
@@ -2492,7 +2538,9 @@ class RjnLifecycleMonitor:
             if not _process_missing_dead_eligible(pkg, row):
                 return False
             if row.watchdog_active and not row.process_seen_since_launch:
-                return False
+                launch_age = now - row.launch_started_at if row.launch_started_at > 0 else 0.0
+                if launch_age < 8.0:
+                    return False
             row.force_close_detected = True
             row.process_missing_streak = PROCESS_MISSING_CONFIRM
             row.last_state_change_reason = "process_missing_force_close"
@@ -2529,7 +2577,9 @@ class RjnLifecycleMonitor:
                 if row is None:
                     continue
                 if row.watchdog_active and not row.process_seen_since_launch:
-                    continue
+                    launch_age = now - row.launch_started_at if row.launch_started_at > 0 else 0.0
+                    if launch_age < 8.0:
+                        continue
                 was_tracking = (
                     row.internal_state
                     in {
@@ -2670,8 +2720,14 @@ class RjnLifecycleMonitor:
                     if not (row.watchdog_active and not row.process_seen_since_launch):
                         confirm_needed = 1
                 if row.process_missing_streak >= confirm_needed:
+                    launch_age = (
+                        now - row.launch_started_at if row.launch_started_at > 0 else 0.0
+                    )
                     user_kill_during_launch = (
-                        row.watchdog_active and row.process_seen_since_launch
+                        row.watchdog_active
+                        and row.process_seen_since_launch
+                        and row.relaunching
+                        and launch_age >= 8.0
                     )
                     if _process_missing_dead_eligible(pkg, row) or user_kill_during_launch:
                         row.force_close_detected = True
