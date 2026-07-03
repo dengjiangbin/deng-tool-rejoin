@@ -57,28 +57,28 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         self.assertEqual(source.count("while not _supervisor.stop_event.is_set():"), 1)
         self.assertEqual(source.count('name="start-supervisor-daemon"'), 1)
 
-    def test_start_license_and_lock_run_before_prep_and_cache(self) -> None:
-        """License + instance lock must pass before kill-all / cache clear."""
+    def test_start_cache_clear_runs_before_lock_and_license(self) -> None:
+        """Prep + cache clear are real commands before lock/license/UI setup."""
         source = inspect.getsource(commands.cmd_start)
-        license_idx = source.find("_cmd_start_run_license_gate(")
-        lock_idx = source.find("_cmd_start_acquire_instance_lock(")
         imm_prep = source.find("# ── IMMEDIATE PREP")
         imm_cc = source.find("# ── IMMEDIATE CACHE CLEAR")
         batch_idx = source.find("batch_clear_cache_begin")
-        self.assertGreater(license_idx, -1)
-        self.assertGreater(lock_idx, -1)
+        lock_idx = source.find("_start_lock.acquire()")
+        license_idx = source.find("License gate before launch")
         self.assertGreater(imm_prep, -1)
         self.assertGreater(imm_cc, -1)
         self.assertGreater(batch_idx, -1)
-        self.assertLess(license_idx, lock_idx)
-        self.assertLess(lock_idx, imm_prep)
+        self.assertGreater(lock_idx, -1)
         self.assertLess(imm_prep, imm_cc)
-        self.assertGreater(batch_idx, imm_cc)
+        self.assertLess(batch_idx, lock_idx)
+        self.assertLess(batch_idx, license_idx)
         self.assertIn("START_PREP_DEADLINE_S", source)
         self.assertIn("_prep_commands_immediate", source)
         self.assertIn("run_callable_with_deadline(", source)
         self.assertIn("bootstrap_first_launch_after_cache(", source)
-        self.assertNotIn("Could not create Start lock:", source)
+        early_boot = source.find("bootstrap_first_launch_after_cache(")
+        self.assertLess(early_boot, lock_idx)
+        self.assertIn("_launch_sched_started", source)
         self.assertIn("_emit_immediate_start_table", source)
         self.assertIn("_get_ram_label", source)
         self.assertIn("_start_prep_ui_refresh", source)
@@ -132,9 +132,8 @@ class StartSegfaultRegressionTests(unittest.TestCase):
 
     def test_repeated_start_guard_uses_lockfile(self) -> None:
         source = inspect.getsource(commands.cmd_start)
-        lock_helper = inspect.getsource(commands._cmd_start_acquire_instance_lock)
-        self.assertIn("_cmd_start_acquire_instance_lock", source)
-        self.assertIn("stop_running_agent", lock_helper)
+        self.assertIn("LockManager()", source)
+        self.assertIn("stop_running_agent", source)
         self.assertIn("_release_start_lock", source)
 
     def test_run_command_timeout_returns_clean_result(self) -> None:

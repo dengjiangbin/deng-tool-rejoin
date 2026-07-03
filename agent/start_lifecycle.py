@@ -44,14 +44,6 @@ _cleanup_kill_except_termux_started_at: float | None = None
 _cleanup_kill_except_termux_finished_at: float | None = None
 _header_phase: str = ""
 _first_launch_requested_at: float | None = None
-_license_check_started_at: float | None = None
-_license_check_result: str | None = None
-_start_lock_path: str | None = None
-_start_lock_create_started_at: float | None = None
-_start_lock_create_result: str | None = None
-_start_lock_create_error_type: str | None = None
-_start_lock_create_errno: int | None = None
-_lifecycle_command_sent_at: float | None = None
 
 
 def reset_for_start(packages: list[str]) -> None:
@@ -71,10 +63,6 @@ def reset_for_start(packages: list[str]) -> None:
     global _launching_started_at, _all_packages_dispatched_at, _monitoring_started_at
     global _cleanup_kill_except_termux_started_at, _cleanup_kill_except_termux_finished_at
     global _header_phase, _first_launch_requested_at
-    global _license_check_started_at, _license_check_result
-    global _start_lock_path, _start_lock_create_started_at, _start_lock_create_result
-    global _start_lock_create_error_type, _start_lock_create_errno
-    global _lifecycle_command_sent_at
     with _lock:
         _cache_clear_closed = False
         _launch_scheduled_packages = {str(p).strip() for p in packages if str(p).strip()}
@@ -113,21 +101,12 @@ def reset_for_start(packages: list[str]) -> None:
         _cleanup_kill_except_termux_finished_at = None
         _header_phase = ""
         _first_launch_requested_at = None
-        _license_check_started_at = None
-        _license_check_result = None
-        _start_lock_path = None
-        _start_lock_create_started_at = None
-        _start_lock_create_result = None
-        _start_lock_create_error_type = None
-        _start_lock_create_errno = None
-        _lifecycle_command_sent_at = None
 
 
 def begin_prepare_immediately() -> float:
     """Atomically stamp Start + prepare command begin (probe SLA: <=500ms to kill)."""
     global _start_pressed_at, _preparing_entered_at, _prepare_started_at
     global _preparing_command_started_at, _cleanup_kill_except_termux_started_at
-    global _lifecycle_command_sent_at
     with _lock:
         now = time.time()
         if _start_pressed_at is None:
@@ -140,8 +119,6 @@ def begin_prepare_immediately() -> float:
             _preparing_command_started_at = now
         if _cleanup_kill_except_termux_started_at is None:
             _cleanup_kill_except_termux_started_at = now
-        if _lifecycle_command_sent_at is None:
-            _lifecycle_command_sent_at = now
         return now
 
 
@@ -150,60 +127,6 @@ def mark_start_pressed() -> None:
     with _lock:
         if _start_pressed_at is None:
             _start_pressed_at = time.time()
-
-
-def mark_license_check_started() -> None:
-    global _license_check_started_at
-    with _lock:
-        if _license_check_started_at is None:
-            _license_check_started_at = time.time()
-
-
-def mark_license_check_result(result: str) -> None:
-    global _license_check_result
-    with _lock:
-        _license_check_result = str(result or "").strip()[:80] or None
-
-
-def mark_start_lock_create_started(lock_path: str) -> None:
-    global _start_lock_path, _start_lock_create_started_at
-    with _lock:
-        _start_lock_path = str(lock_path or "").strip() or None
-        if _start_lock_create_started_at is None:
-            _start_lock_create_started_at = time.time()
-
-
-def mark_start_lock_create_ok(lock_path: str) -> None:
-    global _start_lock_path, _start_lock_create_result
-    global _start_lock_create_error_type, _start_lock_create_errno
-    with _lock:
-        _start_lock_path = str(lock_path or "").strip() or _start_lock_path
-        _start_lock_create_result = "ok"
-        _start_lock_create_error_type = None
-        _start_lock_create_errno = None
-
-
-def mark_start_lock_create_failed(
-    *,
-    lock_path: str,
-    error_type: str,
-    errno: int | None,
-    operation: str,
-) -> None:
-    global _start_lock_path, _start_lock_create_result
-    global _start_lock_create_error_type, _start_lock_create_errno
-    with _lock:
-        _start_lock_path = str(lock_path or "").strip() or _start_lock_path
-        _start_lock_create_result = "failed"
-        _start_lock_create_error_type = str(error_type or operation or "error")[:80]
-        _start_lock_create_errno = errno
-
-
-def mark_lifecycle_command_sent() -> None:
-    global _lifecycle_command_sent_at
-    with _lock:
-        if _lifecycle_command_sent_at is None:
-            _lifecycle_command_sent_at = time.time()
 
 
 def mark_preparing_entered() -> None:
@@ -556,15 +479,6 @@ def probe_snapshot() -> dict[str, Any]:
             "header_is_single_row": True,
             "header_phase": _header_phase or None,
             "start_pressed_at": _start_pressed_at,
-            "license_check_started_at": _license_check_started_at,
-            "license_check_result": _license_check_result,
-            "start_lock_path": _start_lock_path,
-            "start_lock_create_started_at": _start_lock_create_started_at,
-            "start_lock_create_result": _start_lock_create_result,
-            "start_lock_create_error_type": _start_lock_create_error_type,
-            "start_lock_create_errno": _start_lock_create_errno,
-            "lifecycle_command_sent_at": _lifecycle_command_sent_at,
-            "preparing_started_at": _prepare_started_at,
             "preparing_entered_at": _preparing_entered_at,
             "preparing_finished_at": _preparing_finished_at,
             "preparing_duration_ms": prep_duration,
