@@ -112,4 +112,12 @@ SENSITIVE_URL_PARAM_NAMES = {
     "token",
 }
 
+# Roblox cookie auto-extraction from app/browser/WebView storage is disabled.
+# Rejoin uses roblox:// deep links with the clone's existing logged-in session.
+COOKIE_AUTO_SCAN_DISABLED = os.environ.get("DENG_REJOIN_ALLOW_COOKIE_AUTO_SCAN", "").strip() not in {
+    "1",
+    "true",
+    "yes",
+}
+
 APP_DIRS = (APP_HOME, DATA_DIR, LOG_DIR, FAULT_LOG_DIR, RUN_DIR, LAUNCHER_DIR, CACHE_DIR, SNAPSHOT_DIR)

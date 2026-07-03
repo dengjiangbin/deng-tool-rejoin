@@ -52,6 +52,7 @@ from .constants import (
     APP_HOME,
     DATA_DIR,
     CONFIG_PATH,
+    COOKIE_AUTO_SCAN_DISABLED,
     CRASH_LOG_PATH,
     DB_PATH,
     DEFAULT_LICENSE_SERVER_URL,
@@ -145,6 +146,7 @@ COMMANDS = {
     "launch",
     "selftest",
     "state",
+    "detection",
 }
 
 # ─── ANSI color constants (used only when a tty is available) ─────────────────
@@ -2460,7 +2462,9 @@ def _ensure_presence_auth_for_entries(
     entries: list[dict[str, Any]],
     config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Root-scan ROBLOSECURITY cookies for watchdog presence checks."""
+    """Presence auth prep — cookie auto-scan intentionally disabled (manual only)."""
+    if COOKIE_AUTO_SCAN_DISABLED:
+        return [dict(e) for e in entries if isinstance(e, dict)]
     from agent.roblox_presence import detect_roblox_cookie
 
     out: list[dict[str, Any]] = []
@@ -6062,7 +6066,7 @@ def _wait_for_sequential_presence_online(
         return "Failed"
     uid = _resolve_presence_user_id(entry)
     cookie = str(entry.get("roblox_cookie") or "").strip()
-    if not cookie:
+    if not cookie and not _COOKIE_AUTO_SCAN_DISABLED:
         try:
             cookie = detect_roblox_cookie(pkg, entry=entry, config=cfg, use_root=True)
         except Exception:  # noqa: BLE001
@@ -9562,6 +9566,31 @@ def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
         return 1
 
 
+def cmd_detection(args: argparse.Namespace) -> int:
+    """``deng-rejoin detection speed-test [--upload-probe] [--scenario NAME] [--package PKG]``."""
+    sub = (getattr(args, "detection_subcommand", "") or "speed_test").lower().strip()
+    if sub not in {"speed_test", "speed-test", "speedtest", ""}:
+        print(f"Unknown detection subcommand: {sub}")
+        print("Usage: deng-rejoin detection speed-test [--upload-probe] [--scenario force-close] [--package com.example]")
+        return 2
+    from .detection_speed_test import run_speed_test_cli
+
+    pkg = str(getattr(args, "detection_package", "") or "").strip()
+    if not pkg:
+        try:
+            cfg = load_config()
+            entries = cfg.get("roblox_packages") or []
+            if entries and isinstance(entries[0], dict):
+                pkg = str(entries[0].get("package") or "").strip()
+        except Exception:  # noqa: BLE001
+            pkg = ""
+    return run_speed_test_cli(
+        package=pkg,
+        scenario=str(getattr(args, "detection_scenario", "") or "").strip(),
+        upload_probe=bool(getattr(args, "detection_upload_probe", False)),
+    )
+
+
 def cmd_monitor(args: argparse.Namespace) -> int:
     """``deng-rejoin monitor [status|start|stop|restart|snapshot-test]``.
 
@@ -9882,6 +9911,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Capture sub-action for `monitor`: "monitor status" / "monitor snapshot-test".
     ns.monitor_subcommand = ""
     ns.snapshot_upload_probe = False
+    ns.detection_subcommand = ""
+    ns.detection_upload_probe = False
+    ns.detection_scenario = ""
+    ns.detection_package = ""
     if ns.command == "monitor" and _unknown:
         # First non-flag token is the subcommand; flags like --upload-probe are
         # collected separately so `monitor snapshot-test --upload-probe` works.
@@ -9893,6 +9926,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         else:
             ns.monitor_subcommand = sub
         ns.snapshot_upload_probe = ("__upload_probe" in flags) or ("upload_probe" in flags)
+
+    if ns.command == "detection" and _unknown:
+        positional = [t for t in _unknown if not str(t).startswith("-")]
+        flags = {str(t).lower().replace("-", "_") for t in _unknown if str(t).startswith("-")}
+        sub = (positional[0] if positional else "").lower().replace("-", "_").strip()
+        if sub in {"speed_test", "speed-test", "speedtest"}:
+            ns.detection_subcommand = "speed_test"
+        else:
+            ns.detection_subcommand = sub or "speed_test"
+        ns.detection_upload_probe = ("__upload_probe" in flags) or ("upload_probe" in flags)
+        for i, tok in enumerate(_unknown):
+            if tok in ("--scenario", "-s") and i + 1 < len(_unknown):
+                ns.detection_scenario = str(_unknown[i + 1])
+            if tok in ("--package", "-p") and i + 1 < len(_unknown):
+                ns.detection_package = str(_unknown[i + 1])
 
     # Map positional sub-subcommands for `doctor`: "doctor layout", "doctor root-state".
     ns.doctor_install = False
@@ -10070,6 +10118,7 @@ def _handlers() -> dict[str, Any]:
         "launch": cmd_launch,
         "selftest": cmd_selftest,
         "state": cmd_state,
+        "detection": cmd_detection,
     }
 
 

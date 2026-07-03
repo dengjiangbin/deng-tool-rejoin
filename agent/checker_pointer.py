@@ -127,6 +127,12 @@ class _PackagePointer:
     waiting_reason: str = ""
     last_state_transition_reason: str = ""
     dead_detected_at: float | None = None
+    process_dead_detected_at: float | None = None
+    logcat_dead_detected_at: float | None = None
+    ocr_dead_detected_at: float | None = None
+    online_evidence_at: float | None = None
+    checking_committed_state_at: float | None = None
+    detection_latency_ms: float | None = None
     recovery_requested_at: float | None = None
     recovery_started_at: float | None = None
     recovery_finished_at: float | None = None
@@ -635,6 +641,14 @@ class CheckerPointerState:
             if persist:
                 self._refresh_header_action_locked()
                 self._persist(force=True)
+        try:
+            from .lime_detection_speed import get_active_lime_tracker
+
+            lime = get_active_lime_tracker()
+            if lime is not None:
+                lime.note_recovery_requested(pkg)
+        except Exception:  # noqa: BLE001
+            pass
 
     def dequeue_recovery(self) -> str:
         with self._lock:
@@ -1090,15 +1104,27 @@ class CheckerPointerState:
         transient ``Checking`` marker and the raw-evidence-pending flags for
         that package (the evidence has now been consumed by the relay).
         """
+        now = time.time()
         with self._lock:
             self.presence_state_writer = str(writer or "checking_system")[:80]
             row = self._pkg(package)
             row.committed_presence_state = state
             row.last_real_state = state
             row.display_state = state
+            row.checking_committed_state_at = now
             row.raw_online_evidence_pending = False
             row.raw_dead_evidence_pending = False
+            if state == "Online" and row.online_evidence_at is None:
+                row.online_evidence_at = now
             self._persist(force=True)
+        try:
+            from .lime_detection_speed import get_active_lime_tracker
+
+            lime = get_active_lime_tracker()
+            if lime is not None:
+                lime.note_checking_committed(package, at=now, state=state)
+        except Exception:  # noqa: BLE001
+            pass
 
     # Backwards-compatible alias: the resolved real state IS the committed
     # presence state under the single-relay model.
@@ -1272,6 +1298,12 @@ class CheckerPointerState:
                     "waiting_reason": row.waiting_reason or None,
                     "last_state_transition_reason": row.last_state_transition_reason or None,
                     "dead_detected_at": row.dead_detected_at,
+                    "process_dead_detected_at": row.process_dead_detected_at,
+                    "logcat_dead_detected_at": row.logcat_dead_detected_at,
+                    "ocr_dead_detected_at": row.ocr_dead_detected_at,
+                    "online_evidence_at": row.online_evidence_at,
+                    "checking_committed_state_at": row.checking_committed_state_at,
+                    "detection_latency_ms": row.detection_latency_ms,
                     "recovery_requested_at": row.recovery_requested_at,
                     "recovery_started_at": row.recovery_started_at,
                     "recovery_finished_at": row.recovery_finished_at,

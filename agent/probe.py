@@ -1368,6 +1368,28 @@ def collect_probe(
         errors.append({"step": "force_close_race", "error": str(exc)[:200]})
         out["force_close_race"] = {"enabled": False, "error": str(exc)[:120]}
     try:
+        from .lime_detection_speed import probe_lime_detection_speed_snapshot
+
+        lime_snap = probe_lime_detection_speed_snapshot()
+        out["lime_detection_speed"] = lime_snap
+        # Flatten primary package timestamps for dev-probe proof (pinned field).
+        pkgs_lime = lime_snap.get("packages") or {}
+        if isinstance(pkgs_lime, dict) and pkgs_lime:
+            first_pkg = next(iter(pkgs_lime.values()), {})
+            if isinstance(first_pkg, dict):
+                out["lime_detection_speed_proof"] = {
+                    "process_dead_detected_at": first_pkg.get("process_dead_detected_at"),
+                    "logcat_dead_detected_at": first_pkg.get("logcat_dead_detected_at"),
+                    "ocr_dead_detected_at": first_pkg.get("ocr_dead_detected_at"),
+                    "online_evidence_at": first_pkg.get("online_evidence_at"),
+                    "checking_committed_state_at": first_pkg.get("checking_committed_state_at"),
+                    "recovery_requested_at": first_pkg.get("recovery_requested_at"),
+                    "detection_latency_ms": first_pkg.get("detection_latency_ms"),
+                }
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "lime_detection_speed", "error": str(exc)[:200]})
+        out["lime_detection_speed"] = {"enabled": False, "error": str(exc)[:120]}
+    try:
         from . import checker_pointer as _checker_pointer
 
         _fc = _checker_pointer.probe_snapshot()
@@ -1739,6 +1761,7 @@ _PROBE_PINNED_FIELDS = frozenset({
     "rjn_detection_only", "online_detection", "decision", "state_machine",
     "dead_detection", "launch_relaunch", "relaunch", "account_dead_webhook",
     "resize_debug", "focused_checker", "launch_scheduler", "launch_schedule", "force_close_race",
+    "lime_detection_speed", "lime_detection_speed_proof",
 })
 
 

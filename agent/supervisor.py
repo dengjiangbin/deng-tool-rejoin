@@ -2381,7 +2381,16 @@ class WatchdogSupervisor:
             # This lets the authenticated Roblox endpoint identify the exact
             # account even when local prefs are unavailable or malformed.
             cookie = self._presence_cookies.get(pkg)
-            if not cookie or force_cookie_rescan:
+            if not cookie:
+                entry = self.entry_by_pkg.get(pkg) or {}
+                manual = str(entry.get("roblox_cookie") or self.cfg.get("roblox_cookie") or "").strip()
+                if manual:
+                    cookie = manual
+                    self._presence_cookies[pkg] = cookie
+                    detail["roblox_cookie_source"] = "config_manual"
+            from .constants import COOKIE_AUTO_SCAN_DISABLED
+
+            if (not cookie or force_cookie_rescan) and not COOKIE_AUTO_SCAN_DISABLED:
                 last_cookie_attempt = self._presence_cookie_lookup_at.get(pkg, 0.0)
                 should_try_cookie = force_cookie_rescan or (
                     (time.monotonic() - last_cookie_attempt) >= 120.0
