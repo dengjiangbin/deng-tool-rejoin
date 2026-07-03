@@ -161,7 +161,7 @@
     "notes": "Keyless isolated test channel for Lime-style detection speed tests. Does not affect test/latest or stable.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "98b148a0a8734c8c00e2762a46f769f372b5e634595f44ffe5ea02e337b6503e",
+    "artifact_sha256": "50ef8720aaef5c00509260887c43d42ad1a842eb7e8b99e1028708926ca5b0ac",
     "build_mode": "lime_on_v130",
     "base_git_commit": "2a3a776015562b8d73251b3932374f23272aefcf"
   }

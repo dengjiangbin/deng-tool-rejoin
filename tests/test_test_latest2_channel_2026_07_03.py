@@ -75,6 +75,17 @@ class TestLatest2ManifestTests(unittest.TestCase):
                     "test/latest2 must not be a byte copy of the rebuilt stable tarball",
                 )
 
+    def test_lime_overlay_deps_satisfied_on_v130_tag(self) -> None:
+        import subprocess
+
+        proc = subprocess.run(
+            [sys.executable, str(PROJECT / "scripts" / "_check_lime_overlay_deps.py")],
+            cwd=str(PROJECT),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+
     def test_test_latest2_endpoint_differs_from_test_latest_and_stable(self) -> None:
         t2 = get_exact_registry_row("test-latest2")
         md = get_exact_registry_row("main-dev")

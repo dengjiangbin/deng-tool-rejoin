@@ -45,6 +45,8 @@ _LIME_OVERLAY_FILES = (
     "agent/lime_detection_speed.py",
     "agent/rjn_lifecycle_monitor.py",
     "agent/force_close_race.py",
+    "agent/roblox_disconnect_reasons.py",
+    "agent/ocr_screen_detector.py",
     "agent/detection_speed_test.py",
     "agent/probe.py",
     "agent/license.py",
@@ -151,6 +153,33 @@ def _overlay_lime_files(source_repo: Path, worktree: Path) -> None:
             raise FileNotFoundError(f"Lime overlay missing: {rel}")
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+    _validate_lime_overlay_deps(worktree)
+
+
+def _validate_lime_overlay_deps(worktree: Path) -> None:
+    """Ensure overlaid modules do not import missing agent.* files on v1.3.0 base."""
+    import ast
+
+    overlay_set = set(_LIME_OVERLAY_FILES)
+    missing: set[str] = set()
+    for rel in _LIME_OVERLAY_FILES:
+        path = worktree / rel
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            mod = str(node.module or "")
+            if not mod.startswith("agent."):
+                continue
+            dep = "agent/" + mod[len("agent.") :].replace(".", "/") + ".py"
+            if dep in overlay_set or (worktree / dep).is_file():
+                continue
+            missing.add(dep.replace("\\", "/"))
+    if missing:
+        raise RuntimeError(
+            "lime overlay imports missing on v1.3.0 base: "
+            + ", ".join(sorted(missing))
+        )
 
 
 def build_lime_on_v130(repo: Path, out: Path) -> tuple[str, str]:
