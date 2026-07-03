@@ -30,6 +30,8 @@ def _rows_to_build(rows: list[dict]) -> list[dict]:
         version = str(row.get("version") or "").strip()
         if not version:
             continue
+        if version == "test-latest2":
+            continue
         rel = str(row.get("artifact_path") or "").strip()
         if not rel:
             continue

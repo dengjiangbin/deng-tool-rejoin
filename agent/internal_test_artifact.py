@@ -18,6 +18,7 @@ import zlib
 from pathlib import Path
 
 MAIN_DEV_ARCHIVE_REL_PATH = "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz"
+TEST_LATEST2_ARCHIVE_REL_PATH = "releases/test-latest2/deng-tool-rejoin-test-latest2.tar.gz"
 
 _CLIENT_SOURCE_DIR = "agent"
 _PROTECTED_BUNDLE = "agent/.deng_runtime.bin"
@@ -403,7 +404,11 @@ def _git_commit_short(repo_root: Path) -> str:
 
 
 def _make_build_info_bytes(
-    repo_root: Path, *, channel: str = "main-dev", version: str = "main-dev",
+    repo_root: Path,
+    *,
+    channel: str = "main-dev",
+    version: str = "main-dev",
+    source_version: str = "",
 ) -> bytes:
     """Render the BUILD-INFO.json payload embedded into the tarball.
 
@@ -432,6 +437,8 @@ def _make_build_info_bytes(
         "protection": "protected-bytecode-bundle",
         "probe_id": probe_id,
     }
+    if source_version:
+        info["source_version"] = str(source_version).strip()
     return json.dumps(info, indent=2, sort_keys=True).encode("utf-8")
 
 
@@ -566,6 +573,7 @@ def build_internal_test_tarball(
     *,
     channel: str = "main-dev",
     version: str = "main-dev",
+    source_version: str = "",
 ) -> str:
     """Write gzip tarball and return lowercase SHA-256 hex digest of the file.
 
@@ -581,10 +589,20 @@ def build_internal_test_tarball(
         raise RuntimeError("No client modules matched protected artifact rules.")
 
     signing_key = _load_or_create_signing_key(repo_root)
-    build_info_bytes = _make_build_info_bytes(repo_root, channel=channel, version=version)
+    build_info_bytes = _make_build_info_bytes(
+        repo_root,
+        channel=channel,
+        version=version,
+        source_version=source_version,
+    )
     build_info = json.loads(build_info_bytes.decode("utf-8"))
     bundle_bytes = _compile_client_bundle(pairs)
-    fallback_install_endpoint = f"/install/{version}" if version != "main-dev" else "/install/test/latest"
+    if version == "main-dev":
+        fallback_install_endpoint = "/install/test/latest"
+    elif version == "test-latest2":
+        fallback_install_endpoint = "/install/test/latest2"
+    else:
+        fallback_install_endpoint = f"/install/{version}"
     entries = _render_raw_runtime_files(
         signing_key,
         fallback_install_endpoint=fallback_install_endpoint,

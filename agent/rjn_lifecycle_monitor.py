@@ -652,6 +652,10 @@ class RjnLifecycleMonitor:
 
     def _start_lime_detection_speed(self) -> None:
         try:
+            from .lime_channel import lime_detection_enabled
+
+            if not lime_detection_enabled():
+                return
             from .lime_detection_speed import start_lime_tracker_for_monitor
 
             if self._lime_tracker is not None:

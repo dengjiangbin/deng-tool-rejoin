@@ -284,6 +284,7 @@ def collect_version_info() -> dict[str, Any]:
         "product": PRODUCT_NAME,
         "product_version": product_version,
         "channel": str(ib.get("channel") or bi.get("channel") or ""),
+        "source_version": str(bi.get("source_version") or ib.get("source_version") or ""),
         "git_commit": str(ib.get("git_commit") or bi.get("git_commit") or ""),
         "git_commit_short": _short(
             str(ib.get("git_commit") or bi.get("git_commit") or "")

@@ -24,6 +24,7 @@ ENDPOINTS = (
     "/install/v1.2.0",
     "/install/v1.0.0",
     "/install/test/latest",
+    "/install/test/latest2",
 )
 
 
@@ -104,7 +105,9 @@ def main() -> int:
                     "sha_match": match,
                     "version": parsed.get("version_label"),
                     "channel": parsed.get("channel"),
-                    "license_gate": "key-free" if ep.endswith("test/latest") else "license-gated",
+                    "license_gate": "key-free"
+                    if ep.endswith(("test/latest", "test/latest2"))
+                    else "license-gated",
                     "forbidden_reset_hwid": parsed.get("forbidden_reset_hwid"),
                 }
             )

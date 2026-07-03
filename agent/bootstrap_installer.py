@@ -295,7 +295,7 @@ def render_direct_install_bootstrap(
     # channels so testers never need to enter a license key.  Stable/production
     # installers never contain this block, and the tool re-checks the build
     # channel at runtime, so a copied marker cannot unlock production.
-    _dev_channels = {"main-dev", "dev", "internal", "test", "beta", "test-latest"}
+    _dev_channels = {"main-dev", "dev", "internal", "test", "beta", "test-latest", "test-latest2", "test_latest2"}
     test_bypass_part = ""
     if channel.strip().lower() in _dev_channels:
         test_bypass_part = (

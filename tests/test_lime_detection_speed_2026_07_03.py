@@ -103,6 +103,14 @@ class LimeStateFileTests(unittest.TestCase):
                 self.assertEqual(row["logcat_dead_detected_at"], 3000.8)
 
 
+class LimeChannelGateTests(unittest.TestCase):
+    def test_lime_only_on_test_latest2_channel(self) -> None:
+        from agent.lime_channel import is_lime_detection_channel
+
+        self.assertTrue(is_lime_detection_channel("test-latest2"))
+        self.assertFalse(is_lime_detection_channel("main-dev"))
+
+
 class ProbeProofTests(unittest.TestCase):
     def test_build_probe_proof_section(self) -> None:
         snap = {
@@ -123,6 +131,8 @@ class ProbeProofTests(unittest.TestCase):
         proof = build_probe_proof_section(snap)
         self.assertEqual(proof["detection_latency_ms"], 100.0)
         self.assertFalse(proof["cookie_auto_extract"])
+        self.assertIn("source_version", proof)
+        self.assertIn("keyless_start_ok", proof)
         lines = format_speed_test_report(snap)
         self.assertTrue(any("process_dead_detected_at" in ln for ln in lines))
 

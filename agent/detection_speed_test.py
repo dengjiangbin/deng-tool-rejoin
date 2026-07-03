@@ -76,9 +76,26 @@ def build_probe_proof_section(snap: dict[str, Any]) -> dict[str, Any]:
     primary: dict[str, Any] = {}
     if isinstance(pkgs, dict) and pkgs:
         primary = next(iter(pkgs.values()), {}) if isinstance(next(iter(pkgs.values())), dict) else {}
+    build_meta: dict[str, Any] = {}
+    keyless_start_ok = False
+    try:
+        from .build_info import collect_version_info
+        from .license import is_test_license_bypass_active
+
+        build_meta = collect_version_info() or {}
+        ch = str(build_meta.get("channel") or "").strip().lower()
+        keyless_start_ok = ch in {"test-latest2", "test_latest2", "main-dev"} and (
+            is_test_license_bypass_active() or ch == "test-latest2"
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "scenario": "lime_detection_speed_live",
         "captured_at": time.time(),
+        "channel": build_meta.get("channel") or snap.get("channel"),
+        "artifact_sha256": build_meta.get("artifact_sha256") or snap.get("artifact_sha256"),
+        "source_version": build_meta.get("source_version") or snap.get("source_version") or "v1.3.0",
+        "keyless_start_ok": keyless_start_ok,
         "enabled": bool(snap.get("enabled")),
         "cookie_auto_extract": bool(snap.get("cookie_auto_extract")),
         "process_dead_detected_at": primary.get("process_dead_detected_at"),
@@ -143,6 +160,10 @@ def run_speed_test_cli(
     doc["lime_detection_speed_proof"] = {
         k: proof[k]
         for k in (
+            "channel",
+            "artifact_sha256",
+            "source_version",
+            "keyless_start_ok",
             "process_dead_detected_at",
             "logcat_dead_detected_at",
             "ocr_dead_detected_at",

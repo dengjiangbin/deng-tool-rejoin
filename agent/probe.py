@@ -1377,7 +1377,11 @@ def collect_probe(
         if isinstance(pkgs_lime, dict) and pkgs_lime:
             first_pkg = next(iter(pkgs_lime.values()), {})
             if isinstance(first_pkg, dict):
+                build_info = out.get("build") if isinstance(out.get("build"), dict) else {}
                 out["lime_detection_speed_proof"] = {
+                    "channel": build_info.get("channel"),
+                    "artifact_sha256": build_info.get("artifact_sha256"),
+                    "source_version": build_info.get("source_version"),
                     "process_dead_detected_at": first_pkg.get("process_dead_detected_at"),
                     "logcat_dead_detected_at": first_pkg.get("logcat_dead_detected_at"),
                     "ocr_dead_detected_at": first_pkg.get("ocr_dead_detected_at"),

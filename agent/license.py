@@ -165,7 +165,7 @@ def hash_install_id(install_id: str) -> str:
 # can NEVER unlock production: stable builds always require a real key.
 TEST_BYPASS_MARKER_PATH = APP_HOME / ".test-license-bypass"
 _DEV_CHANNELS = frozenset(
-    {"main-dev", "dev", "internal", "test", "beta", "test-latest"}
+    {"main-dev", "dev", "internal", "test", "beta", "test-latest", "test-latest2", "test_latest2"}
 )
 
 

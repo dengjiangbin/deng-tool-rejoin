@@ -37,11 +37,11 @@ LIME_STATE_PATH = DATA_DIR / "lime-detection-speed-state.json"
 LIME_STATE_MAX_AGE_SECONDS = 20.0
 LIME_STATE_WRITE_MIN_INTERVAL_SECONDS = 0.5
 
-LIME_ENABLED = os.environ.get("DENG_REJOIN_DISABLE_LIME_SPEED", "").strip() not in {
-    "1",
-    "true",
-    "yes",
-}
+from .lime_channel import lime_detection_enabled as _lime_channel_enabled
+
+
+def _lime_enabled() -> bool:
+    return _lime_channel_enabled()
 
 PROCESS_POLL_INTERVAL_SECONDS = float(
     os.environ.get("DENG_REJOIN_LIME_PROCESS_POLL_SEC", "0.5") or "0.5"
@@ -102,7 +102,7 @@ class LimeDetectionSpeedTracker:
         }
 
     def start(self) -> None:
-        if not LIME_ENABLED:
+        if not _lime_enabled():
             return
         with self._lock:
             if self._session_active:
@@ -383,7 +383,7 @@ class LimeDetectionSpeedTracker:
             race_snap = probe_force_close_race_snapshot(clock=self._clock)
             ocr_snap = probe_ocr_snapshot()
             return {
-                "enabled": self._session_active and LIME_ENABLED,
+                "enabled": self._session_active and _lime_enabled(),
                 "cookie_auto_extract": False,
                 "launch_requires_cookie": False,
                 "process_poll_interval_ms": round(PROCESS_POLL_INTERVAL_SECONDS * 1000.0, 0),
@@ -459,7 +459,7 @@ def probe_lime_detection_speed_snapshot(
 
 def start_lime_tracker_for_monitor(monitor: Any) -> LimeDetectionSpeedTracker | None:
     """Start Lime tracker when RJN session starts (replaces bare force_close_race start)."""
-    if not LIME_ENABLED:
+    if not _lime_enabled():
         return None
     existing = get_active_force_close_race_detector()
     if existing is not None:

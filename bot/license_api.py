@@ -24,6 +24,7 @@ Endpoints
   GET  /install/latest
   GET  /install/<version>   e.g. /install/v1.0.0
   GET  /install/test/latest   (fixed URL; internal test channel banner)
+  GET  /install/test/latest2  (isolated Lime detection test channel; keyless)
   GET  /install/beta/latest   (302 alias → /install/test/latest)
   GET  /install/dev/main?exp=...&sig=...   (HMAC-signed; legacy internal)
   GET  /install/launcher/bundle.tar.gz
@@ -679,6 +680,85 @@ def _route_public_install(
                 script.encode("utf-8"),
                 200,
                 "text/x-shellscript",
+                [("Cache-Control", "no-store")],
+            )
+
+        if tail == "test/latest2":
+            from agent.bootstrap_installer import render_direct_install_bootstrap
+
+            _row = get_exact_registry_row("test-latest2")
+            if _row is None:
+                return (
+                    json.dumps({"error": "test/latest2 channel not configured."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    [("Cache-Control", "no-store")],
+                )
+            _sha = str(_row.get("artifact_sha256") or "").strip()
+            _source = str(_row.get("source_version") or "v1.3.0").strip()
+            script = render_direct_install_bootstrap(
+                base_url=base,
+                package_sha256=_sha,
+                banner_lines=(f"Channel: test/latest2", f"Source: {_source}"),
+                version_label="test-latest2",
+                channel="test-latest2",
+                token_endpoint="/install/test/latest2/package-token",
+                installer_endpoint="/install/test/latest2",
+                requested_channel="test/latest2",
+            )
+            return (
+                script.encode("utf-8"),
+                200,
+                "text/x-shellscript",
+                [("Cache-Control", "no-store")],
+            )
+
+        if tail == "test/latest2/package-token":
+            _row = get_exact_registry_row("test-latest2")
+            if _row is None:
+                return (
+                    json.dumps({"error": "test/latest2 package not configured."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    [("Cache-Control", "no-store")],
+                )
+            _pkg_path: Path | None = None
+            _project_pkg = _PROJECT_ROOT / "releases" / "test-latest2" / "deng-tool-rejoin-test-latest2.tar.gz"
+            if _project_pkg.is_file():
+                _pkg_path = _project_pkg
+            else:
+                _art_root = get_artifact_root()
+                if _art_root is not None:
+                    _cand = artifact_path_for_row(_row, _art_root)
+                    if _cand is not None and _cand.is_file():
+                        _pkg_path = _cand
+            if _pkg_path is None:
+                return (
+                    json.dumps({"error": "test/latest2 package not found."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    [("Cache-Control", "no-store")],
+                )
+            _sha = str(_row.get("artifact_sha256") or "").strip()
+            ttl = max(30, int(os.environ.get("LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS", "300")))
+            token = _issue_download_token(
+                _pkg_path,
+                _sha,
+                _pkg_path.name,
+                str(_row.get("version") or "test-latest2"),
+                str(_row.get("channel") or "test"),
+                _pkg_path.stat().st_size,
+                ttl,
+            )
+            payload = {
+                "url": f"{_public_base_url()}/api/download/package/{token}",
+                "sha256": _sha,
+                "expires_in": ttl,
+            }
+            return (
+                json.dumps(payload, sort_keys=True).encode("utf-8"),
+                200,
+                "application/json",
                 [("Cache-Control", "no-store")],
             )
 
