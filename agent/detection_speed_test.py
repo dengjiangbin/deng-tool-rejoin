@@ -13,7 +13,7 @@ from .lime_detection_speed import (
 
 def _fmt_ts(at: float | None) -> str:
     if at is None:
-        return "—"
+        return "-"
     try:
         return f"{float(at):.3f}"
     except (TypeError, ValueError):
