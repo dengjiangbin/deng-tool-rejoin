@@ -76,7 +76,15 @@ from .constants import (
 from .doctor import print_doctor, run_doctor
 from .launcher import RejoinResult, perform_rejoin
 from .launcher_file import create_market_launchers
-from .lockfile import LockError, LockManager, is_process_alive, stop_running_agent
+from .lockfile import (
+    LockError,
+    LockManager,
+    LockPermissionError,
+    is_process_alive,
+    lock_acquire_trace,
+    resolve_writable_instance_lock_paths,
+    stop_running_agent,
+)
 from .menu import run_menu
 from .onboarding import (
     NEW_USER_HELP_TEXT,
@@ -655,9 +663,9 @@ def _license_failure_user_message(result: str, msg: str) -> str:
     if norm == "check_timeout":
         return LICENSE_CHECK_TIMEOUT_USER_MESSAGE
     if norm == "expired":
-        return text or "This license key has expired."
+        return "License expired. Please generate a new key."
     if norm in ("not_found", "invalid", "inactive", "revoked"):
-        return text or "License key is not valid."
+        return "License invalid. Please enter a valid key."
     if norm == "key_not_redeemed":
         return text or "This key has not been activated."
     if norm in _LICENSE_TRANSIENT_RESULTS:
@@ -1210,7 +1218,7 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
     elif result == "missing_key":
         _print_license_err("No License Key Found", use_color)
     else:
-        _print_license_err(f"License Invalid: {msg}", use_color)
+        _print_license_err(_license_failure_user_message(result, msg), use_color)
     print_beginner_license_gate_help(
         show_hwid_footer=(result not in ("wrong_device", "key_not_redeemed"))
     )
@@ -6154,6 +6162,201 @@ def cmd_package_key(args: argparse.Namespace) -> int:
     return 0
 
 
+_START_LOCK_USER_MESSAGE = (
+    "Start lock could not be created. Please restart Termux and try again."
+)
+
+
+def _cmd_start_run_license_gate(
+    cfg: dict[str, Any],
+    *,
+    use_color: bool,
+    start_log: Any,
+    start_lifecycle: Any,
+) -> bool:
+    """Return True when Start may continue (valid/bypass license)."""
+    global _license_session_validated
+    start_lifecycle.mark_license_check_started()
+    if is_test_license_bypass_active():
+        start_log.info(
+            "[DENG_REJOIN_TEST_LICENSE_BYPASS] active=true stdout_suppressed_during_start"
+        )
+        start_lifecycle.mark_license_check_result("bypass")
+        return True
+    if keystore.DEV_MODE:
+        start_lifecycle.mark_license_check_result("dev_mode")
+        return True
+
+    license_cfg = cfg.get("license") or {}
+    if license_cfg.get("disabled_by_user") or not license_cfg.get("enabled", True):
+        start_lifecycle.mark_license_check_result("disabled")
+        return True
+
+    mode = str(license_cfg.get("mode") or "remote").strip().lower()
+    if mode == "local":
+        key = (license_cfg.get("key") or "").strip() or (cfg.get("license_key") or "").strip()
+        if not key:
+            start_lifecycle.mark_license_check_result("missing_key")
+            _print_license_err("No License Key Found", use_color)
+            print_beginner_license_gate_help()
+            return False
+        ok, msg = keystore.verify_key(key)
+        if not ok:
+            result = "expired" if "expir" in str(msg or "").lower() else "invalid"
+            start_lifecycle.mark_license_check_result(result)
+            _print_license_err(_license_failure_user_message(result, msg), use_color)
+            print_beginner_license_gate_help()
+            return False
+        start_lifecycle.mark_license_check_result("active")
+        return True
+
+    result, msg = _remote_license_run_check(cfg)
+    if result == "active":
+        _license_session_validated = True
+        try:
+            _persist_license_status(cfg, "active")
+        except Exception:  # noqa: BLE001
+            pass
+        start_lifecycle.mark_license_check_result("active")
+        return True
+
+    if result not in _LICENSE_TRANSIENT_RESULTS:
+        try:
+            _persist_license_status(cfg, result)
+        except Exception:  # noqa: BLE001
+            pass
+
+    start_lifecycle.mark_license_check_result(result)
+    if result == "wrong_device":
+        _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+    elif result == "requires_manual_rebind":
+        _print_license_err(HWID_RESET_REENTRY_MESSAGE, use_color)
+        try:
+            _clear_cached_license_key(cfg)
+        except Exception:  # noqa: BLE001
+            pass
+    elif result == "key_not_redeemed":
+        _print_license_err(msg, use_color)
+    elif result == "missing_key":
+        _print_license_err("No License Key Found", use_color)
+    else:
+        _print_license_err(_license_failure_user_message(result, msg), use_color)
+    print_beginner_license_gate_help(
+        show_hwid_footer=(result not in ("wrong_device", "key_not_redeemed"))
+    )
+    return False
+
+
+def _cmd_start_acquire_instance_lock(
+    start_session: Any,
+    start_log: Any,
+    start_lifecycle: Any,
+) -> tuple[LockManager | None, int]:
+    """Create the Start instance lock in a writable runtime directory."""
+    ensure_app_dirs()
+    try:
+        pid_path, lock_path = resolve_writable_instance_lock_paths()
+    except LockPermissionError as exc:
+        trace = lock_acquire_trace()
+        start_lifecycle.mark_start_lock_create_started(str(trace.get("lock_path") or RUN_DIR / "agent.lock"))
+        start_lifecycle.mark_start_lock_create_failed(
+            lock_path=str(trace.get("lock_path") or RUN_DIR / "agent.lock"),
+            error_type=type(exc).__name__,
+            errno=getattr(exc, "errno", None) or trace.get("errno"),
+            operation=str(trace.get("operation") or "resolve_runtime_dir"),
+        )
+        start_log.error(
+            "[DENG_REJOIN_INSTANCE_LOCK] action=resolve_failed error=%s trace=%s",
+            exc,
+            trace,
+        )
+        print(_START_LOCK_USER_MESSAGE)
+        start_session.finish("lock_failed")
+        return None, 1
+
+    start_lifecycle.mark_start_lock_create_started(str(lock_path))
+    manager = LockManager(pid_path=pid_path, lock_path=lock_path)
+    try:
+        from .logger import configure_logging, log_event
+
+        lock_logger = configure_logging()
+        try:
+            manager.acquire()
+            trace = lock_acquire_trace()
+            start_lifecycle.mark_start_lock_create_ok(str(lock_path))
+            log_event(
+                lock_logger,
+                "info",
+                "[DENG_REJOIN_INSTANCE_LOCK]",
+                action="created",
+                pid=os.getpid(),
+                lock_path=str(lock_path),
+                runtime_dir=str(trace.get("runtime_dir") or lock_path.parent),
+            )
+            return manager, 0
+        except LockPermissionError as exc:
+            trace = lock_acquire_trace()
+            start_lifecycle.mark_start_lock_create_failed(
+                lock_path=str(lock_path),
+                error_type=str(trace.get("start_lock_create_error_type") or type(exc).__name__),
+                errno=trace.get("start_lock_create_errno") or getattr(exc, "errno", None),
+                operation=str(trace.get("operation") or "acquire"),
+            )
+            start_log.error(
+                "[DENG_REJOIN_INSTANCE_LOCK] action=permission_denied error=%s trace=%s",
+                exc,
+                trace,
+            )
+            print(_START_LOCK_USER_MESSAGE)
+            start_session.finish("lock_failed")
+            return None, 1
+        except LockError:
+            stopped, stop_msg = stop_running_agent(
+                pid_path=pid_path, lock_path=lock_path, timeout=5
+            )
+            log_event(
+                lock_logger,
+                "info",
+                "[DENG_REJOIN_INSTANCE_LOCK]",
+                action="active_existing",
+                pid="",
+                lock_path=str(lock_path),
+                result=stop_msg,
+            )
+            if stopped:
+                manager.acquire()
+                start_lifecycle.mark_start_lock_create_ok(str(lock_path))
+                log_event(
+                    lock_logger,
+                    "info",
+                    "[DENG_REJOIN_INSTANCE_LOCK]",
+                    action="created",
+                    pid=os.getpid(),
+                    lock_path=str(lock_path),
+                )
+                return manager, 0
+            print("DENG Tool: Rejoin is already running.")
+            print("Stop the existing Start session, then run Start again.")
+            start_session.finish("already_running")
+            return None, 1
+    except OSError as exc:
+        start_lifecycle.mark_start_lock_create_failed(
+            lock_path=str(lock_path),
+            error_type=type(exc).__name__,
+            errno=getattr(exc, "errno", None),
+            operation="acquire",
+        )
+        start_log.error(
+            "[DENG_REJOIN_INSTANCE_LOCK] action=os_error error=%s errno=%s path=%s",
+            exc,
+            getattr(exc, "errno", None),
+            lock_path,
+        )
+        print(_START_LOCK_USER_MESSAGE)
+        start_session.finish("lock_failed")
+        return None, 1
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     use_color = not args.no_color
     _start_lock: LockManager | None = None
@@ -6376,8 +6579,40 @@ def cmd_start(args: argparse.Namespace) -> int:
         def _stop_prep_ui_refresh() -> None:
             _prep_ui_stop.set()
 
-        # ── IMMEDIATE PREP (real command, not UI-only) ─────────────────────
         _start_lifecycle_prep.reset_for_start(package_names_early)
+        _start_lifecycle_prep.mark_start_pressed()
+
+        if not _cmd_start_run_license_gate(
+            cfg,
+            use_color=use_color,
+            start_log=_start_log,
+            start_lifecycle=_start_lifecycle_prep,
+        ):
+            _start_session.finish("license_failed")
+            return 1
+
+        _start_lock, _lock_rc = _cmd_start_acquire_instance_lock(
+            _start_session,
+            _start_log,
+            _start_lifecycle_prep,
+        )
+        if _lock_rc != 0:
+            return _lock_rc
+
+        cfg = _ensure_install_id_saved(cfg)
+        try:
+            from .build_info import collect_version_info
+
+            _version_info = collect_version_info()
+        except Exception:  # noqa: BLE001
+            _version_info = {}
+        safe_io.set_crash_context(
+            git_commit=_version_info.get("git_commit_short", ""),
+            artifact_sha=_version_info.get("artifact_sha256_short", ""),
+            build_probe_id=_version_info.get("probe_id", ""),
+        )
+
+        # ── IMMEDIATE PREP (real command, not UI-only) ─────────────────────
         _prep_stamp = _start_lifecycle_prep.begin_prepare_immediately()
         _emit_immediate_start_table("Preparing")
         _start_prep_ui_refresh("Preparing")
@@ -6436,7 +6671,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 pass
 
-        # ── IMMEDIATE CACHE CLEAR (before lock/license/UI — real command) ──
+        # ── IMMEDIATE CACHE CLEAR (after license+lock — real command) ──
         from .cache_clear_phases import (
             START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S,
             START_PREP_DEADLINE_S,
@@ -6644,57 +6879,6 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         _start_session.mark("package_preparation_begin", package_count=len(entries))
 
-        try:
-            from .logger import configure_logging, log_event
-            _lock_logger = configure_logging()
-            _start_lock = LockManager()
-            try:
-                _start_lock.acquire()
-                log_event(
-                    _lock_logger, "info", "[DENG_REJOIN_INSTANCE_LOCK]",
-                    action="created",
-                    pid=os.getpid(),
-                    lock_path=str(LOCK_PATH),
-                )
-            except LockError:
-                stopped, stop_msg = stop_running_agent(timeout=5)
-                log_event(
-                    _lock_logger, "info", "[DENG_REJOIN_INSTANCE_LOCK]",
-                    action="active_existing",
-                    pid="",
-                    lock_path=str(LOCK_PATH),
-                    result=stop_msg,
-                )
-                if stopped:
-                    _start_lock.acquire()
-                    log_event(
-                        _lock_logger, "info", "[DENG_REJOIN_INSTANCE_LOCK]",
-                        action="created",
-                        pid=os.getpid(),
-                        lock_path=str(LOCK_PATH),
-                    )
-                else:
-                    print("DENG Tool: Rejoin is already running.")
-                    print("Stop the existing Start session, then run Start again.")
-                    _start_session.finish("already_running")
-                    return 1
-        except Exception as exc:  # noqa: BLE001
-            print(f"Could not create Start lock: {exc}")
-            _start_session.finish("lock_failed")
-            return 1
-
-        cfg = _ensure_install_id_saved(cfg)
-        try:
-            from .build_info import collect_version_info
-            _version_info = collect_version_info()
-        except Exception:  # noqa: BLE001
-            _version_info = {}
-        safe_io.set_crash_context(
-            git_commit=_version_info.get("git_commit_short", ""),
-            artifact_sha=_version_info.get("artifact_sha256_short", ""),
-            build_probe_id=_version_info.get("probe_id", ""),
-        )
-
         def _screen_mode_before_start_bg() -> None:
             try:
                 _enforce_configured_screen_mode(
@@ -6717,6 +6901,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             pass
         if previous_crash_notice:
             try:
+                from .logger import configure_logging, log_event
+
                 log_event(
                     configure_logging(),
                     "warning",
@@ -6725,33 +6911,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 )
             except Exception:  # noqa: BLE001
                 pass
-
-        # License gate before launch (after real prep — never blocks kill-all).
-        if is_test_license_bypass_active():
-            _start_log.info(
-                "[DENG_REJOIN_TEST_LICENSE_BYPASS] active=true stdout_suppressed_during_start"
-            )
-        elif not keystore.DEV_MODE:
-            license_cfg = cfg.get("license") or {}
-            if not license_cfg.get("disabled_by_user") and license_cfg.get("enabled", True):
-                if str(license_cfg.get("mode") or "remote").strip().lower() == "local":
-                    _key = (license_cfg.get("key") or "").strip() or (cfg.get("license_key") or "").strip()
-                    if _key:
-                        ok, msg = keystore.verify_key(_key)
-                        if not ok:
-                            _print_license_err(f"License key error: {msg}", use_color)
-                            print_beginner_license_gate_help()
-                            _start_session.finish("license_failed")
-                            return 1
-                    else:
-                        _print_license_err("No License Key Found", use_color)
-                        print_beginner_license_gate_help()
-                        _start_session.finish("license_missing")
-                        return 1
-                else:
-                    if not verify_remote_license_noninteractive(cfg, use_color=use_color):
-                        _start_session.finish("license_failed")
-                        return 1
 
         # Screen already cleared once at Start press — do not wipe prep/cache UI.
         # [DENG_REJOIN_PRIVATE_URL_LAUNCH] probe_id=p-ea167faf5f
