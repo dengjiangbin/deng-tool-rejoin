@@ -146,7 +146,7 @@ class DeltaKeyBypassTests(unittest.TestCase):
         with patch("agent.lime_channel.lime_detection_enabled", return_value=False):
             snap = probe_snapshot()
             self.assertFalse(snap.get("enabled", True))
-            self.assertEqual(snap.get("bypass_count"), 0)
+            self.assertEqual(snap.get("mode"), "token_activation")
 
 
 class RelayVersionTests(unittest.TestCase):

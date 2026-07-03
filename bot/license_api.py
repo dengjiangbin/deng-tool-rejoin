@@ -603,6 +603,77 @@ def _guess_package_content_type(filename: str) -> str:
     return "application/octet-stream"
 
 
+def _route_delta_bypass(
+    environ: dict, path: str, method: str
+) -> tuple[bytes, int, str, list[tuple[str, str]] | None] | None:
+    """Lime-compatible Delta executor bypass (public — no bearer auth).
+
+    GET  /bypass?token=…  or  /api/bypass?token=…
+    POST /license/activate   body: {"key", "hwid", "install_id_hash"}
+    GET  /license/check?key=…
+    """
+    from agent.delta_bypass_store import (
+        activate_executor_license,
+        check_executor_license,
+        redeem_bypass_token,
+    )
+
+    if path in ("/bypass", "/api/bypass"):
+        if method != "GET":
+            return (
+                json.dumps({"error": "GET required"}).encode("utf-8"),
+                405,
+                "application/json",
+                None,
+            )
+        qs = parse_qs(environ.get("QUERY_STRING", ""))
+        token = (qs.get("token") or [""])[0].strip()
+        ok, payload = redeem_bypass_token(token)
+        status = 200 if ok else 404
+        err = str(payload.get("error") or "")
+        if err == "already_used":
+            status = 409
+        elif err == "expired":
+            status = 410
+        return (json.dumps(payload).encode("utf-8"), status, "application/json", None)
+
+    if path == "/license/activate":
+        if method != "POST":
+            return (
+                json.dumps({"error": "POST required"}).encode("utf-8"),
+                405,
+                "application/json",
+                None,
+            )
+        body = _read_json_body(environ) or {}
+        ok, payload = activate_executor_license(
+            str(body.get("key") or ""),
+            hwid=str(body.get("hwid") or ""),
+            install_id_hash=str(body.get("install_id_hash") or ""),
+        )
+        return (
+            json.dumps(payload).encode("utf-8"),
+            200 if ok else 400,
+            "application/json",
+            None,
+        )
+
+    if path == "/license/check":
+        if method != "GET":
+            return (
+                json.dumps({"error": "GET required"}).encode("utf-8"),
+                405,
+                "application/json",
+                None,
+            )
+        qs = parse_qs(environ.get("QUERY_STRING", ""))
+        key = (qs.get("key") or [""])[0].strip()
+        payload = check_executor_license(key)
+        return (json.dumps(payload).encode("utf-8"), 200, "application/json", None)
+
+    return None
+
+
 def _route_public_install(
     environ: dict, path: str, method: str
 ) -> tuple[bytes, int, str, list[tuple[str, str]] | None] | None:
@@ -1510,6 +1581,11 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         return respond(data, content_type="image/png")
 
     # ── Public bootstrap + install authorize + signed package downloads ───────
+    routed = _route_delta_bypass(environ, path, method)
+    if routed is not None:
+        body, st, ctype, extra = routed
+        return respond(body, status=st, content_type=ctype, extra_headers=extra)
+
     routed = _route_public_install(environ, path, method)
     if routed is not None:
         body, st, ctype, extra = routed

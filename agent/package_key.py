@@ -333,6 +333,81 @@ def write_package_key_file(
     return result
 
 
+def write_executor_license_raw(
+    package: str,
+    key: str,
+    *,
+    root_enabled: bool = True,
+) -> dict[str, Any]:
+    """Write a Delta / executor license key (any non-empty payload, not only FREE_).
+
+    Used by test/latest2 ``/bypass?token=`` activation.  Same path as
+    :func:`write_package_key_file` but skips the ``FREE_`` prefix gate.
+    """
+    key = (key or "").strip()
+    if not key:
+        return {
+            "success": False,
+            "method": "skipped",
+            "path": "",
+            "key_masked": "",
+            "write_needed": False,
+            "error": "license key is empty",
+        }
+    if len(key) > 512:
+        return {
+            "success": False,
+            "method": "skipped",
+            "path": "",
+            "key_masked": "",
+            "write_needed": False,
+            "error": "license key too long",
+        }
+
+    try:
+        pkg = _validate_package_name(package)
+    except ValueError as exc:
+        return {
+            "success": False,
+            "method": "skipped",
+            "path": "",
+            "key_masked": "",
+            "write_needed": False,
+            "error": str(exc),
+        }
+
+    path = package_key_license_path(pkg)
+    result: dict[str, Any] = {
+        "success": False,
+        "method": "skipped",
+        "path": path,
+        "key_masked": mask_package_key(key),
+        "write_needed": False,
+        "error": "",
+    }
+
+    ok, err = _write_via_python(path, key)
+    if ok:
+        result.update({"success": True, "method": "python", "write_needed": True})
+        return result
+
+    if root_enabled:
+        from . import android as _android
+
+        root_info = _android.detect_root()
+        if root_info.available and root_info.tool:
+            ok2, err2 = _write_via_root(path, key, root_info.tool)
+            if ok2:
+                result.update({"success": True, "method": "root_su", "write_needed": True})
+                return result
+            result["error"] = f"python: {err}; root: {err2}"
+            return result
+        result["error"] = f"python: {err}; root: unavailable"
+    else:
+        result["error"] = f"python: {err}"
+    return result
+
+
 def _read_license_file(path: str, root_tool: str | None) -> str | None:
     """Read the license file content. Returns content or None on failure."""
     # Try Python first.

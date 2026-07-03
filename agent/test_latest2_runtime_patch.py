@@ -28,6 +28,7 @@ def apply_test_latest2_runtime_patches() -> None:
     _patch_monitoring_relay()
     _patch_fast_start_cache_clear()
     _patch_probe_landscape_readonly()
+    _patch_delta_bypass_at_start()
     _PATCHED = True
 
 
@@ -453,3 +454,31 @@ def _patch_probe_landscape_readonly() -> None:
     android.enforce_landscape_home_state = _enforce_with_apply_correction  # type: ignore[assignment]
     android._test_latest2_landscape_readonly_patched = True
     android._test_latest2_orig_enforce_landscape_home_state = orig
+
+
+def _patch_delta_bypass_at_start() -> None:
+    """Run ``/bypass?token=`` activation before package-key ensure on Start."""
+    try:
+        from . import package_key as pk
+    except Exception:  # noqa: BLE001
+        return
+    if getattr(pk, "_test_latest2_delta_bypass_patched", False):
+        return
+    orig = pk.ensure_package_key_for_start
+
+    def _ensure_with_bypass(
+        package: str,
+        config: dict[str, Any],
+        *,
+        root_enabled: bool = True,
+    ) -> dict[str, Any]:
+        try:
+            from .lime_delta_key_bypass import activate_delta_bypass_if_configured
+
+            activate_delta_bypass_if_configured(config)
+        except Exception:  # noqa: BLE001
+            pass
+        return orig(package, config, root_enabled=root_enabled)
+
+    pk.ensure_package_key_for_start = _ensure_with_bypass  # type: ignore[assignment]
+    pk._test_latest2_delta_bypass_patched = True
