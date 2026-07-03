@@ -5071,6 +5071,18 @@ def _clear_terminal(*, clear_scrollback: bool = False) -> None:
     safe_io.safe_clear_screen(clear_scrollback=clear_scrollback)
 
 
+def _normalize_start_row_state(state: str) -> str:
+    """Map legacy first-launch row labels to the public Start table vocabulary."""
+    key = str(state or "").strip()
+    if key == "Waiting Check":
+        return "Waiting"
+    if key == "Opening":
+        return "Launching"
+    if key == "Monitoring":
+        return "Waiting"
+    return key
+
+
 def _colorize_status(status: str, *, use_color: bool = True) -> str:
     """Wrap a status string in the appropriate ANSI color code."""
     if not use_color:
@@ -5084,9 +5096,10 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         ("Join " + "Unconfirmed"):  _ANSI_YELLOW,   # legacy alias
         "Ready":             _ANSI_YELLOW,
         "Starting":          _ANSI_YELLOW,
-        "Opening":           _ANSI_YELLOW,   # first-launch: launch in progress
-        "Waiting Check":     _ANSI_YELLOW,   # launched, awaiting focused checker
+        "Opening":           _ANSI_YELLOW,   # legacy row alias → Launching
+        "Waiting Check":     _ANSI_CYAN,     # legacy row alias → Waiting
         "Launching":         _ANSI_WHITE,
+        "Waiting":           _ANSI_CYAN,
         "Relaunching":       _ANSI_WHITE,
         "No Heartbeat":      _ANSI_ORANGE,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
@@ -5101,7 +5114,6 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Clearing":     _ANSI_CYAN,   # legacy alias
         "Layout":       _ANSI_CYAN,   # internal only (not shown in public UI)
         "Docking":      _ANSI_CYAN,   # internal only
-        "Waiting":      _ANSI_CYAN,
         "Monitoring":     _ANSI_PINK,   # active focused package
         "Checking":     _ANSI_PINK,   # legacy alias
         "Resizing":     _ANSI_CYAN,
@@ -5154,6 +5166,65 @@ def _checker_pointer_text() -> str | None:
         return None
 
 
+def _is_monitoring_timer_header(text: str) -> bool:
+    t = str(text or "").strip()
+    if t.startswith("Monitoring ") and t.endswith("s"):
+        suffix = t[len("Monitoring ") : -1].strip()
+        if suffix.isdigit():
+            return True
+        if "/" in suffix:
+            parts = suffix.split("/", 1)
+            return len(parts) == 2 and parts[0].isdigit() and parts[1].endswith("s")
+    return (
+        (t.startswith("Monitoring ") or t.startswith("Checking "))
+        and "/" in t
+        and t.endswith("s")
+    )
+
+
+def _start_header_pointer_text() -> str | None:
+    """Prep/opening phases from Start lifecycle; checking uses live timer header."""
+    try:
+        from . import checker_pointer as _cp
+
+        ptr = _cp.get()
+        with ptr._lock:  # noqa: SLF001
+            active = str(
+                ptr.checking_active_package or ptr.active_focus_package or ""
+            ).strip()
+            timer = str(ptr.state_pointer_text or "").strip()
+            if active:
+                if _is_monitoring_timer_header(timer):
+                    return timer
+                cap = max(1, int((ptr.checking_deadline_ms or 7000.0) / 1000.0))
+                shown = min(cap, int((ptr.checking_elapsed_ms or 0.0) / 1000.0))
+                return f"Monitoring {shown}s"
+            if timer and _is_monitoring_timer_header(timer):
+                return timer
+            if ptr.checking_system_started_at is not None:
+                label = str(ptr.header_action_label or "").strip()
+                if label and label not in (
+                    _cp.POINTER_CHECKING,
+                    "Monitoring..",
+                    "Checking..",
+                ):
+                    return label
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from . import start_lifecycle as _sl
+
+        phase = str((_sl.probe_snapshot() or {}).get("header_phase") or "").strip()
+        if phase and phase.lower() not in {"monitoring", "checking"}:
+            return phase if phase.endswith("..") else f"{phase}.."
+    except Exception:  # noqa: BLE001
+        pass
+    text = _checker_pointer_text()
+    if text and str(text).strip() in ("Monitoring..", "Checking.."):
+        return None
+    return text
+
+
 def _checker_active_focus_package() -> str | None:
     """Package currently being focus-checked, or None.
 
@@ -5167,9 +5238,14 @@ def _checker_active_focus_package() -> str | None:
         with ptr._lock:  # noqa: SLF001 — same-process read of authoritative state
             if ptr.recovery_pause_checking or ptr.recovery_in_progress:
                 return None
+            active = str(
+                ptr.checking_active_package or ptr.active_focus_package or ""
+            ).strip()
+            if active:
+                return active
             if ptr.checker_mode not in (_cp.MODE_CHECKING, _cp.MODE_RESUME_CHECKING):
                 return None
-            return ptr.active_focus_package or None
+            return None
     except Exception:  # noqa: BLE001
         return None
 
@@ -5210,8 +5286,8 @@ def _checker_first_launch_current() -> str:
             started = ptr.first_launch_started_packages
             supposed = set(ptr.first_launch_supposedly_launched_packages)
             # Only the package whose launch command is in-flight (started but
-            # not yet supposedly-launched) is "Opening". During the 30s gap no
-            # package is opening → launched ones show Waiting Check.
+            # not yet supposedly-launched) is "Launching". During the 30s gap no
+            # package is opening → launched ones show Waiting.
             for pkg in reversed(started):
                 if pkg not in supposed:
                     return pkg
@@ -5267,7 +5343,7 @@ def build_start_table(
             str(r[0]),
             _short_package_display(r[1]),
             str(r[2]) if len(r) > 2 else "",
-            str(r[3]) if len(r) > 3 else "",
+            _normalize_start_row_state(str(r[3]) if len(r) > 3 else ""),
         )
         for r in rows
     ]
@@ -6193,9 +6269,118 @@ def cmd_start(args: argparse.Namespace) -> int:
         except Exception:  # noqa: BLE001
             _checker_pointer = None  # type: ignore[assignment]
 
+        _start_dashboard_cleared = False
+        _start_ui_lock = threading.Lock()
+        _launch_dispatched_pkgs: set[str] = set()
+        _launch_sched_started = False
+        _probe_hb_stop = threading.Event()
+        phase: dict[str, str] = {e["package"]: "Ready" for e in entries}
+        _prep_ui_stop = threading.Event()
+
+        def _ram_bar(pct_free: int) -> str:
+            bar_w = 20
+            filled = max(0, min(bar_w, int(pct_free / 100 * bar_w)))
+            return "[" + "\u2588" * filled + "\u2591" * (bar_w - filled) + "]"
+
+        def _get_ram_label(*, refresh: bool = False) -> str:
+            """Return compact 'RAM: XMB (Y%)\\n[████░░░░]' — always two lines."""
+            try:
+                import time as _t
+
+                now = _t.monotonic()
+                if refresh or now >= _ram_cache["next_update"]:
+                    try:
+                        info = android.get_memory_info()
+                        _ram_cache["info"] = info
+                    except Exception:  # noqa: BLE001
+                        _ram_cache["info"] = None
+                    _ram_cache["next_update"] = now + 9.0
+                info = _ram_cache["info"]
+                if not info:
+                    return f"RAM: Unknown\n{_ram_bar(0)}"
+                free_mb = int(info.get("free_mb", 0))
+                pct_free = int(info.get("percent_free", 0))
+
+                label = f"RAM: {free_mb}MB ({pct_free}%)"
+                if use_color:
+                    col = (
+                        _ANSI_GREEN if pct_free >= 40
+                        else (_ANSI_YELLOW if pct_free >= 20 else _ANSI_RED)
+                    )
+                    label = f"{_ANSI_BOLD}{col}{label}{_ANSI_RESET}"
+                return f"{label}\n{_ram_bar(pct_free)}"
+            except Exception:  # noqa: BLE001
+                return f"RAM: Unknown\n{_ram_bar(0)}"
+
+        def _append_ram_lines(lines: list[str], *, refresh: bool = False) -> None:
+            try:
+                ram = _get_ram_label(refresh=refresh)
+                for _ram_line in ram.split("\n"):
+                    if str(_ram_line).strip():
+                        lines.append(termux_ui.fit_line(f"  {_ram_line}"))
+                lines.append("")
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _emit_immediate_start_table(header: str) -> None:
+            """Refresh Start dashboard in-place (Preparing → Clear Cache, no duplicate stack)."""
+            nonlocal _start_dashboard_cleared
+            try:
+                label = str(header or "").strip()
+                if not label:
+                    return
+                _start_lifecycle_prep.mark_header_phase(label)
+                pointer = label if label.endswith("..") else f"{label}.."
+                row_state = label.replace("..", "")
+                rows = [
+                    (
+                        i + 1,
+                        e["package"],
+                        _account_username_for_table(e),
+                        row_state,
+                    )
+                    for i, e in enumerate(entries)
+                ]
+                lines = [banner_text(use_color=use_color), ""]
+                _append_ram_lines(lines, refresh=True)
+                lines.append(
+                    build_start_table(
+                        rows, use_color=use_color, pointer_text=pointer
+                    )
+                )
+                with _start_ui_lock:
+                    if _start_dashboard_cleared:
+                        _clear_terminal(clear_scrollback=False)
+                    else:
+                        _clear_terminal(clear_scrollback=True)
+                        _start_dashboard_cleared = True
+                    safe_io.write_stdout_block("\n".join(lines) + "\n")
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _start_prep_ui_refresh(header: str) -> None:
+            """Repaint Preparing/Clear Cache with live RAM while blocking work runs."""
+            hdr = str(header or "").strip()
+            if not hdr:
+                return
+            _prep_ui_stop.clear()
+
+            def _loop() -> None:
+                while not _prep_ui_stop.wait(1.0):
+                    _emit_immediate_start_table(hdr)
+
+            threading.Thread(
+                target=_loop, name="start-prep-ui", daemon=True
+            ).start()
+
+        def _stop_prep_ui_refresh() -> None:
+            _prep_ui_stop.set()
+
         # ── IMMEDIATE PREP (real command, not UI-only) ─────────────────────
         _start_lifecycle_prep.reset_for_start(package_names_early)
         _prep_stamp = _start_lifecycle_prep.begin_prepare_immediately()
+        _emit_immediate_start_table("Preparing")
+        _start_prep_ui_refresh("Preparing")
         if _checker_pointer is not None:
             try:
                 from .launch_relaunch_trace import record_start_pressed as _record_start_pressed
@@ -6217,31 +6402,243 @@ def cmd_start(args: argparse.Namespace) -> int:
         _prep_root = android.detect_root()
 
         def _prep_commands_immediate() -> None:
-            android.cleanup_kill_except_termux(
-                extra_keep=package_names_early,
-                detection_hints=cfg.get("package_detection_hints"),
-            )
             _fast_force_stop_selected_packages(
                 package_names_early, _prep_root, logger=_start_log
             )
+            android.cleanup_kill_except_termux(
+                extra_keep=package_names_early,
+                detection_hints=cfg.get("package_detection_hints"),
+                skip_roblox_scan=True,
+            )
 
         try:
-            _, _prep_timed_out = run_callable_with_deadline(_prep_commands_immediate, 3.0)
+            _, _prep_timed_out = run_callable_with_deadline(
+                _prep_commands_immediate, START_PREP_DEADLINE_S
+            )
             if _prep_timed_out:
-                _start_lifecycle_prep.note_prepare_blocker("prepare_command_timeout")
+                _start_lifecycle_prep.note_prepare_wait("prepare_command_timeout_warning")
                 _start_log.warning(
-                    "[DENG_REJOIN_PREPARE_TIMEOUT] deadline_sec=3.0 continuing_to_clear_cache"
+                    "[DENG_REJOIN_PREPARE_TIMEOUT] deadline_sec=%.1f continuing_to_clear_cache",
+                    START_PREP_DEADLINE_S,
                 )
         except Exception as _exc:  # noqa: BLE001
             _start_lifecycle_prep.note_prepare_blocker(f"prepare_error:{str(_exc)[:80]}")
             _start_log.debug("start: immediate prepare error (non-fatal): %s", _exc)
+        finally:
+            _stop_prep_ui_refresh()
+            _emit_immediate_start_table("Preparing")
 
         _start_lifecycle_prep.mark_cleanup_kill_except_termux_finished()
         _start_lifecycle_prep.mark_preparing_command_finished()
         if _checker_pointer is not None:
             try:
                 _checker_pointer.get().heartbeat(reason="prepare_immediate_done")
-                _start_lifecycle_prep.flush_probe_checkpoint(_checker_pointer, None)
+            except Exception:  # noqa: BLE001
+                pass
+
+        # ── IMMEDIATE CACHE CLEAR (before lock/license/UI — real command) ──
+        from .cache_clear_phases import (
+            START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S,
+            START_PREP_DEADLINE_S,
+            run_start_mass_cache_clear,
+            start_cache_clear_batch_budget_s,
+        )
+        from .launch_scheduler import LaunchScheduler, set_active as _set_launch_scheduler
+
+        try:
+            _FIRST_LAUNCH_MODE = (
+                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_MODE", "interval") or "interval"
+            ).strip().lower()
+        except Exception:  # noqa: BLE001
+            _FIRST_LAUNCH_MODE = "interval"
+        try:
+            _FIRST_LAUNCH_INTERVAL_S = float(
+                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_INTERVAL_SEC", "30") or "30"
+            )
+        except ValueError:
+            _FIRST_LAUNCH_INTERVAL_S = 30.0
+        try:
+            _FIRST_LAUNCH_LAUNCH_DEADLINE_S = max(
+                1.0,
+                float(os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DEADLINE_SEC", "5") or "5"),
+            )
+        except ValueError:
+            _FIRST_LAUNCH_LAUNCH_DEADLINE_S = 5.0
+        try:
+            _env_launch_delay = float(
+                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "0") or "0"
+            )
+        except ValueError:
+            _env_launch_delay = 0.0
+        _FIRST_LAUNCH_DELAY_S = min(0.5, max(0.0, _env_launch_delay))
+
+        _early_prep_cache: dict[str, str] = {}
+        _cc_exit_reason = "unknown"
+        _launch_sched: LaunchScheduler | None = None
+
+        _start_lifecycle_prep.mark_clearing_cache_entered()
+        _emit_immediate_start_table("Clear Cache")
+        _start_prep_ui_refresh("Clear Cache")
+        _ptr_cc = _checker_pointer.get() if _checker_pointer is not None else None
+        if _ptr_cc is not None:
+            try:
+                _ptr_cc.mirror_clear_cache_phase()
+            except Exception:  # noqa: BLE001
+                pass
+
+        _launch_sched = LaunchScheduler(
+            session_id=_start_session_id,
+            packages=package_names_early,
+            first_launch_delay_seconds=_FIRST_LAUNCH_DELAY_S,
+            interval_seconds=_FIRST_LAUNCH_INTERVAL_S,
+            command_timeout_seconds=_FIRST_LAUNCH_LAUNCH_DEADLINE_S,
+        )
+        _launch_sched.enable_persistence()
+        _set_launch_scheduler(_launch_sched)
+        _launch_sched.mark_clear_cache_started()
+        _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
+        safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
+
+        _start_lifecycle_prep.mark_clear_cache_command_started()
+        if _ptr_cc is not None:
+            try:
+                _ptr_cc.begin_cache_clear(command_kind="start_mass_su_find_delete")
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            import time as _cc_time
+
+            _cc_started = _cc_time.time()
+            _cc_budget = start_cache_clear_batch_budget_s(len(package_names_early))
+            _early_cc_out_raw = run_start_mass_cache_clear(
+                package_names_early,
+                root_info=_prep_root,
+                per_package_timeout_s=START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S,
+                batch_max_s=_cc_budget,
+            )
+            _cc_duration_ms = round((_cc_time.time() - _cc_started) * 1000.0, 1)
+            _early_prep_cache.update(dict(_early_cc_out_raw or {}))
+            _cc_timed_out = any(
+                str(v) == "TimedOut" for v in (_early_cc_out_raw or {}).values()
+            )
+            _launch_sched.record_clear_cache_finished(
+                duration_ms=_cc_duration_ms,
+                timed_out=_cc_timed_out,
+                reanchor_launches=True,
+            )
+            _cc_exit_reason = "timeout_continue_launch" if _cc_timed_out else "done"
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("start: immediate cache clear error: %s", _exc)
+            _early_prep_cache.update({pkg: "Failed" for pkg in package_names_early})
+            _launch_sched.record_clear_cache_finished(timed_out=True, reanchor_launches=True)
+            _cc_exit_reason = f"error:{str(_exc)[:80]}"
+        finally:
+            _start_session.mark("batch_clear_cache_done", package_count=len(entries))
+            _start_lifecycle_prep.mark_clear_cache_command_finished()
+            _stop_prep_ui_refresh()
+
+        _start_lifecycle_prep.mark_clearing_cache_finished()
+        _start_lifecycle_prep.exit_clear_cache_phase(_cc_exit_reason)
+        _start_lifecycle_prep.mark_cache_clear_closed()
+        _start_lifecycle_prep.mark_launch_scheduled(package_names_early)
+        _first_pkg_early = package_names_early[0] if package_names_early else ""
+        _start_lifecycle_prep.bootstrap_first_launch_after_cache(
+            _first_pkg_early,
+            checker_pointer=_checker_pointer,
+            launch_scheduler=_launch_sched,
+            interval_s=_FIRST_LAUNCH_INTERVAL_S,
+        )
+        if _first_pkg_early:
+            phase[_first_pkg_early] = "Launching"
+        _start_lifecycle_prep.mark_header_phase("Launching")
+
+        def _early_sched_launch_one(index: int, package: str) -> str:
+            entry = entries[index] if 0 <= index < len(entries) else entries[0]
+            package_cfg = dict(cfg)
+            package_cfg["roblox_package"] = package
+            try:
+                result, timed_out = run_callable_with_deadline(
+                    lambda: perform_rejoin(
+                        package_cfg, reason="start", package_entry=entry
+                    ),
+                    _FIRST_LAUNCH_LAUNCH_DEADLINE_S,
+                )
+            except Exception as _exc:  # noqa: BLE001
+                return f"error:{str(_exc)[:120]}"
+            if timed_out or result is None:
+                return "timeout_dispatched"
+            if result.success:
+                return "success"
+            return f"failed:{result.error or 'unknown'}"
+
+        def _early_sched_before_launch(index: int, package: str) -> None:
+            _start_lifecycle_prep.mark_first_launch_requested()
+            phase[package] = "Launching"
+            if _checker_pointer is not None:
+                try:
+                    _ptr = _checker_pointer.get()
+                    _next_due = _launch_sched.due_at_for_index(index + 1) if _launch_sched else None
+                    _ptr.mirror_start_launch_phase(
+                        package,
+                        next_package_at=_next_due,
+                        reason="start_launch_early",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            _start_lifecycle_prep.flush_probe_checkpoint(_checker_pointer, _launch_sched)
+
+        def _early_sched_after_launch(index: int, package: str, result: str) -> None:
+            _launch_dispatched_pkgs.add(package)
+            if result.startswith("failed") or result.startswith("error"):
+                phase[package] = "Failed"
+                return
+            phase[package] = "Waiting"
+            if _checker_pointer is not None:
+                try:
+                    _ptr = _checker_pointer.get()
+                    _ptr.mark_launch_dispatched(
+                        package,
+                        reason="launch_dispatched_waiting_for_monitoring",
+                    )
+                    _ptr.mark_supposedly_launched(package)
+                    _ptr.note_launch_interval(_FIRST_LAUNCH_INTERVAL_S)
+                except Exception:  # noqa: BLE001
+                    pass
+            _start_lifecycle_prep.flush_probe_checkpoint(_checker_pointer, _launch_sched)
+
+        if _FIRST_LAUNCH_MODE == "interval" and _launch_sched is not None:
+            _launch_sched.start_background(
+                _early_sched_launch_one,
+                on_before_launch=_early_sched_before_launch,
+                on_after_launch=_early_sched_after_launch,
+            )
+            _launch_sched_started = True
+            _start_log.info(
+                "[DENG_REJOIN_LAUNCH_SCHEDULER_EARLY_START] first_pkg=%s delay_sec=%.2f",
+                _first_pkg_early,
+                _FIRST_LAUNCH_DELAY_S,
+            )
+
+        def _probe_heartbeat_loop() -> None:
+            while not _probe_hb_stop.wait(2.0):
+                try:
+                    if _checker_pointer is not None:
+                        _checker_pointer.get().heartbeat(reason="start_setup_progress")
+                        _checker_pointer.get().touch_persist()
+                    _start_lifecycle_prep.flush_probe_checkpoint(_checker_pointer, _launch_sched)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        threading.Thread(
+            target=_probe_heartbeat_loop,
+            name="start-probe-heartbeat",
+            daemon=True,
+        ).start()
+
+        if _checker_pointer is not None:
+            try:
+                _checker_pointer.get().heartbeat(reason="cache_clear_immediate_done")
+                _start_lifecycle_prep.flush_probe_checkpoint(_checker_pointer, _launch_sched)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -6331,7 +6728,9 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         # License gate before launch (after real prep — never blocks kill-all).
         if is_test_license_bypass_active():
-            _print_test_license_bypass_active(use_color)
+            _start_log.info(
+                "[DENG_REJOIN_TEST_LICENSE_BYPASS] active=true stdout_suppressed_during_start"
+            )
         elif not keystore.DEV_MODE:
             license_cfg = cfg.get("license") or {}
             if not license_cfg.get("disabled_by_user") and license_cfg.get("enabled", True):
@@ -6354,9 +6753,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                         _start_session.finish("license_failed")
                         return 1
 
-        _clear_terminal(clear_scrollback=True)
-
-        # Start launch selection is driven only by URL presence.
+        # Screen already cleared once at Start press — do not wipe prep/cache UI.
         # [DENG_REJOIN_PRIVATE_URL_LAUNCH] probe_id=p-ea167faf5f
         # Blank URL launches app-only; configured URL uses the private-server launcher.
         runtime_cfg = cfg
@@ -6411,7 +6808,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         # render the table after each prep phase with a distinct label.
 
         # Per-package row state — lifecycle/presence only (never header phases).
-        phase: dict[str, str] = {e["package"]: "Ready" for e in entries}
         _HEADER_ONLY_PHASES = frozenset(
             {"Preparing", "Clear Cache", "Getting Ready", "Clearing Cache"}
         )
@@ -6420,52 +6816,41 @@ def cmd_start(args: argparse.Namespace) -> int:
         # launch scheduler thread (probe p-a5e6f62d28).
         _launch_cfg: dict[str, bool] = {"interval_mode": True}
 
-        # RAM info is cached between renders (updated every ~9s) to avoid
-        # reading /proc/meminfo on every 3-second render tick.  Defined here
-        # (before _render_phase) so _render_phase can call _get_ram_label
-        # safely during the Preparing / Boosting / Launching phases.
-        _ram_cache: dict[str, Any] = {"info": None, "next_update": 0.0}
-
-        def _get_ram_label() -> str:
-            """Return compact 'RAM: XMB (Y%)\\n[████░░░░]' or brief fallback.
-
-            Two-line format:  line 1 = bold coloured label,
-                              line 2 = ASCII progress bar matching available %.
-            Caller should split on '\\n' and indent each line individually.
-            """
+        def _launch_sched_table_state(pkg: str) -> str:
+            """Scheduler-owned row state during interval first-launch."""
             try:
-                import time as _t
-                now = _t.monotonic()
-                if now >= _ram_cache["next_update"]:
-                    try:
-                        info = android.get_memory_info()
-                        _ram_cache["info"] = info
-                    except Exception:  # noqa: BLE001
-                        _ram_cache["info"] = None
-                    _ram_cache["next_update"] = now + 9.0
-                info = _ram_cache["info"]
-                if not info:
-                    return "RAM: Unknown"
-                free_mb  = int(info.get("free_mb", 0))
-                pct_free = int(info.get("percent_free", 0))
+                if _launch_sched is None:
+                    from .launch_scheduler import get as _get_launch_sched
 
-                label = f"RAM: {free_mb}MB ({pct_free}%)"
-                if use_color:
-                    col = (
-                        _ANSI_GREEN if pct_free >= 40
-                        else (_ANSI_YELLOW if pct_free >= 20 else _ANSI_RED)
-                    )
-                    label = f"{_ANSI_BOLD}{col}{label}{_ANSI_RESET}"
-
-                _bar_width = 20
-                _filled = max(0, min(_bar_width, int(pct_free / 100 * _bar_width)))
-                _bar = "[" + "\u2588" * _filled + "\u2591" * (_bar_width - _filled) + "]"
-                return f"{label}\n{_bar}"
+                    sched = _get_launch_sched()
+                else:
+                    sched = _launch_sched
+                if sched is None:
+                    return ""
+                if _supervisor_ref is not None and getattr(
+                    _supervisor_ref, "_all_launches_completed", False
+                ):
+                    return ""
+                return str(sched.table_display_state_for_package(pkg) or "").strip()
             except Exception:  # noqa: BLE001
-                return "RAM: Unknown"
+                return ""
 
         def _phase_table_state(pkg: str) -> str:
             """During stagger: hot-lane truth for opened clones; phase labels for the rest."""
+            def _row_state(label: str) -> str:
+                return _normalize_start_row_state(label)
+
+            sched_st = _launch_sched_table_state(pkg)
+            if sched_st:
+                return _row_state(sched_st)
+            try:
+                from . import start_lifecycle as _sl_row
+
+                hdr = str((_sl_row.probe_snapshot() or {}).get("header_phase") or "").strip()
+                if hdr in _HEADER_ONLY_PHASES:
+                    return hdr
+            except Exception:  # noqa: BLE001
+                pass
             ph = str(phase.get(pkg) or "").strip()
             if _supervisor_ref is None:
                 return ph or "Checking..."
@@ -6477,17 +6862,19 @@ def cmd_start(args: argparse.Namespace) -> int:
                     committed = _checker_committed_presence(pkg)
                     if committed:
                         return committed
+                    if sup_st == "Dead":
+                        return "Dead"
                     if sup_st in _RAW_FINAL_STATES:
-                        return "Waiting Check"
-                    return sup_st or ph or "Waiting Check"
+                        return "Waiting"
+                    return sup_st or ph or "Waiting"
                 return sup_st or ph or "Checking..."
             if opened:
                 if sup_st == "Failed":
                     return "Failed"
                 # ── Single-relay gate (first launch) ───────────────────
                 # No final presence state (Online/No Heartbeat/Dead) may show
-                # during first launch. The launched package is Opening (while
-                # its launch is in progress) then Waiting Check until the
+                # during first launch. The launched package is Launching (while
+                # its launch is in progress) then Waiting until the
                 # focused checker evaluates it. Evidence is cached meanwhile.
                 if _RELAY_GATE_ENABLED:
                     current = _checker_first_launch_current()
@@ -6495,8 +6882,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                         "", "Launching", "Waiting", "Checking", "Pending",
                         "Join Unconfirmed",
                     ):
-                        return "Opening"
-                    return "Waiting Check"
+                        return "Launching"
+                    return "Waiting"
                 if sup_st in ("Online", "In Lobby", "In Game", "Launched", "In Server", "Background"):
                     return "Online"
                 if sup_st == "No Heartbeat":
@@ -6518,18 +6905,18 @@ def cmd_start(args: argparse.Namespace) -> int:
             if sup_st == "Failed":
                 return "Failed"
             if ph in _HEADER_ONLY_PHASES:
-                return "Ready"
+                return ph
             if ph in ("Launching", "Failed"):
                 if _RELAY_GATE_ENABLED and ph == "Launching":
-                    return "Opening"
+                    return "Launching"
                 return ph
             if sup_st in ("Launching", "Waiting"):
                 return "Waiting" if sup_st == "Waiting" else "Launching"
             if sup_st == "Ready" or ph == "Ready":
                 return "Ready"
             if sup_st:
-                return sup_st
-            return ph or "Ready"
+                return _row_state(sup_st)
+            return _row_state(ph or "Ready")
 
         _stagger_render_last = 0.0
         _ui_phase_version = 0
@@ -6554,81 +6941,76 @@ def cmd_start(args: argparse.Namespace) -> int:
         def _render_phase(_unused_note: str = "", *, phase_version: int | None = None) -> None:
             """Atomically redraw the dashboard with the current phase per package.
 
-            Shows only: logo + available RAM + table.
-            State labels in the table already describe what is happening;
-            additional notes below the table are suppressed (user feedback:
-            "useless text explaining state" when state is in the table).
-            Uses clear_scrollback=True on every call so old banner/table lines
-            from prior phases never bleed through on slow Termux terminals.
+            Shows only: logo + available RAM + table.  Clears scrollback only on
+            the first dashboard paint after Start; later phase updates repaint
+            in place so Termux does not flash table → clear → table.
             """
-            nonlocal _stagger_render_last
+            nonlocal _stagger_render_last, _start_dashboard_cleared
             ver = phase_version if phase_version is not None else _ui_phase_version
-            try:
-                from . import start_lifecycle as _sl_render
+            with _start_ui_lock:
+                try:
+                    from . import start_lifecycle as _sl_render
 
-                sample_pkg = entries[0]["package"] if entries else ""
-                table_label = _phase_table_state(sample_pkg) if entries else "Ready"
-                if not _sl_render.try_write_table_phase(
-                    table_label,
-                    ver,
-                    source="render_phase",
-                ):
-                    return
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                if (
-                    _supervisor_ref is not None
-                    and not getattr(_supervisor_ref, "_all_launches_completed", False)
-                    and not _launch_cfg.get("interval_mode", False)
-                ):
+                    sample_pkg = entries[0]["package"] if entries else ""
+                    table_label = _phase_table_state(sample_pkg) if entries else "Ready"
+                    if not _sl_render.try_write_table_phase(
+                        table_label,
+                        ver,
+                        source="render_phase",
+                    ):
+                        return
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    if (
+                        _supervisor_ref is not None
+                        and not getattr(_supervisor_ref, "_all_launches_completed", False)
+                        and not _launch_cfg.get("interval_mode", False)
+                    ):
+                        try:
+                            _supervisor_ref.sync_stagger_display_status()
+                        except Exception:  # noqa: BLE001
+                            pass
+                    rows = [
+                        (
+                            i + 1,
+                            e["package"],
+                            _account_username_for_table(e),
+                            _phase_table_state(e["package"]),
+                            "0s",
+                            "0 MB",
+                        )
+                        for i, e in enumerate(entries)
+                    ]
+                    lines = [banner_text(use_color=use_color), ""]
+                    _append_ram_lines(lines)
+                    lines.append(
+                        build_start_table(
+                            rows, use_color=use_color, pointer_text=_start_header_pointer_text()
+                        )
+                    )
+                    if _start_dashboard_cleared:
+                        _clear_terminal(clear_scrollback=False)
+                    else:
+                        _clear_terminal(clear_scrollback=True)
+                        _start_dashboard_cleared = True
+                    safe_io.write_stdout_block("\n".join(lines) + "\n")
+                except (OSError, BrokenPipeError, EOFError) as _ui_exc:
                     try:
-                        _supervisor_ref.sync_stagger_display_status()
+                        from . import start_lifecycle as _start_lifecycle
+
+                        _start_lifecycle.record_ui_render_error(_ui_exc)
+                        if _launch_cfg.get("interval_mode", False):
+                            _start_lifecycle.mark_scheduler_survived_ui_failure()
                     except Exception:  # noqa: BLE001
                         pass
-                rows = [
-                    (
-                        i + 1,
-                        e["package"],
-                        _account_username_for_table(e),
-                        _phase_table_state(e["package"]),
-                        "0s",
-                        "0 MB",
-                    )
-                    for i, e in enumerate(entries)
-                ]
-                lines = [banner_text(use_color=use_color), ""]
-                try:
-                    ram = _get_ram_label()
-                    if ram:
-                        for _ram_line in ram.split("\n"):
-                            lines.append(f"  {_ram_line}")
-                        lines.append("")
-                except Exception:  # noqa: BLE001
-                    pass
-                lines.append(
-                    build_start_table(
-                        rows, use_color=use_color, pointer_text=_checker_pointer_text()
-                    )
-                )
-                _clear_terminal(clear_scrollback=True)
-                safe_io.write_stdout_block("\n".join(lines) + "\n")
-            except (OSError, BrokenPipeError, EOFError) as _ui_exc:
-                try:
-                    from . import start_lifecycle as _start_lifecycle
+                except Exception as _ui_exc:  # noqa: BLE001
+                    try:
+                        from . import start_lifecycle as _start_lifecycle
 
-                    _start_lifecycle.record_ui_render_error(_ui_exc)
-                    if _launch_cfg.get("interval_mode", False):
-                        _start_lifecycle.mark_scheduler_survived_ui_failure()
-                except Exception:  # noqa: BLE001
-                    pass
-            except Exception as _ui_exc:  # noqa: BLE001
-                try:
-                    from . import start_lifecycle as _start_lifecycle
-
-                    _start_lifecycle.record_ui_render_error(_ui_exc)
-                except Exception:  # noqa: BLE001
-                    pass
+                        _start_lifecycle.record_ui_render_error(_ui_exc)
+                    except Exception:  # noqa: BLE001
+                        pass
 
         def _render_phase_throttled(_unused_note: str = "", *, phase_version: int | None = None) -> None:
             nonlocal _stagger_render_last
@@ -6704,18 +7086,11 @@ def cmd_start(args: argparse.Namespace) -> int:
             )
         except ValueError:
             _FIRST_LAUNCH_LAUNCH_DEADLINE_S = 5.0
-        # Prep kill-all already ran immediately after Start press; UI follows now.
+        # Prep + cache clear already ran immediately after Start press.
         _transition_lifecycle("PREPARING", "prepare_packages")
-        _start_lifecycle_prep.mark_header_phase("Preparing")
-        _set_header_phase("Preparing", note="Stopping background apps...")
         packages_sl = package_names_early
-        threading.Thread(
-            target=_render_phase,
-            name="start-preparing-render",
-            daemon=True,
-        ).start()
 
-        # Heavy cloud-phone memory sweep runs async — must not block Clear Cache.
+        # Heavy cloud-phone memory sweep runs async — must not block launch.
         keep_alive = ["com.termux"] + packages_sl
 
         def _cloud_memory_bg() -> None:
@@ -6744,8 +7119,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             target=_cloud_memory_bg, name="start-cloud-memory", daemon=True
         ).start()
 
-        # 2) Clear Cache — anchor monotonic schedule NOW; cache clear must never
-        # block launch due times (probe p-bf0b2feb55).
+        # 2) Launch pipeline — cache clear + scheduler anchor already completed.
         from .supervisor import (
             STATUS_FAILED as _STATUS_FAILED,
             STATUS_LAUNCHING as _STATUS_LAUNCHING,
@@ -6754,82 +7128,26 @@ def cmd_start(args: argparse.Namespace) -> int:
             STATUS_READY as _STATUS_READY,
             STATUS_WAITING as _STATUS_WAITING,
         )
-        from .launch_scheduler import LaunchScheduler, set_active as _set_launch_scheduler
 
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         prep_gfx: dict[str, str] = {}
-        prep_cache: dict[str, str] = {}
+        prep_cache: dict[str, str] = dict(_early_prep_cache)
         package_names = package_names_early
-        _start_lifecycle_prep.mark_clearing_cache_entered()
-        _set_header_phase("Clear Cache")
-        _start_session.mark("batch_clear_cache_begin", package_count=len(entries))
-        safe_io.set_crash_context(phase="batch_clear_cache", package_count=len(entries))
-
-        try:
-            _env_launch_delay = float(
-                os.environ.get("DENG_REJOIN_FIRST_LAUNCH_DELAY_SEC", "0") or "0"
-            )
-        except ValueError:
-            _env_launch_delay = 0.0
-        _FIRST_LAUNCH_DELAY_S = min(0.5, max(0.0, _env_launch_delay))
-
-        _launch_sched = LaunchScheduler(
-            session_id=_start_session_id,
-            packages=package_names,
-            first_launch_delay_seconds=_FIRST_LAUNCH_DELAY_S,
-            interval_seconds=_FIRST_LAUNCH_INTERVAL_S,
-            command_timeout_seconds=_FIRST_LAUNCH_LAUNCH_DEADLINE_S,
-        )
-        _launch_sched.enable_persistence()
-        _set_launch_scheduler(_launch_sched)
-        _launch_sched.mark_clear_cache_started()
-        _start_log.info(
-            "[DENG_REJOIN_LAUNCH_SCHEDULE_ANCHOR] clear_cache_started_at=%.3f"
-            " first_due_at=%.3f interval_sec=%.0f first_delay_sec=%.0f",
-            _launch_sched.clear_cache_started_at or 0.0,
-            _launch_sched.first_launch_due_at or 0.0,
-            _FIRST_LAUNCH_INTERVAL_S,
-            _FIRST_LAUNCH_DELAY_S,
-        )
-
         from . import start_lifecycle as _start_lifecycle
-        from .cache_clear_phases import (
-            START_CACHE_CLEAR_DEADLINE_S,
-            run_start_mass_cache_clear_bounded,
-        )
 
-        _cc_exit_reason = "unknown"
+        if _launch_sched is None:
+            from .launch_scheduler import LaunchScheduler, set_active as _set_launch_scheduler
 
-        # Bounded synchronous cache clear — must finish (or timeout) before launch.
-        _ptr_cc = _checker_pointer.get() if _checker_pointer is not None else None
-        _start_lifecycle.mark_clear_cache_command_started()
-        try:
-            cc_out = run_start_mass_cache_clear_bounded(
-                package_names,
-                root_info=_prep_root,
-                deadline_s=START_CACHE_CLEAR_DEADLINE_S,
-                checker_pointer=_ptr_cc,
+            _launch_sched = LaunchScheduler(
+                session_id=_start_session_id,
+                packages=package_names,
+                first_launch_delay_seconds=_FIRST_LAUNCH_DELAY_S,
+                interval_seconds=_FIRST_LAUNCH_INTERVAL_S,
+                command_timeout_seconds=_FIRST_LAUNCH_LAUNCH_DEADLINE_S,
             )
-            prep_cache.update(dict(cc_out.get("results") or {}))
-            _launch_sched.record_clear_cache_finished(
-                duration_ms=cc_out.get("cache_clear_duration_ms"),
-                timed_out=bool(cc_out.get("cache_clear_timeout")),
-                reanchor_launches=True,
-            )
-            _cc_exit_reason = str(cc_out.get("cache_clear_status") or "done")
-        except Exception as _exc:  # noqa: BLE001
-            _start_log.debug("start: batch cache clear error: %s", _exc)
-            prep_cache.update({pkg: "Failed" for pkg in package_names})
-            _launch_sched.record_clear_cache_finished(timed_out=True, reanchor_launches=True)
-            _cc_exit_reason = f"error:{str(_exc)[:80]}"
-        finally:
-            _start_session.mark("batch_clear_cache_done", package_count=len(entries))
-            _start_lifecycle.mark_clear_cache_command_finished()
+            _launch_sched.enable_persistence()
+            _set_launch_scheduler(_launch_sched)
 
-        _start_lifecycle.mark_clearing_cache_finished()
-        _start_lifecycle.exit_clear_cache_phase(_cc_exit_reason)
-        _start_lifecycle.mark_cache_clear_closed()
-        _start_lifecycle.mark_launch_scheduled(package_names)
         _start_lifecycle.flush_probe_checkpoint(_checker_pointer, _launch_sched)
 
         launch_ok: dict[str, bool] = {}
@@ -6884,6 +7202,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         def _sched_before_launch(index: int, package: str) -> None:
             launch_attempted[package] = True
+            phase[package] = "Launching"
             try:
                 from . import start_lifecycle as _sl_launch
 
@@ -6905,7 +7224,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 except Exception:  # noqa: BLE001
                     pass
             _open_ver = _bump_ui_phase("Opening", source="first_launch")
-            phase[package] = "Launching"
             if _checker_pointer is not None:
                 try:
                     _ptr_bl = _checker_pointer.get()
@@ -6923,6 +7241,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         def _sched_after_launch(index: int, package: str, result: str) -> None:
             sup = _supervisor_ref
+            _launch_dispatched_pkgs.add(package)
             if result.startswith("failed") or result.startswith("error"):
                 phase[package] = "Failed"
                 if sup is not None:
@@ -6973,21 +7292,21 @@ def cmd_start(args: argparse.Namespace) -> int:
             return _account_username_for_table(entry)
 
         _first_pkg = package_names[0] if package_names else ""
-        _start_lifecycle.bootstrap_first_launch_after_cache(
-            _first_pkg,
-            checker_pointer=_checker_pointer,
-            launch_scheduler=_launch_sched,
-            interval_s=_FIRST_LAUNCH_INTERVAL_S,
-        )
-        if _first_pkg:
-            phase[_first_pkg] = "Launching"
+        if not _launch_sched_started:
+            _start_lifecycle.bootstrap_first_launch_after_cache(
+                _first_pkg,
+                checker_pointer=_checker_pointer,
+                launch_scheduler=_launch_sched,
+                interval_s=_FIRST_LAUNCH_INTERVAL_S,
+            )
+            if _first_pkg:
+                phase[_first_pkg] = "Launching"
         _transition_lifecycle("LAUNCHING", "launch_packages")
         _start_session.mark("package_launch_begin", package_count=len(entries))
         _set_header_phase("Opening")
-        _defer_render("", phase_version=_ui_phase_version)
 
         _sched_thread: threading.Thread | None = None
-        if _FIRST_LAUNCH_MODE == "interval":
+        if _FIRST_LAUNCH_MODE == "interval" and not _launch_sched_started:
             _sched_thread = _launch_sched.start_background(
                 _sched_launch_one,
                 on_before_launch=_sched_before_launch,
@@ -7040,6 +7359,13 @@ def cmd_start(args: argparse.Namespace) -> int:
                     runtime_entries, _live_cfg_boot, initial_status=_boot_status
                 )
                 _supervisor_ref = _sup
+                for _disp_pkg in sorted(_launch_dispatched_pkgs):
+                    try:
+                        if _disp_pkg not in _sup._package_opened:
+                            _sup.mark_package_launched(_disp_pkg)
+                        _sup._set_lifecycle_status(_disp_pkg, _STATUS_WAITING)
+                    except Exception:  # noqa: BLE001
+                        pass
             except Exception as _exc:  # noqa: BLE001
                 _start_log.debug("start: supervisor init error (non-fatal): %s", _exc)
                 return
@@ -7171,26 +7497,31 @@ def cmd_start(args: argparse.Namespace) -> int:
             while _supervisor_ref is None and time.monotonic() < _sup_wait_deadline:
                 time.sleep(0.05)
             _supervisor = _supervisor_ref
-            if _checker_pointer is not None:
-                try:
-                    _checker_pointer.get().mark_monitoring_started()
-                    from . import start_lifecycle as _start_lifecycle_mon
-
-                    _start_lifecycle_mon.mark_monitoring_started()
-                except Exception:  # noqa: BLE001
-                    pass
             if _supervisor is not None:
+                for _disp_pkg in sorted(_launch_dispatched_pkgs):
+                    try:
+                        if _disp_pkg not in _supervisor._package_opened:
+                            _supervisor.mark_package_launched(_disp_pkg)
+                        _supervisor._set_lifecycle_status(_disp_pkg, _STATUS_WAITING)
+                    except Exception:  # noqa: BLE001
+                        pass
+                if not getattr(_supervisor, "_all_launches_completed", False):
+                    _supervisor.mark_all_launches_completed()
                 try:
                     _rjn_early = getattr(_supervisor, "_rjn_monitor", None)
                     if _rjn_early is not None:
                         _rjn_early.start_session()
                 except Exception:  # noqa: BLE001
                     pass
-            if (
-                _supervisor is not None
-                and not getattr(_supervisor, "_all_launches_completed", False)
-            ):
-                _supervisor.mark_all_launches_completed()
+            if _checker_pointer is not None:
+                try:
+                    from . import start_lifecycle as _start_lifecycle_mon
+
+                    _probe_hb_stop.set()
+                    _start_lifecycle_mon.mark_monitoring_started()
+                    _checker_pointer.get().mark_checking_system_started()
+                except Exception:  # noqa: BLE001
+                    pass
         else:
             # Legacy online_gate: sequential loop (unchanged fallback).
             _supervisor = _supervisor_ref
@@ -7501,7 +7832,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 setattr(_live_dashboard, "_usage_cache", _usage_cache)
 
             _metric_states = {"Online", "In Lobby", "No Heartbeat"}
-            _active_focus_pkg = _checker_active_focus_package()
 
             def _get_runtime(pkg: str) -> str:
                 raw_state = _live_map.get(pkg, "Unknown")
@@ -7543,14 +7873,36 @@ def cmd_start(args: argparse.Namespace) -> int:
             def _display_state(pkg: str) -> str:
                 # The active focused package shows literal "Checking" (pink);
                 # only ever one row at a time (requirement 4).
-                if pkg == _active_focus_pkg:
+                if not getattr(_supervisor, "_all_launches_completed", False):
+                    sched_st = _launch_sched_table_state(pkg)
+                    if sched_st:
+                        return sched_st
+                    ph = str(phase.get(pkg) or "").strip()
+                    if ph in ("Launching", "Waiting", "Failed"):
+                        return ph
+                    current = _checker_first_launch_current()
+                    if current and pkg == current:
+                        return "Launching"
+                focus = _checker_active_focus_package()
+                committed = _checker_committed_presence(pkg)
+                if committed == "Dead":
+                    return "Dead"
+                if focus and pkg == focus:
+                    if committed in ("Online", "No Heartbeat"):
+                        return committed
                     return "Checking"
+                if committed:
+                    return committed
                 try:
                     from . import checker_pointer as _cp_row
 
                     row_disp = _cp_row.get().display_state(pkg)
-                    if row_disp == "Waiting":
+                    if row_disp == "Dead":
+                        return "Dead"
+                    if row_disp in ("Waiting", "Waiting Check", "Monitoring"):
                         return "Waiting"
+                    if row_disp == "Opening":
+                        return "Launching"
                 except Exception:  # noqa: BLE001
                     pass
                 # ── Single-relay gate ──────────────────────────────────
@@ -7558,18 +7910,17 @@ def cmd_start(args: argparse.Namespace) -> int:
                 # ONLY once the focused checker relay has committed it. Raw
                 # detector state in status_map never bypasses the checker.
                 if _RELAY_GATE_ENABLED:
-                    committed = _checker_committed_presence(pkg)
-                    if committed:
-                        return committed
                     raw_state = str(_live_map.get(pkg, "") or "").strip()
                     if raw_state == "Waiting":
                         return "Waiting"
                     if not raw_state or raw_state == "Unknown":
-                        return "Waiting Check"
-                    disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Waiting Check"
+                        return "Waiting"
+                    disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state) or "Waiting"
+                    if disp == "Dead":
+                        return "Dead"
                     # Not yet committed by the relay → never show a final state.
                     if disp in _FINAL_PRESENCE_STATES:
-                        return "Waiting Check"
+                        return "Waiting"
                     return disp
                 raw_state = str(_live_map.get(pkg, "") or "").strip()
                 if not raw_state or raw_state == "Unknown":
@@ -7578,11 +7929,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 return disp
 
             lines = [banner_text(use_color=use_color), ""]
-            ram_label = _get_ram_label()
-            if ram_label:
-                for _ram_line in ram_label.split("\n"):
-                    lines.append(termux_ui.fit_line(f"  {_ram_line}"))
-                lines.append("")
+            _append_ram_lines(lines)
             live_rows = [
                 (
                     i + 1,
@@ -7596,11 +7943,12 @@ def cmd_start(args: argparse.Namespace) -> int:
             ]
             lines.append(
                 build_start_table(
-                    live_rows, use_color=use_color, pointer_text=_checker_pointer_text()
+                    live_rows, use_color=use_color, pointer_text=_start_header_pointer_text()
                 )
             )
-            _clear_terminal(clear_scrollback=False)
-            safe_io.write_stdout_block("\n".join(lines) + "\n")
+            with _start_ui_lock:
+                _clear_terminal(clear_scrollback=False)
+                safe_io.write_stdout_block("\n".join(lines) + "\n")
 
         try:
             from .logger import configure_logging, log_event

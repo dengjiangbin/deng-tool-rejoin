@@ -130,10 +130,13 @@ class TestRamAboveTableP447(unittest.TestCase):
     def test_cmd_start_renders_ram_before_table_in_phase_and_live_dashboard(self) -> None:
         import agent.commands as commands
         src = inspect.getsource(commands.cmd_start)
+        imm_body = src.split("def _emit_immediate_start_table", 1)[1].split("def _start_prep_ui_refresh", 1)[0]
         phase_body = src.split("def _render_phase", 1)[1].split("def _set_all_phase", 1)[0]
         live_body = src.split("def _live_dashboard", 1)[1].split("# Use 3-second", 1)[0]
-        self.assertLess(phase_body.find("ram = _get_ram_label()"), phase_body.find("build_start_table(rows"))
-        self.assertLess(live_body.find("ram_label = _get_ram_label()"), live_body.find("build_start_table(live_rows"))
+        self.assertIn("_append_ram_lines", imm_body)
+        self.assertLess(imm_body.find("_append_ram_lines"), imm_body.find("build_start_table"))
+        self.assertLess(phase_body.find("_append_ram_lines"), phase_body.find("build_start_table"))
+        self.assertLess(live_body.find("_append_ram_lines"), live_body.find("build_start_table"))
 
 
 if __name__ == "__main__":

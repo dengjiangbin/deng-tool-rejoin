@@ -71,6 +71,32 @@ POINTER_RESUME_CHECKING = "Resume Monitoring.."
 POINTER_RESUME_MONITORING = POINTER_RESUME_CHECKING
 POINTER_RESUME_CHECKER = "Resume Monitoring"
 
+_STATIC_MONITORING_LABELS = frozenset(
+    {POINTER_CHECKING, "Monitoring..", "Checking..", POINTER_MONITORING}
+)
+
+
+def _is_monitoring_timer_text(text: str) -> bool:
+    t = str(text or "").strip()
+    if t.startswith("Monitoring ") and t.endswith("s"):
+        suffix = t[len("Monitoring ") : -1].strip()
+        if suffix.isdigit():
+            return True
+        if "/" in suffix:
+            parts = suffix.split("/", 1)
+            return len(parts) == 2 and parts[0].isdigit() and parts[1].endswith("s")
+    return (
+        (t.startswith("Monitoring ") or t.startswith("Checking "))
+        and "/" in t
+        and t.endswith("s")
+    )
+
+
+def _format_monitoring_timer(elapsed_ms: float, deadline_ms: float) -> str:
+    cap = max(1, int((deadline_ms or 7000.0) / 1000.0))
+    shown = min(cap, int((elapsed_ms or 0.0) / 1000.0))
+    return f"Monitoring {shown}s"
+
 
 @dataclass
 class _PackagePointer:
@@ -389,6 +415,14 @@ class CheckerPointerState:
             self.header_action_source = "start_preparing"
             self._persist(force=True)
 
+    def mirror_clear_cache_phase(self) -> None:
+        """Display-only mirror of Start clear-cache phase."""
+        with self._lock:
+            self.state_pointer_text = "Clear Cache.."
+            self.header_action_label = "Clear Cache.."
+            self.header_action_source = "start_clear_cache"
+            self._persist(force=True)
+
     def mirror_start_launch_phase(
         self,
         package: str = "",
@@ -425,7 +459,6 @@ class CheckerPointerState:
             if self.monitoring_started_at is None:
                 self.monitoring_started_at = now
             self.checker_mode = MODE_CHECKING
-            self.state_pointer_text = POINTER_CHECKING
             self.checker_status = "monitoring"
             self.checker_idle_reason = ""
             self._refresh_header_action_locked()
@@ -495,11 +528,14 @@ class CheckerPointerState:
             self.checking_elapsed_ms = 0.0
             self.checking_over_deadline = False
             self.checking_timeout_action = ""
-            self.state_pointer_text = f"Monitoring 0/{int(deadline)}s"
+            timer = _format_monitoring_timer(0.0, self.checking_deadline_ms)
+            self.state_pointer_text = timer
+            self.header_action_label = timer
+            self.header_action_source = "checking_active"
             for pkg, row in self._packages.items():
                 if row.display_state in ("Checking", "Monitoring") and pkg != package:
                     row.display_state = row.committed_presence_state or row.last_real_state
-            self._pkg(package).display_state = "Monitoring"
+            self._pkg(package).display_state = "Checking"
             self._persist(force=True)
 
     def update_focus_timer(self, elapsed_s: float) -> None:
@@ -514,7 +550,10 @@ class CheckerPointerState:
             secs = max(0, int(elapsed_s))
             cap = max(1, int(deadline))
             shown = min(secs, cap)
-            self.state_pointer_text = f"Monitoring {shown}/{cap}s"
+            timer = f"Monitoring {shown}s"
+            self.state_pointer_text = timer
+            self.header_action_label = timer
+            self.header_action_source = "checking_active"
             self.checking_elapsed_ms = round(max(0.0, elapsed_s) * 1000.0, 1)
             self.checking_over_deadline = elapsed_s >= deadline
             self._persist(force=True)
@@ -549,7 +588,13 @@ class CheckerPointerState:
                 self.checking_active_package = ""
             row = self._packages.get(package)
             if row is not None and row.display_state in ("Checking", "Monitoring"):
-                row.display_state = row.committed_presence_state or row.last_real_state
+                if row.committed_presence_state:
+                    row.display_state = row.committed_presence_state
+                elif row.launch_dispatched_at is not None:
+                    row.display_state = "Waiting"
+                else:
+                    row.display_state = row.last_real_state or "Waiting"
+            self._refresh_header_action_locked()
             self._persist(force=True)
 
     def mark_dead_detected(self, package: str, reason: str, source: str, evidence: str) -> None:
@@ -871,19 +916,40 @@ class CheckerPointerState:
             return label, source
 
         if self.checker_mode == MODE_CHECKING or self.checking_active_package:
-            label = self.state_pointer_text or POINTER_CHECKING
-            source = "checking_active"
-        else:
-            label = self.state_pointer_text or POINTER_CHECKING
-            source = "default"
+            if self.checking_active_package:
+                timer = str(self.state_pointer_text or "").strip()
+                if not _is_monitoring_timer_text(timer):
+                    timer = _format_monitoring_timer(
+                        self.checking_elapsed_ms, self.checking_deadline_ms
+                    )
+                label = timer
+                source = "checking_active"
+                self.header_action_label = label
+                self.header_action_source = source
+                self.state_pointer_text = label
+                return label, source
+            label = ""
+            source = "checking_idle"
+            self.header_action_label = label
+            self.header_action_source = source
+            return label, source
+
+        label = str(self.state_pointer_text or "").strip()
+        if label in _STATIC_MONITORING_LABELS:
+            label = ""
+        source = "default"
         self.header_action_label = label
         self.header_action_source = source
         return label, source
 
     def resume_checking_if_safe(self) -> bool:
-        """Resume pointer only when no unrecovered Dead packages remain."""
+        """Resume checking when no unrecovered Dead packages remain.
+
+        Automated recovery must never leave a stale ``Resume Monitoring..``
+        label blocking the round-robin (probe p-fe3653d07a): when it is safe to
+        resume, flip straight back to ``MODE_CHECKING``.
+        """
         with self._lock:
-            was_paused = bool(self.recovery_pause_checking)
             self.recovery_pause_checking = False
             safe = (
                 not self.recovery_in_progress
@@ -891,29 +957,13 @@ class CheckerPointerState:
                 and not self.dead_without_recovery_queue
                 and self._count_unrecovered_dead_locked() == 0
             )
-            if was_paused and safe:
-                self.checker_mode = MODE_RESUME_CHECKING
-                self.state_pointer_text = POINTER_RESUME_CHECKING
-                self.header_action_label = POINTER_RESUME_CHECKING
-                self.header_action_source = "checker_paused_no_unrecovered_dead"
-                self.checker_paused_reason = self.header_action_source
-                self._persist(force=True)
-                return True
-            label, source = self._refresh_header_action_locked()
-            if label == POINTER_RESUME_CHECKING:
-                self.checker_mode = MODE_RESUME_CHECKING
-                self.state_pointer_text = POINTER_RESUME_CHECKING
-                self.checker_paused_reason = source
-                self._persist(force=True)
-                return True
             if safe:
                 self.checker_mode = MODE_CHECKING
-                self.state_pointer_text = POINTER_CHECKING
-                self.header_action_label = POINTER_CHECKING
-                self.header_action_source = "recovery_complete"
                 self.checker_paused_reason = ""
+                self._refresh_header_action_locked()
                 self._persist(force=True)
                 return True
+            self._refresh_header_action_locked()
             self._persist(force=True)
             return False
 
@@ -967,8 +1017,11 @@ class CheckerPointerState:
             row.waiting_entered_at = now
             row.waiting_reason = str(reason or "")[:200]
             row.last_state_transition_reason = row.waiting_reason
-            row.display_state = "Waiting"
-            row.committed_presence_state = ""
+            if row.committed_presence_state == "Dead":
+                row.display_state = "Dead"
+            else:
+                row.display_state = "Waiting"
+                row.committed_presence_state = ""
             self.last_state_transition_reason = row.waiting_reason
             self._persist(force=True)
 
@@ -1082,7 +1135,21 @@ class CheckerPointerState:
             row = self._packages.get(package)
             if row is None:
                 return ""
-            return row.display_state or row.last_real_state
+            committed = str(row.committed_presence_state or "").strip()
+            if committed == "Dead":
+                return "Dead"
+            if package == self.checking_active_package:
+                if committed in ("Online", "No Heartbeat"):
+                    return committed
+                return "Checking"
+            if committed in ("Online", "No Heartbeat"):
+                return committed
+            val = str(row.display_state or row.last_real_state or "").strip()
+            if val == "Waiting Check":
+                return "Waiting"
+            if val in ("Monitoring", "Opening"):
+                return "Waiting" if val == "Monitoring" else "Launching"
+            return val
 
     def set_online_evidence(self, package: str, source: str, age_ms: float | None) -> None:
         with self._lock:

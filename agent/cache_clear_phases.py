@@ -27,11 +27,21 @@ from . import android
 # advance to relaunch — a wrong/hung root shell can never freeze recovery.
 RECOVERY_CACHE_CLEAR_DEADLINE_S = 25.0
 
-# Start prep (TYPE A): total wall-clock budget for the whole batch.  Launch
-# scheduling is anchored at clear-cache *start* and must never wait for this
-# phase to finish (probe p-a5e6f62d28).
-START_CACHE_CLEAR_DEADLINE_S = 5.0
-START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S = 3
+# Start prep (TYPE A): 2s per package, batch capped at 5s (probe p-f372c13452).
+START_PREP_DEADLINE_S = 3.0
+START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S = 2
+START_CACHE_CLEAR_BATCH_MAX_S = 5.0
+# Optional safety cap for ``run_start_mass_cache_clear_bounded`` tests/tools only.
+START_CACHE_CLEAR_BOUNDED_DEADLINE_S = 120.0
+
+
+def start_cache_clear_batch_budget_s(package_count: int) -> float:
+    """Wall-clock budget: 2s × N packages, never more than 5s."""
+    n = max(0, int(package_count))
+    return min(
+        START_CACHE_CLEAR_BATCH_MAX_S,
+        float(n) * float(START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S),
+    )
 
 
 def _settle_before_start_cache_clear() -> None:
@@ -44,15 +54,22 @@ def run_start_mass_cache_clear(
     *,
     root_info: android.RootInfo | None = None,
     per_package_timeout_s: int = START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S,
+    batch_max_s: float | None = None,
 ) -> dict[str, str]:
     """TYPE A: mass cache clear for every selected package (Start prep only)."""
     if not packages:
         return {}
     _settle_before_start_cache_clear()
+    budget = (
+        float(batch_max_s)
+        if batch_max_s is not None
+        else start_cache_clear_batch_budget_s(len(packages))
+    )
     return android.clear_packages_cache_mass_batch(
         packages,
         root_info=root_info,
         per_package_timeout_s=per_package_timeout_s,
+        batch_max_s=budget,
     )
 
 
@@ -60,7 +77,7 @@ def run_start_mass_cache_clear_bounded(
     packages: list[str],
     *,
     root_info: android.RootInfo | None = None,
-    deadline_s: float = START_CACHE_CLEAR_DEADLINE_S,
+    deadline_s: float = START_CACHE_CLEAR_BOUNDED_DEADLINE_S,
     checker_pointer: Any | None = None,
 ) -> dict[str, object]:
     """TYPE A with a hard total deadline — never blocks launch scheduling.

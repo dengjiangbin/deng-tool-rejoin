@@ -50,23 +50,40 @@ class StartSegfaultRegressionTests(unittest.TestCase):
     def test_start_uses_single_watchdog_instance(self) -> None:
         source = inspect.getsource(commands.cmd_start)
         self.assertEqual(source.count("WatchdogSupervisor("), 1)
-        self.assertEqual(source.count("_supervisor.run_forever("), 1)
+        self.assertEqual(source.count("start_daemon("), 1)
 
-    def test_start_has_no_duplicate_render_loop_thread(self) -> None:
+    def test_start_has_single_main_monitor_render_loop(self) -> None:
         source = inspect.getsource(commands.cmd_start)
-        self.assertNotIn("threading.Thread", source)
-        self.assertNotIn("Thread(", source)
+        self.assertEqual(source.count("while not _supervisor.stop_event.is_set():"), 1)
+        self.assertEqual(source.count('name="start-supervisor-daemon"'), 1)
 
-    def test_start_batch_cache_clear_deferred_render(self) -> None:
+    def test_start_cache_clear_runs_before_lock_and_license(self) -> None:
+        """Prep + cache clear are real commands before lock/license/UI setup."""
         source = inspect.getsource(commands.cmd_start)
-        visible_idx = source.find('_set_all_phase("Clear Cache")')
+        imm_prep = source.find("# ── IMMEDIATE PREP")
+        imm_cc = source.find("# ── IMMEDIATE CACHE CLEAR")
         batch_idx = source.find("batch_clear_cache_begin")
-        done_idx = source.find("batch_clear_cache_done", batch_idx)
-        block = source[batch_idx:done_idx]
-        self.assertGreater(visible_idx, -1)
-        self.assertLess(visible_idx, batch_idx)
-        self.assertNotIn('_set_all_phase("Clear Cache"', block)
-        self.assertNotIn('_set_all_phase("Preparing"', block)
+        lock_idx = source.find("_start_lock.acquire()")
+        license_idx = source.find("License gate before launch")
+        self.assertGreater(imm_prep, -1)
+        self.assertGreater(imm_cc, -1)
+        self.assertGreater(batch_idx, -1)
+        self.assertGreater(lock_idx, -1)
+        self.assertLess(imm_prep, imm_cc)
+        self.assertLess(batch_idx, lock_idx)
+        self.assertLess(batch_idx, license_idx)
+        self.assertIn("START_PREP_DEADLINE_S", source)
+        self.assertIn("_prep_commands_immediate", source)
+        self.assertIn("run_callable_with_deadline(", source)
+        self.assertIn("bootstrap_first_launch_after_cache(", source)
+        early_boot = source.find("bootstrap_first_launch_after_cache(")
+        self.assertLess(early_boot, lock_idx)
+        self.assertIn("_launch_sched_started", source)
+        self.assertIn("_emit_immediate_start_table", source)
+        self.assertIn("_get_ram_label", source)
+        self.assertIn("_start_prep_ui_refresh", source)
+        self.assertIn("_append_ram_lines", source)
+        self.assertIn("_start_header_pointer_text()", source)
 
     def test_live_dashboard_caches_package_ram_polling(self) -> None:
         source = inspect.getsource(commands.cmd_start)

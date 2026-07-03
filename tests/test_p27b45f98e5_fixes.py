@@ -199,6 +199,45 @@ class TestRamLabelCompactFormat(unittest.TestCase):
         self.assertNotIn("free /", result)
         self.assertNotIn("total", result)
 
+    def test_unknown_still_includes_bar(self):
+        import agent.android as amod
+
+        def get_label_via_closure() -> str:
+            import time as _t
+
+            _ram_cache: dict = {"info": None, "next_update": 0.0}
+
+            def _get_ram_label(*, refresh: bool = False) -> str:
+                try:
+                    now = _t.monotonic()
+                    if refresh or now >= _ram_cache["next_update"]:
+                        try:
+                            info = amod.get_memory_info()
+                            _ram_cache["info"] = info
+                        except Exception:
+                            _ram_cache["info"] = None
+                        _ram_cache["next_update"] = now + 9.0
+                    info = _ram_cache["info"]
+                    bar_w = 20
+                    if not info:
+                        return f"RAM: Unknown\n[" + "\u2591" * bar_w + "]"
+                    _free_mb = int(info.get("free_mb", 0))
+                    _pct_free = int(info.get("percent_free", 0))
+                    label = f"RAM: {_free_mb}MB ({_pct_free}%)"
+                    filled = max(0, min(bar_w, int(_pct_free / 100 * bar_w)))
+                    bar = "[" + "\u2588" * filled + "\u2591" * (bar_w - filled) + "]"
+                    return f"{label}\n{bar}"
+                except Exception:
+                    return f"RAM: Unknown\n[" + "\u2591" * bar_w + "]"
+
+            return _get_ram_label(refresh=True)
+
+        with unittest.mock.patch.object(amod, "get_memory_info", side_effect=OSError("denied")):
+            result = get_label_via_closure()
+        lines = result.split("\n")
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[1].startswith("["), lines[1])
+
 
 # ---------------------------------------------------------------------------
 # 3. URL-first launch (probe p-316b3b040d fix — replaces two-phase)

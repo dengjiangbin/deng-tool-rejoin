@@ -320,7 +320,7 @@ def test_recovery_resumes_checking_after_online():
     ok = checker.run_recovery("p1")
     assert ok is True
     assert deps.pointer.checker_mode == checker_pointer.MODE_CHECKING
-    assert deps.pointer.state_pointer_text == checker_pointer.POINTER_CHECKING
+    assert deps.pointer.state_pointer_text == checker_pointer.POINTER_ONLINE
     assert deps.pointer.recovery_in_progress is False
 
 
@@ -334,7 +334,7 @@ def test_pointer_text_transitions():
     p.begin_focus("p1", 1, now=0.0)
     assert p.state_pointer_text.startswith("Monitoring ")
     p.update_focus_timer(3)
-    assert p.state_pointer_text == "Monitoring 3/7s"
+    assert p.state_pointer_text == "Monitoring 3s"
     p.mark_dead_detected("p1", "crash", "logcat", "FATAL")
     assert p.state_pointer_text == checker_pointer.POINTER_START_RECOVERY
     p.begin_recovery("p1")
@@ -349,8 +349,11 @@ def test_pointer_text_transitions():
     assert p.state_pointer_text == checker_pointer.POINTER_ONLINE
     p.end_recovery(failed=False, resume=False)
     p.recovery_pause_checking = True
+    label, _source = p._refresh_header_action_locked()
+    assert label == checker_pointer.POINTER_RESUME_CHECKING
     assert p.resume_checking_if_safe()
-    assert p.state_pointer_text == checker_pointer.POINTER_RESUME_CHECKING
+    assert p.checker_mode == checker_pointer.MODE_CHECKING
+    assert p.header_pointer_text() != checker_pointer.POINTER_RESUME_CHECKING
 
 
 def test_table_single_row_header_with_phase():
@@ -436,10 +439,10 @@ def test_only_active_focus_package_marked_checking():
     p = CheckerPointerState()
     p.begin_getting_ready(["p1", "p2"])
     p.begin_focus("p1", 1, now=0.0)
-    assert p.display_state("p1") == "Monitoring"
+    assert p.display_state("p1") == "Checking"
     p.set_real_state("p1", "Online")
     p.begin_focus("p2", 2, now=1.0)
-    assert p.display_state("p2") == "Monitoring"
+    assert p.display_state("p2") == "Checking"
     # p1 is no longer "Checking" — shows its resolved real state.
     assert p.display_state("p1") == "Online"
     # Exactly one package is the active focus at a time.
@@ -449,7 +452,7 @@ def test_only_active_focus_package_marked_checking():
 def test_active_row_changes_from_checking_to_result():
     p = CheckerPointerState()
     p.begin_focus("p1", 1, now=0.0)
-    assert p.display_state("p1") == "Monitoring"
+    assert p.display_state("p1") == "Checking"
     p.set_real_state("p1", "No Heartbeat")
     assert p.display_state("p1") == "No Heartbeat"
     p.mark_dead_detected("p1", "crash", "logcat", "FATAL")
@@ -546,14 +549,14 @@ def test_launch_interval_defaults_to_30_and_notes_interval():
 
 
 def test_render_sequence_getting_ready_then_opening_then_checking():
-    # Requirement: 1) Getting Ready.. 2) Opening.. 3) Ready/Waiting Check 4) Checking..
+    # Requirement: 1) Getting Ready.. 2) Opening.. 3) Ready/Waiting 4) Checking..
     p = CheckerPointerState()
     seq: list[str] = []
     p.begin_getting_ready(["p1"], interval_s=30)
     seq.append(p.pointer_text())          # Getting Ready..
     p.begin_opening("p1")
     seq.append(p.pointer_text())          # Opening..
-    p.mark_supposedly_launched("p1")      # launched → Waiting Check phase
+    p.mark_supposedly_launched("p1")      # launched → Waiting row phase
     p.begin_focus("p1", 1, now=0.0)
     seq.append(p.pointer_text())          # Checking..
     assert seq[0] == checker_pointer.POINTER_GETTING_READY
@@ -573,7 +576,7 @@ def test_display_state_gate_hides_raw_online_until_committed():
     p = checker_pointer.get()
     p.reset()
     p.begin_getting_ready(["com.x"], interval_s=30)
-    # No committed presence yet → gate returns "" so the row shows Waiting Check.
+    # No committed presence yet → gate returns "" so the row shows Waiting.
     assert commands._checker_committed_presence("com.x") == ""
     p.commit_presence_state("com.x", "Online")
     assert commands._checker_committed_presence("com.x") == "Online"
@@ -607,6 +610,22 @@ def test_header_yellow_bold_ansi_present_all_headers():
     assert commands._ANSI_YELLOW in out_color
     assert "Package" in out_plain and "Username" in out_plain and "Monitoring.." in out_plain
     assert commands._ANSI_PINK in out_color
+
+
+def test_build_start_table_normalizes_legacy_first_launch_row_states():
+    from agent import commands
+
+    rows = [
+        (1, "com.moons.litesc", "user1", "Waiting Check"),
+        (2, "com.moons.litesd", "user2", "Opening"),
+    ]
+    out = commands.build_start_table(rows, use_color=False, pointer_text="Opening..")
+    assert "Waiting Check" not in out
+    assert "Opening.." in out  # header phase unchanged
+    plain = out.splitlines()
+    body = [ln for ln in plain if "user1" in ln or "user2" in ln]
+    assert any("Waiting" in ln and "Waiting Check" not in ln for ln in body)
+    assert any("Launching" in ln for ln in body)
 
 
 def test_probe_snapshot_has_all_required_fields():
@@ -656,7 +675,7 @@ def test_probe_snapshot_has_all_required_fields():
         "raw_dead_evidence_pending",
     ):
         assert k in pp, k
-    assert pp["display_state"] == "Monitoring"  # p1 is the active focus
+    assert pp["display_state"] == "Checking"  # p1 is the active focus
     assert snap["valid_state_writer"] == "focused_checker_only"
     assert snap["focus_elapsed_s"] == pytest.approx(5.0, abs=0.01)
 

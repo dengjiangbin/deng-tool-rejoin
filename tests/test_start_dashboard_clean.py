@@ -282,7 +282,9 @@ class TestStartOutputClean(unittest.TestCase):
         import agent.commands as _cmd
         src = inspect.getsource(_cmd.cmd_start)
         self.assertIn("_clear_terminal(clear_scrollback=True)", src)
+        self.assertIn("_start_ui_lock", src)
         self.assertNotIn("# ── Render post-launch table", src)
+        self.assertNotIn('_set_header_phase("Opening")\n        _defer_render', src)
 
 
 if __name__ == "__main__":

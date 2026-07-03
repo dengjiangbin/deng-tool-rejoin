@@ -2514,7 +2514,8 @@ def clear_packages_cache_mass_batch(
     packages: Iterable[str],
     *,
     root_info: RootInfo | None = None,
-    per_package_timeout_s: int = 45,
+    per_package_timeout_s: int = 2,
+    batch_max_s: float | None = None,
 ) -> dict[str, str]:
     """Phase-1 Start mass clear (cache-clear TYPE A) — all selected clones.
 
@@ -2546,19 +2547,30 @@ def clear_packages_cache_mass_batch(
             results.setdefault(pkg, "Skipped")
         return results
     root_tool = str(info.tool)
-    pkg_timeout = max(2, int(per_package_timeout_s))
-    for pkg in package_list:
+    pkg_timeout = max(1, int(per_package_timeout_s))
+    import time as _time
+
+    batch_budget = float(batch_max_s if batch_max_s is not None else pkg_timeout * len(package_list))
+    batch_deadline = _time.monotonic() + max(0.5, batch_budget)
+    for idx, pkg in enumerate(package_list):
+        remaining = batch_deadline - _time.monotonic()
+        if remaining <= 0:
+            for rest in package_list[idx:]:
+                results.setdefault(rest, "TimedOut")
+            break
         try:
             from . import start_lifecycle as _start_lifecycle
 
             if _start_lifecycle.start_cache_clear_abort_requested():
-                results.setdefault(pkg, "Aborted")
-                continue
+                for rest in package_list[idx:]:
+                    results.setdefault(rest, "Aborted")
+                break
         except Exception:  # noqa: BLE001
             pass
         try:
+            this_timeout = max(1, min(pkg_timeout, int(remaining)))
             results[pkg] = clear_package_cache_for_start(
-                pkg, root_tool=root_tool, timeout_s=pkg_timeout
+                pkg, root_tool=root_tool, timeout_s=this_timeout
             )
         except Exception:  # noqa: BLE001
             results[pkg] = "Failed"
@@ -2995,7 +3007,7 @@ def kill_all_background_apps(keep_packages: list[str]) -> dict[str, list[str]]:
     """
     result: dict[str, list[str]] = {"killed_bg": [], "skipped": list(keep_packages)}
 
-    bg = run_android_command(["am", "kill-all"], prefer_root=True, timeout=10)
+    bg = run_android_command(["am", "kill-all"], prefer_root=True, timeout=3)
     if bg.ok:
         result["killed_bg"].append("am kill-all")
     return result
@@ -3005,14 +3017,16 @@ def cleanup_kill_except_termux(
     *,
     extra_keep: list[str] | None = None,
     detection_hints: list[str] | None = None,
+    skip_roblox_scan: bool = False,
 ) -> dict[str, Any]:
     """Force-stop third-party apps; keep Termux and system/shell packages.
 
-    Used during Start Preparing with a hard outer deadline (3s).  Never raises.
+    When ``skip_roblox_scan`` is true (Start immediate prep), only kill-all and
+    explicit ``extra_keep`` force-stops run — no slow ``find_roblox_packages``
+    scan that added idle time before cache clear.
     """
     import time as _time
 
-    deadline = _time.monotonic() + 2.5
     keep: set[str] = {
         "com.termux",
         "com.termux.boot",
@@ -3037,9 +3051,6 @@ def cleanup_kill_except_termux(
     except Exception as exc:  # noqa: BLE001
         result["errors"].append(f"kill-all:{exc}"[:120])
 
-    if _time.monotonic() >= deadline:
-        return result
-
     root_info = detect_root()
     for pkg in list(extra_keep or []):
         text = str(pkg or "").strip()
@@ -3051,14 +3062,13 @@ def cleanup_kill_except_termux(
                 result["force_stopped"].append(text)
         except Exception as exc:  # noqa: BLE001
             result["errors"].append(f"{text}:{exc}"[:80])
-        if _time.monotonic() >= deadline:
-            return result
 
-    try:
-        stopped_roblox = force_stop_packages_except(list(extra_keep or []), detection_hints)
-        result["force_stopped"].extend(stopped_roblox)
-    except Exception as exc:  # noqa: BLE001
-        result["errors"].append(f"roblox_stop:{exc}"[:120])
+    if not skip_roblox_scan:
+        try:
+            stopped_roblox = force_stop_packages_except(list(extra_keep or []), detection_hints)
+            result["force_stopped"].extend(stopped_roblox)
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"roblox_stop:{exc}"[:120])
 
     result["force_stopped"] = sorted(set(result["force_stopped"]))
     return result

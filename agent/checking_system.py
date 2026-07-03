@@ -69,6 +69,32 @@ class CheckingSystem:
             ptr.end_checking_focus(pkg)
             return fc.OUTCOME_NO_HEARTBEAT
 
+        from .supervisor import STATUS_DEAD, STATUS_DISCONNECTED
+
+        if (
+            sup.status_map.get(pkg) in {STATUS_DEAD, STATUS_DISCONNECTED}
+            or ptr.has_pending_dead(pkg)
+        ):
+            dead_reason = "process_missing"
+            dead_source = "pre_focus_dead"
+            dead_evidence = "process_gone"
+            if sup.status_map.get(pkg) == STATUS_DISCONNECTED:
+                dead = sup._focused_dead_evidence(
+                    pkg, STATUS_DISCONNECTED, {}
+                )
+                if dead is not None:
+                    dead_reason, dead_source, dead_evidence = dead
+            ptr.mark_dead_detected(
+                pkg,
+                dead_reason,
+                dead_source,
+                dead_evidence,
+            )
+            ptr.recovery_pause_checking = True
+            self._render(render_cb)
+            self._process_next_recovery(render_cb)
+            return fc.OUTCOME_DEAD
+
         deadline_s = CHECKING_DEADLINE_S
         ptr.begin_checking_package(pkg, index, now=now, deadline_s=deadline_s)
         self._render(render_cb)
@@ -160,19 +186,58 @@ class CheckingSystem:
         self._process_next_recovery(render_cb)
 
     def _timeout_decision(self, pkg: str) -> tuple[str, str, str]:
+        """Resolve a completed 7s focus window without early Online/Dead.
+
+        Dead is detected only inside the focus loop via ``_focused_dead_evidence``
+        so we never block the round-robin on slow process probes after the timer
+        already reached 7/7s.  A bare timeout always commits No Heartbeat and
+        advances to the next package.
+        """
         sup = self._sup
         online = sup._focused_online_evidence(pkg)
         if online is not None:
             return "commit_online", "Online", "timeout_online_evidence"
-        process_alive = False
+        return "commit_no_heartbeat", "No Heartbeat", "timeout_process_no_online"
+
+    def _process_confirmed_gone(self, pkg: str) -> tuple[bool, str]:
+        """Return True when the clone process is provably gone (force-close/crash)."""
+        sup = self._sup
+        monitor = getattr(sup, "_rjn_monitor", None)
+        if monitor is not None:
+            try:
+                if monitor.try_mark_force_close_dead(pkg):
+                    return True, "process_missing"
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                from .rjn_lifecycle_monitor import (
+                    _package_force_stopped_quick,
+                    _unpack_process_check,
+                )
+
+                exists, _, definitive = _unpack_process_check(monitor._process_check(pkg))
+                if not exists and definitive:
+                    return True, "process_missing"
+                if exists and _package_force_stopped_quick(pkg):
+                    return True, "force_stopped"
+            except Exception:  # noqa: BLE001
+                pass
         try:
-            if sup._root_info.available:
-                process_alive = bool(android.get_package_pid(pkg, sup._root_info))
+            if sup._root_info.available and android.get_package_pid(pkg, sup._root_info):
+                return False, ""
         except Exception:  # noqa: BLE001
-            process_alive = False
-        if process_alive:
-            return "commit_no_heartbeat", "No Heartbeat", "timeout_process_no_online"
-        return "commit_dead", "Dead", "timeout_no_process"
+            pass
+        try:
+            ev = android.get_package_alive_evidence(pkg)
+            if not bool(ev.get("alive")):
+                if bool(ev.get("running") or ev.get("root_running")):
+                    return False, ""
+                return True, "timeout_no_alive_evidence"
+        except Exception:  # noqa: BLE001
+            pass
+        if getattr(sup._root_info, "available", False):
+            return True, "timeout_no_process"
+        return False, ""
 
     def _process_next_recovery(
         self, render_cb: Callable[[], None] | None

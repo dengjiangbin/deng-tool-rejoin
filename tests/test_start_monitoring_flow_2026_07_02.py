@@ -261,8 +261,13 @@ def test_monitoring_user_facing_labels():
     ptr = CheckerPointerState()
     ptr.mark_monitoring_started()
     assert POINTER_CHECKING == "Monitoring.."
-    assert ptr.header_pointer_text() == "Monitoring.."
+    assert ptr.header_pointer_text() == ""
     assert ptr.probe_snapshot()["checker_status"] == "monitoring"
+    ptr.begin_checking_package("p0", 1, now=1000.0, deadline_s=7.0)
+    assert ptr.header_pointer_text() == "Monitoring 0s"
+    assert ptr.display_state("p0") == "Checking"
+    ptr.update_checking_timer(3.0, deadline_s=7.0)
+    assert ptr.header_pointer_text() == "Monitoring 3s"
 
 
 def test_supervisor_launching_to_waiting_lifecycle():

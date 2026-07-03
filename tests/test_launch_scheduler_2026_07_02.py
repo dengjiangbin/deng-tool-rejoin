@@ -24,6 +24,56 @@ class FakeClock:
         self._t += float(seconds)
 
 
+def test_table_display_state_reflects_scheduler_not_ui_phase():
+    sched = LaunchScheduler(session_id="s-ui", packages=["p0", "p1", "p2"])
+    sched.mark_clear_cache_started(monotonic_now=0.0)
+    assert sched.table_display_state_for_package("p0") == "Ready"
+    assert sched.table_display_state_for_package("p1") == "Ready"
+
+    sched.record_command_started(1, started_at=100.0, username="user2")
+    assert sched.table_display_state_for_package("p0") == "Ready"
+    assert sched.table_display_state_for_package("p1") == "Launching"
+    assert sched.table_display_state_for_package("p2") == "Ready"
+
+    sched.record_command_finished(1, finished_at=130.0, result="success")
+    assert sched.table_display_state_for_package("p1") == "Waiting"
+
+    sched.mark_checking_system_started(monotonic_now=200.0)
+    assert sched.table_display_state_for_package("p1") == ""
+
+
+def test_table_display_state_launching_when_before_launch_times_out():
+    """Simulate probe: launch command started but on_before_launch never updates UI phase."""
+    clock = FakeClock(0.0)
+    sched = LaunchScheduler(
+        session_id="s-before-ui",
+        packages=["p0", "p1"],
+        first_launch_delay_seconds=5.0,
+        interval_seconds=30.0,
+        before_launch_timeout_seconds=0.1,
+    )
+    sched.mark_clear_cache_started(monotonic_now=0.0)
+    states: list[tuple[str, str]] = []
+
+    def before(_index: int, package: str) -> None:
+        states.append(("before", package))
+        time.sleep(5.0)
+
+    def launch_one(index: int, package: str) -> str:
+        states.append(("launch", package))
+        if index == 1:
+            assert sched.table_display_state_for_package("p1") == "Launching"
+        return "success"
+
+    sched.run_schedule(
+        launch_one,
+        on_before_launch=before,
+        monotonic_fn=clock.monotonic,
+        sleep_fn=clock.sleep,
+    )
+    assert [p for _tag, p in states if _tag == "launch"] == ["p0", "p1"]
+
+
 def test_first_package_due_at_clear_cache_plus_delay_after_finish():
     sched = LaunchScheduler(
         session_id="s1",

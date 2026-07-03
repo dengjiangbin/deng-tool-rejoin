@@ -462,6 +462,46 @@ def _package_force_stopped_quick(package: str) -> bool:
         return False
 
 
+def _process_missing_dead_eligible(pkg: str, row: PackageRjnState) -> bool:
+    """True when a gone process must be Dead — not left as No Heartbeat.
+
+    Force-close after a No Heartbeat focus window is Dead: the checker already
+    proved the process was alive but not uploading.  Killing it is not the same
+    as a live client with a silent script.
+    """
+    if row.process_seen_since_launch:
+        return True
+    if row.last_positive_online_evidence_at > 0 or row.ingame_hb_ever or row.online_since > 0:
+        return True
+    if row.watchdog_active and row.process_seen_since_launch:
+        return True
+    if row.pids or str(row.current_pid or "").strip():
+        return True
+    try:
+        from . import checker_pointer as cp
+
+        ptr = cp.get()
+        committed = str(ptr.committed_presence_state(pkg) or "").strip()
+        if committed in {"No Heartbeat", "Online"}:
+            return True
+        prow = ptr._packages.get(pkg)  # noqa: SLF001
+        if prow is not None and int(prow.consecutive_no_heartbeat_focus_count or 0) > 0:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def _sync_committed_dead_from_process_missing(pkg: str) -> None:
+    """Mirror authoritative process-missing Dead into the checker relay."""
+    try:
+        from . import checker_pointer as cp
+
+        cp.get().commit_presence_state(pkg, "Dead", writer="process_missing")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def resolve_package_uid(package: str) -> UidResolution:
     pkg = android.validate_package_name(package)
     now = time.time()
@@ -1055,7 +1095,7 @@ class RjnLifecycleMonitor:
                 )
             elif event.event == "package_process_missing":
                 row = self._states.get(event.package)
-                if row and self._was_ever_online_confirmed(row):
+                if row and _process_missing_dead_eligible(event.package, row):
                     self._clear_online_evidence(event.package, at=event.at)
                     row.process_missing_streak = PROCESS_MISSING_CONFIRM
                     row.force_close_detected = True
@@ -1066,6 +1106,7 @@ class RjnLifecycleMonitor:
                         at=event.at,
                         offline=True,
                     )
+                    _sync_committed_dead_from_process_missing(event.package)
             elif event.event == "package_logcat_teleport":
                 self._apply_phrase(
                     event.package,
@@ -2425,6 +2466,9 @@ class RjnLifecycleMonitor:
         if not pkg:
             return False
         exists, _pids, _definitive = _unpack_process_check(self._process_check(pkg))
+        if exists and _package_force_stopped_quick(pkg):
+            exists = False
+            _definitive = True
         if exists:
             return False
         now = float(at if at is not None else time.time())
@@ -2433,10 +2477,9 @@ class RjnLifecycleMonitor:
             if row is None:
                 return False
             if row.internal_state == STATE_DEAD and row.last_transition_reason == "process_missing":
+                _sync_committed_dead_from_process_missing(pkg)
                 return True
-            ever = self._was_ever_online_confirmed(row)
-            user_kill_launch = row.watchdog_active and row.process_seen_since_launch
-            if not ever and not user_kill_launch:
+            if not _process_missing_dead_eligible(pkg, row):
                 return False
             if row.watchdog_active and not row.process_seen_since_launch:
                 return False
@@ -2455,7 +2498,8 @@ class RjnLifecycleMonitor:
                 at=now,
                 offline=True,
             )
-            return True
+        _sync_committed_dead_from_process_missing(pkg)
+        return True
 
     def _poll_force_close_fast_lane(self) -> None:
         """Stream-side force-close detector — runs every ~2s independent of watchdog."""
@@ -2478,10 +2522,13 @@ class RjnLifecycleMonitor:
                         STATE_DISCONNECTED,
                     }
                     or self._was_ever_online_confirmed(row)
+                    or _process_missing_dead_eligible(pkg, row)
                 )
                 if not was_tracking:
                     continue
             exists, _pids, _definitive = _unpack_process_check(self._process_check(pkg))
+            if exists and _package_force_stopped_quick(pkg):
+                exists = False
             if not exists:
                 self.try_mark_force_close_dead(pkg, at=now)
 
@@ -2607,33 +2654,10 @@ class RjnLifecycleMonitor:
                     if not (row.watchdog_active and not row.process_seen_since_launch):
                         confirm_needed = 1
                 if row.process_missing_streak >= confirm_needed:
-                    # Any package that ever reached a live server this session and
-                    # whose process is now gone is a real force-close / crash.
-                    # Covers the logcat-heartbeat-only online path (the slow-scrape
-                    # last_positive_online_evidence_at can be 0 on cloud-phone clones
-                    # where loopback push is blocked — probe p-87b567bde8 #2).
-                    ever_in_game = (
-                        row.ingame_hb_ever
-                        or row.last_positive_online_evidence_at > 0
-                        or row.online_since > 0
-                        or row.internal_state in {
-                            STATE_ONLINE_CONFIRMED,
-                            STATE_TELEPORTING,
-                            STATE_DISCONNECTED,
-                        }
-                    )
-                    # Detect force-close DURING a relaunch window: the user
-                    # force-closes the package AFTER it started loading (process was
-                    # briefly seen since the last (re)launch) but BEFORE
-                    # gamejoinloadtime fires, so ever_in_game is still False.  This
-                    # is the "2nd+ force-close not detected" bug (p-39ba4923dc #3).
-                    # Using process_seen_since_launch distinguishes the tool's own
-                    # transient am-force-stop gap (process never seen → streak reset)
-                    # from a real user kill (process appeared then vanished → dead).
                     user_kill_during_launch = (
                         row.watchdog_active and row.process_seen_since_launch
                     )
-                    if ever_in_game or user_kill_during_launch:
+                    if _process_missing_dead_eligible(pkg, row) or user_kill_during_launch:
                         row.force_close_detected = True
                         self._clear_online_evidence(pkg, at=now)
                         self._transition(
@@ -2643,6 +2667,7 @@ class RjnLifecycleMonitor:
                             at=now,
                             offline=True,
                         )
+                        _sync_committed_dead_from_process_missing(pkg)
                     elif (
                         row.watchdog_active
                         or row.internal_state in {STATE_LAUNCHING, STATE_RELAUNCHING}

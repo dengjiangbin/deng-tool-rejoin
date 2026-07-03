@@ -26,6 +26,15 @@ class FakeClock:
         self._t += float(seconds)
 
 
+def test_start_cache_clear_batch_budget_caps_at_five_seconds():
+    from agent.cache_clear_phases import start_cache_clear_batch_budget_s
+
+    assert start_cache_clear_batch_budget_s(1) == 2.0
+    assert start_cache_clear_batch_budget_s(3) == 5.0
+    assert start_cache_clear_batch_budget_s(5) == 5.0
+    assert start_cache_clear_batch_budget_s(8) == 5.0
+
+
 def test_prepare_optional_diagnostics_do_not_block_clear_cache(monkeypatch):
     """Cloud memory sweep is async; prep finish is immediate after force-stop."""
     start_lifecycle.reset_for_start(["p0"])
@@ -145,6 +154,16 @@ def test_five_packages_launch_every_thirty_seconds():
     assert snap["launch_interval_observed_ms"] == [30000.0] * 4
     assert snap["all_packages_launched_at"] is not None
     assert snap["checking_system_started_at"] is not None
+
+
+def test_checker_mirror_clear_cache_display_only():
+    p = CheckerPointerState()
+    p.reset_for_new_start(session_id="s-cc", pid=1)
+    p.mirror_clear_cache_phase()
+    snap = p.probe_snapshot()
+    assert snap["state_pointer_text"] == "Clear Cache.."
+    assert snap["header_action_label"] == "Clear Cache.."
+    assert snap["header_action_source"] == "start_clear_cache"
 
 
 def test_checker_mirror_start_launch_display_only():

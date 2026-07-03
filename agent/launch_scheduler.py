@@ -245,6 +245,42 @@ class LaunchScheduler:
                 return None
             return self._attempts[index].due_at
 
+    def table_display_state_for_package(self, package: str) -> str:
+        """Row label for the Start table during interval first-launch.
+
+        Uses scheduler truth so a package shows ``Launching`` as soon as its
+        launch command starts, even when ``on_before_launch`` times out before
+        the UI phase dict is updated (probe: package 2 window open, row Ready).
+        """
+        pkg = str(package or "").strip()
+        if not pkg:
+            return ""
+        with self._lock:
+            if self.checking_system_started_at is not None:
+                return ""
+            for row in self._attempts:
+                if row.package != pkg:
+                    continue
+                res = str(row.result or "")
+                if res == "launching" or (
+                    row.command_started_at is not None
+                    and row.command_finished_at is None
+                    and not res.startswith("failed")
+                    and not res.startswith("error")
+                ):
+                    return "Launching"
+                if res.startswith("failed") or res.startswith("error"):
+                    return "Failed"
+                if row.command_finished_at is not None or res in {
+                    "success",
+                    "timeout_dispatched",
+                }:
+                    return "Waiting"
+                if res == "fired":
+                    return "Launching"
+                return "Ready"
+        return ""
+
     def wait_until_due(
         self,
         index: int,
@@ -311,7 +347,21 @@ class LaunchScheduler:
                     row.result = "launching"
                 if index == 0 and self.first_launch_called_at is None:
                     self.first_launch_called_at = ts
+                pkg_name = row.package
                 self._persist(force=True)
+            else:
+                pkg_name = ""
+        if pkg_name:
+            try:
+                from . import checker_pointer as _cp_launch
+                from . import start_lifecycle as _sl_launch
+
+                _cp_launch.get().mark_launch_requested(pkg_name)
+                _cp_launch.get().mark_launch_command_sent(pkg_name)
+                _sl_launch.mark_first_launch_requested()
+                _sl_launch.flush_probe_checkpoint(_cp_launch, self)
+            except Exception:  # noqa: BLE001
+                pass
 
     def record_command_finished(
         self,

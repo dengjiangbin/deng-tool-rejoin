@@ -203,6 +203,7 @@ _ACCOUNT_DEAD_WEBHOOK_STATES = frozenset({
 _RECOVERY_TRIGGER_STATES = frozenset({
     STATUS_DEAD,
     STATUS_JOIN_FAILED,
+    STATUS_DISCONNECTED,
 })
 
 
@@ -1775,7 +1776,22 @@ class WatchdogSupervisor:
 
     def _watchdog_monitoring_active(self) -> bool:
         with self._state_lock:
-            return bool(self._package_opened) or self._all_launches_completed
+            if self._all_launches_completed:
+                return True
+            if bool(self._package_opened):
+                return True
+        try:
+            from .launch_scheduler import get as _get_launch_sched
+
+            sched = _get_launch_sched()
+            if sched is not None and sched.all_packages_dispatched_at is not None:
+                with self._state_lock:
+                    if not self._all_launches_completed:
+                        self._all_launches_completed = True
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        return False
 
     def _opened_packages(self) -> list[str]:
         with self._state_lock:
@@ -4732,6 +4748,56 @@ class WatchdogSupervisor:
         if state in dead_states:
             reason = str(detail.get("reason") or "dead")
             return reason, "current_detector", f"{state}:{reason}"
+        if state == STATUS_DISCONNECTED:
+            reason = str(
+                (detail or {}).get("reason_internal")
+                or (detail or {}).get("reason")
+                or (detail or {}).get("reason_user_friendly")
+                or ""
+            ).strip()
+            if not reason:
+                try:
+                    with self._rjn_monitor._lock:
+                        row = self._rjn_monitor._states.get(pkg)
+                        if row is not None:
+                            reason = str(row.last_transition_reason or "disconnect")
+                except Exception:  # noqa: BLE001
+                    reason = "disconnect"
+            return reason, "disconnect_detector", f"Disconnected:{reason}"
+        # No Heartbeat + process gone = force-close/crash (Dead), not more NHB.
+        if state == STATUS_NO_HEARTBEAT:
+            try:
+                if self._rjn_monitor.try_mark_force_close_dead(pkg):
+                    return (
+                        "process_missing",
+                        "no_heartbeat_force_close",
+                        "process_gone",
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                from .rjn_lifecycle_monitor import (
+                    _package_force_stopped_quick,
+                    _unpack_process_check,
+                )
+
+                exists, _, definitive = _unpack_process_check(
+                    self._rjn_monitor._process_check(pkg)
+                )
+                if not exists and definitive:
+                    return (
+                        "process_missing",
+                        "no_heartbeat_process_gone",
+                        "process_gone",
+                    )
+                if exists and _package_force_stopped_quick(pkg):
+                    return (
+                        "force_stopped",
+                        "no_heartbeat_user_force_stop",
+                        "dumpsys_stopped",
+                    )
+            except Exception:  # noqa: BLE001
+                pass
         # Fast layered signal: the live force-close race detector marks a
         # package "dead" from logcat crash/force-stop or process_poll vanish.
         try:
@@ -4788,7 +4854,19 @@ class WatchdogSupervisor:
             except Exception:  # noqa: BLE001
                 pass
             dead_pending = False
-            if race is not None:
+            try:
+                from .rjn_lifecycle_monitor import STATE_DEAD, STATE_DISCONNECTED
+
+                with self._rjn_monitor._lock:
+                    row = self._rjn_monitor._states.get(pkg)
+                    if row is not None and row.internal_state in {
+                        STATE_DEAD,
+                        STATE_DISCONNECTED,
+                    }:
+                        dead_pending = True
+            except Exception:  # noqa: BLE001
+                pass
+            if not dead_pending and race is not None:
                 try:
                     with race._lock:
                         r = race._packages.get(pkg)
