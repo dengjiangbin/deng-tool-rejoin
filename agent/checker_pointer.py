@@ -1180,10 +1180,19 @@ class CheckerPointerState:
             return val
 
     def set_online_evidence(self, package: str, source: str, age_ms: float | None) -> None:
+        now = time.time()
         with self._lock:
             row = self._pkg(package)
             row.last_online_evidence_source = source
             row.last_online_evidence_age_ms = age_ms
+        try:
+            from .lime_detection_speed import get_active_lime_tracker
+
+            lime = get_active_lime_tracker()
+            if lime is not None:
+                lime.note_online_evidence(package, at=now, source=source)
+        except Exception:  # noqa: BLE001
+            pass
 
     def set_pid(self, package: str, pid: str, *, missing_since: float | None) -> None:
         with self._lock:

@@ -44,6 +44,8 @@ _LIME_OVERLAY_FILES = (
     "agent/lime_channel.py",
     "agent/lime_detection_speed.py",
     "agent/rjn_lifecycle_monitor.py",
+    "agent/force_close_race.py",
+    "agent/checker_pointer.py",
     "agent/detection_speed_test.py",
     "agent/probe.py",
     "agent/license.py",

@@ -62,6 +62,28 @@ _active_detector: "ForceCloseRaceDetector | None" = None
 _active_lock = threading.Lock()
 
 
+def _notify_lime_process_dead(package: str, at: float) -> None:
+    try:
+        from .lime_detection_speed import get_active_lime_tracker
+
+        lime = get_active_lime_tracker()
+        if lime is not None:
+            lime.note_process_dead(package, at=at)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _notify_lime_logcat_dead(package: str, at: float, evidence: str) -> None:
+    try:
+        from .lime_detection_speed import get_active_lime_tracker
+
+        lime = get_active_lime_tracker()
+        if lime is not None:
+            lime.note_logcat_dead(package, at=at, evidence=evidence)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def get_active_force_close_race_detector() -> "ForceCloseRaceDetector | None":
     with _active_lock:
         return _active_detector
@@ -368,6 +390,7 @@ class ForceCloseRaceDetector:
                     "latency_ms": rec.latency_ms,
                 },
             )
+            _notify_lime_process_dead(pkg, now)
             was_online = False
             with monitor._lock:
                 mrow = monitor._states.get(pkg)
@@ -630,6 +653,7 @@ class ForceCloseRaceDetector:
                     "latency_ms": rec.latency_ms,
                 },
             )
+            _notify_lime_logcat_dead(pkg, at, evidence)
         elif force_stop and race.status != "dead":
             race.suspect_dead_at = at
 
