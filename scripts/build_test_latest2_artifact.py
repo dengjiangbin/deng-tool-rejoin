@@ -47,6 +47,7 @@ _LIME_OVERLAY_FILES = (
     "agent/force_close_race.py",
     "agent/roblox_disconnect_reasons.py",
     "agent/ocr_screen_detector.py",
+    "agent/webhook.py",
     "agent/detection_speed_test.py",
     "agent/probe.py",
     "agent/license.py",
@@ -138,10 +139,11 @@ def copy_v130_baseline(repo: Path, out: Path) -> tuple[str, str]:
             subprocess.run(
                 ["git", "worktree", "remove", str(wt), "--force"],
                 cwd=str(repo),
-                check=True,
+                check=False,
                 capture_output=True,
                 text=True,
             )
+            subprocess.run(["git", "worktree", "prune"], cwd=str(repo), check=False, capture_output=True)
     return sha, base_commit
 
 
@@ -154,6 +156,31 @@ def _overlay_lime_files(source_repo: Path, worktree: Path) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
     _validate_lime_overlay_deps(worktree)
+    _validate_v130_supervisor_webhook_api(worktree)
+
+
+def _validate_v130_supervisor_webhook_api(worktree: Path) -> None:
+    """v1.3.0-tag supervisor calls webhook helpers added after the tag."""
+    import ast
+    import re
+
+    supervisor = worktree / "agent" / "supervisor.py"
+    webhook = worktree / "agent" / "webhook.py"
+    if not supervisor.is_file() or not webhook.is_file():
+        return
+    needed = set(re.findall(r"lifecycle_webhook\.([A-Za-z_][A-Za-z0-9_]*)", supervisor.read_text(encoding="utf-8")))
+    tree = ast.parse(webhook.read_text(encoding="utf-8"))
+    defined = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    missing = sorted(name for name in needed if name not in defined)
+    if missing:
+        raise RuntimeError(
+            "v1.3.0 supervisor expects webhook API missing after overlay: "
+            + ", ".join(missing)
+        )
 
 
 def _validate_lime_overlay_deps(worktree: Path) -> None:
@@ -219,10 +246,11 @@ def build_lime_on_v130(repo: Path, out: Path) -> tuple[str, str]:
             subprocess.run(
                 ["git", "worktree", "remove", str(wt), "--force"],
                 cwd=str(repo),
-                check=True,
+                check=False,
                 capture_output=True,
                 text=True,
             )
+            subprocess.run(["git", "worktree", "prune"], cwd=str(repo), check=False, capture_output=True)
 
 
 def main() -> int:

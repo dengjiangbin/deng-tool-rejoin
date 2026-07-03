@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ OVERLAY = (
     "agent/force_close_race.py",
     "agent/roblox_disconnect_reasons.py",
     "agent/ocr_screen_detector.py",
+    "agent/webhook.py",
     "agent/detection_speed_test.py",
     "agent/probe.py",
     "agent/license.py",
@@ -39,7 +41,7 @@ def _agent_imports(path: Path) -> set[str]:
     return out
 
 
-def main() -> int:
+def _check_overlay_imports() -> list[str]:
     overlay_set = set(OVERLAY)
     missing: set[str] = set()
     for rel in OVERLAY:
@@ -53,12 +55,39 @@ def main() -> int:
             )
             if r.returncode != 0:
                 missing.add(dep)
-    if missing:
+    return sorted(missing)
+
+
+def _check_supervisor_webhook_api() -> list[str]:
+    supervisor = ROOT / "agent" / "supervisor.py"
+    webhook = ROOT / "agent" / "webhook.py"
+    needed = set(re.findall(r"lifecycle_webhook\.([A-Za-z_][A-Za-z0-9_]*)", supervisor.read_text(encoding="utf-8")))
+    tree = ast.parse(webhook.read_text(encoding="utf-8"))
+    defined = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    return sorted(name for name in needed if name not in defined)
+
+
+def main() -> int:
+    failed = False
+    missing_imports = _check_overlay_imports()
+    if missing_imports:
+        failed = True
         print("Missing at v1.3.0 tag (add to overlay):", file=sys.stderr)
-        for m in sorted(missing):
+        for m in missing_imports:
             print(f"  {m}", file=sys.stderr)
+    missing_webhook = _check_supervisor_webhook_api()
+    if missing_webhook:
+        failed = True
+        print("Supervisor lifecycle_webhook API missing from HEAD webhook.py:", file=sys.stderr)
+        for m in missing_webhook:
+            print(f"  {m}", file=sys.stderr)
+    if failed:
         return 1
-    print("OK: all overlay agent imports satisfied")
+    print("OK: overlay imports and supervisor/webhook API satisfied")
     return 0
 
 
