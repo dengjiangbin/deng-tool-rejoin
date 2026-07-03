@@ -139,6 +139,27 @@ class ProbeSummaryTests(unittest.TestCase):
         self.assertTrue(summary["root_required_mode"])
         self.assertEqual(summary["usernames_found"], 1)
 
+    def test_probe_summary_prefers_installed_build_when_build_missing(self) -> None:
+        out = {
+            "build": "<dropped: payload size budget>",
+            "installed_build": {
+                "channel": "test-latest2",
+                "version": "test-latest2",
+                "source_version": "v1.3.0",
+                "git_commit": "8bce60cd4458",
+                "artifact_sha256": "63cbae439414640da4983c1ac21f46feab45901463272a6741c82ded25d844a0",
+                "install_time_iso": "2026-07-03T10:37:41Z",
+            },
+            "device": {"root": {"available": True}},
+            "package_menu_diagnostics": [],
+            "errors": [],
+        }
+        summary = probe._build_probe_summary(out, last_command="probe")
+        self.assertEqual(summary["channel"], "test-latest2")
+        self.assertEqual(summary["product_version"], "test-latest2")
+        self.assertEqual(summary["source_version"], "v1.3.0")
+        self.assertEqual(summary["git_commit"], "8bce60cd4458")
+
 
 class SelftestTests(unittest.TestCase):
     def test_selftest_upload_prints_url(self) -> None:

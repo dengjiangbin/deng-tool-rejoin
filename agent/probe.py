@@ -1193,6 +1193,7 @@ def _build_probe_summary(
     last_command: str = "",
 ) -> dict[str, Any]:
     build = out.get("build") if isinstance(out.get("build"), dict) else {}
+    installed = out.get("installed_build") if isinstance(out.get("installed_build"), dict) else {}
     device = out.get("device") if isinstance(out.get("device"), dict) else {}
     root = device.get("root") if isinstance(device.get("root"), dict) else {}
     menu = out.get("package_menu_diagnostics") if isinstance(out.get("package_menu_diagnostics"), list) else []
@@ -1201,12 +1202,30 @@ def _build_probe_summary(
         if isinstance(row, dict) and str(row.get("display_username") or "").strip()
         and str(row.get("display_username")) not in {"Unknown", "unavailable", ""}
     )
+
+    def _pick(*keys: str) -> str:
+        for src in (build, installed):
+            for key in keys:
+                val = str(src.get(key) or "").strip()
+                if val:
+                    return val
+        return ""
+
+    channel = _pick("channel")
+    product_version = _pick("product_version", "version")
+    artifact_sha256 = _pick("artifact_sha256_short", "artifact_sha256")
+    git_commit = _pick("git_commit_short", "git_commit")
+    install_time_iso = _pick("install_time_iso")
+    source_version = _pick("source_version")
+
     summary: dict[str, Any] = {
         "probe_id": out.get("probe_id") or "",
-        "product_version": build.get("product_version") or build.get("version") or "",
-        "artifact_sha256": build.get("artifact_sha256_short") or build.get("artifact_sha256") or "",
-        "git_commit": build.get("git_commit_short") or build.get("git_commit") or "",
-        "install_time_iso": build.get("install_time_iso") or "",
+        "channel": channel,
+        "product_version": product_version,
+        "source_version": source_version,
+        "artifact_sha256": artifact_sha256,
+        "git_commit": git_commit,
+        "install_time_iso": install_time_iso,
         "root_available": bool(root.get("available")),
         "root_required_mode": True,
         "packages_found": len(menu),
@@ -1378,10 +1397,15 @@ def collect_probe(
             first_pkg = next(iter(pkgs_lime.values()), {})
             if isinstance(first_pkg, dict):
                 build_info = out.get("build") if isinstance(out.get("build"), dict) else {}
+                installed_info = (
+                    out.get("installed_build") if isinstance(out.get("installed_build"), dict) else {}
+                )
                 out["lime_detection_speed_proof"] = {
-                    "channel": build_info.get("channel"),
-                    "artifact_sha256": build_info.get("artifact_sha256"),
-                    "source_version": build_info.get("source_version"),
+                    "channel": build_info.get("channel") or installed_info.get("channel"),
+                    "artifact_sha256": build_info.get("artifact_sha256")
+                    or installed_info.get("artifact_sha256"),
+                    "source_version": build_info.get("source_version")
+                    or installed_info.get("source_version"),
                     "process_dead_detected_at": first_pkg.get("process_dead_detected_at"),
                     "logcat_dead_detected_at": first_pkg.get("logcat_dead_detected_at"),
                     "ocr_dead_detected_at": first_pkg.get("ocr_dead_detected_at"),

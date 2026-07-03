@@ -36,29 +36,44 @@ class TestLatest2ManifestTests(unittest.TestCase):
         self.assertEqual(pointers.get("test_latest"), "main-dev")
 
     def test_lime_build_must_not_use_main_dev_head_commit(self) -> None:
+        import subprocess
         import tarfile
 
         out = PROJECT / "releases/test-latest2/deng-tool-rejoin-test-latest2.tar.gz"
-        v130 = PROJECT / "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz"
-        if not out.is_file() or not v130.is_file():
+        if not out.is_file():
             self.skipTest("artifacts not built")
-        with tarfile.open(v130, mode="r:gz") as tf:
-            base_commit = json.loads(tf.extractfile("BUILD-INFO.json").read()).get("git_commit", "")
+        tag_commit = subprocess.run(
+            ["git", "rev-parse", "v1.3.0^{commit}"],
+            cwd=str(PROJECT),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        self.assertTrue(tag_commit)
         with tarfile.open(out, mode="r:gz") as tf:
             bi = json.loads(tf.extractfile("BUILD-INFO.json").read())
         row = get_exact_registry_row("test-latest2") or {}
         mode = str(row.get("build_mode") or "")
         git_commit = str(bi.get("git_commit") or "")
-        if mode == "v1.3.0_copy":
-            self.assertEqual(
-                hashlib.sha256(out.read_bytes()).hexdigest(),
-                str(row.get("artifact_sha256") or ""),
-            )
-            return
+        base_commit = str(row.get("base_git_commit") or tag_commit)
+        self.assertTrue(git_commit.startswith(base_commit[:8]))
+        self.assertTrue(git_commit.startswith(tag_commit[:8]))
+        self.assertNotEqual(git_commit[:8], "02277ef"[:8])
+        self.assertNotEqual(git_commit[:8], "8bce60cd"[:8])
         if mode == "lime_on_v130":
-            self.assertTrue(git_commit.startswith(str(base_commit)[:8]))
             self.assertEqual(bi.get("source_version"), "v1.3.0")
-            self.assertNotEqual(git_commit[:8], "02277ef"[:8])
+        # Rebuilt stable v1.3.0 tarball embeds 8bce60 (main-dev start flow) — must differ.
+        v130 = PROJECT / "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz"
+        if v130.is_file():
+            with tarfile.open(v130, mode="r:gz") as tf:
+                stable_bi = json.loads(tf.extractfile("BUILD-INFO.json").read())
+            stable_commit = str(stable_bi.get("git_commit") or "")
+            if stable_commit.startswith("8bce60"):
+                self.assertNotEqual(
+                    hashlib.sha256(out.read_bytes()).hexdigest(),
+                    hashlib.sha256(v130.read_bytes()).hexdigest(),
+                    "test/latest2 must not be a byte copy of the rebuilt stable tarball",
+                )
 
     def test_test_latest2_endpoint_differs_from_test_latest_and_stable(self) -> None:
         t2 = get_exact_registry_row("test-latest2")

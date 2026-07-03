@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build or seed the isolated test/latest2 channel artifact.
 
-Phase 1 (baseline proof — exact stable v1.3.0 bytes):
+Phase 1 (baseline proof — true v1.3.0 tag source, no main-dev start flow):
   python scripts/build_test_latest2_artifact.py --copy-v130
 
-Phase 2 (Lime detection on v1.3.0 source — NOT main-dev HEAD):
+Phase 2 (Lime detection on v1.3.0 tag — NOT main-dev HEAD or rebuilt stable tarball):
   python scripts/build_test_latest2_artifact.py --lime-on-v130
 
 Never use the default no-flag build: that compiles current main HEAD and
@@ -33,19 +33,18 @@ from agent.internal_test_artifact import (  # noqa: E402
     verify_tarball_exclusions,
 )
 
-_V130_REL = "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz"
+_V130_TAG = "refs/tags/v1.3.0"
 _MANIFEST_VERSION = "test-latest2"
 _SOURCE_VERSION = "v1.3.0"
 
-# Lime-only overlay onto the v1.3.0 source tree.  Do NOT overlay commands.py,
-# start_lifecycle.py, or other main-dev deltas — those make test/latest2 behave
-# like test/latest.
+# Lime-only overlay onto the v1.3.0 **tag** source tree (refs/tags/v1.3.0).
+# Do NOT overlay commands.py, start_lifecycle.py, checker_pointer.py, or other
+# post-v1.3.0 main-dev deltas — those make test/latest2 behave like test/latest.
 _LIME_OVERLAY_FILES = (
     "agent/lime_channel.py",
     "agent/lime_detection_speed.py",
     "agent/rjn_lifecycle_monitor.py",
     "agent/force_close_race.py",
-    "agent/checker_pointer.py",
     "agent/detection_speed_test.py",
     "agent/probe.py",
     "agent/license.py",
@@ -76,37 +75,71 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _v130_build_commit(repo: Path) -> str:
-    """Git commit embedded in the published stable v1.3.0 tarball."""
-    src = repo / _V130_REL
-    if not src.is_file():
-        raise FileNotFoundError(f"Missing v1.3.0 artifact: {src}")
-    with tarfile.open(src, mode="r:gz") as tf:
-        bi = json.loads(tf.extractfile("BUILD-INFO.json").read().decode("utf-8"))
-    commit = str(bi.get("git_commit") or "").strip()
+def _v130_tag_commit(repo: Path) -> str:
+    """Git commit for the frozen public v1.3.0 tag (NOT rebuilt tarball BUILD-INFO).
+
+    The published ``releases/v1.3.0/*.tar.gz`` has been rebuilt with post-v1.3.0
+    main-dev commits (Preparing/Monitoring checker flow).  test/latest2 must
+    compile from ``refs/tags/v1.3.0`` so Start UX matches real stable v1.3.0.
+    """
+    proc = subprocess.run(
+        ["git", "rev-parse", f"{_V130_TAG}^{{commit}}"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit = proc.stdout.strip()
     if not commit:
-        raise RuntimeError("v1.3.0 BUILD-INFO.json missing git_commit")
+        raise RuntimeError(f"{_V130_TAG} did not resolve to a commit")
     return commit
 
 
-def _v130_artifact_sha(repo: Path) -> str:
-    for row in json.loads((repo / "data" / "rejoin_versions.json").read_text(encoding="utf-8")):
-        if str(row.get("version") or "") == _SOURCE_VERSION:
-            return str(row.get("artifact_sha256") or "").strip()
-    return ""
+def _assert_not_post_v130_main_dev(repo: Path, commit: str) -> None:
+    """Fail fast when the base commit already contains main-dev checker start flow."""
+    proc = subprocess.run(
+        ["git", "cat-file", "-e", f"{commit}:agent/checker_pointer.py"],
+        cwd=str(repo),
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        raise RuntimeError(
+            f"test/latest2 base commit {commit[:12]} includes checker_pointer.py "
+            "(post-v1.3.0 main-dev start flow); use refs/tags/v1.3.0"
+        )
 
 
 def copy_v130_baseline(repo: Path, out: Path) -> tuple[str, str]:
-    src = repo / _V130_REL
-    if not src.is_file():
-        raise FileNotFoundError(f"Missing v1.3.0 artifact: {src}")
+    """Build a true v1.3.0-tag artifact (no lime overlay, no main-dev start flow)."""
+    base_commit = _v130_tag_commit(repo)
+    _assert_not_post_v130_main_dev(repo, base_commit)
     out.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, out)
-    sha = _sha256_file(out)
-    v130_sha = _v130_artifact_sha(repo)
-    if v130_sha and sha != v130_sha:
-        raise RuntimeError(f"test/latest2 copy sha {sha} != v1.3.0 manifest sha {v130_sha}")
-    base_commit = _v130_build_commit(repo)
+    with tempfile.TemporaryDirectory(prefix="deng-test-latest2-copy-") as tmp:
+        wt = Path(tmp) / "worktree"
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", str(wt), base_commit],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        try:
+            sha = build_internal_test_tarball(
+                wt,
+                out,
+                channel="test-latest2",
+                version=_MANIFEST_VERSION,
+                source_version=_SOURCE_VERSION,
+            )
+            verify_tarball_exclusions(out.read_bytes(), require_license_gate_strings=False)
+        finally:
+            subprocess.run(
+                ["git", "worktree", "remove", str(wt), "--force"],
+                cwd=str(repo),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
     return sha, base_commit
 
 
@@ -121,8 +154,9 @@ def _overlay_lime_files(source_repo: Path, worktree: Path) -> None:
 
 
 def build_lime_on_v130(repo: Path, out: Path) -> tuple[str, str]:
-    """Compile v1.3.0 source + lime-only overlay — never current main HEAD."""
-    base_commit = _v130_build_commit(repo)
+    """Compile v1.3.0 tag source + lime-only overlay — never current main HEAD."""
+    base_commit = _v130_tag_commit(repo)
+    _assert_not_post_v130_main_dev(repo, base_commit)
     with tempfile.TemporaryDirectory(prefix="deng-test-latest2-") as tmp:
         wt = Path(tmp) / "worktree"
         subprocess.run(
@@ -175,7 +209,7 @@ def main() -> int:
     mode_group.add_argument(
         "--copy-v130",
         action="store_true",
-        help="Exact byte copy of stable v1.3.0 tarball (channel proof baseline).",
+        help="Build true v1.3.0 tag source with no lime overlay (not rebuilt stable tarball bytes).",
     )
     mode_group.add_argument(
         "--lime-on-v130",
