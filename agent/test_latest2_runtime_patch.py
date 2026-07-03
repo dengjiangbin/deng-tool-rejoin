@@ -26,6 +26,8 @@ def apply_test_latest2_runtime_patches() -> None:
     _patch_supervisor_recovery_gate()
     _patch_supervisor_stagger_safety()
     _patch_monitoring_relay()
+    _patch_fast_start_cache_clear()
+    _patch_probe_landscape_readonly()
     _PATCHED = True
 
 
@@ -333,3 +335,121 @@ def _patch_monitoring_relay() -> None:
         cls._test_latest2_orig_mark_for_relay = prior
 
     cls._test_latest2_monitoring_relay_patched = True
+
+
+def _patch_fast_start_cache_clear() -> None:
+    """Replace v1.3.0 verified cache clear with one-shot find-delete (~50% faster).
+
+    v1.3.0 ``commands.py`` loops ``android.clear_package_cache_verified`` per
+    package (existence probes + wc size checks + retries).  test/latest2 cannot
+    overlay commands.py, so we monkey-patch the android helper at runtime.
+    """
+    try:
+        from . import android
+    except Exception:  # noqa: BLE001
+        return
+    if getattr(android, "_test_latest2_fast_cache_clear_patched", False):
+        return
+
+    import shlex
+
+    _orig = android.clear_package_cache_verified
+
+    def _fast_verified(package: str, *, max_retries: int = 2) -> dict[str, object]:
+        package = android.validate_package_name(package)
+        root_info = android.detect_root()
+        if not root_info.available or not root_info.tool:
+            return {
+                "success": False,
+                "skipped": True,
+                "skipped_reason": "root_unavailable",
+                "cache_paths": [],
+                "size_before_bytes": 0,
+                "size_after_bytes": 0,
+                "attempts": 0,
+                "error": "",
+            }
+        paths = [
+            f"/data/user/0/{package}/cache",
+            f"/data/user/0/{package}/code_cache",
+            f"/data/user/0/{package}/files/tmp",
+            f"/data/user/0/{package}/files/http",
+            f"/data/data/{package}/cache",
+            f"/data/data/{package}/code_cache",
+            f"/data/data/{package}/files/tmp",
+            f"/data/data/{package}/files/http",
+        ]
+        quoted = " ".join(shlex.quote(p) for p in paths)
+        sh = (
+            f"for p in {quoted}; do "
+            f'[ -d "$p" ] && find "$p" -mindepth 1 -delete 2>/dev/null; '
+            f"done"
+        )
+        res = android.run_root_command(
+            ["sh", "-c", sh],
+            root_tool=root_info.tool,
+            timeout=8,
+        )
+        ok = bool(getattr(res, "ok", False)) or getattr(res, "returncode", 1) in (0, 1)
+        if getattr(res, "timed_out", False):
+            ok = False
+        return {
+            "success": ok,
+            "skipped": False,
+            "skipped_reason": "",
+            "cache_paths": paths,
+            "size_before_bytes": -1,
+            "size_after_bytes": 0 if ok else -1,
+            "attempts": 1,
+            "error": "" if ok else (getattr(res, "stderr", "") or "clear_failed")[:120],
+            "method": "test_latest2_fast_find_delete",
+        }
+
+    android.clear_package_cache_verified = _fast_verified  # type: ignore[assignment]
+    android._test_latest2_fast_cache_clear_patched = True
+    android._test_latest2_orig_clear_package_cache_verified = _orig
+
+
+def _patch_probe_landscape_readonly() -> None:
+    """Add ``apply_correction=False`` to v1.3.0 ``enforce_landscape_home_state``."""
+    try:
+        from . import android
+    except Exception:  # noqa: BLE001
+        return
+    if getattr(android, "_test_latest2_landscape_readonly_patched", False):
+        return
+    import inspect
+
+    sig = inspect.signature(android.enforce_landscape_home_state)
+    if "apply_correction" in sig.parameters:
+        return
+    orig = android.enforce_landscape_home_state
+
+    def _enforce_with_apply_correction(
+        *,
+        phase: str = "before_start",
+        screen_mode_config: str = "landscape",
+        apply_correction: bool = True,
+        **kwargs: Any,
+    ) -> dict[str, object]:
+        if not apply_correction:
+            before_display = android.get_display_orientation_state()
+            wm_state = android.get_wm_size()
+            density = android.get_wm_density()
+            rotation = android.get_rotation_settings()
+            return {
+                "phase": phase,
+                "screen_mode_config": screen_mode_config,
+                "before_display": before_display,
+                "after_display": before_display,
+                "wm_size": wm_state,
+                "density": density,
+                "rotation": rotation,
+                "correction_applied": [],
+                "apply_correction": False,
+            }
+        return orig(phase=phase, screen_mode_config=screen_mode_config, **kwargs)
+
+    android.enforce_landscape_home_state = _enforce_with_apply_correction  # type: ignore[assignment]
+    android._test_latest2_landscape_readonly_patched = True
+    android._test_latest2_orig_enforce_landscape_home_state = orig

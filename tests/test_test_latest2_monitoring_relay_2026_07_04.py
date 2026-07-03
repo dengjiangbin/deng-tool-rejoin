@@ -57,6 +57,7 @@ class MonitoringRelayTests(unittest.TestCase):
     def test_dead_commit_triggers_recovery_thread(self) -> None:
         sup = MagicMock()
         sup.status_map = {"com.moons.litesc": "Launching"}
+        sup._all_launches_completed = True
         relay = MonitoringRelay(packages=["com.moons.litesc"])
         relay.bind_supervisor(
             sup,
@@ -72,6 +73,31 @@ class MonitoringRelayTests(unittest.TestCase):
                     evidence="process_missing",
                 )
                 trig.assert_called_once()
+
+    def test_dead_commit_deferred_during_initial_launch(self) -> None:
+        sup = MagicMock()
+        sup.status_map = {"com.moons.litesc": "Launching"}
+        sup._all_launches_completed = False
+        sup._initial_launch_inflight = {"com.moons.litesc"}
+        sup._in_loading_grace = MagicMock(return_value=True)
+        relay = MonitoringRelay(packages=["com.moons.litesc"])
+        relay.bind_supervisor(
+            sup,
+            entries={"com.moons.litesc": {}},
+            direct_set_status=MagicMock(),
+        )
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            with patch.object(relay, "_trigger_immediate_recovery") as trig:
+                ok = relay.commit_presence_state(
+                    "com.moons.litesc",
+                    PRESENCE_DEAD,
+                    source="process",
+                    evidence="process_missing",
+                )
+                self.assertFalse(ok)
+                trig.assert_not_called()
+                with relay._lock:
+                    self.assertTrue(relay._rows["com.moons.litesc"].raw_dead_pending)
 
     def test_module_helpers_without_active_relay(self) -> None:
         with patch("agent.test_latest2_monitoring_relay.get_active_relay", return_value=None):
@@ -100,6 +126,27 @@ class RuntimePatchMonitoringTests(unittest.TestCase):
             self.assertTrue(
                 getattr(sup.WatchdogSupervisor, "_test_latest2_monitoring_relay_patched", False)
             )
+
+    def test_fast_cache_clear_patch_registered(self) -> None:
+        from agent.test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            apply_test_latest2_runtime_patches()
+            from agent import android
+
+            self.assertTrue(
+                getattr(android, "_test_latest2_fast_cache_clear_patched", False)
+            )
+
+
+class DeltaKeyBypassTests(unittest.TestCase):
+    def test_probe_snapshot_when_disabled(self) -> None:
+        from agent.lime_delta_key_bypass import probe_snapshot
+
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=False):
+            snap = probe_snapshot()
+            self.assertFalse(snap.get("enabled", True))
+            self.assertEqual(snap.get("bypass_count"), 0)
 
 
 class RelayVersionTests(unittest.TestCase):

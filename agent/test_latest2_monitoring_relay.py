@@ -194,6 +194,30 @@ class MonitoringRelay:
                 row.raw_dead_pending = True
         self._persist()
 
+    def _recovery_allowed(self, pkg: str, state: str) -> bool:
+        """Respect v1.3.0 stagger + loading grace — no recovery during first launch."""
+        if state == PRESENCE_ONLINE:
+            return True
+        sup = self._supervisor
+        if sup is None:
+            return True
+        if not getattr(sup, "_all_launches_completed", True):
+            inflight = getattr(sup, "_initial_launch_inflight", set())
+            if pkg in inflight:
+                return False
+        if hasattr(sup, "_in_loading_grace") and sup._in_loading_grace(pkg):
+            inflight = getattr(sup, "_initial_launch_inflight", set())
+            if pkg in inflight:
+                return False
+        row = self._rows.get(pkg)
+        if row is not None and row.launch_at:
+            age = time.time() - float(row.launch_at)
+            if age < 20.0 and state in _RECOVERY_PRESENCE:
+                had_online = row.committed_state == PRESENCE_ONLINE
+                if not had_online and not row.recovery_triggered:
+                    return False
+        return True
+
     def commit_presence_state(
         self,
         package: str,
@@ -208,6 +232,14 @@ class MonitoringRelay:
         pkg = str(package or "").strip()
         state_norm = str(state or "").strip()
         if not pkg or state_norm not in COMMITTED_PRESENCE:
+            return False
+        if not self._recovery_allowed(pkg, state_norm) and state_norm in _RECOVERY_PRESENCE:
+            self.submit_raw_evidence(
+                pkg,
+                hint="dead" if state_norm != PRESENCE_KICKED else "kicked",
+                source=source,
+                evidence=f"deferred:{evidence or state_norm}",
+            )
             return False
         now = time.time()
         changed = False
@@ -233,6 +265,8 @@ class MonitoringRelay:
             if trigger_recovery is not None
             else state_norm in _RECOVERY_PRESENCE
         )
+        if do_recovery and changed and not self._recovery_allowed(pkg, state_norm):
+            do_recovery = False
         if do_recovery and changed:
             self._trigger_immediate_recovery(pkg, state_norm, evidence or source)
         return True
@@ -312,6 +346,10 @@ class MonitoringRelay:
 
         sup = self._supervisor
         if sup is None:
+            return
+        if not self._recovery_allowed(pkg, state):
+            with self._lock:
+                self._recovery_inflight.discard(pkg)
             return
         entry = self._entries.get(pkg) or {}
         try:

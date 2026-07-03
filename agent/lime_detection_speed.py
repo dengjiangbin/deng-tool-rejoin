@@ -513,4 +513,10 @@ def start_lime_tracker_for_monitor(monitor: Any) -> LimeDetectionSpeedTracker | 
         set_active_ocr_detector(None)
     tracker = LimeDetectionSpeedTracker(monitor.packages, monitor=monitor)
     tracker.start()
+    try:
+        from .lime_delta_key_bypass import start_delta_key_bypass
+
+        start_delta_key_bypass()
+    except Exception:  # noqa: BLE001
+        pass
     return tracker

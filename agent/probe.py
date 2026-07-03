@@ -1156,9 +1156,19 @@ def _capture_rjn_style_detection(errors: list[dict[str, str]]) -> dict[str, Any]
 def _capture_landscape_debug_state(errors: list[dict[str, str]]) -> dict[str, Any]:
     """Capture current landscape/home evidence using the same Start checks."""
     try:
+        import inspect
+
         from . import android
 
-        state = android.enforce_landscape_home_state(phase="probe", screen_mode_config="landscape")
+        landscape_kwargs: dict[str, Any] = {
+            "phase": "probe",
+            "screen_mode_config": "landscape",
+        }
+        if "apply_correction" in inspect.signature(
+            android.enforce_landscape_home_state
+        ).parameters:
+            landscape_kwargs["apply_correction"] = False
+        state = android.enforce_landscape_home_state(**landscape_kwargs)
         launcher_bounds = state.get("launcher_bounds", {})
         display_rect = state.get("display_rect", {})
         bounds = launcher_bounds.get("bounds") if isinstance(launcher_bounds, dict) else None
@@ -1448,64 +1458,82 @@ def collect_probe(
         errors.append({"step": "lime_detection_speed", "error": str(exc)[:200]})
         out["lime_detection_speed"] = {"enabled": False, "error": str(exc)[:120]}
     try:
-        import importlib
+        from .lime_channel import lime_detection_enabled
 
-        _checker_pointer = importlib.import_module(".checker_pointer", __package__)
-        _fc = _checker_pointer.probe_snapshot()
-        out["focused_checker"] = _fc
-        # Current live session id/pid — used to flag stale prior-session data.
-        _cur_session_id = _fc.get("session_id")
-        _cur_checker_pid = _fc.get("checker_pid")
-        # Top-level launch scheduler proof (single-relay architecture).
-        out["launch_scheduler"] = {
-            "blocked_reason": _fc.get("launch_blocked_reason"),
-            "waiting_for_online": bool(_fc.get("launch_waiting_for_online", False)),
-            "first_launch_interval_s": _fc.get("first_launch_interval_s"),
-            "last_launch_interval_s": _fc.get("last_launch_interval_s"),
-            "first_launch_phase": _fc.get("first_launch_phase"),
-            "first_launch_next_package_at": _fc.get("first_launch_next_package_at"),
-            "valid_state_writer": _fc.get("valid_state_writer"),
-            "start_pressed_at": _fc.get("start_pressed_at"),
-            "getting_ready_at": _fc.get("getting_ready_at"),
-            "checking_system_started_at": _fc.get("checking_system_started_at"),
-            "monitoring_started_at": _fc.get("monitoring_started_at"),
-            "monitoring_paused_reason": _fc.get("monitoring_paused_reason"),
-            "lifecycle_blocker": _fc.get("lifecycle_blocker"),
-            "checker_status": _fc.get("checker_status"),
-            "checker_idle_reason": _fc.get("checker_idle_reason"),
-            "checker_paused_reason": _fc.get("checker_paused_reason"),
-            "unrecovered_dead_count": _fc.get("unrecovered_dead_count"),
-            "recovery_pending_count": _fc.get("recovery_pending_count"),
-            "recovery_running_count": _fc.get("recovery_running_count"),
-            "header_action_source": _fc.get("header_action_source"),
-            "header_action_label": _fc.get("header_action_label"),
-            "last_state_transition_reason": _fc.get("last_state_transition_reason"),
-            "prepare_started_at": _fc.get("prepare_started_at"),
-            "prepare_finished_at": _fc.get("prepare_finished_at"),
-            "prepare_duration_ms": _fc.get("prepare_duration_ms"),
-            "prepare_wait_reasons": _fc.get("prepare_wait_reasons"),
-            "prepare_blockers": _fc.get("prepare_blockers"),
-            "table_state_phase": _fc.get("table_state_phase"),
-            "table_state_source": _fc.get("table_state_source"),
-            "ui_phase_version": _fc.get("ui_phase_version"),
-            "stale_ui_write_ignored_count": _fc.get("stale_ui_write_ignored_count"),
-        }
-        try:
-            _launch_schedule_probe = importlib.import_module(
-                ".launch_scheduler", __package__
-            ).probe_snapshot
-            out["launch_schedule"] = _launch_schedule_probe()
-        except Exception as _ls_exc:  # noqa: BLE001
-            out["launch_schedule"] = {"error": str(_ls_exc)[:120]}
-        # Stamp the current session onto start_crash_state for cross-checking.
-        if isinstance(out.get("start_crash_state"), dict):
-            out["start_crash_state"]["current_start_session_id"] = _cur_session_id
+        if lime_detection_enabled():
+            out["focused_checker"] = {
+                "skipped": True,
+                "reason": "test/latest2 uses central monitoring relay, not checker_pointer",
+            }
+            out["launch_scheduler"] = {
+                "skipped": True,
+                "reason": "test/latest2 central monitoring relay",
+            }
+            out["launch_schedule"] = {"skipped": True, "reason": "test/latest2 relay"}
+            _cur_session_id = None
+            _cur_checker_pid = None
+        else:
+            import importlib
+
+            _checker_pointer = importlib.import_module(".checker_pointer", __package__)
+            _fc = _checker_pointer.probe_snapshot()
+            out["focused_checker"] = _fc
+            _cur_session_id = _fc.get("session_id")
+            _cur_checker_pid = _fc.get("checker_pid")
+            out["launch_scheduler"] = {
+                "blocked_reason": _fc.get("launch_blocked_reason"),
+                "waiting_for_online": bool(_fc.get("launch_waiting_for_online", False)),
+                "first_launch_interval_s": _fc.get("first_launch_interval_s"),
+                "last_launch_interval_s": _fc.get("last_launch_interval_s"),
+                "first_launch_phase": _fc.get("first_launch_phase"),
+                "first_launch_next_package_at": _fc.get("first_launch_next_package_at"),
+                "valid_state_writer": _fc.get("valid_state_writer"),
+                "start_pressed_at": _fc.get("start_pressed_at"),
+                "getting_ready_at": _fc.get("getting_ready_at"),
+                "checking_system_started_at": _fc.get("checking_system_started_at"),
+                "monitoring_started_at": _fc.get("monitoring_started_at"),
+                "monitoring_paused_reason": _fc.get("monitoring_paused_reason"),
+                "lifecycle_blocker": _fc.get("lifecycle_blocker"),
+                "checker_status": _fc.get("checker_status"),
+                "checker_idle_reason": _fc.get("checker_idle_reason"),
+                "checker_paused_reason": _fc.get("checker_paused_reason"),
+                "unrecovered_dead_count": _fc.get("unrecovered_dead_count"),
+                "recovery_pending_count": _fc.get("recovery_pending_count"),
+                "recovery_running_count": _fc.get("recovery_running_count"),
+                "header_action_source": _fc.get("header_action_source"),
+                "header_action_label": _fc.get("header_action_label"),
+                "last_state_transition_reason": _fc.get("last_state_transition_reason"),
+                "prepare_started_at": _fc.get("prepare_started_at"),
+                "prepare_finished_at": _fc.get("prepare_finished_at"),
+                "prepare_duration_ms": _fc.get("prepare_duration_ms"),
+                "prepare_wait_reasons": _fc.get("prepare_wait_reasons"),
+                "prepare_blockers": _fc.get("prepare_blockers"),
+                "table_state_phase": _fc.get("table_state_phase"),
+                "table_state_source": _fc.get("table_state_source"),
+                "ui_phase_version": _fc.get("ui_phase_version"),
+                "stale_ui_write_ignored_count": _fc.get("stale_ui_write_ignored_count"),
+            }
+            try:
+                _launch_schedule_probe = importlib.import_module(
+                    ".launch_scheduler", __package__
+                ).probe_snapshot
+                out["launch_schedule"] = _launch_schedule_probe()
+            except Exception as _ls_exc:  # noqa: BLE001
+                out["launch_schedule"] = {"error": str(_ls_exc)[:120]}
+            if isinstance(out.get("start_crash_state"), dict):
+                out["start_crash_state"]["current_start_session_id"] = _cur_session_id
     except Exception as exc:  # noqa: BLE001
         errors.append({"step": "focused_checker", "error": str(exc)[:200]})
         out["focused_checker"] = {"error": str(exc)[:120]}
         out["launch_scheduler"] = {"error": str(exc)[:120]}
         _cur_session_id = None
         _cur_checker_pid = None
+    try:
+        from .lime_delta_key_bypass import probe_snapshot as delta_key_probe
+
+        out["lime_delta_key_bypass"] = delta_key_probe()
+    except Exception as exc:  # noqa: BLE001
+        out["lime_delta_key_bypass"] = {"error": str(exc)[:120]}
     try:
         from .launch_relaunch_trace import probe_snapshot as launch_probe_snapshot
 

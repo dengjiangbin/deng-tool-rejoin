@@ -701,12 +701,17 @@ def restore_display_defaults(*, portrait: bool = True) -> dict[str, object]:
     }
 
 
-def enforce_landscape_home_state(*, phase: str = "before_start", screen_mode_config: str = "landscape") -> dict[str, object]:
+def enforce_landscape_home_state(
+    *, phase: str = "before_start", screen_mode_config: str = "landscape", apply_correction: bool = True
+) -> dict[str, object]:
     """Report display/home state; apply soft rotation only when needed.
 
     Does NOT run ``wm size`` overrides or launcher stack/task resize tricks.
     Those caused portrait home screens pillarboxed inside forced landscape
     (black side bars) on many devices.
+
+    Set ``apply_correction=False`` for read-only probes so Termux touch mapping
+    is not disturbed (probe upload must not make Termux unclickable).
     """
     before_display = get_display_orientation_state()
     wm_state = get_wm_size()
@@ -722,7 +727,7 @@ def enforce_landscape_home_state(*, phase: str = "before_start", screen_mode_con
 
     display = before_display
     # Portrait layout uses native touch coordinates — never rotation-lock here.
-    if target != "portrait" and before_display.get("orientation") != target:
+    if apply_correction and target != "portrait" and before_display.get("orientation") != target:
         root = detect_root()
         correction_applied.extend(
             r.get("cmd", "")

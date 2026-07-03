@@ -22,6 +22,7 @@ OVERLAY = (
     "agent/test_latest2_runtime_patch.py",
     "agent/test_latest2_monitoring_relay.py",
     "agent/lime_package_discovery.py",
+    "agent/lime_delta_key_bypass.py",
     "agent/launcher.py",
     "agent/banner.py",
     "agent/package_online_evidence.py",
