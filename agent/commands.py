@@ -6483,6 +6483,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _probe_hb_stop = threading.Event()
         phase: dict[str, str] = {e["package"]: "Ready" for e in entries}
         _prep_ui_stop = threading.Event()
+        _ram_cache: dict[str, Any] = {"info": None, "next_update": 0.0}
 
         def _ram_bar(pct_free: int) -> str:
             bar_w = 20
@@ -6503,7 +6504,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                         _ram_cache["info"] = None
                     _ram_cache["next_update"] = now + 9.0
                 info = _ram_cache["info"]
-                if not info:
+                if not info or not int(info.get("total_mb", 0) or 0):
                     return f"RAM: Unknown\n{_ram_bar(0)}"
                 free_mb = int(info.get("free_mb", 0))
                 pct_free = int(info.get("percent_free", 0))
@@ -6640,6 +6641,8 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         _prep_root = android.detect_root()
 
+        from .cache_clear_phases import START_PREP_DEADLINE_S
+
         def _prep_commands_immediate() -> None:
             _fast_force_stop_selected_packages(
                 package_names_early, _prep_root, logger=_start_log
@@ -6678,7 +6681,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         # ── IMMEDIATE CACHE CLEAR (after license+lock — real command) ──
         from .cache_clear_phases import (
             START_CACHE_CLEAR_PER_PACKAGE_TIMEOUT_S,
-            START_PREP_DEADLINE_S,
             run_start_mass_cache_clear,
             start_cache_clear_batch_budget_s,
         )
@@ -6775,6 +6777,24 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_session.mark("batch_clear_cache_done", package_count=len(entries))
             _start_lifecycle_prep.mark_clear_cache_command_finished()
             _stop_prep_ui_refresh()
+            if _checker_pointer is not None:
+                try:
+                    _ptr_cc_done = _checker_pointer.get()
+                    _ptr_cc_done.record_cache_clear_result(
+                        status="done" if _cc_exit_reason == "done" else "timeout",
+                        timed_out=_cc_exit_reason != "done",
+                        command_kind="start_mass_su_find_delete",
+                    )
+                    if _first_pkg := (package_names_early[0] if package_names_early else ""):
+                        _ptr_cc_done.mirror_start_launch_phase(
+                            _first_pkg,
+                            next_package_at=(
+                                _launch_sched.due_at_for_index(1) if _launch_sched else None
+                            ),
+                            reason="clear_cache_finished",
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
 
         _start_lifecycle_prep.mark_clearing_cache_finished()
         _start_lifecycle_prep.exit_clear_cache_phase(_cc_exit_reason)
@@ -7010,7 +7030,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 from . import start_lifecycle as _sl_row
 
                 hdr = str((_sl_row.probe_snapshot() or {}).get("header_phase") or "").strip()
-                if hdr in _HEADER_ONLY_PHASES:
+                if hdr in _HEADER_ONLY_PHASES and not _sl_row.is_cache_clear_closed():
                     return hdr
             except Exception:  # noqa: BLE001
                 pass
@@ -7210,6 +7230,16 @@ def cmd_start(args: argparse.Namespace) -> int:
                 except Exception:  # noqa: BLE001
                     pass
             _render_phase(note, phase_version=_ui_phase_version)
+
+        # Clear-cache finished while batch prep still runs — repaint now so rows
+        # leave the all-"Clear Cache" prep table (probe p-db7256838b).
+        try:
+            from . import start_lifecycle as _sl_post_cc
+
+            if _sl_post_cc.is_cache_clear_closed():
+                _set_header_phase("Opening")
+        except Exception:  # noqa: BLE001
+            pass
 
         def _set_all_phase_labels(label: str) -> None:
             _bump_ui_phase(label)

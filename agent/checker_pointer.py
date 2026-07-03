@@ -445,6 +445,8 @@ class CheckerPointerState:
             if package:
                 self.checker_mode = MODE_FIRST_LAUNCHING
                 self.state_pointer_text = POINTER_OPENING
+                self.header_action_label = POINTER_OPENING
+                self.header_action_source = "start_launch"
                 self.first_launch_phase = "first_launching"
                 self.first_launch_next_package_at = next_package_at
                 if package not in self.first_launch_started_packages:
