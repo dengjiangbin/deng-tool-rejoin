@@ -29,7 +29,8 @@ def apply_test_latest2_runtime_patches() -> None:
     _patch_stagger_interval_15s()
     _patch_monitoring_relay()
     _patch_fast_start_cache_clear()
-    _patch_probe_landscape_readonly()
+    _patch_landscape_readonly()
+    _patch_orientation_readonly()
     _patch_delta_bypass_at_start()
     _PATCHED = True
 
@@ -352,11 +353,11 @@ def _patch_monitoring_relay() -> None:
 
 
 def _patch_fast_start_cache_clear() -> None:
-    """Replace v1.3.0 verified cache clear with one-shot find-delete (~50% faster).
+    """Replace v1.3.0 per-package verified cache clear with one mass batch.
 
     v1.3.0 ``commands.py`` loops ``android.clear_package_cache_verified`` per
-    package (existence probes + wc size checks + retries).  test/latest2 cannot
-    overlay commands.py, so we monkey-patch the android helper at runtime.
+    package on the Start UI thread (table freezes for N×timeout).  The first
+    call mass-clears every enabled clone once; later loop iterations are instant.
     """
     try:
         from . import android
@@ -368,9 +369,65 @@ def _patch_fast_start_cache_clear() -> None:
     import shlex
 
     _orig = android.clear_package_cache_verified
+    _mass_batch: dict[str, dict[str, object]] | None = None
+    _mass_batch_at: float = 0.0
+    _MASS_BATCH_TTL_S = 120.0
+
+    def _enabled_start_packages() -> list[str]:
+        try:
+            from .config import enabled_package_names, load_config, validate_config
+
+            return list(enabled_package_names(validate_config(load_config())))
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _status_to_verified(status: str) -> dict[str, object]:
+        st = str(status or "").strip()
+        return {
+            "success": st in {"Cleared", "OK", "cleared"},
+            "skipped": st in {"Skipped", "Aborted"},
+            "skipped_reason": st if st in {"Skipped", "Aborted"} else "",
+            "cache_paths": [],
+            "size_before_bytes": -1,
+            "size_after_bytes": 0,
+            "attempts": 1,
+            "error": "" if st in {"Cleared", "OK", "Skipped", "Aborted"} else st[:120],
+            "method": "test_latest2_mass_batch",
+        }
+
+    def _run_mass_batch(packages: list[str]) -> dict[str, dict[str, object]]:
+        nonlocal _mass_batch, _mass_batch_at
+        root_info = android.detect_root()
+        if not root_info.available or not root_info.tool:
+            empty = _status_to_verified("Skipped")
+            empty["skipped_reason"] = "root_unavailable"
+            return {p: dict(empty) for p in packages}
+        mass = android.clear_packages_cache_mass_batch(
+            packages,
+            root_info=root_info,
+            per_package_timeout_s=8,
+            batch_max_s=max(12.0, 8.0 * len(packages)),
+        )
+        out: dict[str, dict[str, object]] = {}
+        for pkg in packages:
+            out[pkg] = _status_to_verified(str(mass.get(pkg) or "Failed"))
+        _mass_batch = out
+        _mass_batch_at = time.time()
+        return out
 
     def _fast_verified(package: str, *, max_retries: int = 2) -> dict[str, object]:
+        nonlocal _mass_batch, _mass_batch_at
         package = android.validate_package_name(package)
+        if _mass_batch is not None and (time.time() - _mass_batch_at) > _MASS_BATCH_TTL_S:
+            _mass_batch = None
+        if _mass_batch is None:
+            pkgs = _enabled_start_packages() or [package]
+            if package not in pkgs:
+                pkgs = [package, *pkgs]
+            _run_mass_batch(pkgs)
+        if _mass_batch and package in _mass_batch:
+            return dict(_mass_batch[package])
+        # Fallback: single-package fast clear (manual / out-of-start calls).
         root_info = android.detect_root()
         if not root_info.available or not root_info.tool:
             return {
@@ -424,8 +481,33 @@ def _patch_fast_start_cache_clear() -> None:
     android._test_latest2_orig_clear_package_cache_verified = _orig
 
 
-def _patch_probe_landscape_readonly() -> None:
-    """Add ``apply_correction=False`` to v1.3.0 ``enforce_landscape_home_state``."""
+def _landscape_readonly_state(
+    *,
+    phase: str,
+    screen_mode_config: str,
+) -> dict[str, object]:
+    from . import android
+
+    before_display = android.get_display_orientation_state()
+    wm_state = android.get_wm_size()
+    density = android.get_wm_density()
+    rotation = android.get_rotation_settings()
+    return {
+        "phase": phase,
+        "screen_mode_config": screen_mode_config,
+        "before_display": before_display,
+        "after_display": before_display,
+        "wm_size": wm_state,
+        "density": density,
+        "rotation": rotation,
+        "correction_applied": [],
+        "apply_correction": False,
+        "test_latest2_readonly": True,
+    }
+
+
+def _patch_landscape_readonly() -> None:
+    """Never rotate the display on test/latest2 — preserves Termux touch + table."""
     try:
         from . import android
     except Exception:  # noqa: BLE001
@@ -436,37 +518,89 @@ def _patch_probe_landscape_readonly() -> None:
 
     sig = inspect.signature(android.enforce_landscape_home_state)
     if "apply_correction" in sig.parameters:
-        return
-    orig = android.enforce_landscape_home_state
+        orig = android.enforce_landscape_home_state
 
-    def _enforce_with_apply_correction(
-        *,
-        phase: str = "before_start",
-        screen_mode_config: str = "landscape",
-        apply_correction: bool = True,
-        **kwargs: Any,
-    ) -> dict[str, object]:
-        if not apply_correction:
-            before_display = android.get_display_orientation_state()
-            wm_state = android.get_wm_size()
-            density = android.get_wm_density()
-            rotation = android.get_rotation_settings()
-            return {
-                "phase": phase,
-                "screen_mode_config": screen_mode_config,
-                "before_display": before_display,
-                "after_display": before_display,
-                "wm_size": wm_state,
-                "density": density,
-                "rotation": rotation,
-                "correction_applied": [],
-                "apply_correction": False,
-            }
-        return orig(phase=phase, screen_mode_config=screen_mode_config, **kwargs)
+        def _enforce_with_apply_correction(
+            *,
+            phase: str = "before_start",
+            screen_mode_config: str = "landscape",
+            apply_correction: bool = False,
+            **kwargs: Any,
+        ) -> dict[str, object]:
+            if apply_correction:
+                return orig(
+                    phase=phase,
+                    screen_mode_config=screen_mode_config,
+                    apply_correction=True,
+                    **kwargs,
+                )
+            return _landscape_readonly_state(
+                phase=phase,
+                screen_mode_config=screen_mode_config,
+            )
 
-    android.enforce_landscape_home_state = _enforce_with_apply_correction  # type: ignore[assignment]
+        android.enforce_landscape_home_state = _enforce_with_apply_correction  # type: ignore[assignment]
+    else:
+        orig = android.enforce_landscape_home_state
+
+        def _enforce_readonly_v130(
+            *,
+            phase: str = "before_start",
+            screen_mode_config: str = "landscape",
+            apply_correction: bool = False,
+            **kwargs: Any,
+        ) -> dict[str, object]:
+            if apply_correction:
+                return orig(phase=phase, screen_mode_config=screen_mode_config, **kwargs)
+            return _landscape_readonly_state(
+                phase=phase,
+                screen_mode_config=screen_mode_config,
+            )
+
+        android.enforce_landscape_home_state = _enforce_readonly_v130  # type: ignore[assignment]
+
     android._test_latest2_landscape_readonly_patched = True
     android._test_latest2_orig_enforce_landscape_home_state = orig
+
+
+def _patch_orientation_readonly() -> None:
+    """Skip ``enforce_screen_orientation`` rotation lock during Start on test/latest2."""
+    try:
+        from . import android
+    except Exception:  # noqa: BLE001
+        return
+    if getattr(android, "_test_latest2_orientation_readonly_patched", False):
+        return
+
+    def _orientation_readonly(
+        screen_mode: str,
+        *,
+        protected_packages: Any | None = None,
+        allow_disable: bool = False,
+    ) -> dict[str, object]:
+        from . import android as _android
+
+        before = _android.get_display_orientation_state()
+        requested = str(screen_mode or "auto").strip().lower()
+        return {
+            "requested": requested,
+            "actual_before": before.get("orientation", "unknown"),
+            "actual_after": before.get("orientation", "unknown"),
+            "before": before,
+            "after": before,
+            "root_available": bool(_android.detect_root().available),
+            "success": True,
+            "override_detected": False,
+            "override_package": "",
+            "override_candidates": [],
+            "override_action": "none",
+            "apply_results": [],
+            "error": "",
+            "test_latest2_rotation_skipped": True,
+        }
+
+    android.enforce_screen_orientation = _orientation_readonly  # type: ignore[assignment]
+    android._test_latest2_orientation_readonly_patched = True
 
 
 def _patch_delta_bypass_at_start() -> None:

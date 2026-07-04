@@ -157,6 +157,63 @@ class ProbeLandscapeReadonlyTests(unittest.TestCase):
         self.assertEqual(errors, [])
 
 
+class OrientationReadonlyTests(unittest.TestCase):
+    def test_enforce_screen_orientation_is_readonly_on_test_latest2(self) -> None:
+        from agent import android
+        from agent.test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            apply_test_latest2_runtime_patches()
+            out = android.enforce_screen_orientation("landscape")
+        self.assertTrue(out.get("test_latest2_rotation_skipped"))
+        self.assertEqual(out.get("actual_before"), out.get("actual_after"))
+
+    def test_enforce_landscape_defaults_to_readonly(self) -> None:
+        from agent import android
+        from agent.test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            with patch("agent.android.get_display_orientation_state", return_value={"orientation": "landscape"}):
+                with patch("agent.android.get_wm_size", return_value={"width": 2400, "height": 1080}):
+                    with patch("agent.android.get_wm_density", return_value=420):
+                        with patch("agent.android.get_rotation_settings", return_value={"user_rotation": 1}):
+                            apply_test_latest2_runtime_patches()
+                            out = android.enforce_landscape_home_state(
+                                phase="before_start",
+                                screen_mode_config="landscape",
+                            )
+        self.assertTrue(out.get("test_latest2_readonly"))
+        self.assertEqual(out.get("correction_applied"), [])
+
+
+class MassCacheClearBatchTests(unittest.TestCase):
+    def test_first_verified_call_mass_clears_all_packages(self) -> None:
+        from agent import android
+        from agent.test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        calls: list[list[str]] = []
+
+        def _mass(pkgs, **kwargs):
+            calls.append(list(pkgs))
+            return {p: "Cleared" for p in pkgs}
+
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            with patch("agent.config.enabled_package_names", return_value=["com.a", "com.b"]):
+                with patch("agent.config.validate_config", side_effect=lambda c: c):
+                    with patch("agent.config.load_config", return_value={"roblox_packages": []}):
+                        with patch("agent.android.detect_root") as dr:
+                            dr.return_value = android.RootInfo(True, "su", "")
+                            with patch(
+                                "agent.android.clear_packages_cache_mass_batch",
+                                side_effect=_mass,
+                            ):
+                                apply_test_latest2_runtime_patches()
+                                android.clear_package_cache_verified("com.a")
+                                android.clear_package_cache_verified("com.b")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(set(calls[0]), {"com.a", "com.b"})
+
+
 class LauncherBootstrapTests(unittest.TestCase):
     def test_launcher_import_applies_runtime_patches_on_test_latest2(self) -> None:
         import importlib
