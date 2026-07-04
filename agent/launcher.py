@@ -741,3 +741,20 @@ def launch_package_for_current_config(
     pkg_cfg = dict(cfg)
     pkg_cfg["roblox_package"] = pkg
     return perform_rejoin(pkg_cfg, reason=reason, package_entry=entry)
+
+
+def _bootstrap_test_latest2_runtime_patches() -> None:
+    """Apply test/latest2 monkey-patches as soon as launcher is importable."""
+    try:
+        from .lime_channel import lime_detection_enabled
+
+        if not lime_detection_enabled():
+            return
+        from .test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        apply_test_latest2_runtime_patches()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_bootstrap_test_latest2_runtime_patches()

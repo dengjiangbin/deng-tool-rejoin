@@ -1156,6 +1156,38 @@ def _capture_rjn_style_detection(errors: list[dict[str, str]]) -> dict[str, Any]
 def _capture_landscape_debug_state(errors: list[dict[str, str]]) -> dict[str, Any]:
     """Capture current landscape/home evidence using the same Start checks."""
     try:
+        from .lime_channel import lime_detection_enabled
+
+        if lime_detection_enabled():
+            from . import android
+
+            before_display = android.get_display_orientation_state()
+            wm_state = android.get_wm_size()
+            density = android.get_wm_density()
+            rotation = android.get_rotation_settings()
+            return {
+                "[DENG_REJOIN_LANDSCAPE_STATE]": {
+                    "phase": "probe",
+                    "screen_mode_config": "landscape",
+                    "before_display": before_display,
+                    "after_display": before_display,
+                    "wm_size": wm_state,
+                    "density": density,
+                    "rotation": rotation,
+                    "correction_applied": [],
+                    "skipped_rotation": True,
+                    "reason": "test/latest2 probe is read-only",
+                },
+                "[DENG_REJOIN_HOME_ORIENTATION_CHECK]": {
+                    "launcher_package": "",
+                    "launcher_bounds": None,
+                    "expected_landscape_bounds": before_display,
+                    "match": "skipped",
+                },
+            }
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         import inspect
 
         from . import android

@@ -157,5 +157,22 @@ class ProbeLandscapeReadonlyTests(unittest.TestCase):
         self.assertEqual(errors, [])
 
 
+class LauncherBootstrapTests(unittest.TestCase):
+    def test_launcher_import_applies_runtime_patches_on_test_latest2(self) -> None:
+        import importlib
+
+        import agent.launcher as launcher_mod
+        import agent.test_latest2_runtime_patch as rtp
+
+        rtp._PATCHED = False
+        setattr(launcher_mod, "_test_latest2_lime_bypass_patched", False)
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            importlib.reload(launcher_mod)
+            from agent import supervisor as sup
+
+            self.assertTrue(rtp._PATCHED)
+            self.assertEqual(sup.WatchdogSupervisor.LAUNCH_STAGGER_SECONDS, 15)
+
+
 if __name__ == "__main__":
     unittest.main()

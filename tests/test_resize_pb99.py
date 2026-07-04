@@ -11,19 +11,29 @@ from agent.resize_pb99 import (
 
 
 class TestPb99Grid(unittest.TestCase):
-    def test_portrait_two_apps_one_column_full_width(self) -> None:
+    def test_portrait_two_apps_one_column_with_top_table_zone(self) -> None:
         pkgs = ["com.moons.litesc", "com.moons.litesd"]
         rects, layout = calculate_pb99_grid(pkgs, wm_width=720, wm_height=1280, rotation=0)
         self.assertEqual(layout["mode"], "PORTRAIT")
         self.assertEqual(layout["columns"], 1)
         self.assertEqual(layout["rows"], 2)
         self.assertEqual(layout["left_offset"], 0)
+        self.assertEqual(layout["top_offset"], 1280 * 40 // 100)
         self.assertEqual(len(rects), 2)
+        self.assertGreaterEqual(rects[0].top, layout["top_offset"])
         self.assertEqual(rects[0].left, layout["side_margin"])
         self.assertGreater(rects[0].right, rects[0].left)
         self.assertLessEqual(rects[0].bottom, rects[1].top)
         self.assertEqual(rects[0].package, "com.moons.litesc")
         self.assertEqual(rects[1].package, "com.moons.litesd")
+
+    def test_landscape_uses_left_table_zone(self) -> None:
+        pkgs = ["com.moons.litesc", "com.moons.litesd"]
+        rects, layout = calculate_pb99_grid(pkgs, wm_width=720, wm_height=1280, rotation=1)
+        self.assertEqual(layout["mode"], "LANDSCAPE")
+        self.assertEqual(layout["left_offset"], 1280 * 40 // 100)
+        self.assertEqual(layout["top_offset"], 0)
+        self.assertGreaterEqual(rects[0].left, layout["left_offset"])
 
     def test_landscape_rotation_uses_wide_grid(self) -> None:
         pkgs = [f"com.test.p{i}" for i in range(4)]

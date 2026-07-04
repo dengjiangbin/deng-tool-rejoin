@@ -58,6 +58,8 @@ _LIME_OVERLAY_FILES = (
     "agent/banner.py",
     "agent/package_online_evidence.py",
     "agent/probe.py",
+    "agent/resize_pb99.py",
+    "agent/resize_engine.py",
     "agent/license.py",
     "agent/build_info.py",
 )

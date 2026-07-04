@@ -9,7 +9,9 @@ from typing import Any
 from . import android
 from .window_layout import WindowRect, _layout_tmp_dir, _serialize_xml
 
-_PB99_LEFT_OFFSET_PERCENT = 0
+# Reserve screen space for the Rejoin table / Termux UI (pb99 grid origin).
+_PB99_LANDSCAPE_LEFT_OFFSET_PERCENT = 40
+_PB99_PORTRAIT_TOP_OFFSET_PERCENT = 40
 _MCURRENT_ORIENTATION_RE = re.compile(
     r"mCurrentOrientation\s*=\s*(\d+)",
     re.IGNORECASE,
@@ -84,10 +86,14 @@ def calculate_pb99_grid(
         sw, sh = mn, mx
     num = len(pkgs)
     col = pb99_columns(mod, num) if num else 0
-    ox = sw * _PB99_LEFT_OFFSET_PERCENT // 100
-    oy = 0
+    if mod == "LANDSCAPE":
+        ox = sw * _PB99_LANDSCAPE_LEFT_OFFSET_PERCENT // 100
+        oy = 0
+    else:
+        ox = 0
+        oy = sh * _PB99_PORTRAIT_TOP_OFFSET_PERCENT // 100
     aw = sw - ox
-    ah = sh
+    ah = sh - oy
     mt = mx * 40 // 1000
     ms = sw * 2 // 1000
     mb = sh * 2 // 1000
@@ -135,6 +141,7 @@ def calculate_pb99_grid(
         "columns": col,
         "rows": rows,
         "left_offset": ox,
+        "top_offset": oy,
         "top_margin": mt,
         "side_margin": ms,
         "bottom_margin": mb,

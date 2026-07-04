@@ -46,7 +46,7 @@ def _left_offset_pixels(cfg: dict[str, Any], screen_width: int) -> int:
             except (TypeError, ValueError):
                 pct = 0.0
         else:
-            pct = 0.0
+            pct = 40.0
     try:
         pct_f = max(0.0, min(90.0, float(pct)))
     except (TypeError, ValueError):
@@ -300,8 +300,13 @@ def run_resize_pipeline(
     cfg["last_layout_mode"] = mode.lower()
     cfg["last_layout_preview"] = [r.as_dict() for r in rects]
     cfg["_layout_rects"] = [r.as_dict() for r in rects]
-    if layout.get("screen_width"):
-        cfg["termux_dock_fraction"] = left_offset / max(1, int(layout["screen_width"]))
+    top_offset = int(layout.get("top_offset") or 0)
+    screen_w = int(layout.get("screen_width") or 0)
+    screen_h = int(layout.get("screen_height") or 0)
+    if top_offset > 0 and screen_h > 0:
+        cfg["termux_dock_fraction"] = top_offset / max(1, screen_h)
+    elif left_offset > 0 and screen_w > 0:
+        cfg["termux_dock_fraction"] = left_offset / max(1, screen_w)
 
     event = {
         "last_resize_at": now_iso,
