@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -105,11 +107,24 @@ class LimeFlowTests(unittest.TestCase):
 
 
 class PerformRejoinHookTests(unittest.TestCase):
-    def test_hook_relaunches_after_bypass(self) -> None:
+    def setUp(self) -> None:
+        reset_session_state()
+        import agent.launcher as launcher
+        import agent.test_latest2_runtime_patch as rtp
+
+        orig = getattr(launcher, "_test_latest2_orig_perform_rejoin", None)
+        if callable(orig):
+            launcher.perform_rejoin = orig
+        setattr(launcher, "_test_latest2_lime_bypass_patched", False)
+        rtp._PATCHED = False
+
+    def test_hook_relaunches_after_bypass_without_blocking_stagger(self) -> None:
         import agent.launcher as launcher
         import agent.test_latest2_runtime_patch as rtp
 
         calls: list[str] = []
+        flow_started = threading.Event()
+        flow_done = threading.Event()
         saved = launcher.perform_rejoin
 
         def fake_rejoin(cfg, *, reason="manual", package_entry=None, no_force_stop=False):
@@ -120,13 +135,29 @@ class PerformRejoinHookTests(unittest.TestCase):
         setattr(launcher, "_test_latest2_lime_bypass_patched", False)
         try:
             rtp._patch_delta_bypass_at_start()
-            with patch("agent.lime_delta_key_bypass.run_lime_delta_bypass_flow") as flow:
-                flow.return_value = {"relaunch_requested": True}
+
+            def _flow(*_args, **_kwargs):
+                flow_started.set()
+                allow_flow.wait(timeout=2.0)
+                try:
+                    return {"relaunch_requested": True}
+                finally:
+                    flow_done.set()
+
+            allow_flow = threading.Event()
+            with patch("agent.lime_delta_key_bypass.run_lime_delta_bypass_flow", side_effect=_flow):
                 launcher.perform_rejoin(
                     {"roblox_packages": [{"package": "com.moons.litesc", "enabled": True}]},
                     reason="start",
                     package_entry={"package": "com.moons.litesc"},
                 )
+            self.assertEqual(calls.count("start"), 1)
+            self.assertTrue(flow_started.wait(timeout=2.0))
+            allow_flow.set()
+            self.assertTrue(flow_done.wait(timeout=2.0))
+            deadline = time.monotonic() + 2.0
+            while calls.count("start") < 2 and time.monotonic() < deadline:
+                time.sleep(0.05)
             self.assertEqual(calls.count("start"), 2)
         finally:
             launcher.perform_rejoin = saved

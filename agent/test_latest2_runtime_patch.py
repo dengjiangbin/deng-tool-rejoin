@@ -5,6 +5,7 @@ Applied when ``lime_detection_enabled()`` — never on stable/main-dev channels.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -25,11 +26,23 @@ def apply_test_latest2_runtime_patches() -> None:
 
     _patch_supervisor_recovery_gate()
     _patch_supervisor_stagger_safety()
+    _patch_stagger_interval_15s()
     _patch_monitoring_relay()
     _patch_fast_start_cache_clear()
     _patch_probe_landscape_readonly()
     _patch_delta_bypass_at_start()
     _PATCHED = True
+
+
+def _patch_stagger_interval_15s() -> None:
+    """Hardcode 15s between stagger launches on test/latest2."""
+    try:
+        from . import supervisor as sup
+    except Exception:  # noqa: BLE001
+        return
+    cls = sup.WatchdogSupervisor
+    cls.LAUNCH_STAGGER_SECONDS = 15
+    cls._test_latest2_stagger_interval_patched = True
 
 
 def _patch_supervisor_recovery_gate() -> None:
@@ -466,6 +479,7 @@ def _patch_delta_bypass_at_start() -> None:
         return
 
     orig = launcher_mod.perform_rejoin
+    launcher_mod._test_latest2_orig_perform_rejoin = orig
 
     def _perform_rejoin_with_lime_bypass(
         config_data: dict[str, Any],
@@ -488,14 +502,25 @@ def _patch_delta_bypass_at_start() -> None:
 
             if not is_first_stagger_package(pkg, config_data):
                 return result
-            flow = run_lime_delta_bypass_flow(pkg, config_data)
-            if flow.get("relaunch_requested"):
-                return orig(
-                    config_data,
-                    reason=reason,
-                    package_entry=package_entry,
-                    no_force_stop=no_force_stop,
-                )
+
+            def _background_bypass() -> None:
+                try:
+                    flow = run_lime_delta_bypass_flow(pkg, config_data)
+                    if flow.get("relaunch_requested"):
+                        orig(
+                            config_data,
+                            reason=reason,
+                            package_entry=package_entry,
+                            no_force_stop=no_force_stop,
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            threading.Thread(
+                target=_background_bypass,
+                name=f"lime-delta-bypass-{pkg}",
+                daemon=True,
+            ).start()
         except Exception:  # noqa: BLE001
             pass
         return result

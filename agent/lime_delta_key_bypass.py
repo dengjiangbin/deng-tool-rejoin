@@ -424,8 +424,8 @@ def run_lime_delta_bypass_flow(
             return _finish_state(state)
 
         state.last_attempt_at = time.time()
-        dialog_timeout = float(os.environ.get("DENG_REJOIN_DELTA_DIALOG_WAIT_SEC", "90") or "90")
-        token_wait = float(os.environ.get("DENG_REJOIN_DELTA_TOKEN_WAIT_SEC", "25") or "25")
+        dialog_timeout = float(os.environ.get("DENG_REJOIN_DELTA_DIALOG_WAIT_SEC", "15") or "15")
+        token_wait = float(os.environ.get("DENG_REJOIN_DELTA_TOKEN_WAIT_SEC", "10") or "10")
 
         state.phase = "wait_delta_dialog"
         found, ocr_sample = _wait_for_delta_dialog(timeout_s=dialog_timeout)

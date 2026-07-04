@@ -1160,15 +1160,32 @@ def _capture_landscape_debug_state(errors: list[dict[str, str]]) -> dict[str, An
 
         from . import android
 
-        landscape_kwargs: dict[str, Any] = {
-            "phase": "probe",
-            "screen_mode_config": "landscape",
-        }
-        if "apply_correction" in inspect.signature(
-            android.enforce_landscape_home_state
-        ).parameters:
-            landscape_kwargs["apply_correction"] = False
-        state = android.enforce_landscape_home_state(**landscape_kwargs)
+        sig = inspect.signature(android.enforce_landscape_home_state)
+        if "apply_correction" not in sig.parameters:
+            # v1.3.0 base android always rotates when enforce_landscape runs —
+            # that breaks Termux touch mapping during probe upload.
+            before_display = android.get_display_orientation_state()
+            wm_state = android.get_wm_size()
+            density = android.get_wm_density()
+            rotation = android.get_rotation_settings()
+            state: dict[str, Any] = {
+                "phase": "probe",
+                "screen_mode_config": "landscape",
+                "before_display": before_display,
+                "after_display": before_display,
+                "wm_size": wm_state,
+                "density": density,
+                "rotation": rotation,
+                "correction_applied": [],
+                "skipped_rotation": True,
+                "reason": "probe read-only on v1.3.0 android without apply_correction",
+            }
+        else:
+            state = android.enforce_landscape_home_state(
+                phase="probe",
+                screen_mode_config="landscape",
+                apply_correction=False,
+            )
         launcher_bounds = state.get("launcher_bounds", {})
         display_rect = state.get("display_rect", {})
         bounds = launcher_bounds.get("bounds") if isinstance(launcher_bounds, dict) else None
@@ -1315,6 +1332,13 @@ def collect_probe(
 
     Never raises.  Errors are captured under ``probe["errors"]``.
     """
+    try:
+        from .test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        apply_test_latest2_runtime_patches()
+    except Exception:  # noqa: BLE001
+        pass
+
     if include_diag_startup is None:
         include_diag_startup = (
             os.environ.get("DENG_PROBE_DIAG_STARTUP", "").strip() in {"1", "true", "yes"}
@@ -1748,7 +1772,18 @@ def collect_probe(
         out["diag_startup"] = {"skipped": True,
                                "reason": "default off; use --diag to enable"}
 
-    out["snapshot_proof"] = _capture_snapshot_proof(errors)
+    try:
+        from .lime_channel import lime_detection_enabled
+
+        if lime_detection_enabled():
+            out["snapshot_proof"] = {
+                "skipped": True,
+                "reason": "test/latest2 probe avoids screencap during upload",
+            }
+        else:
+            out["snapshot_proof"] = _capture_snapshot_proof(errors)
+    except Exception:  # noqa: BLE001
+        out["snapshot_proof"] = _capture_snapshot_proof(errors)
     if not include_heavy and mode != "full":
         out["logcat"] = {"skipped": True, "reason": "summary mode; use --full for logcat"}
     summary = _build_probe_summary(out, selftest=selftest, last_command=last_command)

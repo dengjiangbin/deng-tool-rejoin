@@ -109,6 +109,8 @@ class RuntimePatchTests(unittest.TestCase):
             apply_test_latest2_runtime_patches()
             sup_cls = sup.WatchdogSupervisor
             self.assertTrue(getattr(sup_cls, "_test_latest2_stagger_safety_patched", False))
+            self.assertTrue(getattr(sup_cls, "_test_latest2_stagger_interval_patched", False))
+            self.assertEqual(sup_cls.LAUNCH_STAGGER_SECONDS, 15)
             self.assertIsNot(sup_cls._handle_state, sup_cls._test_latest2_orig_handle_state)
             self.assertIsNot(sup_cls._detect_package_state, sup_cls._test_latest2_orig_detect)
             self.assertIsNot(sup_cls.mark_package_launched, sup_cls._test_latest2_orig_mark_launched)
@@ -126,6 +128,33 @@ class ProcessMissingEligibleTests(unittest.TestCase):
         row.process_seen_since_launch = True
         row.launch_started_at = time.time() - 2.0
         self.assertFalse(_process_missing_dead_eligible("com.moons.litesc", row))
+
+
+class ProbeLandscapeReadonlyTests(unittest.TestCase):
+    def test_landscape_probe_skips_rotation_without_apply_correction(self) -> None:
+        import inspect
+
+        from agent import probe as probe_mod
+
+        errors: list[dict[str, str]] = []
+
+        def _enforce(*, phase="before_start", screen_mode_config="landscape"):
+            raise AssertionError("probe must not call enforce_landscape on v1.3.0 android")
+
+        v130_sig = inspect.signature(
+            lambda *, phase="before_start", screen_mode_config="landscape": None
+        )
+
+        with patch("agent.android.enforce_landscape_home_state", _enforce):
+            with patch("agent.android.get_display_orientation_state", return_value={"orientation": "landscape"}):
+                with patch("agent.android.get_wm_size", return_value={"width": 2400, "height": 1080}):
+                    with patch("agent.android.get_wm_density", return_value=420):
+                        with patch("agent.android.get_rotation_settings", return_value={"user_rotation": 1}):
+                            with patch("inspect.signature", return_value=v130_sig):
+                                out = probe_mod._capture_landscape_debug_state(errors)
+        state = out.get("[DENG_REJOIN_LANDSCAPE_STATE]", {})
+        self.assertTrue(state.get("skipped_rotation"))
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":
