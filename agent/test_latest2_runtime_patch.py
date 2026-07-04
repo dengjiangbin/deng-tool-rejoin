@@ -31,6 +31,8 @@ def apply_test_latest2_runtime_patches() -> None:
     _patch_fast_start_cache_clear()
     _patch_landscape_readonly()
     _patch_orientation_readonly()
+    _patch_termux_safe_terminal()
+    _patch_no_direct_window_resize()
     _patch_delta_bypass_at_start()
     _PATCHED = True
 
@@ -413,6 +415,12 @@ def _patch_fast_start_cache_clear() -> None:
             out[pkg] = _status_to_verified(str(mass.get(pkg) or "Failed"))
         _mass_batch = out
         _mass_batch_at = time.time()
+        try:
+            from . import safe_io
+
+            safe_io.restore_terminal()
+        except Exception:  # noqa: BLE001
+            pass
         return out
 
     def _fast_verified(package: str, *, max_retries: int = 2) -> dict[str, object]:
@@ -601,6 +609,63 @@ def _patch_orientation_readonly() -> None:
 
     android.enforce_screen_orientation = _orientation_readonly  # type: ignore[assignment]
     android._test_latest2_orientation_readonly_patched = True
+
+
+def _patch_termux_safe_terminal() -> None:
+    """Never erase Termux scrollback during Start table redraws (breaks input)."""
+    try:
+        from . import safe_io
+    except Exception:  # noqa: BLE001
+        return
+    if getattr(safe_io, "_test_latest2_termux_safe_terminal_patched", False):
+        return
+
+    _orig_clear = safe_io.safe_clear_screen
+
+    def _termux_safe_clear(*, clear_scrollback: bool = False) -> None:
+        _orig_clear(clear_scrollback=False)
+        try:
+            safe_io.restore_terminal()
+        except Exception:  # noqa: BLE001
+            pass
+
+    safe_io.safe_clear_screen = _termux_safe_clear  # type: ignore[assignment]
+    safe_io._test_latest2_termux_safe_terminal_patched = True
+    safe_io._test_latest2_orig_safe_clear_screen = _orig_clear
+
+
+def _patch_no_direct_window_resize() -> None:
+    """Block ``am stack resize`` / task resize — same Termux freeze as probe p-e70faf05a3."""
+    try:
+        from . import window_apply as wa
+    except Exception:  # noqa: BLE001
+        return
+    if getattr(wa, "_test_latest2_no_direct_resize_patched", False):
+        return
+
+    _orig_apply = wa.apply_window_layout
+    _orig_direct = wa._direct_resize_via_root
+    _orig_force = wa.force_resize_package
+
+    def _apply_without_direct_resize(
+        rects: Any,
+        *,
+        allow_direct_resize: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        return _orig_apply(rects, allow_direct_resize=False, **kwargs)
+
+    def _direct_resize_disabled(*_args: Any, **_kwargs: Any) -> tuple[bool, str]:
+        return False, "test_latest2 direct resize disabled"
+
+    def _force_resize_disabled(*_args: Any, **_kwargs: Any) -> tuple[bool, str]:
+        return False, "test_latest2 force resize disabled"
+
+    wa.apply_window_layout = _apply_without_direct_resize  # type: ignore[assignment]
+    wa._direct_resize_via_root = _direct_resize_disabled  # type: ignore[assignment]
+    wa.force_resize_package = _force_resize_disabled  # type: ignore[assignment]
+    wa._test_latest2_no_direct_resize_patched = True
+    wa._test_latest2_orig_apply_window_layout = _orig_apply
 
 
 def _patch_delta_bypass_at_start() -> None:

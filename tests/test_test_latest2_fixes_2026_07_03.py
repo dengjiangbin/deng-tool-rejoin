@@ -186,6 +186,57 @@ class OrientationReadonlyTests(unittest.TestCase):
         self.assertEqual(out.get("correction_applied"), [])
 
 
+class TermuxSafeUiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import agent.test_latest2_runtime_patch as rtp
+
+        rtp._PATCHED = False
+
+    def test_safe_clear_screen_never_clears_scrollback(self) -> None:
+        from agent import safe_io
+        from agent.test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        calls: list[bool] = []
+        setattr(safe_io, "_test_latest2_termux_safe_terminal_patched", False)
+
+        def _track(*, clear_scrollback: bool = False) -> None:
+            calls.append(clear_scrollback)
+
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            with patch.object(safe_io, "safe_clear_screen", _track):
+                with patch.object(safe_io, "restore_terminal", lambda: None):
+                    apply_test_latest2_runtime_patches()
+                    safe_io.safe_clear_screen(clear_scrollback=True)
+        self.assertEqual(calls, [False])
+
+    def test_apply_window_layout_disables_direct_resize(self) -> None:
+        from agent import window_apply as wa
+        from agent.test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        seen: list[bool] = []
+        setattr(wa, "_test_latest2_no_direct_resize_patched", False)
+
+        def _orig_apply(_rects, *, allow_direct_resize=True, **kwargs):
+            seen.append(bool(allow_direct_resize))
+            return []
+
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            wa.apply_window_layout = _orig_apply
+            apply_test_latest2_runtime_patches()
+            wa.apply_window_layout([], allow_direct_resize=True)
+        self.assertEqual(seen, [False])
+
+    def test_direct_resize_helper_is_disabled(self) -> None:
+        from agent import window_apply as wa
+        from agent.test_latest2_runtime_patch import apply_test_latest2_runtime_patches
+
+        with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
+            apply_test_latest2_runtime_patches()
+            ok, msg = wa._direct_resize_via_root("com.test", None, 0, 0, 100, 100)
+        self.assertFalse(ok)
+        self.assertIn("disabled", msg)
+
+
 class MassCacheClearBatchTests(unittest.TestCase):
     def test_first_verified_call_mass_clears_all_packages(self) -> None:
         from agent import android
