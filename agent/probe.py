@@ -1827,15 +1827,6 @@ def collect_probe(
         if key != "summary":
             ordered[key] = value
     ordered["errors"] = compact_probe_errors(ordered.get("errors") or [])
-    try:
-        from .lime_channel import lime_detection_enabled
-
-        if lime_detection_enabled():
-            from . import safe_io
-
-            safe_io.restore_terminal()
-    except Exception:  # noqa: BLE001
-        pass
     return ordered
 
 
@@ -2303,13 +2294,4 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 15.0) -> tuple[bool,
     pid = str(obj.get("probe_id") or "").strip()
     if not pid:
         return False, f"no probe_id in response: {body_text[:200]}"
-    try:
-        from .lime_channel import lime_detection_enabled
-
-        if lime_detection_enabled():
-            from . import safe_io
-
-            safe_io.restore_terminal()
-    except Exception:  # noqa: BLE001
-        pass
     return True, pid

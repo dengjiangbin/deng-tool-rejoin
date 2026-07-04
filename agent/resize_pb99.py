@@ -71,6 +71,7 @@ def calculate_pb99_grid(
     wm_width: int,
     wm_height: int,
     rotation: int | None = None,
+    layout_mode: str | None = None,
 ) -> tuple[list[WindowRect], dict[str, Any]]:
     """Compute window rects using the pb99/rz.txt RS shell algorithm."""
     pkgs = [p for p in packages if p]
@@ -79,7 +80,9 @@ def calculate_pb99_grid(
     h = max(1, int(wm_height))
     mx = max(w, h)
     mn = min(w, h)
-    mod = pb99_mode_from_rotation(rot)
+    mod = str(layout_mode or pb99_mode_from_rotation(rot)).strip().upper()
+    if mod not in ("LANDSCAPE", "PORTRAIT"):
+        mod = pb99_mode_from_rotation(rot)
     if mod == "LANDSCAPE":
         sw, sh = mx, mn
     else:

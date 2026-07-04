@@ -153,27 +153,18 @@ def compute_layout_rects(
     if wm_w <= 0 or wm_h <= 0:
         wm_w, wm_h = screen_width, screen_height
 
-    if mode == "PORTRAIT":
-        rotation = read_display_rotation()
-        try:
-            rotation = int(mode_info.get("signals", {}).get("rotation") or rotation)
-        except (TypeError, ValueError):
-            pass
-        rects, layout = calculate_pb99_grid(
-            trusted,
-            wm_width=wm_w,
-            wm_height=wm_h,
-            rotation=rotation,
-        )
-    else:
-        left_offset = _left_offset_pixels(cfg, screen_width)
-        rects, layout = calculate_resize_grid(
-            trusted,
-            mode=mode,
-            major=major,
-            minor=minor,
-            left_offset=left_offset,
-        )
+    rotation = read_display_rotation()
+    try:
+        rotation = int(mode_info.get("signals", {}).get("rotation") or rotation)
+    except (TypeError, ValueError):
+        pass
+    rects, layout = calculate_pb99_grid(
+        trusted,
+        wm_width=wm_w,
+        wm_height=wm_h,
+        rotation=rotation,
+        layout_mode=mode,
+    )
     return rects, layout, mode.lower()
 
 

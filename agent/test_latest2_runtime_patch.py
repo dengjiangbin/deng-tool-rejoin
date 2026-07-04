@@ -415,12 +415,6 @@ def _patch_fast_start_cache_clear() -> None:
             out[pkg] = _status_to_verified(str(mass.get(pkg) or "Failed"))
         _mass_batch = out
         _mass_batch_at = time.time()
-        try:
-            from . import safe_io
-
-            safe_io.restore_terminal()
-        except Exception:  # noqa: BLE001
-            pass
         return out
 
     def _fast_verified(package: str, *, max_retries: int = 2) -> dict[str, object]:
@@ -623,11 +617,10 @@ def _patch_termux_safe_terminal() -> None:
     _orig_clear = safe_io.safe_clear_screen
 
     def _termux_safe_clear(*, clear_scrollback: bool = False) -> None:
+        # Never erase scrollback — that breaks Termux touch/input mapping.
+        # Do NOT call restore_terminal() here; Start redraws many times per second
+        # and resetting termios on each pass misplaces the Enter/Tab key row.
         _orig_clear(clear_scrollback=False)
-        try:
-            safe_io.restore_terminal()
-        except Exception:  # noqa: BLE001
-            pass
 
     safe_io.safe_clear_screen = _termux_safe_clear  # type: ignore[assignment]
     safe_io._test_latest2_termux_safe_terminal_patched = True

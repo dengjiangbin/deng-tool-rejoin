@@ -204,9 +204,8 @@ class TermuxSafeUiTests(unittest.TestCase):
 
         with patch("agent.lime_channel.lime_detection_enabled", return_value=True):
             with patch.object(safe_io, "safe_clear_screen", _track):
-                with patch.object(safe_io, "restore_terminal", lambda: None):
-                    apply_test_latest2_runtime_patches()
-                    safe_io.safe_clear_screen(clear_scrollback=True)
+                apply_test_latest2_runtime_patches()
+                safe_io.safe_clear_screen(clear_scrollback=True)
         self.assertEqual(calls, [False])
 
     def test_apply_window_layout_disables_direct_resize(self) -> None:

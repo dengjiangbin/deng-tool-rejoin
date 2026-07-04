@@ -35,6 +35,20 @@ class TestPb99Grid(unittest.TestCase):
         self.assertEqual(layout["top_offset"], 0)
         self.assertGreaterEqual(rects[0].left, layout["left_offset"])
 
+    def test_portrait_config_uses_top_zone_even_when_rotated(self) -> None:
+        pkgs = ["com.moons.litesc", "com.moons.litesd"]
+        rects, layout = calculate_pb99_grid(
+            pkgs,
+            wm_width=720,
+            wm_height=1280,
+            rotation=1,
+            layout_mode="PORTRAIT",
+        )
+        self.assertEqual(layout["mode"], "PORTRAIT")
+        self.assertEqual(layout["left_offset"], 0)
+        self.assertEqual(layout["top_offset"], 1280 * 40 // 100)
+        self.assertGreaterEqual(rects[0].top, layout["top_offset"])
+
     def test_landscape_rotation_uses_wide_grid(self) -> None:
         pkgs = [f"com.test.p{i}" for i in range(4)]
         rects, layout = calculate_pb99_grid(pkgs, wm_width=720, wm_height=1280, rotation=1)
