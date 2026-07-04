@@ -457,28 +457,48 @@ def _patch_probe_landscape_readonly() -> None:
 
 
 def _patch_delta_bypass_at_start() -> None:
-    """Run ``/bypass?token=`` activation before package-key ensure on Start."""
+    """After first clone Start launch: Lime OCR → Receive Key → token → inject → relaunch."""
     try:
-        from . import package_key as pk
+        from . import launcher as launcher_mod
     except Exception:  # noqa: BLE001
         return
-    if getattr(pk, "_test_latest2_delta_bypass_patched", False):
+    if getattr(launcher_mod, "_test_latest2_lime_bypass_patched", False):
         return
-    orig = pk.ensure_package_key_for_start
 
-    def _ensure_with_bypass(
-        package: str,
-        config: dict[str, Any],
+    orig = launcher_mod.perform_rejoin
+
+    def _perform_rejoin_with_lime_bypass(
+        config_data: dict[str, Any],
         *,
-        root_enabled: bool = True,
-    ) -> dict[str, Any]:
+        reason: str = "manual",
+        package_entry: dict[str, Any] | None = None,
+        no_force_stop: bool = False,
+    ) -> Any:
+        result = orig(
+            config_data,
+            reason=reason,
+            package_entry=package_entry,
+            no_force_stop=no_force_stop,
+        )
+        if reason != "start" or not result.ok:
+            return result
+        pkg = str((package_entry or {}).get("package") or config_data.get("roblox_package") or "")
         try:
-            from .lime_delta_key_bypass import activate_delta_bypass_if_configured
+            from .lime_delta_key_bypass import is_first_stagger_package, run_lime_delta_bypass_flow
 
-            activate_delta_bypass_if_configured(config)
+            if not is_first_stagger_package(pkg, config_data):
+                return result
+            flow = run_lime_delta_bypass_flow(pkg, config_data)
+            if flow.get("relaunch_requested"):
+                return orig(
+                    config_data,
+                    reason=reason,
+                    package_entry=package_entry,
+                    no_force_stop=no_force_stop,
+                )
         except Exception:  # noqa: BLE001
             pass
-        return orig(package, config, root_enabled=root_enabled)
+        return result
 
-    pk.ensure_package_key_for_start = _ensure_with_bypass  # type: ignore[assignment]
-    pk._test_latest2_delta_bypass_patched = True
+    launcher_mod.perform_rejoin = _perform_rejoin_with_lime_bypass  # type: ignore[assignment]
+    launcher_mod._test_latest2_lime_bypass_patched = True

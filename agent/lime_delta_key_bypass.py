@@ -1,10 +1,14 @@
-"""Lime-style Delta bypass via ``/bypass?token=`` license activation (test/latest2).
+"""Lime-style live Delta key bypass (test/latest2 only).
 
-Flow (matches Lime Rejoiner APK paths):
-  1. User pastes bypass link or token from ad-gate / Discord.
-  2. GET ``{base}/bypass?token=…`` → executor license key.
-  3. POST ``{base}/license/activate`` with key + device HWID.
-  4. Write key to each clone's Delta license file and config ``package_keys``.
+Real Lime flow (see ``lime auto bypass delta.mp4``):
+  1. Launch clone 1 (stagger).
+  2. OCR detects Delta dialog (``Enter key`` / ``Receive Key`` / ``Welcome Back``).
+  3. Tap **Receive Key** → Delta opens ad/key link containing ``token=…``.
+  4. Capture token from clipboard / logcat / captured URL text.
+  5. Force-close clone 1.
+  6. ``GET {origin}/bypass?token=…`` → Delta license key.
+  7. ``POST {origin}/license/activate`` + inject ``…/Internals/Cache/license``.
+  8. Relaunch clone 1, then stagger continues.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,25 +27,79 @@ from .constants import DATA_DIR, DEFAULT_LICENSE_SERVER_URL
 from .lime_channel import lime_detection_enabled
 
 STATE_PATH = DATA_DIR / "lime-delta-key-bypass-state.json"
-_TOKEN_IN_URL_RE = re.compile(r"[?&]token=([^&\s#]+)", re.I)
+_TOKEN_IN_URL_RE = re.compile(
+    r"(https?://[^\s\"'<>]+?/bypass\?token=[^\s\"'&<>]+|[?&]token=([^\s\"'&<>#]+))",
+    re.I,
+)
+_BYPASS_LINK_RE = re.compile(r"https?://[^\s\"'<>]+?/bypass\?token=[^\s\"'&<>]+", re.I)
 
-_active_lock = threading.Lock()
-_activation_lock = threading.RLock()
-_activated_once = False
+DELTA_DIALOG_MARKERS = (
+    "enter key",
+    "welcome back",
+    "receive key",
+    "get key",
+    "activate delta",
+    "key system",
+    "paste key",
+    "delta key",
+    "license key",
+)
+
+RECEIVE_KEY_TAP_MARKERS = (
+    "receive key",
+    "get key",
+    "key bypass",
+)
+
+_flow_lock = threading.RLock()
+_session_first_pkg: str = ""
+_bypass_done_for: set[str] = set()
 
 
 @dataclass
 class DeltaBypassState:
     enabled: bool = False
+    mode: str = "lime_live_flow"
+    package: str = ""
+    phase: str = ""
     last_attempt_at: float | None = None
     last_success_at: float | None = None
-    last_token_hint: str = ""
     last_error: str = ""
     last_key_masked: str = ""
-    activation_count: int = 0
-    packages_written: list[str] = field(default_factory=list)
+    last_token_hint: str = ""
     bypass_base_url: str = ""
-    mode: str = "token_activation"
+    ocr_scans: int = 0
+    token_source: str = ""
+    relaunch_requested: bool = False
+    packages_written: list[str] = field(default_factory=list)
+
+
+def parse_bypass_token(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    m = _BYPASS_LINK_RE.search(s)
+    if m:
+        q = parse_qs(urlparse(m.group(0)).query)
+        return str((q.get("token") or [""])[0]).strip()
+    m2 = _TOKEN_IN_URL_RE.search(s)
+    if m2:
+        if m2.lastindex and m2.lastindex >= 2 and m2.group(2):
+            return m2.group(2).strip()
+        q = parse_qs(urlparse(m2.group(0)).query if "://" in m2.group(0) else f"?{m2.group(0)}")
+        return str((q.get("token") or [""])[0]).strip()
+    if "token=" in s.lower():
+        return s.split("token=", 1)[1].split("&", 1)[0].split("#", 1)[0].strip()
+    return s
+
+
+def parse_bypass_origin(text: str) -> str:
+    m = _BYPASS_LINK_RE.search(text or "")
+    if m:
+        p = urlparse(m.group(0))
+        if p.scheme and p.netloc:
+            return f"{p.scheme}://{p.netloc}".rstrip("/")
+    return ""
 
 
 def _default_base_url() -> str:
@@ -51,58 +110,143 @@ def _default_base_url() -> str:
         from .config import load_config
 
         cfg = load_config()
-        lic = cfg.get("license") if isinstance(cfg.get("license"), dict) else {}
-        server = str(lic.get("server_url") or "").strip().rstrip("/")
-        if server:
-            return server
+        block = cfg.get("delta_bypass") if isinstance(cfg.get("delta_bypass"), dict) else {}
+        cfg_base = str(block.get("base_url") or "").strip().rstrip("/")
+        if cfg_base:
+            return cfg_base
     except Exception:  # noqa: BLE001
         pass
     return DEFAULT_LICENSE_SERVER_URL.rstrip("/")
 
 
-def parse_bypass_token(raw: str) -> str:
-    """Extract token from plain token or full ``…/bypass?token=…`` link."""
-    s = (raw or "").strip()
-    if not s:
+def _ocr_screen_text() -> str:
+    try:
+        from . import snapshot as _snap
+
+        cap = _snap.capture_snapshot_detailed()
+        if not cap.ok or not cap.data:
+            return ""
+    except Exception:  # noqa: BLE001
         return ""
-    if "token=" in s.lower():
-        m = _TOKEN_IN_URL_RE.search(s)
-        if m:
-            return m.group(1).strip()
-        if "://" in s:
-            q = parse_qs(urlparse(s).query)
-            tok = (q.get("token") or [""])[0]
-            return str(tok).strip()
-        return s.split("token=", 1)[1].split("&", 1)[0].split("#", 1)[0].strip()
-    return s
+    tmp = DATA_DIR / f"lime-delta-flow-{int(time.time())}.png"
+    timeout = float(os.environ.get("DENG_REJOIN_DELTA_KEY_OCR_TIMEOUT_SEC", "5") or "5")
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(cap.data)
+        import shutil
 
-
-def resolve_bypass_token(config: dict[str, Any] | None = None) -> tuple[str, str]:
-    """Return ``(token, source)`` from env, config link, or config token."""
-    env_tok = parse_bypass_token(os.environ.get("DENG_REJOIN_DELTA_BYPASS_TOKEN", ""))
-    if env_tok:
-        return env_tok, "env"
-
-    cfg = config
-    if cfg is None:
+        if shutil.which("termux-ocr"):
+            res = subprocess.run(
+                ["termux-ocr", "-i", str(tmp)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                errors="replace",
+            )
+            return (res.stdout or "").strip()
+        if shutil.which("tesseract"):
+            res = subprocess.run(
+                ["tesseract", str(tmp), "stdout", "-l", "eng"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                errors="replace",
+            )
+            return (res.stdout or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+    finally:
         try:
-            from .config import load_config
+            tmp.unlink()
+        except OSError:
+            pass
+    return ""
 
-            cfg = load_config()
+
+def _display_size() -> tuple[int, int]:
+    try:
+        from . import android
+
+        wm = android.get_wm_size()
+        w = int(wm.get("width") or wm.get("override_width") or 720)
+        h = int(wm.get("height") or wm.get("override_height") or 1280)
+        return max(1, w), max(1, h)
+    except Exception:  # noqa: BLE001
+        return 720, 1280
+
+
+def _root_input(cmd: list[str]) -> bool:
+    try:
+        from . import android
+
+        root = android.detect_root()
+        if root.available and root.tool:
+            res = android.run_root_command(cmd, root_tool=root.tool, timeout=4)
+            return bool(res.ok)
+        res = subprocess.run(cmd, capture_output=True, timeout=4)
+        return res.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _tap_receive_key() -> bool:
+    w, h = _display_size()
+    # Delta dialog: Receive Key sits below Continue (~68% screen height, centered).
+    cx, cy = w // 2, int(h * 0.68)
+    return _root_input(["input", "tap", str(cx), str(cy)])
+
+
+def _read_clipboard() -> str:
+    for cmd in (["termux-clipboard-get"], ["termux-clipboard", "get"]):
+        try:
+            if not __import__("shutil").which(cmd[0].split("-")[0] if cmd[0] == "termux-clipboard-get" else cmd[0]):
+                continue
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=3, errors="replace")
+            text = (res.stdout or "").strip()
+            if text:
+                return text
         except Exception:  # noqa: BLE001
-            cfg = {}
+            continue
+    return ""
 
-    block = cfg.get("delta_bypass") if isinstance(cfg.get("delta_bypass"), dict) else {}
-    for key_name, source in (("link", "config_link"), ("token", "config_token"), ("url", "config_url")):
-        tok = parse_bypass_token(str(block.get(key_name) or ""))
-        if tok:
-            return tok, source
 
-    pkg_keys = cfg.get("package_keys") if isinstance(cfg.get("package_keys"), dict) else {}
-    tok = parse_bypass_token(str(pkg_keys.get("bypass_link") or ""))
-    if tok:
-        return tok, "package_keys.bypass_link"
-    return "", ""
+def _read_logcat_tail(max_lines: int = 400) -> str:
+    try:
+        res = subprocess.run(
+            ["logcat", "-d", "-t", str(max(50, max_lines))],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            errors="replace",
+        )
+        return res.stdout or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _capture_token_from_device(*, wait_s: float = 25.0) -> tuple[str, str, str]:
+    """Poll clipboard + logcat for ``/bypass?token=``. Returns (token, origin, source)."""
+    deadline = time.time() + max(5.0, wait_s)
+    seen: set[str] = set()
+    while time.time() < deadline:
+        for source, blob in (
+            ("clipboard", _read_clipboard()),
+            ("logcat", _read_logcat_tail()),
+        ):
+            if not blob or blob in seen:
+                continue
+            seen.add(blob)
+            origin = parse_bypass_origin(blob)
+            tok = parse_bypass_token(blob)
+            if tok:
+                return tok, origin or _default_base_url(), source
+            for m in _BYPASS_LINK_RE.finditer(blob):
+                link = m.group(0)
+                tok = parse_bypass_token(link)
+                if tok:
+                    return tok, parse_bypass_origin(link) or _default_base_url(), source
+        time.sleep(0.75)
+    return "", "", ""
 
 
 def _http_get_json(url: str, *, timeout: int = 30) -> dict[str, Any]:
@@ -139,10 +283,9 @@ def _http_post_json(url: str, payload: dict[str, Any], *, timeout: int = 30) -> 
         return {"ok": False, "error": "network_error", "message": str(exc)[:120]}
 
 
-def fetch_bypass_license(token: str, *, base_url: str | None = None) -> tuple[bool, dict[str, Any]]:
-    base = (base_url or _default_base_url()).rstrip("/")
-    url = f"{base}/bypass?token={token}"
-    resp = _http_get_json(url)
+def fetch_bypass_license(token: str, *, base_url: str) -> tuple[bool, dict[str, Any]]:
+    base = base_url.rstrip("/")
+    resp = _http_get_json(f"{base}/bypass?token={token}")
     if resp.get("ok") is True and (resp.get("key") or resp.get("license_key")):
         return True, resp
     if resp.get("key") or resp.get("license_key"):
@@ -151,76 +294,112 @@ def fetch_bypass_license(token: str, *, base_url: str | None = None) -> tuple[bo
     return False, resp
 
 
-def activate_bypass_license(
-    key: str,
-    *,
-    base_url: str | None = None,
-    install_id: str | None = None,
-) -> tuple[bool, dict[str, Any]]:
+def activate_bypass_license(key: str, *, base_url: str) -> tuple[bool, dict[str, Any]]:
     from .license import get_or_create_install_id, hash_install_id
 
-    base = (base_url or _default_base_url()).rstrip("/")
-    iid = (install_id or get_or_create_install_id()).strip()
-    hwid = hash_install_id(iid)
-    payload = {
-        "key": key,
-        "hwid": hwid,
-        "install_id_hash": hwid,
-    }
-    resp = _http_post_json(f"{base}/license/activate", payload)
+    hwid = hash_install_id(get_or_create_install_id())
+    resp = _http_post_json(
+        f"{base_url.rstrip('/')}/license/activate",
+        {"key": key, "hwid": hwid, "install_id_hash": hwid},
+    )
     if resp.get("ok") is True or resp.get("activated") is True:
         return True, resp
     return False, resp
 
 
-def _write_license_to_packages(key: str, config: dict[str, Any]) -> list[str]:
+def _write_license(package: str, key: str) -> bool:
     from . import package_key as pk
-    from .auto_execute import configured_package_names
 
-    written: list[str] = []
-    for pkg in configured_package_names(config):
-        path = pk.package_key_license_path(pkg)
-        ok, _err = pk._write_via_python(path, key)
-        if not ok:
-            try:
-                from . import android
+    path = pk.package_key_license_path(package)
+    ok, _err = pk._write_via_python(path, key)
+    if ok:
+        return True
+    try:
+        from . import android
 
-                root = android.detect_root()
-                if root.available and root.tool:
-                    ok, _err = pk._write_via_root(path, key, root.tool)
-            except Exception:  # noqa: BLE001
-                ok = False
-        if ok:
-            written.append(pkg)
-    return written
+        root = android.detect_root()
+        if root.available and root.tool:
+            ok2, _err2 = pk._write_via_root(path, key, root.tool)
+            return bool(ok2)
+    except Exception:  # noqa: BLE001
+        pass
+    return False
 
 
-def _persist_config_key(config: dict[str, Any], key: str, token_source: str) -> None:
+def _persist_key(key: str, *, token_source: str, package: str) -> None:
     try:
         from .config import load_config, save_config
 
         cfg = load_config()
         pkg_keys = dict(cfg.get("package_keys") or {})
-        pkg_keys["global"] = key
+        per = dict(pkg_keys.get("per_package") or {})
+        per[package] = key
+        pkg_keys["per_package"] = per
         cfg["package_keys"] = pkg_keys
         block = dict(cfg.get("delta_bypass") or {})
         block["last_activated_at"] = time.time()
         block["last_source"] = token_source
+        block["last_package"] = package
         cfg["delta_bypass"] = block
         save_config(cfg)
     except Exception:  # noqa: BLE001
         pass
 
 
-def activate_delta_bypass_if_configured(
-    config: dict[str, Any] | None = None,
+def _wait_for_delta_dialog(*, timeout_s: float = 90.0) -> tuple[bool, str]:
+    deadline = time.time() + max(10.0, timeout_s)
+    scans = 0
+    while time.time() < deadline:
+        scans += 1
+        text = _ocr_screen_text()
+        lower = text.lower()
+        if text and any(m in lower for m in DELTA_DIALOG_MARKERS):
+            return True, text[:240]
+        time.sleep(2.0)
+    return False, ""
+
+
+def _force_stop_package(package: str) -> bool:
+    try:
+        from . import android
+
+        res = android.force_stop_package(package)
+        return bool(getattr(res, "ok", False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def is_first_stagger_package(package: str, config: dict[str, Any]) -> bool:
+    global _session_first_pkg
+    pkg = str(package or "").strip()
+    if not pkg:
+        return False
+    try:
+        from .config import enabled_package_entries
+
+        entries = enabled_package_entries(config)
+        names = [str(e.get("package") or "").strip() for e in entries if e.get("package")]
+    except Exception:  # noqa: BLE001
+        names = []
+    if not names:
+        return False
+    if not _session_first_pkg:
+        _session_first_pkg = names[0]
+    return pkg == _session_first_pkg
+
+
+def run_lime_delta_bypass_flow(
+    package: str,
+    config: dict[str, Any],
     *,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Redeem bypass token and write Delta license — idempotent per session."""
-    global _activated_once
+    """Execute full Lime bypass on first clone after its initial Start launch."""
+    state = DeltaBypassState(
+        enabled=lime_detection_enabled(),
+        package=str(package or "").strip(),
+    )
 
-    state = DeltaBypassState(enabled=lime_detection_enabled(), mode="token_activation")
     if not lime_detection_enabled():
         state.last_error = "not_test_latest2"
         return _finish_state(state)
@@ -233,24 +412,53 @@ def activate_delta_bypass_if_configured(
         state.last_error = "disabled_by_env"
         return _finish_state(state)
 
-    token, source = resolve_bypass_token(config)
-    if not token:
-        state.last_error = "no_token_configured"
+    pkg = state.package
+    if not pkg or not is_first_stagger_package(pkg, config):
+        state.last_error = "not_first_stagger_package"
         return _finish_state(state)
 
-    with _activation_lock:
-        if _activated_once and not force:
-            state.last_error = "already_activated_this_session"
+    with _flow_lock:
+        if pkg in _bypass_done_for and not force:
+            state.last_error = "already_completed"
+            state.phase = "skipped"
             return _finish_state(state)
 
         state.last_attempt_at = time.time()
-        state.last_token_hint = token[:4] + "…" if len(token) > 4 else "…"
-        state.bypass_base_url = _default_base_url()
+        dialog_timeout = float(os.environ.get("DENG_REJOIN_DELTA_DIALOG_WAIT_SEC", "90") or "90")
+        token_wait = float(os.environ.get("DENG_REJOIN_DELTA_TOKEN_WAIT_SEC", "25") or "25")
 
+        state.phase = "wait_delta_dialog"
+        found, ocr_sample = _wait_for_delta_dialog(timeout_s=dialog_timeout)
+        state.ocr_scans += 1
+        if not found:
+            state.last_error = "delta_dialog_not_detected"
+            state.phase = "no_dialog"
+            return _finish_state(state)
+
+        state.phase = "tap_receive_key"
+        _tap_receive_key()
+        time.sleep(1.5)
+
+        state.phase = "capture_token"
+        token, origin, token_source = _capture_token_from_device(wait_s=token_wait)
+        if not token:
+            state.last_error = "token_not_captured"
+            state.phase = "token_missing"
+            return _finish_state(state)
+
+        state.last_token_hint = token[:6] + "…" if len(token) > 6 else token
+        state.token_source = token_source
+        state.bypass_base_url = origin or _default_base_url()
+
+        state.phase = "force_close"
+        _force_stop_package(pkg)
+        time.sleep(0.8)
+
+        state.phase = "fetch_key"
         ok, bypass_resp = fetch_bypass_license(token, base_url=state.bypass_base_url)
         if not ok:
             state.last_error = str(
-                bypass_resp.get("message") or bypass_resp.get("error") or "bypass_failed"
+                bypass_resp.get("message") or bypass_resp.get("error") or "bypass_fetch_failed"
             )[:120]
             return _finish_state(state)
 
@@ -259,33 +467,27 @@ def activate_delta_bypass_if_configured(
             state.last_error = "bypass_missing_key"
             return _finish_state(state)
 
-        act_ok, act_resp = activate_bypass_license(key, base_url=state.bypass_base_url)
+        state.phase = "activate"
+        act_ok, _act = activate_bypass_license(key, base_url=state.bypass_base_url)
         if not act_ok:
-            state.last_error = str(
-                act_resp.get("message") or act_resp.get("error") or "activate_failed"
-            )[:120]
+            state.last_error = "activate_failed"
             return _finish_state(state)
 
-        cfg = config
-        if cfg is None:
-            try:
-                from .config import load_config
+        state.phase = "inject"
+        if not _write_license(pkg, key):
+            state.last_error = "inject_failed"
+            return _finish_state(state)
 
-                cfg = load_config()
-            except Exception:  # noqa: BLE001
-                cfg = {}
-
-        written = _write_license_to_packages(key, cfg)
-        _persist_config_key(cfg, key, source)
-
+        _persist_key(key, token_source=token_source, package=pkg)
         from .package_key import mask_package_key
 
-        state.last_success_at = time.time()
-        state.activation_count += 1
-        state.packages_written = written
         state.last_key_masked = mask_package_key(key)
+        state.packages_written = [pkg]
+        state.last_success_at = time.time()
+        state.relaunch_requested = True
+        state.phase = "done"
         state.last_error = ""
-        _activated_once = True
+        _bypass_done_for.add(pkg)
         return _finish_state(state)
 
 
@@ -293,14 +495,18 @@ def _finish_state(state: DeltaBypassState) -> dict[str, Any]:
     row = {
         "enabled": state.enabled,
         "mode": state.mode,
+        "package": state.package or None,
+        "phase": state.phase or None,
         "last_attempt_at": state.last_attempt_at,
         "last_success_at": state.last_success_at,
-        "last_token_hint": state.last_token_hint or None,
-        "last_key_masked": state.last_key_masked or None,
-        "activation_count": state.activation_count,
-        "packages_written": state.packages_written,
-        "bypass_base_url": state.bypass_base_url or None,
         "last_error": state.last_error or None,
+        "last_key_masked": state.last_key_masked or None,
+        "last_token_hint": state.last_token_hint or None,
+        "token_source": state.token_source or None,
+        "bypass_base_url": state.bypass_base_url or None,
+        "ocr_scans": state.ocr_scans,
+        "relaunch_requested": state.relaunch_requested,
+        "packages_written": state.packages_written,
     }
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -310,20 +516,15 @@ def _finish_state(state: DeltaBypassState) -> dict[str, Any]:
     return row
 
 
+def reset_session_state() -> None:
+    global _session_first_pkg
+    _session_first_pkg = ""
+    _bypass_done_for.clear()
+
+
 def start_delta_key_bypass() -> dict[str, Any] | None:
-    """Run token activation once (Start prep + monitor fallback)."""
-    if not lime_detection_enabled():
-        return None
-
-    holder: dict[str, Any] = {}
-
-    def _work() -> None:
-        holder["result"] = activate_delta_bypass_if_configured()
-
-    t = threading.Thread(target=_work, name="lime-delta-bypass-activate", daemon=True)
-    t.start()
-    t.join(timeout=45.0)
-    return holder.get("result")
+    """No-op on monitor start — live flow runs from first Start launch hook."""
+    return probe_snapshot()
 
 
 def probe_snapshot() -> dict[str, Any]:
@@ -331,17 +532,9 @@ def probe_snapshot() -> dict[str, Any]:
         if STATE_PATH.is_file():
             parsed = json.loads(STATE_PATH.read_text(encoding="utf-8"))
             if isinstance(parsed, dict):
-                parsed.setdefault("mode", "token_activation")
                 parsed["enabled"] = lime_detection_enabled()
-                token, _ = resolve_bypass_token()
-                parsed["token_configured"] = bool(token)
+                parsed.setdefault("mode", "lime_live_flow")
                 return parsed
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         pass
-    token, _ = resolve_bypass_token()
-    return {
-        "enabled": lime_detection_enabled(),
-        "mode": "token_activation",
-        "token_configured": bool(token),
-        "activation_count": 0,
-    }
+    return {"enabled": lime_detection_enabled(), "mode": "lime_live_flow", "phase": "idle"}

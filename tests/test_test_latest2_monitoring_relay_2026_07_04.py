@@ -140,13 +140,13 @@ class RuntimePatchMonitoringTests(unittest.TestCase):
 
 
 class DeltaKeyBypassTests(unittest.TestCase):
-    def test_probe_snapshot_when_disabled(self) -> None:
+    def test_probe_snapshot_mode(self) -> None:
         from agent.lime_delta_key_bypass import probe_snapshot
 
-        with patch("agent.lime_channel.lime_detection_enabled", return_value=False):
+        with patch("agent.lime_delta_key_bypass.lime_detection_enabled", return_value=False):
             snap = probe_snapshot()
             self.assertFalse(snap.get("enabled", True))
-            self.assertEqual(snap.get("mode"), "token_activation")
+            self.assertEqual(snap.get("mode"), "lime_live_flow")
 
 
 class RelayVersionTests(unittest.TestCase):
