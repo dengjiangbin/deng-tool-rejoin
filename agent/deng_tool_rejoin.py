@@ -39,7 +39,7 @@ def _dispatch_install_safe_version(argv: list[str]) -> int | None:
     if not argv:
         return None
     head = argv[0]
-    if head not in {"version", "--version"}:
+    if head not in ("version", "--version"):
         return None
     version_script = _ENTRY_ROOT / "version_standalone.py"
     if not version_script.is_file():
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     if _version_rc is not None:
         raise SystemExit(_version_rc)
 
-if __package__ in {None, ""}:
+if __package__ in (None, ""):
     sys.path.insert(0, str(_INSTALL_ROOT))
     from agent.commands import main
 else:
@@ -73,7 +73,7 @@ else:
 if __name__ == "__main__":
     _lime_rc = None
     try:
-        if __package__ in {None, ""}:
+        if __package__ in (None, ""):
             from agent.lime_cli_dispatch import try_dispatch_lime_argv
         else:
             from .lime_cli_dispatch import try_dispatch_lime_argv

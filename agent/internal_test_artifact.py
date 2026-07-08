@@ -45,60 +45,6 @@ _SIGNING_KEY_REL = Path("data") / "rejoin_manifest_signing_key.pem"
 
 _RAW_RUNTIME_FILES = {
     "agent/__init__.py": '''from . import _protected_runtime as _dpr\n_dpr.install()\n__all__ = ["__version__"]\n__version__ = {package_version!r}\n''',
-    "agent/deng_tool_rejoin.py": '''#!/usr/bin/env python3
-from __future__ import annotations
-import subprocess as _subprocess
-import sys
-from pathlib import Path
-try:
-    if hasattr(_subprocess, "_USE_VFORK"):
-        _subprocess._USE_VFORK = False
-    if hasattr(_subprocess, "_USE_POSIX_SPAWN"):
-        _subprocess._USE_POSIX_SPAWN = False
-except Exception:
-    pass
-_ENTRY_ROOT = Path(__file__).resolve().parent
-_INSTALL_ROOT = _ENTRY_ROOT.parent
-def _dispatch_install_safe_version(argv):
-    if not argv or argv[0] not in {{"version", "--version"}}:
-        return None
-    version_script = _ENTRY_ROOT / "version_standalone.py"
-    if not version_script.is_file():
-        return 1
-    import runpy
-    try:
-        runpy.run_path(str(version_script), run_name="__main__")
-    except SystemExit as exc:
-        code = exc.code
-        if code is None:
-            return 0
-        if isinstance(code, int):
-            return code
-        return 1
-    return 0
-if __name__ == "__main__":
-    _version_rc = _dispatch_install_safe_version(sys.argv[1:])
-    if _version_rc is not None:
-        raise SystemExit(_version_rc)
-if __package__ in {{None, ""}}:
-    sys.path.insert(0, str(_INSTALL_ROOT))
-    from agent.commands import main
-else:
-    from .commands import main
-if __name__ == "__main__":
-    _lime_rc = None
-    try:
-        if __package__ in {{None, ""}}:
-            from agent.lime_cli_dispatch import try_dispatch_lime_argv
-        else:
-            from .lime_cli_dispatch import try_dispatch_lime_argv
-        _lime_rc = try_dispatch_lime_argv(sys.argv[1:])
-    except Exception:
-        _lime_rc = None
-    if _lime_rc is not None:
-        raise SystemExit(_lime_rc)
-    raise SystemExit(main())
-''',
     "agent/_protected_runtime.py": r'''from __future__ import annotations
 import base64, hashlib, importlib.abc, importlib.machinery, json, marshal, sys, zlib
 from pathlib import Path
@@ -549,6 +495,7 @@ def _public_numbers(signing_key) -> tuple[int, int]:
 def _render_raw_runtime_files(
     signing_key,
     *,
+    repo_root: Path,
     fallback_install_endpoint: str = "/install/test/latest",
     package_version: str = "1.0.0",
 ) -> dict[str, str]:
@@ -562,6 +509,10 @@ def _render_raw_runtime_files(
         public_e=public_e,
         fallback_install_endpoint=fallback_install_endpoint,
     )
+    entrypoint = repo_root / "agent" / "deng_tool_rejoin.py"
+    if not entrypoint.is_file():
+        raise RuntimeError("agent/deng_tool_rejoin.py is required for protected artifacts")
+    rendered["agent/deng_tool_rejoin.py"] = entrypoint.read_text(encoding="utf-8")
     return rendered
 
 
@@ -681,6 +632,7 @@ def build_internal_test_tarball(
         fallback_install_endpoint = f"/install/{version}"
     entries = _render_raw_runtime_files(
         signing_key,
+        repo_root=repo_root,
         fallback_install_endpoint=fallback_install_endpoint,
         package_version=version,
     )
