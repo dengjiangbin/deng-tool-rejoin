@@ -517,18 +517,29 @@ async function supersedeOpenAttemptsExcept(siteUserId, exceptAttemptId, supersed
   const supersededAt = new Date().toISOString();
   for (const row of rows) {
     const payload = normalizeJson(row.provider_payload);
-    await supabase
+    const nextPayload = {
+      ...payload,
+      superseded_by_attempt_id: supersededByAttemptId,
+      superseded_at: supersededAt,
+    };
+    let { error: updateError } = await supabase
       .from('license_ad_challenges')
       .update({
         status: SUPERSEDED_STATUS,
         failure_reason: 'superseded_by_new_attempt',
-        provider_payload: {
-          ...payload,
-          superseded_by_attempt_id: supersededByAttemptId,
-          superseded_at: supersededAt,
-        },
+        provider_payload: nextPayload,
       })
       .eq('id', row.id);
+    if (updateError) {
+      await supabase
+        .from('license_ad_challenges')
+        .update({
+          status: 'failed',
+          failure_reason: 'superseded_by_new_attempt',
+          provider_payload: nextPayload,
+        })
+        .eq('id', row.id);
+    }
   }
   return rows.length;
 }
@@ -670,7 +681,7 @@ function assertChallengeReadyForCompletion(row, req, provider, { allowConsumedRe
   if (!challengeOwnedByUser(row, req)) {
     throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Provider challenge owner mismatch');
   }
-  if (row.status === SUPERSEDED_STATUS) {
+  if (row.status === SUPERSEDED_STATUS || row.failure_reason === 'superseded_by_new_attempt') {
     throw safeError('CHALLENGE_SUPERSEDED', 'Ads session superseded');
   }
   if (row.provider !== provider) {
