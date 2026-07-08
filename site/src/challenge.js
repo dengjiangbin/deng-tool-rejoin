@@ -61,7 +61,15 @@ const ALLOWED_PROVIDER_REFERERS = {
 const CONSUMED_STATUSES = ['ad_completed', 'key_generated', 'completed', 'used'];
 const COMPLETABLE_STATUSES = ['provider_selected', 'pending_ad', 'ad_started'];
 const RESUMABLE_STATUSES = ['created', 'provider_selected', 'pending_ad', 'ad_started'];
+const SUPERSEDED_STATUS = 'superseded';
 const GENERATION_LOCKS = new Map();
+
+function maskAttemptId(id) {
+  const text = String(id || '').trim();
+  if (!text) return null;
+  if (text.length <= 8) return `${text.slice(0, 2)}…`;
+  return `${text.slice(0, 8)}…`;
+}
 
 function safeError(code, message) {
   const err = new Error(message || code);
@@ -489,11 +497,40 @@ async function supersedeOpenAttempts(siteUserId, reason = 'superseded_by_new_att
   await supabase
     .from('license_ad_challenges')
     .update({
-      status: 'failed',
+      status: SUPERSEDED_STATUS,
       failure_reason: reason,
     })
     .eq('site_user_id', siteUserId)
     .in('status', RESUMABLE_STATUSES);
+}
+
+async function supersedeOpenAttemptsExcept(siteUserId, exceptAttemptId, supersededByAttemptId) {
+  if (!siteUserId) return 0;
+  const { data: rows, error } = await supabase
+    .from('license_ad_challenges')
+    .select('id, provider_payload')
+    .eq('site_user_id', siteUserId)
+    .in('status', RESUMABLE_STATUSES)
+    .neq('id', exceptAttemptId);
+  if (error || !rows?.length) return 0;
+
+  const supersededAt = new Date().toISOString();
+  for (const row of rows) {
+    const payload = normalizeJson(row.provider_payload);
+    await supabase
+      .from('license_ad_challenges')
+      .update({
+        status: SUPERSEDED_STATUS,
+        failure_reason: 'superseded_by_new_attempt',
+        provider_payload: {
+          ...payload,
+          superseded_by_attempt_id: supersededByAttemptId,
+          superseded_at: supersededAt,
+        },
+      })
+      .eq('id', row.id);
+  }
+  return rows.length;
 }
 
 async function cleanupExpiredResumableAttempts(siteUserId) {
@@ -518,6 +555,31 @@ async function findOrCreateResumableChallenge(req, siteUser) {
   await supersedeOpenAttempts(siteUser.id);
   const row = await createChallenge(req, siteUser);
   return { row, resumed: false };
+}
+
+/**
+ * Every provider click creates a brand-new ads attempt. Older unfinished
+ * attempts in the same account are marked superseded and never block retries.
+ */
+async function startFreshProviderAttempt(req, siteUser, provider) {
+  if (!['lootlabs', 'linkvertise'].includes(provider)) {
+    throw safeError('PROVIDER_MISMATCH', 'Invalid provider');
+  }
+  await cleanupExpiredResumableAttempts(siteUser.id);
+  const created = await createChallenge(req, siteUser);
+  const supersededCount = await supersedeOpenAttemptsExcept(
+    siteUser.id,
+    created.id,
+    created.id,
+  );
+  const workingRow = await selectProvider(created.id, provider, req, siteUser);
+  return {
+    row: workingRow,
+    attemptId: created.id,
+    source: 'fresh_attempt',
+    supersededCount,
+    resumed: false,
+  };
 }
 
 async function resolveChallengeForProvider(req, siteUser, { challengeId = '', provider = '' } = {}) {
@@ -559,7 +621,8 @@ function mapErrorToFailureReason(err) {
     PROVIDER_RETURN_TOKEN_MISSING: 'provider_callback_missing',
     PROVIDER_RETURN_TOKEN_INVALID: 'provider_callback_missing',
     PROVIDER_CHALLENGE_OWNER_MISMATCH: 'session_mismatch',
-    PROVIDER_MISMATCH: 'missing_state',
+    PROVIDER_MISMATCH: 'provider_mismatch',
+    CHALLENGE_SUPERSEDED: 'superseded_attempt',
     KEY_LIMIT_REACHED: 'quota_blocked',
     COOLDOWN_ACTIVE: 'quota_blocked',
     KEY_GENERATION_FAILED: 'server_error',
@@ -607,6 +670,9 @@ function assertChallengeReadyForCompletion(row, req, provider, { allowConsumedRe
   if (!challengeOwnedByUser(row, req)) {
     throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Provider challenge owner mismatch');
   }
+  if (row.status === SUPERSEDED_STATUS) {
+    throw safeError('CHALLENGE_SUPERSEDED', 'Ads session superseded');
+  }
   if (row.provider !== provider) {
     throw safeError('PROVIDER_MISMATCH', 'Provider challenge provider mismatch');
   }
@@ -651,6 +717,17 @@ async function recoverGeneratedKeyFromChallenge(row) {
 async function resolveProviderChallenge(req, provider, { challengeId = null, linkvertiseHash = '' } = {}) {
   if (!req?.session?.user) {
     throw safeError('AUTH_REQUIRED', 'Login required');
+  }
+
+  if (challengeId) {
+    const explicit = await loadChallengeById(challengeId);
+    if (explicit && challengeOwnedByUser(explicit, req)) {
+      if (explicit.provider !== provider) {
+        throw safeError('PROVIDER_MISMATCH', 'Provider challenge provider mismatch');
+      }
+      assertChallengeReadyForCompletion(explicit, req, provider, { allowConsumedRecovery: true });
+      return explicit;
+    }
   }
 
   if (provider === 'linkvertise' && linkvertiseHash) {
@@ -698,7 +775,17 @@ async function resolveProviderChallenge(req, provider, { challengeId = null, lin
   throw safeError('PROVIDER_CHALLENGE_MISSING', 'No recoverable provider challenge');
 }
 
-async function getGenerationAttemptDiagnostic({ discordUserId = '', siteUserId = '', challengeId = null } = {}) {
+async function getGenerationAttemptDiagnostic({
+  discordUserId = '',
+  siteUserId = '',
+  challengeId = null,
+  callbackProvider = null,
+  callbackMatched = null,
+  providerVerifyResult = null,
+  keyGenerated = null,
+  errorCode = null,
+  reasonMessage = null,
+} = {}) {
   let row = null;
   if (challengeId) {
     row = await loadChallengeById(challengeId);
@@ -713,16 +800,25 @@ async function getGenerationAttemptDiagnostic({ discordUserId = '', siteUserId =
   }
   const payload = normalizeJson(row?.provider_payload);
   return {
-    latestAttemptId: row?.id || null,
+    latestAttemptId: maskAttemptId(row?.id),
     provider: row?.provider || null,
     attemptStatus: row?.status || 'none',
     attemptCreatedAt: row?.created_at || null,
     attemptExpiresAt: row?.expires_at || null,
+    tokenStateMasked: row?.state_hash ? `${String(row.state_hash).slice(0, 8)}…` : null,
+    supersededByAttemptId: maskAttemptId(payload.superseded_by_attempt_id),
     providerVerifyStatus: payload.linkvertise_hash ? 'hash_bound' : (payload.lootlabs_started ? 'lootlabs_started' : null),
     providerVerifyReason: row?.failure_reason || null,
-    consumedKeyId: row?.license_key_id ? String(row.license_key_id).slice(0, 8) + '…' : null,
+    consumedKeyId: maskAttemptId(row?.license_key_id),
     linkvertiseHashBound: Boolean(payload.linkvertise_hash),
     sessionHashStored: Boolean(row?.session_hash),
+    callbackProvider: callbackProvider || null,
+    callbackMatchedAttempt: callbackMatched,
+    providerVerificationResult: providerVerifyResult,
+    generatedKey: keyGenerated,
+    errorCode: errorCode || row?.failure_reason || null,
+    reasonMessage: reasonMessage || null,
+    discordUserId: discordUserId || null,
   };
 }
 
@@ -1181,9 +1277,13 @@ module.exports = {
   findLatestResumableChallengeForUser,
   findOrCreateResumableChallenge,
   resolveChallengeForProvider,
+  startFreshProviderAttempt,
   supersedeOpenAttempts,
+  supersedeOpenAttemptsExcept,
   mapErrorToFailureReason,
+  maskAttemptId,
   RESUMABLE_STATUSES,
+  SUPERSEDED_STATUS,
   hashSession,
   classifyChallengeInsertError,
 };

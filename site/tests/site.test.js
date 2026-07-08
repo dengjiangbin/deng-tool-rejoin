@@ -926,11 +926,19 @@ describe('auth and protected pages', () => {
       site_user_id: null,
       redeemed_at: '2026-05-02T00:00:00Z',
     });
+    insertLicenseFixture('DENG-EEEE-FFFF-0000-1111', {
+      id: 'key-expired',
+      status: 'expired',
+      owner_discord_id: 'discord-user-1',
+      site_user_id: 'site-1',
+      redeemed_at: '2026-05-02T00:00:00Z',
+    });
     memoryDb.device_bindings.push(
       { key_id: 'key-bound-fallback', install_id_hash: 'device-secret-1', device_model: 'Private Phone', is_active: true },
       { key_id: 'key-redeemed-at', install_id_hash: 'device-secret-2', device_model: 'Private Phone 2', is_active: false },
       { key_id: 'key-revoked', install_id_hash: 'device-secret-3', device_model: 'Private Phone 3', is_active: true },
       { key_id: 'key-test', install_id_hash: 'device-secret-test', device_model: 'Private Phone T', is_active: true },
+      { key_id: 'key-expired', install_id_hash: 'device-secret-expired', device_model: 'Expired Phone', is_active: false },
     );
 
     const res = await request(app).get('/api/public-stats');
@@ -939,13 +947,15 @@ describe('auth and protected pages', () => {
       'activeDevices',
       'generatedKeys',
       'redeemedKeys',
+      'totalDevices',
       'uniqueUsers',
       'updatedAt',
     ].sort());
-    assert.equal(res.body.generatedKeys, 3);
+    assert.equal(res.body.generatedKeys, 4);
     assert.equal(res.body.uniqueUsers, 2);
-    assert.equal(res.body.redeemedKeys, 2);
+    assert.equal(res.body.redeemedKeys, 3);
     assert.equal(res.body.activeDevices, 1);
+    assert.equal(res.body.totalDevices, 3);
     assert.match(res.body.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
 
     const blob = JSON.stringify(res.body);
@@ -1727,6 +1737,11 @@ describe('Luarmor-style key flow', () => {
       redeemed_at: null,
       expires_at: new Date(Date.now() - 3600 * 1000).toISOString(),
     });
+    const boundExpired = insertLicenseFixture('DENG-0C0C-1111-2222-3333', {
+      created_at: now,
+      redeemed_at: now,
+      expires_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    });
     insertLicenseFixture('DENG-0F0F-1111-2222-3333', {
       status: 'revoked',
       created_at: now,
@@ -1738,6 +1753,14 @@ describe('Luarmor-style key flow', () => {
       install_id_hash: 'bound-hwid',
       device_model: 'Cloud Phone',
       device_label: 'Cloud Phone',
+      last_seen_at: now,
+      is_active: true,
+    });
+    memoryDb.device_bindings.push({
+      key_id: boundExpired.id,
+      install_id_hash: 'bound-expired-hwid',
+      device_model: 'Old Phone',
+      device_label: 'Old Phone',
       last_seen_at: now,
       is_active: true,
     });
@@ -1757,6 +1780,7 @@ describe('Luarmor-style key flow', () => {
     assert.equal(byKey.get('DENG-E132-C484-51E0-96A7').lifecycle_status, 'unbound');
     assert.equal(byKey.get('DENG-E132-C484-51E0-96A7').blocks_generation, false);
     assert.equal(byKey.get('DENG-0B0B-1111-2222-3333').lifecycle_status, 'bound');
+    assert.equal(byKey.get('DENG-0C0C-1111-2222-3333').lifecycle_status, 'expired');
     assert.equal(api.body.history.some((row) => row.lifecycle_status === 'expired'), true);
     assert.equal(api.body.history.some((row) => row.lifecycle_status === 'revoked'), true);
   });
@@ -2128,7 +2152,7 @@ describe('Luarmor-style key flow', () => {
     assert.ok(memoryDb.license_ad_challenges[0].provider_payload.provider_started_at);
   });
 
-  test('first provider click immediately redirects and repeated click does not corrupt the challenge', async () => {
+  test('first provider click immediately redirects and repeated click creates a fresh independent attempt', async () => {
     const agent = request.agent(app);
     await login(agent);
     const first = await chooseProvider(agent, 'linkvertise');
@@ -2137,7 +2161,7 @@ describe('Luarmor-style key flow', () => {
     assert.equal(first.location, 'https://link-hub.net/5914830/XEpUhZ8TdtyV');
     assert.notEqual(first.location, '/license');
 
-    // Repeated same-provider click: must still 303 (safe reissue)
+    // Repeated same-provider click: must still 303 with a fresh attempt (old one superseded)
     const second = await agent.post('/key/provider/linkvertise').type('form').send({
       _csrf: first.started.csrf,
       challenge_id: first.started.challengeId,
@@ -2146,8 +2170,10 @@ describe('Luarmor-style key flow', () => {
     assert.equal(second.status, 303);
     assert.equal(second.headers.location, 'https://link-hub.net/5914830/XEpUhZ8TdtyV');
     assert.notEqual(second.headers.location, '/license');
-    assert.equal(memoryDb.license_ad_challenges.length, 1);
-    assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
+    assert.equal(memoryDb.license_ad_challenges.length, 3);
+    assert.equal(memoryDb.license_ad_challenges[0].status, 'superseded');
+    assert.equal(memoryDb.license_ad_challenges[1].status, 'superseded');
+    assert.equal(memoryDb.license_ad_challenges[2].status, 'pending_ad');
   });
 
   test('LootLabs provider selection works as a mobile top-level form redirect with the encrypted shortlink', async () => {
@@ -2568,16 +2594,16 @@ describe('Luarmor-style key flow', () => {
   test('wrong provider complete route is blocked for a Linkvertise challenge', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    await chooseProvider(agent, 'linkvertise');
+    const challengeId = memoryDb.license_ad_challenges.at(-1).id;
+    const wrongState = signChallenge(challengeId, 'lootlabs', Date.now() + 60000);
 
-    // LootLabs route invoked with a Linkvertise-bound active challenge → must
-    // be rejected by the provider mismatch check.
-    const res = await completeProvider(agent, 'lootlabs', hash);
+    const res = await completeProvider(agent, 'lootlabs', wrongState);
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
     const rendered = await agent.get('/license');
-    assert.match(rendered.text, /Invalid or expired key generation session\. Please start again\./);
+    assert.match(rendered.text, /Ads provider mismatch\. Please start again\./);
   });
 
   test('valid Linkvertise unlock generates one key, keeps it out of the URL, and shows 48-hour usage instructions', async () => {
@@ -2815,6 +2841,187 @@ describe('Luarmor-style key flow', () => {
       delete process.env.ENABLE_RATE_LIMIT_TEST;
     }
   });
+
+  describe('ads attempt retry/switch hardening (2026-07-08)', () => {
+    async function csrfFromLicense(agent) {
+      const page = await agent.get('/license');
+      return csrfFrom(page.text);
+    }
+
+    async function startProvider(agent, provider) {
+      const csrf = await csrfFromLicense(agent);
+      const res = await agent.post(`/key/provider/${provider}`).type('form').send({
+        _csrf: csrf,
+        provider,
+      });
+      assert.equal(res.status, 303, `provider ${provider} should redirect, got ${res.status} loc=${res.headers.location}`);
+      assert.notEqual(res.headers.location, '/license');
+      if (provider === 'linkvertise') {
+        const hash = validLinkvertiseHash(`${provider}-${memoryDb.license_ad_challenges.length}`);
+        linkvertiseApi.validHashes.add(hash);
+        return { res, location: res.headers.location, returnToken: hash };
+      }
+      const dataMatch = res.headers.location.match(/[?&]data=([^&]+)$/);
+      assert.ok(dataMatch, 'lootlabs redirect must include encrypted data');
+      const encrypted = decodeURIComponent(dataMatch[1]);
+      const destinationUrl = lootlabsApi.byEncrypted.get(encrypted);
+      assert.ok(destinationUrl, 'mock must record lootlabs destination');
+      const signedState = new URL(destinationUrl).searchParams.get('s');
+      assert.ok(signedState);
+      return { res, location: res.headers.location, returnToken: signedState };
+    }
+
+    test('A: LootLabs abandoned then Linkvertise completed generates key without vague error', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      await startProvider(agent, 'lootlabs');
+      const second = await startProvider(agent, 'linkvertise');
+      const unlock = await completeProvider(agent, 'linkvertise', second.returnToken);
+      assert.equal(unlock.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+      const license = await agent.get('/license');
+      assert.doesNotMatch(license.text, /No active key generation attempt was found/i);
+      assert.doesNotMatch(license.text, /no key generate was found/i);
+    });
+
+    test('B: Linkvertise abandoned then LootLabs completed generates key without vague error', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      await startProvider(agent, 'linkvertise');
+      const second = await startProvider(agent, 'lootlabs');
+      const unlock = await completeProvider(agent, 'lootlabs', second.returnToken);
+      assert.equal(unlock.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+    });
+
+    test('C: LootLabs retry same provider completes the second fresh attempt', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      await startProvider(agent, 'lootlabs');
+      const second = await startProvider(agent, 'lootlabs');
+      const unlock = await completeProvider(agent, 'lootlabs', second.returnToken);
+      assert.equal(unlock.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+      assert.equal(memoryDb.license_ad_challenges.filter((r) => r.status === 'superseded').length, 1);
+    });
+
+    test('D: Linkvertise retry same provider completes the second fresh attempt', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      await startProvider(agent, 'linkvertise');
+      const second = await startProvider(agent, 'linkvertise');
+      const unlock = await completeProvider(agent, 'linkvertise', second.returnToken);
+      assert.equal(unlock.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+    });
+
+    test('E: old callback after newer attempt is rejected cleanly without corrupting newer attempt', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      const first = await startProvider(agent, 'lootlabs');
+      const second = await startProvider(agent, 'linkvertise');
+      const stale = await completeProvider(agent, 'lootlabs', first.returnToken);
+      assert.notEqual(stale.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 0);
+      const fresh = await completeProvider(agent, 'linkvertise', second.returnToken);
+      assert.equal(fresh.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+    });
+
+    test('F: expired attempt callback returns clean expired-session message', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      const started = await startProvider(agent, 'lootlabs');
+      memoryDb.license_ad_challenges.at(-1).expires_at = new Date(Date.now() - 60_000).toISOString();
+      const res = await completeProvider(agent, 'lootlabs', started.returnToken);
+      assert.notEqual(res.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 0);
+      const page = await agent.get('/license');
+      assert.match(page.text, /Ads session expired\. Please choose an ads provider again\./);
+    });
+
+    test('G: already consumed callback does not mint a second key', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      const started = await startProvider(agent, 'linkvertise');
+      const first = await completeProvider(agent, 'linkvertise', started.returnToken);
+      assert.equal(first.headers.location, '/key/result');
+      const second = await completeProvider(agent, 'linkvertise', started.returnToken);
+      assert.notEqual(second.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+    });
+
+    test('H: missing token callback returns invalid-session message', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      const res = await completeProvider(agent, 'lootlabs', '');
+      assert.equal(res.headers.location, '/license');
+      assert.equal(memoryDb.license_keys.length, 0);
+      const page = await agent.get('/license');
+      assert.match(page.text, /Invalid ads session\. Please choose an ads provider again\./);
+    });
+
+    test('I: provider mismatch does not generate a key', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      await startProvider(agent, 'lootlabs');
+      const hash = validLinkvertiseHash('mismatch');
+      linkvertiseApi.validHashes.add(hash);
+      const res = await completeProvider(agent, 'linkvertise', hash);
+      assert.equal(res.headers.location, '/license');
+      assert.equal(memoryDb.license_keys.length, 0);
+    });
+
+    test('J: race on same valid token creates only one key', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      const started = await startProvider(agent, 'lootlabs');
+      const [a, b] = await Promise.all([
+        completeProvider(agent, 'lootlabs', started.returnToken),
+        completeProvider(agent, 'lootlabs', started.returnToken),
+      ]);
+      assert.ok(a.headers.location === '/key/result' || b.headers.location === '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+    });
+
+    test('K: many attempts each get unique state hashes', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      const hashes = new Set();
+      for (let i = 0; i < 5; i += 1) {
+        await startProvider(agent, i % 2 === 0 ? 'lootlabs' : 'linkvertise');
+        hashes.add(memoryDb.license_ad_challenges.at(-1).state_hash);
+      }
+      assert.equal(hashes.size, 5);
+    });
+
+    test('L: provider click with existing pending attempt still creates a fresh active attempt', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      await startProvider(agent, 'lootlabs');
+      const pendingId = memoryDb.license_ad_challenges.at(-1).id;
+      const second = await startProvider(agent, 'linkvertise');
+      const activeId = memoryDb.license_ad_challenges.at(-1).id;
+      assert.notEqual(pendingId, activeId);
+      assert.equal(memoryDb.license_ad_challenges.find((r) => r.id === pendingId).status, 'superseded');
+      assert.equal(memoryDb.license_ad_challenges.find((r) => r.id === activeId).status, 'pending_ad');
+      assert.equal(second.res.status, 303);
+    });
+
+    test('M: abuse safety — many starts do not crash and normal retry still works', async () => {
+      const agent = request.agent(app);
+      await login(agent);
+      const csrf = await csrfFromLicense(agent);
+      for (let i = 0; i < 12; i += 1) {
+        const res = await agent.post('/key/provider/lootlabs').type('form').send({ _csrf: csrf, provider: 'lootlabs' });
+        assert.equal(res.status, 303);
+      }
+      const final = await startProvider(agent, 'linkvertise');
+      const unlock = await completeProvider(agent, 'linkvertise', final.returnToken);
+      assert.equal(unlock.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+    });
+  });
 });
 
 describe('security controls', () => {
@@ -2877,14 +3084,19 @@ describe('security controls', () => {
 describe('canonical license service', () => {
   test('active/status helper matches Discord rules for revoked, expired, bound, and unbound keys', () => {
     const svc = require('../src/licenseService');
+    const past = new Date(Date.now() - 3600 * 1000).toISOString();
+    const future = new Date(Date.now() + 3600 * 1000).toISOString();
     assert.equal(svc.isActiveLicense({ status: 'revoked' }), false);
-    assert.equal(svc.isActiveLicense({ status: 'active', expires_at: new Date(Date.now() - 1).toISOString() }), false);
-    assert.equal(svc.isActiveLicense({ status: 'active', redeemed_at: new Date().toISOString() }), true);
-    assert.equal(svc.isActiveLicense({ status: 'active', active_binding: true }), true);
-    assert.equal(svc.isActiveLicense({ status: 'active', expires_at: new Date(Date.now() + 1000).toISOString() }), true);
-    assert.equal(svc.formatLicenseStatus({ status: 'active', active_binding: true }), 'Bound');
-    assert.equal(svc.formatLicenseStatus({ status: 'active', redeemed_at: new Date().toISOString(), license_key_id: 'owned' }), 'Unbound');
-    assert.equal(svc.formatLicenseStatus({ status: 'active', license_key_id: 'owned' }), 'Unredeemed');
+    assert.equal(svc.isActiveLicense({ status: 'active', expires_at: past }), false);
+    assert.equal(svc.isActiveLicense({ status: 'active', redeemed_at: new Date().toISOString(), expires_at: past }), false);
+    assert.equal(svc.isActiveLicense({ status: 'active', active_binding: true, expires_at: past }), false);
+    assert.equal(svc.isActiveLicense({ status: 'active', redeemed_at: new Date().toISOString(), expires_at: future }), true);
+    assert.equal(svc.isActiveLicense({ status: 'active', active_binding: true, expires_at: future }), true);
+    assert.equal(svc.isActiveLicense({ status: 'active', expires_at: future }), true);
+    assert.equal(svc.formatLicenseStatus({ status: 'active', active_binding: true, expires_at: future }), 'Bound');
+    assert.equal(svc.formatLicenseStatus({ status: 'active', active_binding: true, expires_at: past }), 'Expired');
+    assert.equal(svc.formatLicenseStatus({ status: 'active', redeemed_at: new Date().toISOString(), expires_at: future }), 'Unbound');
+    assert.equal(svc.formatLicenseStatus({ status: 'active', expires_at: future }), 'Unredeemed');
   });
 });
 
@@ -3049,6 +3261,7 @@ describe('health and service identity', () => {
       'activeDevices',
       'generatedKeys',
       'redeemedKeys',
+      'totalDevices',
       'uniqueUsers',
       'updatedAt',
     ].sort());

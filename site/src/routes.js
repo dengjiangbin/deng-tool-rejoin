@@ -58,24 +58,26 @@ const SAFE_MESSAGES = {
   SITE_USER_UPSERT_FAILED: 'Could not prepare your license account. Please try again.',
   CHALLENGE_INSERT_FAILED: 'Could not start key generation. Please try again.',
   PROVIDER_NOT_CONFIGURED: 'This ad provider is not configured yet.',
-  PROVIDER_CHALLENGE_MISSING: 'No active key generation attempt was found. Tap Generate Key to start again.',
+  PROVIDER_CHALLENGE_MISSING: 'Invalid ads session. Please choose an ads provider again.',
   STATE_SECRET_NOT_CONFIGURED: 'Key generation is temporarily unavailable (server signing not configured). Contact an admin.',
-  PROVIDER_CHALLENGE_EXPIRED: 'Your ad session expired. Tap Generate Key to start a new one.',
+  PROVIDER_CHALLENGE_EXPIRED: 'Ads session expired. Please choose an ads provider again.',
   PROVIDER_CHALLENGE_OWNER_MISMATCH: 'This ad completion belongs to another account. Please login with the correct Discord account.',
-  PROVIDER_CHALLENGE_ALREADY_USED: 'This ad completion was already used. Check your keys below or wait for cooldown.',
+  PROVIDER_CHALLENGE_ALREADY_USED: 'This ads session was already used. Please start again.',
   PROVIDER_ATTEMPT_PENDING: 'Your ad step is still pending. Finish the ad or wait a moment, then return here.',
-  PROVIDER_ATTEMPT_REJECTED: 'The ad provider could not verify completion. Please try the ad again.',
-  PROVIDER_TOKEN_REPLAYED: 'This ad completion link was already used and cannot generate another key.',
-  PROVIDER_RETURN_UNVERIFIED: 'Could not verify ad completion. Please complete the ad step again.',
+  PROVIDER_ATTEMPT_REJECTED: 'Ads verification failed. Please try again.',
+  PROVIDER_TOKEN_REPLAYED: 'This ads session was already used. Please start again.',
+  PROVIDER_RETURN_UNVERIFIED: 'Ads verification failed. Please try again.',
   PROVIDER_RETURN_SECRET_MISSING: 'Ad unlock security is not configured yet.',
-  PROVIDER_RETURN_TOKEN_MISSING: 'Invalid or expired key generation session. Please start again.',
-  PROVIDER_RETURN_TOKEN_INVALID: 'Invalid or expired key generation session. Please start again.',
-  PROVIDER_RETURN_TOKEN_EXPIRED: 'This key generation session expired. Please start again.',
+  PROVIDER_RETURN_TOKEN_MISSING: 'Invalid ads session. Please choose an ads provider again.',
+  PROVIDER_RETURN_TOKEN_INVALID: 'Invalid ads session. Please choose an ads provider again.',
+  PROVIDER_RETURN_TOKEN_EXPIRED: 'Ads session expired. Please choose an ads provider again.',
   PROVIDER_WAIT_INCOMPLETE: 'Please complete the ad step before continuing.',
-  PROVIDER_MISMATCH: 'Invalid or expired key generation session. Please start again.',
-  CHALLENGE_ALREADY_USED: 'Invalid or expired key generation session. Please start again.',
+  PROVIDER_MISMATCH: 'Ads provider mismatch. Please start again.',
+  CHALLENGE_ALREADY_USED: 'This ads session was already used. Please start again.',
+  CHALLENGE_SUPERSEDED: 'This ads session was replaced by a newer attempt. Please choose an ads provider again.',
   KEY_GENERATION_FAILED: 'Could not generate key. Please try again.',
   UNEXPECTED_ERROR: 'Could not start key generation. Please try again.',
+  ADS_START_RATE_LIMITED: 'Too many ad starts in a short time. Please wait a moment and try again.',
 };
 
 function cleanEnv(name, fallback = '') {
@@ -166,6 +168,7 @@ function codeToBlockReason(code) {
     PROVIDER_CHALLENGE_EXPIRED: 'attempt_expired',
     PROVIDER_CHALLENGE_ALREADY_USED: 'provider_token_replayed',
     CHALLENGE_ALREADY_USED: 'provider_token_replayed',
+    CHALLENGE_SUPERSEDED: 'superseded_attempt',
     PROVIDER_RETURN_UNVERIFIED: 'provider_rejected',
     PROVIDER_RETURN_TOKEN_MISSING: 'provider_attempt_invalid',
     PROVIDER_RETURN_TOKEN_INVALID: 'provider_attempt_invalid',
@@ -177,6 +180,19 @@ function codeToBlockReason(code) {
     AUTH_REQUIRED: 'auth_required',
   };
   return map[code] || 'server_error';
+}
+
+function logAdsAttemptDebug(scope, fields) {
+  const safe = {
+    ...fields,
+    attemptId: challenge.maskAttemptId(fields.attemptId),
+    supersededByAttemptId: challenge.maskAttemptId(fields.supersededByAttemptId),
+    keyId: challenge.maskAttemptId(fields.keyId),
+    tokenStateMasked: fields.tokenStateMasked || (fields.tokenState ? `${String(fields.tokenState).slice(0, 8)}…` : null),
+    ts: new Date().toISOString(),
+  };
+  delete safe.tokenState;
+  console.log(`[${scope}]`, JSON.stringify(safe));
 }
 
 function logGenerateKeyStart(fields) {
@@ -294,6 +310,7 @@ function logSafeError(scope, code, err) {
     'PROVIDER_CHALLENGE_OWNER_MISMATCH',
     'PROVIDER_CHALLENGE_ALREADY_USED',
     'CHALLENGE_ALREADY_USED',
+    'CHALLENGE_SUPERSEDED',
   ]);
   const line = `[${scope}] code=${code}${table}${constraint} message=${detail.slice(0, 240)}`;
   if (expected.has(code)) console.log(line);
@@ -325,6 +342,24 @@ const generateLimiter = createUserRateLimit({
     const code = 'TOO_MANY_ATTEMPTS';
     const handler = createRateLimitHandler({
       keyPrefix: 'license-generate:',
+      jsonError: code,
+      jsonMessage: messageFor(code),
+      htmlMessage: messageFor(code),
+      redirectTo: '/license',
+    });
+    return handler(req, res, _next, limiterOptions);
+  },
+});
+
+const adsStartLimiter = createUserRateLimit({
+  keyPrefix: 'license-ads-start:',
+  windowMs: 5 * 60 * 1000,
+  max: 25,
+  skip: rateLimitsDisabled,
+  handler: (req, res, _next, limiterOptions) => {
+    const code = 'ADS_START_RATE_LIMITED';
+    const handler = createRateLimitHandler({
+      keyPrefix: 'license-ads-start:',
       jsonError: code,
       jsonMessage: messageFor(code),
       htmlMessage: messageFor(code),
@@ -848,113 +883,110 @@ async function handleKeyStart(req, res) {
   }
 }
 
-async function handleProvider(req, res) {
-  if (!verifyCsrf(req)) {
-    if (wantsJson(req)) return res.status(403).json({ error: 'invalid_csrf' });
-    safeFlash(req, 'error', 'Invalid request token.');
-    return res.redirect('/license');
-  }
-
-  const provider = ensureProvider(String(req.params.provider || req.body.provider || ''));
-  const challengeIdFromBody = String(req.body.challenge_id || '');
+async function ensureProviderStartAllowed(req, res) {
+  await ensureRealSiteUser(req);
   const { user } = req.session;
+  const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
+    discordUserId: discordOwnerId(req),
+    siteUserId: user.id,
+    skipProviderCheck: true,
+  });
 
-  if (!provider) {
-    safeFlash(req, 'error', 'Invalid provider selection.');
-    return res.redirect('/license');
+  if (!eligibility.canGenerate) {
+    if (eligibility.blockReason === 'active_unredeemed_key') {
+      const existingUnused = await licenseService.findActiveUnredeemedKey({
+        discordUserId: discordOwnerId(req),
+        siteUserId: user.id,
+      });
+      const payload = existingUnusedPayload(existingUnused);
+      if (wantsJson(req)) {
+        return {
+          ok: false,
+          status: 200,
+          body: {
+            status: 'existing_unused_key',
+            blockReason: 'active_unredeemed_key',
+            existing_key: payload,
+            message: payload.message,
+          },
+        };
+      }
+      req.session.recoveredExistingKey = payload;
+      safeFlash(req, 'success', payload.message);
+      return { ok: false, redirect: '/license' };
+    }
+
+    const msg = eligibility.message || licenseEligibility.messageForBlockReason(
+      eligibility.blockReason,
+      eligibility.remainingSeconds,
+    ) || messageFor('UNEXPECTED_ERROR');
+    const code = eligibility.blockReason === 'cooldown_active'
+      ? 'COOLDOWN_ACTIVE'
+      : (eligibility.blockReason === 'max_key_limit' ? 'KEY_LIMIT_REACHED' : 'UNEXPECTED_ERROR');
+    if (wantsJson(req)) {
+      return {
+        ok: false,
+        status: eligibility.blockReason === 'cooldown_active' ? 429 : 400,
+        body: {
+          error: code,
+          blockReason: eligibility.blockReason,
+          message: msg,
+          remainingSeconds: eligibility.remainingSeconds,
+        },
+      };
+    }
+    flashBlock(req, code, { blockReason: eligibility.blockReason });
+    return { ok: false, redirect: '/license' };
   }
-  if (!providerIsReady(provider)) {
-    const code = 'PROVIDER_NOT_CONFIGURED';
-    if (wantsJson(req)) return res.status(503).json({ error: code, message: messageFor(code) });
-    safeFlash(req, 'error', messageFor(code));
-    return res.redirect('/license');
-  }
-  if (!isStateSecretConfigured()) {
-    const code = 'STATE_SECRET_NOT_CONFIGURED';
-    logGenerateKeyStart({
-      ...accountIdsFromReq(req),
-      provider,
-      existingActiveKeyFound: false,
-      createdAttemptId: null,
-      redirectUrlCreated: false,
-      failureReason: 'state_secret_missing',
-    });
-    flashBlock(req, code, { blockReason: 'server_error', failureReason: 'state_secret_missing' });
-    if (wantsJson(req)) return res.status(503).json({ error: code, message: messageFor(code) });
+
+  return { ok: true, user };
+}
+
+async function executeProviderRedirect(req, res, provider, { source = 'provider_post' } = {}) {
+  const gate = await ensureProviderStartAllowed(req, res);
+  if (!gate.ok) {
+    if (gate.body && wantsJson(req)) return res.status(gate.status).json(gate.body);
+    if (gate.redirect) return res.redirect(gate.status === 200 ? 303 : 302, gate.redirect);
     return res.redirect('/license');
   }
 
-  let resolved;
+  const { user } = gate;
+  let started;
   try {
-    resolved = await challenge.resolveChallengeForProvider(req, user, {
-      challengeId: challengeIdFromBody,
-      provider,
-    });
+    started = await challenge.startFreshProviderAttempt(req, user, provider);
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
-    logGenerateKeyStart({
-      ...accountIdsFromReq(req),
+    logAdsAttemptDebug('ads/start', {
       provider,
-      existingActiveKeyFound: false,
-      activeSlotCount: null,
-      maxKeyLimit: null,
-      createdAttemptId: null,
-      attemptExpiresAt: null,
-      redirectUrlCreated: false,
-      failureReason: challenge.mapErrorToFailureReason(err),
+      source,
+      attemptId: null,
+      status: 'failed',
+      errorCode: code,
+      reasonMessage: messageFor(code),
+      callbackMatchedAttempt: false,
+      generatedKey: false,
     });
-    flashBlock(req, code, { blockReason: codeToBlockReason(code), failureReason: challenge.mapErrorToFailureReason(err) });
-    return res.redirect('/license');
-  }
-
-  if (!resolved.row) {
-    logGenerateKeyStart({
-      ...accountIdsFromReq(req),
-      provider,
-      existingActiveKeyFound: false,
-      activeSlotCount: null,
-      maxKeyLimit: null,
-      createdAttemptId: null,
-      attemptExpiresAt: null,
-      redirectUrlCreated: false,
-      failureReason: 'missing_attempt_id',
-      recoverySource: resolved.source,
-      storageMissing: !req.session?.pendingChallenge,
-    });
-    flashBlock(req, 'PROVIDER_CHALLENGE_MISSING', {
-      blockReason: 'provider_attempt_invalid',
-      failureReason: 'missing_attempt_id',
-    });
+    logSafeError('api/key/provider', code, err);
     if (wantsJson(req)) {
       return res.status(400).json({
-        error: 'PROVIDER_CHALLENGE_MISSING',
-        message: messageFor('PROVIDER_CHALLENGE_MISSING'),
-        blockReason: 'provider_attempt_invalid',
-        failureReason: 'missing_attempt_id',
+        error: code,
+        message: messageFor(code),
+        failureReason: challenge.mapErrorToFailureReason(err),
       });
     }
+    flashBlock(req, code, {
+      blockReason: codeToBlockReason(code),
+      failureReason: challenge.mapErrorToFailureReason(err),
+    });
     return res.redirect('/license');
   }
 
-  const row = resolved.row;
-  req.session.pendingChallenge = row.id;
-  req.session.activeAdChallengeId = row.id;
+  const workingRow = started.row;
+  req.session.pendingChallenge = workingRow.id;
+  req.session.activeAdChallengeId = workingRow.id;
+  req.session.pendingProvider = provider;
 
   try {
-    let workingRow = row;
-    if (row.status === 'created' || (row.status === 'provider_selected' && row.provider !== provider)) {
-      workingRow = await challenge.selectProvider(row.id, provider, req, user);
-    } else if (row.status === 'provider_selected' && row.provider === provider) {
-      workingRow = row;
-    } else if (row.status === 'pending_ad' && row.provider === provider) {
-      workingRow = row;
-    } else if (row.status === 'pending_ad' && row.provider !== provider) {
-      workingRow = await challenge.selectProvider(row.id, provider, req, user);
-    } else {
-      workingRow = await challenge.selectProvider(row.id, provider, req, user);
-    }
-    const providerCfg = getProviderConfig(provider);
-
     let redirectUrl;
     let returnTokenLen = 0;
 
@@ -966,7 +998,6 @@ async function handleProvider(req, res) {
         callbackUrl,
       });
       redirectUrl = targetLinkUrl;
-      req.session.activeAdChallengeId = workingRow.id;
     } else if (provider === 'lootlabs') {
       const ttlMs = 30 * 60 * 1000;
       const signedState = signChallenge(workingRow.id, 'lootlabs', Date.now() + ttlMs);
@@ -1001,7 +1032,9 @@ async function handleProvider(req, res) {
           '[key/provider] provider=lootlabs invalid_start_url prefix=%s',
           String(startUrl || '').slice(0, 64),
         );
-        if (wantsJson(req)) return res.status(503).json({ error: 'PROVIDER_NOT_CONFIGURED', message: messageFor('PROVIDER_NOT_CONFIGURED') });
+        if (wantsJson(req)) {
+          return res.status(503).json({ error: 'PROVIDER_NOT_CONFIGURED', message: messageFor('PROVIDER_NOT_CONFIGURED') });
+        }
         safeFlash(req, 'error', messageFor('PROVIDER_NOT_CONFIGURED'));
         return res.redirect('/license');
       }
@@ -1012,30 +1045,39 @@ async function handleProvider(req, res) {
       });
 
       redirectUrl = startUrl;
-      req.session.activeAdChallengeId = workingRow.id;
-      returnTokenLen = 0;
     } else {
-      const started = await challenge.markPendingAdById(workingRow.id, req, user, providerCfg.monetizedUrl);
-      redirectUrl = providerRedirectUrl(providerCfg, started.return_token);
-      returnTokenLen = (started.return_token || '').length;
+      const providerCfg = getProviderConfig(provider);
+      const startedLegacy = await challenge.markPendingAdById(workingRow.id, req, user, providerCfg.monetizedUrl);
+      redirectUrl = providerRedirectUrl(providerCfg, startedLegacy.return_token);
+      returnTokenLen = (startedLegacy.return_token || '').length;
     }
-
-    req.session.pendingProvider = provider;
 
     let redirectHost = '';
     try { redirectHost = new URL(redirectUrl).hostname; } catch {}
+    logAdsAttemptDebug('ads/start', {
+      provider,
+      source,
+      attemptId: workingRow.id,
+      status: 'pending_ad',
+      createdAt: workingRow.created_at,
+      expiresAt: workingRow.expires_at,
+      supersededCount: started.supersededCount,
+      redirectHost,
+      callbackMatchedAttempt: null,
+      providerVerificationResult: null,
+      generatedKey: false,
+    });
     logGenerateKeyStart({
       ...accountIdsFromReq(req),
       provider,
       existingActiveKeyFound: false,
-      activeSlotCount: null,
-      maxKeyLimit: null,
       createdAttemptId: workingRow.id,
       attemptExpiresAt: workingRow.expires_at,
-      attemptStatus: workingRow.status,
-      recoverySource: resolved.source,
+      attemptStatus: 'pending_ad',
+      recoverySource: started.source,
       redirectUrlCreated: true,
       redirectHost,
+      supersededCount: started.supersededCount,
     });
     console.log(
       '[key/provider] provider=%s challenge_prefix=%s url_host=%s token_len=%d status=303',
@@ -1046,28 +1088,85 @@ async function handleProvider(req, res) {
     );
 
     if (wantsJson(req)) {
-      // Verification happens via callback (Linkvertise hash / LootLabs signed
-      // state). The JSON caller only sees the public redirect URL.
-      return res.json({ provider, redirect_url: redirectUrl });
+      return res.json({
+        provider,
+        attempt_id: workingRow.id,
+        redirect_url: redirectUrl,
+        status: 'pending_ad',
+      });
     }
-
     return res.redirect(303, redirectUrl);
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
     const failureReason = challenge.mapErrorToFailureReason(err);
-    logGenerateKeyStart({
-      ...accountIdsFromReq(req),
+    logAdsAttemptDebug('ads/start', {
       provider,
-      existingActiveKeyFound: false,
-      createdAttemptId: resolved?.row?.id || null,
-      redirectUrlCreated: false,
-      failureReason,
+      source,
+      attemptId: workingRow?.id || null,
+      status: 'failed',
+      errorCode: code,
+      reasonMessage: messageFor(code),
+      callbackMatchedAttempt: false,
+      generatedKey: false,
     });
     logSafeError('api/key/provider', code, err);
     if (wantsJson(req)) return res.status(400).json({ error: code, message: messageFor(code), failureReason });
     flashBlock(req, code, { blockReason: codeToBlockReason(code), failureReason });
     return res.redirect('/license');
   }
+}
+
+async function handleProvider(req, res) {
+  if (!verifyCsrf(req)) {
+    if (wantsJson(req)) return res.status(403).json({ error: 'invalid_csrf' });
+    safeFlash(req, 'error', 'Invalid request token.');
+    return res.redirect('/license');
+  }
+
+  const provider = ensureProvider(String(req.params.provider || req.body.provider || ''));
+  if (!provider) {
+    safeFlash(req, 'error', 'Invalid provider selection.');
+    return res.redirect('/license');
+  }
+  if (!providerIsReady(provider)) {
+    const code = 'PROVIDER_NOT_CONFIGURED';
+    if (wantsJson(req)) return res.status(503).json({ error: code, message: messageFor(code) });
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
+  if (!isStateSecretConfigured()) {
+    const code = 'STATE_SECRET_NOT_CONFIGURED';
+    logGenerateKeyStart({
+      ...accountIdsFromReq(req),
+      provider,
+      existingActiveKeyFound: false,
+      createdAttemptId: null,
+      redirectUrlCreated: false,
+      failureReason: 'state_secret_missing',
+    });
+    flashBlock(req, code, { blockReason: 'server_error', failureReason: 'state_secret_missing' });
+    if (wantsJson(req)) return res.status(503).json({ error: code, message: messageFor(code) });
+    return res.redirect('/license');
+  }
+
+  return executeProviderRedirect(req, res, provider, { source: 'provider_post' });
+}
+
+async function handleAdsStart(req, res) {
+  if (req.method !== 'GET' && !verifyCsrf(req)) {
+    return res.status(403).json({ error: 'invalid_csrf', message: 'Invalid request token.' });
+  }
+  const provider = ensureProvider(String(req.query.provider || req.body?.provider || ''));
+  if (!provider) {
+    return res.status(400).json({ error: 'invalid_provider', message: 'Invalid provider selection.' });
+  }
+  if (!providerIsReady(provider)) {
+    return res.status(503).json({ error: 'PROVIDER_NOT_CONFIGURED', message: messageFor('PROVIDER_NOT_CONFIGURED') });
+  }
+  if (!isStateSecretConfigured()) {
+    return res.status(503).json({ error: 'STATE_SECRET_NOT_CONFIGURED', message: messageFor('STATE_SECRET_NOT_CONFIGURED') });
+  }
+  return executeProviderRedirect(req, res, provider, { source: 'api_license_ads_start' });
 }
 
 async function handleUnlock(req, res, provider) {
@@ -1535,6 +1634,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       cooldown,
       eligibility,
       existingUnusedKey: existingUnusedPayload(existingUnused) || recoveredExistingKey,
+      providers: enabledProviders(),
       maskKeyRow,
       fullKeyRow,
       friendlyStatus,
@@ -1551,6 +1651,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       cooldown: { allowed: true, secondsLeft: 0 },
       eligibility: { canGenerate: true, blockReason: null },
       existingUnusedKey: null,
+      providers: enabledProviders(),
       maskKeyRow,
       fullKeyRow,
       friendlyStatus,
@@ -1596,15 +1697,17 @@ router.get('/key/provider', requireLogin, repairSiteUser, async (req, res) => {
 
 router.post('/api/key/start', requireLogin, generateLimiter, handleKeyStart);
 router.post('/license/generate', requireLogin, generateLimiter, handleKeyStart);
+router.post('/api/license/ads/start', requireLogin, repairSiteUser, adsStartLimiter, handleAdsStart);
+router.get('/api/license/ads/start', requireLogin, repairSiteUser, adsStartLimiter, handleAdsStart);
 // The API endpoint is intentionally JSON-only. A normal browser navigation
 // should return to the form route instead of exposing a raw JSON response.
 router.get('/api/key/start', requireLogin, (_req, res) => res.redirect(303, '/license'));
-router.post('/api/key/provider', requireLogin, repairSiteUser, handleProvider);
-router.post('/api/key/provider/:provider', requireLogin, repairSiteUser, handleProvider);
-router.post('/license/provider', requireLogin, repairSiteUser, handleProvider);
-router.post('/license/provider/:provider', requireLogin, repairSiteUser, handleProvider);
-router.post('/key/provider', requireLogin, repairSiteUser, handleProvider);
-router.post('/key/provider/:provider', requireLogin, repairSiteUser, handleProvider);
+router.post('/api/key/provider', requireLogin, repairSiteUser, adsStartLimiter, handleProvider);
+router.post('/api/key/provider/:provider', requireLogin, repairSiteUser, adsStartLimiter, handleProvider);
+router.post('/license/provider', requireLogin, repairSiteUser, adsStartLimiter, handleProvider);
+router.post('/license/provider/:provider', requireLogin, repairSiteUser, adsStartLimiter, handleProvider);
+router.post('/key/provider', requireLogin, repairSiteUser, adsStartLimiter, handleProvider);
+router.post('/key/provider/:provider', requireLogin, repairSiteUser, adsStartLimiter, handleProvider);
 
 router.get('/unlock/lootlabs', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'lootlabs'));
 router.get('/unlock/linkvertise', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'linkvertise'));

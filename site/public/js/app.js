@@ -127,6 +127,73 @@
   }
 }());
 
+(function initLicenseProviderStart() {
+  var root = document.querySelector('[data-license-provider-actions]');
+  if (!root || !window.fetch) return;
+  var csrf = root.dataset.csrf || '';
+  var messageEl = document.querySelector('[data-license-message]');
+
+  function showMessage(text) {
+    if (!messageEl) return;
+    messageEl.textContent = text;
+    messageEl.hidden = !text;
+  }
+
+  root.querySelectorAll('[data-ads-provider]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (btn.disabled) return;
+      var provider = btn.dataset.adsProvider;
+      if (!provider) return;
+      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
+      showMessage('');
+
+      fetch('/api/license/ads/start?provider=' + encodeURIComponent(provider), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrf,
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ _csrf: csrf, provider: provider }),
+      })
+        .then(function(res) {
+          return res.json().then(function(body) {
+            return { ok: res.ok, status: res.status, body: body };
+          });
+        })
+        .then(function(result) {
+          if (result.body && result.body.redirect_url) {
+            window.location.href = result.body.redirect_url;
+            return;
+          }
+          var msg = (result.body && (result.body.message || result.body.error)) || 'Could not start ad provider.';
+          showMessage(msg);
+          btn.disabled = false;
+          btn.removeAttribute('aria-disabled');
+        })
+        .catch(function() {
+          showMessage('Could not start ad provider. Please try again.');
+          btn.disabled = false;
+          btn.removeAttribute('aria-disabled');
+        });
+    });
+  });
+}());
+
+(function initProviderFormDoubleClick() {
+  document.querySelectorAll('form[action*="/license/provider"], form[action*="/key/provider"]').forEach(function(form) {
+    form.addEventListener('submit', function() {
+      var btn = form.querySelector('button[type="submit"]');
+      if (btn && !btn.disabled) {
+        btn.disabled = true;
+        btn.setAttribute('aria-disabled', 'true');
+      }
+    });
+  });
+}());
+
 (function initCooldown() {
   var notice = document.querySelector('.cooldown-notice');
   if (!notice) return;

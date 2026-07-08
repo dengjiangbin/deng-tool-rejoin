@@ -63,6 +63,24 @@
     <button type="button" class="btn btn-primary" data-download-keys>Download Key</button>
   </div>
 
+  <%
+    var licenseProviders = providers || [];
+    var lootlabsReady = licenseProviders.some(function(p){ return p.provider === 'lootlabs'; });
+    var linkvertiseReady = licenseProviders.some(function(p){ return p.provider === 'linkvertise'; });
+    var canStartAds = eligibility && eligibility.canGenerate && !existingUnusedKey;
+  %>
+  <% if (canStartAds && (lootlabsReady || linkvertiseReady)) { %>
+  <div class="provider-grid license-provider-grid" data-license-provider-actions data-csrf="<%= csrfToken %>">
+    <p class="section-desc">Or choose an ad provider directly. Each click starts a fresh ad session.</p>
+    <% if (lootlabsReady) { %>
+    <button type="button" class="btn btn-primary btn-block btn-provider" data-ads-provider="lootlabs">Continue with LootLabs</button>
+    <% } %>
+    <% if (linkvertiseReady) { %>
+    <button type="button" class="btn btn-primary btn-block btn-provider" data-ads-provider="linkvertise">Continue with Linkvertise</button>
+    <% } %>
+  </div>
+  <% } %>
+
   <div class="license-message" data-license-message hidden></div>
 </section>
 
