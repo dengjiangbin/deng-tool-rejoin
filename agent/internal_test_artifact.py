@@ -36,6 +36,7 @@ _ALLOWED_ARTIFACT_PATHS = frozenset(
         "agent/deng_tool_rejoin.py",
         "agent/install_verify_standalone.py",
         "agent/version_standalone.py",
+        "tools/boot_probe.py",
     }
 )
 _CLIENT_PROTOCOL = 2
@@ -44,7 +45,7 @@ _SIGNING_KEY_ENV = "DENG_REJOIN_MANIFEST_SIGNING_KEY_PEM"
 _SIGNING_KEY_REL = Path("data") / "rejoin_manifest_signing_key.pem"
 
 _RAW_RUNTIME_FILES = {
-    "agent/__init__.py": '''from . import _protected_runtime as _dpr\n_dpr.install()\n__all__ = ["__version__"]\n__version__ = {package_version!r}\n''',
+    "agent/__init__.py": '''__all__ = ["__version__"]\n__version__ = {package_version!r}\n''',
     "agent/_protected_runtime.py": r'''from __future__ import annotations
 import base64, hashlib, importlib.abc, importlib.machinery, json, marshal, sys, zlib
 from pathlib import Path
@@ -140,7 +141,6 @@ def _m():
 def install():
     if not any(isinstance(x,_L) for x in sys.meta_path):
         sys.meta_path.insert(0,_L())
-install()
 ''',
 }
 
@@ -170,6 +170,7 @@ _CLIENT_ONLY_MODULES = frozenset(
         "agent/_protected_runtime.py",
         "agent/install_verify_standalone.py",
         "agent/version_standalone.py",
+        "tools/boot_probe.py",
     }
 )
 
@@ -644,6 +645,10 @@ def build_internal_test_tarball(
         raise RuntimeError("agent/version_standalone.py is required for install-safe version output")
     entries["agent/install_verify_standalone.py"] = standalone_verify.read_text(encoding="utf-8")
     entries["agent/version_standalone.py"] = version_standalone.read_text(encoding="utf-8")
+    boot_probe = repo_root / "tools" / "boot_probe.py"
+    if not boot_probe.is_file():
+        raise RuntimeError("tools/boot_probe.py is required for Termux startup diagnostics")
+    entries["tools/boot_probe.py"] = boot_probe.read_text(encoding="utf-8")
     entries[_PROTECTED_BUNDLE] = bundle_bytes
     entries["BUILD-INFO.json"] = build_info_bytes
     entries[".deng_build.json"] = _make_deng_build_json_bytes(

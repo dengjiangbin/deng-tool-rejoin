@@ -211,7 +211,19 @@ def wrapper_body_sh(install_api_base: str) -> str:
         "  fi\n"
         '  exec python3 "$DENG_REJOIN_HOME/agent/version_standalone.py" "$@"\n'
         "  ;; esac\n"
-        'exec python3 "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" "$@"\n'
+        '_rc=0\n'
+        'if command -v python3 >/dev/null 2>&1; then\n'
+        '  python3 "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" "$@"\n'
+        '  _rc=$?\n'
+        "else\n"
+        "  _rc=127\n"
+        "fi\n"
+        'case "$_rc" in 134|139)\n'
+        '  echo "[!] deng-rejoin crashed during startup." >&2\n'
+        '  echo "[!] Run: DENG_BOOT_TRACE=1 deng-rejoin" >&2\n'
+        '  echo "[!] Run: python3 $DENG_REJOIN_HOME/tools/boot_probe.py" >&2\n'
+        "  ;; esac\n"
+        "exit $_rc\n"
     )
 
 

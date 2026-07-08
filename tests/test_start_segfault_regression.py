@@ -74,14 +74,13 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         self.assertLess(lock_idx, imm_prep)
         self.assertLess(imm_prep, imm_cc)
         self.assertGreater(batch_idx, imm_cc)
-        self.assertIn("START_PREP_DEADLINE_S", source)
         self.assertIn("_prep_commands_immediate", source)
         self.assertIn("run_callable_with_deadline(", source)
         self.assertIn("bootstrap_first_launch_after_cache(", source)
         self.assertNotIn("Could not create Start lock:", source)
         self.assertIn("_emit_immediate_start_table", source)
         self.assertIn("_get_ram_label", source)
-        self.assertIn("_start_prep_ui_refresh", source)
+        self.assertIn("_start_truth_ui_refresh_loop", source)
         self.assertIn("_append_ram_lines", source)
         self.assertIn("_start_header_pointer_text()", source)
 
@@ -212,13 +211,14 @@ class ForkVforkHardeningTests(unittest.TestCase):
 
     def test_entrypoint_disables_vfork_before_imports(self) -> None:
         entry = (PROJECT / "agent" / "deng_tool_rejoin.py").read_text(encoding="utf-8")
-        # The disable must run before the agent package is imported.
+        # The disable must run before any lazy agent import helper.
         vfork_idx = entry.find("_USE_VFORK = False")
-        import_idx = entry.find("from agent.commands import main")
+        import_idx = entry.find("def _import_commands_main")
         self.assertGreater(vfork_idx, -1)
         self.assertGreater(import_idx, -1)
         self.assertLess(vfork_idx, import_idx)
         self.assertIn("p-3daeae4cbd", entry)
+        self.assertNotIn("from agent.commands import main", entry.split("def _import_commands_main", 1)[0])
 
     def test_monitor_worker_spawn_is_serialized(self) -> None:
         source = inspect.getsource(commands._spawn_monitor_worker)

@@ -184,20 +184,15 @@ def _wait_for_launch_ready(package: str, cfg: dict[str, Any]) -> dict[str, Any]:
     return last
 
 
-def _start_stagger_launch_settle(cfg: dict[str, Any]) -> float:
-    """Brief pause after ``am start`` during stagger — no dumpsys (HB owns Online)."""
-    return _launch_wait_seconds(cfg, "start_launch_settle_sec", 1.0, 0.3, 2.5)
-
-
-RECOVERY_LAUNCH_REASONS = frozenset({
+_DETACHED_RECOVERY_REASONS = frozenset({
     "recovery_gate_retry",
     "dead_recovery",
     "watchdog_recovery",
     "process_missing",
 })
 
-# Back-compat alias for detached-script gating inside perform_rejoin.
-_DETACHED_RECOVERY_REASONS = RECOVERY_LAUNCH_REASONS
+# Public alias used by supervisor recovery layout gating.
+RECOVERY_LAUNCH_REASONS = _DETACHED_RECOVERY_REASONS
 
 
 def perform_rejoin(
@@ -269,8 +264,6 @@ def perform_rejoin(
     masked_url = mask_launch_url(url_for_launch) if url_for_launch else None
     root_used = False
     warning: str | None = None
-    _launch_sent_cb = config_data.get("__on_launch_sent")
-    start_stagger_fast = reason == "start"
 
     log_event(
         logger,
@@ -327,7 +320,7 @@ def perform_rejoin(
                 )
                 return RejoinResult(True, root_used=True, warning=warning)
 
-        # ── ALWAYS force-stop before launch ────────────────────────────────
+        # â”€â”€ ALWAYS force-stop before launch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # User feedback (post-probe-1239f2b5f9): "I messed up the open
         # window then restarted; the tool failed to fix it. Kaeru fixes
         # it every time."  Kaeru ALWAYS force-stops the clone before
@@ -395,18 +388,7 @@ def perform_rejoin(
                           method=stopped_via, package=package)
                 # Brief grace so the WindowManager actually tears down
                 # the activity before we re-create it.
-                if start_stagger_fast:
-                    time.sleep(
-                        min(
-                            0.6,
-                            max(
-                                0.3,
-                                int(cfg.get("reconnect_delay_seconds", 2)) / 8,
-                            ),
-                        )
-                    )
-                else:
-                    time.sleep(min(2.5, max(1.0, int(cfg.get("reconnect_delay_seconds", 2)) / 2)))
+                time.sleep(min(2.5, max(1.0, int(cfg.get("reconnect_delay_seconds", 2)) / 2)))
             else:
                 # Even without successful stop, log so the operator can
                 # correlate "bounds not honored" with "task still alive".
@@ -427,35 +409,42 @@ def perform_rejoin(
         try:
             from . import window_layout
             from .config import DEFAULT_SCREEN_MODE, validate_screen_mode
-            from .resize_engine import compute_layout_rects, layout_package_set, rects_cover_packages, rects_from_cfg
             _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
-            _enabled_pkgs = [e["package"] for e in ents]
-            _selected = layout_package_set(ents)
-            _stored_rects = rects_from_cfg(cfg, _selected)
-            if rects_cover_packages(_stored_rects, _selected):
-                _all_rects = _stored_rects
-            else:
-                _all_rects, _, _computed_mode = compute_layout_rects(cfg, ents)
-                if _computed_mode:
-                    _screen_mode = validate_screen_mode(_computed_mode)
-            _r_for_pkg = next(
-                (r for r in (_all_rects or []) if getattr(r, "package", None) == package),
-                None,
-            )
-            if _r_for_pkg is None and _enabled_pkgs:
+            _rects = []
+            for _source in (cfg.get("_layout_rects"), cfg.get("last_layout_preview")):
+                if not isinstance(_source, list):
+                    continue
+                for _item in _source:
+                    if not isinstance(_item, dict) or _item.get("package") != package:
+                        continue
+                    try:
+                        _rects = [window_layout.WindowRect(
+                            package=str(_item["package"]),
+                            left=int(_item["left"]),
+                            top=int(_item["top"]),
+                            right=int(_item["right"]),
+                            bottom=int(_item["bottom"]),
+                        )]
+                    except (KeyError, TypeError, ValueError):
+                        _rects = []
+                    break
+                if _rects:
+                    break
+            if not _rects:
                 _display = window_layout.detect_display_info()
-                if package not in _enabled_pkgs:
-                    _enabled_pkgs.append(package)
+                _all_pkgs = [e["package"] for e in ents] or [package]
+                if package not in _all_pkgs:
+                    _all_pkgs.append(package)
                 _dock_frac = float(cfg.get("termux_dock_fraction", 0.0) or 0.0)
-                _fallback_rects = window_layout.calculate_split_layout(
-                    _enabled_pkgs, _display.width, _display.height,
+                _rects = window_layout.calculate_split_layout(
+                    _all_pkgs, _display.width, _display.height,
                     termux_log_fraction=_dock_frac,
                     screen_mode=_screen_mode,
                 )
-                _r_for_pkg = next(
-                    (r for r in (_fallback_rects or []) if getattr(r, "package", None) == package),
-                    None,
-                )
+            _r_for_pkg = next(
+                (r for r in (_rects or []) if getattr(r, "package", None) == package),
+                None,
+            )
             if _r_for_pkg is not None:
                 _bounds_rect = (
                     _r_for_pkg.left, _r_for_pkg.top,
@@ -464,11 +453,11 @@ def perform_rejoin(
         except Exception:  # noqa: BLE001
             _bounds_rect = None
 
-        # ── URL-first launch (probe p-316b3b040d fix) ───────────────────────────
+        # â”€â”€ URL-first launch (probe p-316b3b040d fix) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # When private_server_url is SET, the URL itself IS the join intent.
         # Pass it directly to the first (and only) am-start call so Android
         # routes the roblox:// VIEW intent to ActivityProtocolLaunch
-        # immediately — exactly like the user manually tapping the link.
+        # immediately â€” exactly like the user manually tapping the link.
         # No app-first phase, no waiting, no second phase URL delivery.
         #
         # When private_server_url is BLANK, a plain MAIN/LAUNCHER intent is
@@ -524,75 +513,49 @@ def perform_rejoin(
             error = mask_urls_in_text(result.summary or "Android launch command failed")
             raise RuntimeError(error)
 
-        if start_stagger_fast and callable(_launch_sent_cb):
-            try:
-                _launch_sent_cb(package)
-            except Exception:  # noqa: BLE001
-                pass
-
         from . import launch_verify
+
+        verification = launch_verify.verify_launch(
+            package,
+            launch_result=result,
+            launch_method=_method,
+            wait_seconds=_launch_verify_wait_seconds(cfg),
+        )
+        readiness = _wait_for_launch_ready(package, cfg)
+        if not verification.success and not readiness.get("process_alive"):
+            raise RuntimeError(verification.failure_message())
+        if verification.success and not readiness.get("process_alive"):
+            readiness = _read_launch_state(package)
         retry_count = 0
-        if start_stagger_fast:
-            settle = _start_stagger_launch_settle(cfg)
-            if settle:
-                time.sleep(settle)
-            readiness = {
-                "process_alive": True,
-                "activity_visible": False,
-                "surface_present": False,
-                "black_screen_suspected": False,
-            }
-            verification = None
+        if readiness.get("black_screen_suspected"):
+            retry_count = 1
             log_event(
                 logger,
-                "info",
-                "[DENG_REJOIN_START_STAGGER_FAST]",
+                "warning",
+                "launch_black_screen_retry",
                 package=package,
-                launch_method=_method,
-                settle_sec=settle,
-                reason="stagger_queue_must_not_block_on_dumpsys_verify",
+                first_method=_method,
+                retry_method="delayed_no_bounds",
+                private_url_mode=url_context.get("private_url_mode", "global"),
+                url_config_source=url_context.get("url_config_source", "blank"),
             )
-        else:
-            verification = launch_verify.verify_launch(
-                package,
-                launch_result=result,
-                launch_method=_method,
-                wait_seconds=_launch_verify_wait_seconds(cfg),
-            )
-            readiness = _wait_for_launch_ready(package, cfg)
-            if not verification.success and not readiness.get("process_alive"):
-                raise RuntimeError(verification.failure_message())
-            if verification.success and not readiness.get("process_alive"):
-                readiness = _read_launch_state(package)
-            if readiness.get("black_screen_suspected"):
-                retry_count = 1
+            time.sleep(_launch_wait_seconds(cfg, "launch_black_screen_retry_delay_sec", 1.5, 0.5, 5.0))
+            retry_result, retry_method = android.launch_package_with_options(package, url_for_launch or None)
+            if _result_used_root(retry_result) or retry_method.startswith("root_"):
+                root_used = True
+            if retry_result.ok:
+                result = retry_result
+                _method = retry_method
+                readiness = _wait_for_launch_ready(package, cfg)
+            else:
                 log_event(
                     logger,
                     "warning",
-                    "launch_black_screen_retry",
+                    "launch_black_screen_retry_failed",
                     package=package,
-                    first_method=_method,
-                    retry_method="delayed_no_bounds",
-                    private_url_mode=url_context.get("private_url_mode", "global"),
-                    url_config_source=url_context.get("url_config_source", "blank"),
+                    method=retry_method,
+                    error=mask_urls_in_text(retry_result.summary),
                 )
-                time.sleep(_launch_wait_seconds(cfg, "launch_black_screen_retry_delay_sec", 1.5, 0.5, 5.0))
-                retry_result, retry_method = android.launch_package_with_options(package, url_for_launch or None)
-                if _result_used_root(retry_result) or retry_method.startswith("root_"):
-                    root_used = True
-                if retry_result.ok:
-                    result = retry_result
-                    _method = retry_method
-                    readiness = _wait_for_launch_ready(package, cfg)
-                else:
-                    log_event(
-                        logger,
-                        "warning",
-                        "launch_black_screen_retry_failed",
-                        package=package,
-                        method=retry_method,
-                        error=mask_urls_in_text(retry_result.summary),
-                    )
         log_event(
             logger,
             "info",
@@ -614,16 +577,14 @@ def perform_rejoin(
             black_screen_suspected=str(bool(readiness.get("black_screen_suspected"))).lower(),
             layout_applied_before_surface="false",
             retry_count=retry_count,
-            start_stagger_fast=str(start_stagger_fast).lower(),
             final_state="ready" if not readiness.get("black_screen_suspected") else "suspect",
         )
-        if not start_stagger_fast:
-            if not readiness.get("process_alive"):
-                if verification is not None and not verification.success:
-                    raise RuntimeError(verification.failure_message())
-                raise RuntimeError("Android launch returned success but package process was not detected")
-            if readiness.get("black_screen_suspected"):
-                raise RuntimeError("Android launch returned success but no visible activity or surface was detected")
+        if not readiness.get("process_alive"):
+            if not verification.success:
+                raise RuntimeError(verification.failure_message())
+            raise RuntimeError("Android launch returned success but package process was not detected")
+        if readiness.get("black_screen_suspected"):
+            raise RuntimeError("Android launch returned success but no visible activity or surface was detected")
 
         log_event(
             logger, "info", "launch_result",
@@ -667,7 +628,7 @@ def perform_rejoin(
 
 
 def launch_package_structured(config_data: dict[str, Any], entry: dict[str, Any]) -> LaunchAttemptResult:
-    """Launch a single package with URL → am fallback; never raises."""
+    """Launch a single package with URL â†’ am fallback; never raises."""
     cfg = validate_config(config_data)
     package = entry["package"]
     if not android.package_installed(package):
@@ -723,7 +684,7 @@ def launch_package_for_current_config(
         Calls ``perform_rejoin`` which sends the roblox:// deep-link intent.
         The private server URL is preserved including ``&type=Server`` params.
     - If ``private_server_url`` is blank:
-        Calls ``perform_rejoin`` with no URL — Roblox opens to home/lobby only
+        Calls ``perform_rejoin`` with no URL â€” Roblox opens to home/lobby only
         (app-only launch, no join intent sent).
 
     This function MUST be used by:
@@ -734,7 +695,7 @@ def launch_package_for_current_config(
     [DENG_REJOIN_CANONICAL_LAUNCHER] probe_id=p-ea167faf5f
     Private Server URL is optional. Blank URL = app-only. Configured URL = private join.
     ``perform_rejoin`` already selects the correct am-start command based on
-    ``effective_private_server_url(entry, cfg)`` — this wrapper just sets the
+    ``effective_private_server_url(entry, cfg)`` â€” this wrapper just sets the
     package and delegates.
     """
     pkg = str(entry.get("package") or "")
@@ -742,9 +703,8 @@ def launch_package_for_current_config(
     pkg_cfg["roblox_package"] = pkg
     return perform_rejoin(pkg_cfg, reason=reason, package_entry=entry)
 
-
-def _bootstrap_test_latest2_runtime_patches() -> None:
-    """Apply test/latest2 monkey-patches as soon as launcher is importable."""
+def _bootstrap_test_latest2_lime_delta_bypass() -> None:
+    """Apply test/latest2 delta-bypass hook only (v1.3.0 base otherwise unchanged)."""
     try:
         from .lime_channel import lime_detection_enabled
 
@@ -757,4 +717,5 @@ def _bootstrap_test_latest2_runtime_patches() -> None:
         pass
 
 
-_bootstrap_test_latest2_runtime_patches()
+_bootstrap_test_latest2_lime_delta_bypass()
+
