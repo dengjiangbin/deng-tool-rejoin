@@ -203,6 +203,14 @@ def wrapper_body_sh(install_api_base: str) -> str:
         '  echo "deng-rejoin: missing $DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" >&2\n'
         "  exit 1\n"
         "fi\n"
+        "# Install-safe version path: metadata only, never boot protected runtime.\n"
+        'case "$1" in version|--version)\n'
+        '  if [ ! -f "$DENG_REJOIN_HOME/agent/version_standalone.py" ]; then\n'
+        '    echo "deng-rejoin: missing $DENG_REJOIN_HOME/agent/version_standalone.py" >&2\n'
+        "    exit 1\n"
+        "  fi\n"
+        '  exec python3 "$DENG_REJOIN_HOME/agent/version_standalone.py" "$@"\n'
+        "  ;; esac\n"
         'exec python3 "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" "$@"\n'
     )
 
@@ -351,7 +359,7 @@ def render_direct_install_bootstrap(
         '[ "$a" = "$s" ] || fail "Package checksum mismatch."\n'
         'if command -v pkill >/dev/null 2>&1; then pkill -f "agent/deng_tool_rejoin.py" 2>/dev/null || true; fi\n'
         'for d in "$h"/a?ent "$h"/b?t "$h"/scr?pts "$h"/d?cs "$h"/ex?mples "$h"/assets "$h"/s?te "$h"/ser?er "$h"/te?ts; do rm -rf "$d" 2>/dev/null || true; done\n'
-        'rm -f "$h/BUILD-INFO.json" "$h/RELEASE-MANIFEST.json" "$h/.installed-build.json" 2>/dev/null || true\n'
+        'rm -f "$h/BUILD-INFO.json" "$h/RELEASE-MANIFEST.json" "$h/.installed-build.json" "$h/.deng_build.json" 2>/dev/null || true\n'
         'find "$h" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
         'find "$h" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         'info "Installing files..."\n'
@@ -427,22 +435,57 @@ def render_direct_install_bootstrap(
         '[ -f "$h/BUILD-INFO.json" ] || fail "Failed: BUILD-INFO.json missing in package."\n'
         '[ -f "$h/RELEASE-MANIFEST.sig" ] || fail "Failed: RELEASE-MANIFEST.sig missing in package."\n'
         '[ -f "$h/.installed-build.json" ] || fail "Failed: .installed-build.json was not written."\n'
-        'if ! (cd "$h" && PYTHONPATH="$h" python3 -c '
-        "'import agent._protected_runtime as r; r._verify(); import agent.commands, agent.supervisor, agent.roblox_presence, agent.freeform_enable, agent.playing_state, agent.dumpsys_cache, agent.window_apply' "
-        '2>/dev/null); then\n'
+        '[ -f "$h/agent/install_verify_standalone.py" ] || fail "Failed: install verifier missing in package."\n'
+        '[ -f "$h/agent/version_standalone.py" ] || fail "Failed: version metadata script missing in package."\n'
+        '[ -f "$h/.deng_build.json" ] || fail "Failed: .deng_build.json missing in package."\n'
+        'if ! (cd "$h" && python3 "$h/agent/install_verify_standalone.py" 2>/dev/null); then\n'
         '  fail "Install verification failed: manifest or runtime integrity check failed."\n'
         "fi\n"
-        '_MONITOR_IMPL="$(cd "$h" && PYTHONPATH="$h" python3 -c "from agent import build_info; print(build_info.collect_version_info().get(\'monitor_command_implementation\') or \'\')" 2>/dev/null)" || _MONITOR_IMPL=""\n'
-        'if [ "$_MONITOR_IMPL" != "persistent_worker" ]; then\n'
-        '  fail "Install verification failed: monitor runtime is not the persistent worker build."\n'
+        '_VERSION_RC=1\n'
+        '_VERSION_OUT=""\n'
+        '_VERSION_ERR=""\n'
+        '_VERSION_CMD=""\n'
+        '_VE="$(mktemp)"\n'
+        '_run_version_probe() {\n'
+        '  _VERSION_CMD="$1"\n'
+        '  set +e\n'
+        '  _VERSION_OUT="$($_VERSION_CMD 2>"$_VE")"\n'
+        '  _VERSION_RC=$?\n'
+        '  _VERSION_ERR="$(cat "$_VE" 2>/dev/null || true)"\n'
+        '  set -e\n'
+        "}\n"
+        'if command -v deng-rejoin >/dev/null 2>&1; then\n'
+        '  _run_version_probe "deng-rejoin version"\n'
         "fi\n"
-        '_VERSION_OUT="$("$BIN/deng-rejoin" version 2>/dev/null)" || _VERSION_OUT=""\n'
-        'if ! echo "$_VERSION_OUT" | grep -q "^artifact_sha256: " ; then\n'
+        'if ! echo "$_VERSION_OUT" | grep -q "^artifact_sha="; then\n'
+        '  if [ -x "$BIN/deng-rejoin" ]; then\n'
+        '    _run_version_probe "$BIN/deng-rejoin version"\n'
+        "  fi\n"
+        "fi\n"
+        'if ! echo "$_VERSION_OUT" | grep -q "^artifact_sha="; then\n'
+        '  _run_version_probe "python3 $h/agent/version_standalone.py version"\n'
+        "fi\n"
+        'rm -f "$_VE" 2>/dev/null || true\n'
+        'if ! echo "$_VERSION_OUT" | grep -qE "^artifact_sha=[0-9a-f]{64}$"; then\n'
+        '  printf "%b[!]%b Install verification failed: version check did not return artifact_sha.\\n" "$R" "$X" >&2\n'
+        '  printf "  command: %s\\n" "$_VERSION_CMD" >&2\n'
+        '  printf "  exit_code: %s\\n" "$_VERSION_RC" >&2\n'
+        '  printf "  wrapper_path: %s\\n" "$BIN/deng-rejoin" >&2\n'
+        '  if command -v deng-rejoin >/dev/null 2>&1; then printf "  path_deng_rejoin: %s\\n" "$(command -v deng-rejoin)" >&2; fi\n'
+        '  printf "  .deng_build.json: %s\\n" "$([ -f "$h/.deng_build.json" ] && echo yes || echo no)" >&2\n'
+        '  printf "  .installed-build.json: %s\\n" "$([ -f "$h/.installed-build.json" ] && echo yes || echo no)" >&2\n'
+        '  printf "  version_standalone.py: %s\\n" "$([ -f "$h/agent/version_standalone.py" ] && echo yes || echo no)" >&2\n'
+        '  printf "  stdout (first 40 lines):\\n" >&2\n'
+        '  echo "$_VERSION_OUT" | sed -n "1,40p" >&2\n'
+        '  printf "  stderr (first 40 lines):\\n" >&2\n'
+        '  echo "$_VERSION_ERR" | sed -n "1,40p" >&2\n'
         '  fail "Install verification failed: deng-rejoin version did not return artifact SHA."\n'
         "fi\n"
-        '_INSTALLED_SHORT_SHA="$(echo "$_VERSION_OUT" | grep "^artifact_sha256: " | head -n1 | awk \'{print $2}\')"\n'
-        "_EXPECTED_SHORT_SHA=\"$(printf '%.12s' \"$s\")\"\n"
-        'if [ "$_INSTALLED_SHORT_SHA" != "$_EXPECTED_SHORT_SHA" ]; then\n'
+        '_INSTALLED_SHA="$(echo "$_VERSION_OUT" | grep "^artifact_sha=" | head -n1 | sed "s/^artifact_sha=//")"\n'
+        'if [ "$_INSTALLED_SHA" != "$s" ]; then\n'
+        '  printf "%b[!]%b Install verification failed: artifact SHA mismatch.\\n" "$R" "$X" >&2\n'
+        '  printf "  expected: %s\\n" "$s" >&2\n'
+        '  printf "  got:      %s\\n" "$_INSTALLED_SHA" >&2\n'
         '  fail "Install verification failed: installed SHA mismatch."\n'
         "fi\n"
         '_LEGACY_IMPORT="NO"\n'
@@ -452,7 +495,7 @@ def render_direct_install_bootstrap(
         '    _LEGACY_IMPORT="YES (WARNING: old detector in supervisor)"\n'
         '  fi\n'
         'fi\n'
-        '_AGENT_FILE="$(PYTHONPATH="$h" python3 -c "import agent; print(agent.__file__)" 2>/dev/null)" || _AGENT_FILE=""\n'
+        '_AGENT_FILE="$h/agent/__init__.py"\n'
         'find "$h" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
         'find "$h" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         'printf "%b%s%b\\n" "$C" "$sep" "$X"\n'

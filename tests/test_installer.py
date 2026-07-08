@@ -309,7 +309,7 @@ class TestInstallerScript(unittest.TestCase):
 
     def test_agent_file_proof_present(self):
         script = self._make_script()
-        self.assertIn("agent.__file__", script)
+        self.assertIn("agent/__init__.py", script)
 
     def test_install_complete_printed(self):
         script = self._make_script()

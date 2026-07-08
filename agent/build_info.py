@@ -165,6 +165,48 @@ def _code_object_facts(root: Any) -> dict[str, set[str]]:
     return {"names": names, "strings": strings}
 
 
+def _load_protected_modules() -> dict[str, Any] | None:
+    """Return the unmarshalled protected-runtime module map, or ``None``."""
+    if not PROTECTED_RUNTIME_PATH.is_file():
+        return None
+    try:
+        modules = marshal.loads(zlib.decompress(PROTECTED_RUNTIME_PATH.read_bytes()))
+    except Exception:  # noqa: BLE001
+        return None
+    return modules if isinstance(modules, dict) else None
+
+
+def verify_runtime_bundle_integrity() -> None:
+    """Install-time probe: protected bundle contains required modules/symbols.
+
+    The installer must **not** import ``agent.commands`` or other heavy modules
+    inline.  On Termux/cloud phones (Python 3.13 + bionic) that import graph can
+    SIGSEGV during install verification even though the installed build is fine.
+    This function inspects the marshalled bundle only — no network, no subprocess,
+    no full module execution.  Call ``agent._protected_runtime._verify()`` first
+    for manifest signature checks.
+    """
+    modules = _load_protected_modules()
+    if not modules:
+        raise SystemExit(1)
+    missing_modules = [mod for mod in REQUIRED_MODULES if mod not in modules]
+    if missing_modules:
+        raise SystemExit(1)
+    missing_symbols: list[str] = []
+    for mod, sym in REQUIRED_SYMBOLS:
+        code = modules.get(mod)
+        if code is None:
+            missing_symbols.append(f"{mod}.{sym}")
+            continue
+        if sym not in _code_object_facts(code)["names"]:
+            missing_symbols.append(f"{mod}.{sym}")
+    if missing_symbols:
+        raise SystemExit(1)
+    runtime = inspect_protected_runtime()
+    if runtime.get("monitor_command_implementation") != "persistent_worker":
+        raise SystemExit(1)
+
+
 def inspect_protected_runtime() -> dict[str, Any]:
     info: dict[str, Any] = {
         "present": PROTECTED_RUNTIME_PATH.is_file(),
@@ -182,12 +224,8 @@ def inspect_protected_runtime() -> dict[str, Any]:
         return info
     info["sha256"] = _hash_file(PROTECTED_RUNTIME_PATH)
     info["sha256_short"] = _short(info["sha256"])
-    try:
-        modules = marshal.loads(zlib.decompress(PROTECTED_RUNTIME_PATH.read_bytes()))
-    except Exception:  # noqa: BLE001
-        info["monitor_command_implementation"] = "unreadable"
-        return info
-    if not isinstance(modules, dict):
+    modules = _load_protected_modules()
+    if modules is None:
         info["monitor_command_implementation"] = "unreadable"
         return info
     info["module_count"] = len(modules)

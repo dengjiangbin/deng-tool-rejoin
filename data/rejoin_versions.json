@@ -126,7 +126,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.3.0/deng-tool-rejoin-v1.3.0.tar.gz",
-    "artifact_sha256": "c44ddadb25f016ff4572fe775f9f8d7d46bcb7eb7b2ae8d0defbaabc377d9027",
+    "artifact_sha256": "2a80cfa8f9f1b5b315939c2ebbe8594b27696165b532d5ccfb9bd093cf3a9097",
     "installer_endpoint": "/install/v1.3.0",
     "notes": "Public stable release: portrait pb99 window resize, online detection timing, and portrait Start layout fixes.",
     "enabled": true
@@ -144,7 +144,7 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "65685357a391b69d0c3007d7abb3ba847a06a9867a7f52ff2a0ed5f5e7aef4cc"
+    "artifact_sha256": "967e5184232bf0704894204fa4a492ce1496642a6b6c44215fce187b1e63f5eb"
   },
   {
     "version": "test-latest2",
@@ -153,7 +153,7 @@
     "recommended": false,
     "title": "Test Latest 2 (Lime detection)",
     "label": "test-latest2",
-    "description": "Isolated test channel \u2014 v1.3.0 base + Lime-style detection",
+    "description": "Isolated test channel \u2014 exact v1.3.0 base + Lime Delta key bypass only",
     "install_ref": "refs/heads/main",
     "source_version": "v1.3.0",
     "artifact_path": "releases/test-latest2/deng-tool-rejoin-test-latest2.tar.gz",
@@ -161,7 +161,7 @@
     "notes": "Keyless isolated test channel for Lime-style detection speed tests. Does not affect test/latest or stable.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "16e5cf73d3a68388e51b966be1afd497b9c39f77e41fbdfded3a59e61e6acf25",
+    "artifact_sha256": "545213ab4f5511a0f8b5d61966cb17ca015207366928a40b0282248ab0983ce7",
     "build_mode": "lime_on_v130",
     "base_git_commit": "2a3a776015562b8d73251b3932374f23272aefcf"
   }

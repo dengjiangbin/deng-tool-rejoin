@@ -252,5 +252,43 @@ class DoctorInstallChecksTests(unittest.TestCase):
         self.assertTrue(build_info.doctor_install_overall_ok([]))
 
 
+class VerifyRuntimeBundleIntegrityTests(unittest.TestCase):
+    def test_passes_on_current_checkout_when_bundle_present(self) -> None:
+        if not build_info.PROTECTED_RUNTIME_PATH.is_file():
+            self.skipTest("protected runtime bundle not present in dev checkout")
+        try:
+            build_info.verify_runtime_bundle_integrity()
+        except SystemExit as exc:
+            self.fail(f"verify_runtime_bundle_integrity raised SystemExit({exc.code})")
+
+    def test_fails_when_bundle_missing(self) -> None:
+        with patch.object(build_info, "_load_protected_modules", return_value=None):
+            with self.assertRaises(SystemExit) as ctx:
+                build_info.verify_runtime_bundle_integrity()
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_fails_when_required_module_missing_from_bundle(self) -> None:
+        modules = build_info._load_protected_modules() or {}
+        if not modules:
+            self.skipTest("protected runtime bundle not present in dev checkout")
+        trimmed = dict(modules)
+        trimmed.pop("agent.roblox_presence", None)
+        with patch.object(build_info, "_load_protected_modules", return_value=trimmed):
+            with self.assertRaises(SystemExit) as ctx:
+                build_info.verify_runtime_bundle_integrity()
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_installer_uses_standalone_verifier_not_agent_imports(self) -> None:
+        from agent.bootstrap_installer import render_direct_install_bootstrap
+
+        script = render_direct_install_bootstrap(
+            base_url="https://rejoin.deng.my.id",
+            package_sha256="a" * 64,
+        )
+        self.assertIn("install_verify_standalone.py", script)
+        self.assertNotIn("import agent._protected_runtime", script)
+        self.assertNotIn("PYTHONPATH=\"$h\" python3 -c", script)
+
+
 if __name__ == "__main__":
     unittest.main()

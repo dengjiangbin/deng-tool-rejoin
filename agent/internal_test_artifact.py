@@ -30,9 +30,12 @@ _ALLOWED_ARTIFACT_PATHS = frozenset(
         _MANIFEST_NAME,
         _MANIFEST_SIG_NAME,
         _PROTECTED_BUNDLE,
+        ".deng_build.json",
         "agent/__init__.py",
         "agent/_protected_runtime.py",
         "agent/deng_tool_rejoin.py",
+        "agent/install_verify_standalone.py",
+        "agent/version_standalone.py",
     }
 )
 _CLIENT_PROTOCOL = 2
@@ -42,7 +45,60 @@ _SIGNING_KEY_REL = Path("data") / "rejoin_manifest_signing_key.pem"
 
 _RAW_RUNTIME_FILES = {
     "agent/__init__.py": '''from . import _protected_runtime as _dpr\n_dpr.install()\n__all__ = ["__version__"]\n__version__ = {package_version!r}\n''',
-    "agent/deng_tool_rejoin.py": '''#!/usr/bin/env python3\nfrom __future__ import annotations\nimport sys\nfrom pathlib import Path\nif __package__ in {None, ""}:\n    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nimport agent._protected_runtime  # noqa: F401\nfrom agent.commands import main\nif __name__ == "__main__":\n    raise SystemExit(main())\n''',
+    "agent/deng_tool_rejoin.py": '''#!/usr/bin/env python3
+from __future__ import annotations
+import subprocess as _subprocess
+import sys
+from pathlib import Path
+try:
+    if hasattr(_subprocess, "_USE_VFORK"):
+        _subprocess._USE_VFORK = False
+    if hasattr(_subprocess, "_USE_POSIX_SPAWN"):
+        _subprocess._USE_POSIX_SPAWN = False
+except Exception:
+    pass
+_ENTRY_ROOT = Path(__file__).resolve().parent
+_INSTALL_ROOT = _ENTRY_ROOT.parent
+def _dispatch_install_safe_version(argv):
+    if not argv or argv[0] not in {{"version", "--version"}}:
+        return None
+    version_script = _ENTRY_ROOT / "version_standalone.py"
+    if not version_script.is_file():
+        return 1
+    import runpy
+    try:
+        runpy.run_path(str(version_script), run_name="__main__")
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        return 1
+    return 0
+if __name__ == "__main__":
+    _version_rc = _dispatch_install_safe_version(sys.argv[1:])
+    if _version_rc is not None:
+        raise SystemExit(_version_rc)
+if __package__ in {{None, ""}}:
+    sys.path.insert(0, str(_INSTALL_ROOT))
+    from agent.commands import main
+else:
+    from .commands import main
+if __name__ == "__main__":
+    _lime_rc = None
+    try:
+        if __package__ in {{None, ""}}:
+            from agent.lime_cli_dispatch import try_dispatch_lime_argv
+        else:
+            from .lime_cli_dispatch import try_dispatch_lime_argv
+        _lime_rc = try_dispatch_lime_argv(sys.argv[1:])
+    except Exception:
+        _lime_rc = None
+    if _lime_rc is not None:
+        raise SystemExit(_lime_rc)
+    raise SystemExit(main())
+''',
     "agent/_protected_runtime.py": r'''from __future__ import annotations
 import base64, hashlib, importlib.abc, importlib.machinery, json, marshal, sys, zlib
 from pathlib import Path
@@ -166,6 +222,8 @@ _CLIENT_ONLY_MODULES = frozenset(
         "agent/deng_tool_rejoin.py",
         "agent/__init__.py",
         "agent/_protected_runtime.py",
+        "agent/install_verify_standalone.py",
+        "agent/version_standalone.py",
     }
 )
 
@@ -507,6 +565,24 @@ def _render_raw_runtime_files(
     return rendered
 
 
+def _make_deng_build_json_bytes(
+    build_info: dict,
+    *,
+    version: str,
+    channel: str,
+    artifact_sha: str = "",
+) -> bytes:
+    payload = {
+        "version": version,
+        "channel": channel,
+        "artifact_sha": artifact_sha,
+        "build_id": str(build_info.get("probe_id") or ""),
+        "build_time": str(build_info.get("built_at_iso") or ""),
+        "git_commit": str(build_info.get("git_commit") or ""),
+    }
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def _make_release_manifest_bytes(
     entries: dict[str, bytes | str],
     *,
@@ -608,16 +684,51 @@ def build_internal_test_tarball(
         fallback_install_endpoint=fallback_install_endpoint,
         package_version=version,
     )
+    standalone_verify = repo_root / "agent" / "install_verify_standalone.py"
+    if not standalone_verify.is_file():
+        raise RuntimeError("agent/install_verify_standalone.py is required for install verification")
+    version_standalone = repo_root / "agent" / "version_standalone.py"
+    if not version_standalone.is_file():
+        raise RuntimeError("agent/version_standalone.py is required for install-safe version output")
+    entries["agent/install_verify_standalone.py"] = standalone_verify.read_text(encoding="utf-8")
+    entries["agent/version_standalone.py"] = version_standalone.read_text(encoding="utf-8")
     entries[_PROTECTED_BUNDLE] = bundle_bytes
     entries["BUILD-INFO.json"] = build_info_bytes
-    manifest_bytes = _make_release_manifest_bytes(entries, build_info=build_info, version=version)
-    entries[_MANIFEST_NAME] = manifest_bytes
-    entries[_MANIFEST_SIG_NAME] = _sign_manifest(signing_key, manifest_bytes)
+    entries[".deng_build.json"] = _make_deng_build_json_bytes(
+        build_info,
+        version=version,
+        channel=channel,
+        artifact_sha="",
+    )
+    for _ in range(3):
+        entries.pop(_MANIFEST_NAME, None)
+        entries.pop(_MANIFEST_SIG_NAME, None)
+        manifest_bytes = _make_release_manifest_bytes(entries, build_info=build_info, version=version)
+        entries[_MANIFEST_NAME] = manifest_bytes
+        entries[_MANIFEST_SIG_NAME] = _sign_manifest(signing_key, manifest_bytes)
     raw = _tar_bytes(entries)
-    digest = hashlib.sha256()
-    digest.update(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    entries[".deng_build.json"] = _make_deng_build_json_bytes(
+        build_info,
+        version=version,
+        channel=channel,
+        artifact_sha=digest,
+    )
+    for _ in range(3):
+        entries.pop(_MANIFEST_NAME, None)
+        entries.pop(_MANIFEST_SIG_NAME, None)
+        manifest_bytes = _make_release_manifest_bytes(
+            entries,
+            build_info=build_info,
+            version=version,
+            artifact_sha256=digest,
+        )
+        entries[_MANIFEST_NAME] = manifest_bytes
+        entries[_MANIFEST_SIG_NAME] = _sign_manifest(signing_key, manifest_bytes)
+    raw = _tar_bytes(entries)
+    digest = hashlib.sha256(raw).hexdigest()
     output_tar_gz.write_bytes(raw)
-    return digest.hexdigest()
+    return digest
 
 
 def verify_tarball_exclusions(tar_bytes: bytes, *, require_license_gate_strings: bool = False) -> None:
@@ -642,7 +753,7 @@ def verify_tarball_exclusions(tar_bytes: bytes, *, require_license_gate_strings:
         assert not n.endswith(".pyc"), n
         if n == ".env" or n.endswith("/.env"):
             raise AssertionError(f"unexpected env file in tarball: {n}")
-        if n.endswith(".py") and n not in _RAW_RUNTIME_FILES:
+        if n.endswith(".py") and n not in _ALLOWED_ARTIFACT_PATHS:
             raise AssertionError(f"unexpected raw python source in tarball: {n}")
     if "BUILD-INFO.json" not in names:
         raise AssertionError("tarball missing BUILD-INFO.json — build proof is required")

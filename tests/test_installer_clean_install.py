@@ -92,11 +92,13 @@ class CacheBustingTests(unittest.TestCase):
 
     def test_simplified_output_keeps_integrity_checks(self) -> None:
         # Even though the progress chatter was trimmed, the actual SHA256 match,
-        # protected-runtime verification, and persistent-worker check must remain.
+        # standalone install verifier, and deng-rejoin version check must remain.
         s = _script()
         self.assertIn('[ "$a" = "$s" ]', s)
         self.assertIn("manifest or runtime integrity check failed", s)
-        self.assertIn("persistent_worker", s)
+        self.assertIn("install_verify_standalone.py", s)
+        self.assertIn("_run_version_probe", s)
+        self.assertIn('grep -qE "^artifact_sha=[0-9a-f]{64}$"', s)
 
     def test_no_permanent_package_url_or_token_leak(self) -> None:
         s = _script()
@@ -173,25 +175,25 @@ class InstalledBuildMetadataTests(unittest.TestCase):
 class PostInstallVerificationTests(unittest.TestCase):
     def test_imports_new_modules(self) -> None:
         s = _script()
-        self.assertIn("agent.roblox_presence", s)
-        self.assertIn("agent.freeform_enable", s)
-        self.assertIn("agent.playing_state", s)
-        self.assertIn("agent.dumpsys_cache", s)
+        self.assertIn("install_verify_standalone.py", s)
+        self.assertNotIn("PYTHONPATH=\"$h\" python3 -c", s)
+        self.assertNotIn("import agent._protected_runtime", s)
+        self.assertNotIn("verify_runtime_bundle_integrity", s)
+        self.assertNotIn("persistent_worker", s)
         # Must exit non-zero on import failure.
         self.assertIn("Install verification failed: manifest or runtime integrity check failed", s)
 
     def test_runs_version_and_compares_sha(self) -> None:
         s = _script()
-        # The installer runs ``deng-rejoin version`` and greps for
-        # ``artifact_sha256:`` to prove the wrapper executes the new code.
-        self.assertIn('"$BIN/deng-rejoin" version', s)
-        self.assertIn('grep -q "^artifact_sha256: "', s)
+        self.assertIn('grep -qE "^artifact_sha=[0-9a-f]{64}$"', s)
+        self.assertIn('sed "s/^artifact_sha=//"', s)
         self.assertIn("installed SHA mismatch", s)
+        self.assertIn("_run_version_probe", s)
 
     def test_wrapper_resolution_diagnostics_stay_out_of_installer(self) -> None:
         s = _script()
-        self.assertNotIn("command -v deng-rejoin", s)
         self.assertNotIn("did not resolve after install", s)
+        self.assertIn("_run_version_probe", s)
 
 
 class OrderingTests(unittest.TestCase):
@@ -218,7 +220,7 @@ class OrderingTests(unittest.TestCase):
 
     def test_version_check_before_install_complete(self) -> None:
         s = _script()
-        version_check = s.index('"$BIN/deng-rejoin" version')
+        version_check = s.index("_run_version_probe")
         complete = s.index("Install complete.")
         self.assertLess(version_check, complete)
 
