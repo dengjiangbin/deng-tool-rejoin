@@ -39,6 +39,16 @@ _ALLOWED_ARTIFACT_PATHS = frozenset(
         "tools/boot_probe.py",
     }
 )
+# Minimum plain-source modules required for Termux source-mode startup.
+_SOURCE_RUNTIME_REQUIRED = frozenset(
+    {
+        "agent/commands.py",
+        "agent/supervisor.py",
+        "agent/roblox_presence.py",
+        "agent/launcher.py",
+        "agent/deng_tool_rejoin.py",
+    }
+)
 _CLIENT_PROTOCOL = 2
 _MIN_SERVER_PROTOCOL = 2
 _SIGNING_KEY_ENV = "DENG_REJOIN_MANIFEST_SIGNING_KEY_PEM"
@@ -289,6 +299,17 @@ def path_should_exclude(rel_posix: str) -> bool:
     ):
         return True
     return False
+
+
+def expected_artifact_paths(client_rels: list[str]) -> frozenset[str]:
+    """Full tarball path set: infrastructure files plus shipped source modules."""
+    return _ALLOWED_ARTIFACT_PATHS | frozenset(client_rels)
+
+
+def _client_source_text(rel: str, path: Path) -> str:
+    """Return client source sanitized the same way as the protected bundle."""
+    text = path.read_text(encoding="utf-8")
+    return _client_source_for_compile(rel, text)
 
 
 def iter_internal_test_pack_files(repo_root: Path) -> list[tuple[str, Path]]:
@@ -649,6 +670,13 @@ def build_internal_test_tarball(
     if not boot_probe.is_file():
         raise RuntimeError("tools/boot_probe.py is required for Termux startup diagnostics")
     entries["tools/boot_probe.py"] = boot_probe.read_text(encoding="utf-8")
+    client_rels = [rel for rel, _ in pairs]
+    for rel, path in pairs:
+        entries[rel] = _client_source_text(rel, path)
+    expected_paths = expected_artifact_paths(client_rels)
+    for required in _SOURCE_RUNTIME_REQUIRED:
+        if required not in entries:
+            raise RuntimeError(f"source runtime missing required module: {required}")
     entries[_PROTECTED_BUNDLE] = bundle_bytes
     entries["BUILD-INFO.json"] = build_info_bytes
     entries[".deng_build.json"] = _make_deng_build_json_bytes(
@@ -688,7 +716,12 @@ def build_internal_test_tarball(
     return digest
 
 
-def verify_tarball_exclusions(tar_bytes: bytes, *, require_license_gate_strings: bool = False) -> None:
+def verify_tarball_exclusions(
+    tar_bytes: bytes,
+    *,
+    require_license_gate_strings: bool = False,
+    expected_paths: frozenset[str] | None = None,
+) -> None:
     """Raise AssertionError if forbidden names appear inside tarball bytes.
 
     Also asserts the tarball contains a top-level ``BUILD-INFO.json`` so
@@ -701,6 +734,11 @@ def verify_tarball_exclusions(tar_bytes: bytes, *, require_license_gate_strings:
             for n in names
         }
     lowered = [n.lower().replace("\\", "/") for n in names]
+    if expected_paths is None:
+        manifest = json.loads(file_bytes.get(_MANIFEST_NAME, b"{}").decode("utf-8", errors="replace") or "{}")
+        expected_paths = frozenset(str(item.get("path") or "") for item in manifest.get("files", []))
+    expected_lower = {p.lower() for p in expected_paths if p}
+    expected_lower |= {_MANIFEST_NAME.lower(), _MANIFEST_SIG_NAME.lower()}
     for n in lowered:
         segs = n.split("/")
         assert _FORBIDDEN_PATH_SEGMENTS.isdisjoint(segs), n
@@ -710,7 +748,7 @@ def verify_tarball_exclusions(tar_bytes: bytes, *, require_license_gate_strings:
         assert not n.endswith(".pyc"), n
         if n == ".env" or n.endswith("/.env"):
             raise AssertionError(f"unexpected env file in tarball: {n}")
-        if n.endswith(".py") and n not in _ALLOWED_ARTIFACT_PATHS:
+        if n.endswith(".py") and n not in expected_lower:
             raise AssertionError(f"unexpected raw python source in tarball: {n}")
     if "BUILD-INFO.json" not in names:
         raise AssertionError("tarball missing BUILD-INFO.json — build proof is required")
@@ -720,10 +758,18 @@ def verify_tarball_exclusions(tar_bytes: bytes, *, require_license_gate_strings:
         raise AssertionError("tarball missing RELEASE-MANIFEST.sig")
     if _PROTECTED_BUNDLE not in names:
         raise AssertionError("tarball missing protected runtime bundle")
-    expected_lower = {p.lower() for p in _ALLOWED_ARTIFACT_PATHS}
     if set(lowered) != expected_lower:
         raise AssertionError(f"unexpected artifact file list: {sorted(names)}")
-    combined = b"\n".join(file_bytes.values()).decode("utf-8", errors="ignore")
+    for required in _SOURCE_RUNTIME_REQUIRED:
+        if required.lower() not in lowered:
+            raise AssertionError(f"source runtime missing required module in tarball: {required}")
+    marker_scope = [
+        file_bytes.get(_PROTECTED_BUNDLE) or file_bytes.get(_PROTECTED_BUNDLE.lower()) or b"",
+        file_bytes.get("agent/_protected_runtime.py") or b"",
+        file_bytes.get("agent/__init__.py") or b"",
+        file_bytes.get("BUILD-INFO.json") or b"",
+    ]
+    combined = b"\n".join(marker_scope).decode("utf-8", errors="ignore")
     for marker in _FORBIDDEN_STRING_MARKERS:
         if marker in combined:
             raise AssertionError(f"forbidden string marker in tarball: {marker}")

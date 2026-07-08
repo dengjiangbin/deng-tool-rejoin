@@ -10,12 +10,15 @@ import unittest
 from pathlib import Path
 
 from agent.internal_test_artifact import (
-    _ALLOWED_ARTIFACT_PATHS,
+    _SOURCE_RUNTIME_REQUIRED,
     build_internal_test_tarball,
+    expected_artifact_paths,
     iter_internal_test_pack_files,
     path_should_exclude,
     verify_tarball_exclusions,
 )
+
+PROJECT = Path(__file__).resolve().parents[1]
 
 
 class ExcludePathTests(unittest.TestCase):
@@ -42,9 +45,31 @@ class BuilderFixtureTests(unittest.TestCase):
 
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def _seed_minimal_repo(self) -> None:
+        import shutil
+
+        (self.tmp / "agent").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "tools").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "agent" / "commands.py").write_text(
+            "def main(argv=None):\n    return 0\n",
+            encoding="utf-8",
+        )
+        for rel in (
+            "agent/deng_tool_rejoin.py",
+            "agent/install_verify_standalone.py",
+            "agent/version_standalone.py",
+            "agent/supervisor.py",
+            "agent/roblox_presence.py",
+            "agent/launcher.py",
+            "tools/boot_probe.py",
+        ):
+            src = PROJECT / rel
+            dst = self.tmp / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+
     def test_tarball_excludes_junk_and_has_sha256(self) -> None:
-        (self.tmp / "agent").mkdir()
-        (self.tmp / "agent" / "commands.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self._seed_minimal_repo()
         (self.tmp / "bot").mkdir()
         (self.tmp / "bot" / "main.py").write_text("x\n", encoding="utf-8")
         (self.tmp / "scripts").mkdir()
@@ -86,13 +111,16 @@ class BuilderFixtureTests(unittest.TestCase):
                 if tf.getmember(name).isfile()
             }
         joined = "\n".join(names)
-        self.assertEqual(set(names), _ALLOWED_ARTIFACT_PATHS)
+        client_rels = [rel for rel, _ in iter_internal_test_pack_files(self.tmp)]
+        self.assertEqual(set(names), expected_artifact_paths(client_rels))
         self.assertIn("agent/deng_tool_rejoin.py", names)
         self.assertIn("agent/_protected_runtime.py", names)
         self.assertIn("agent/.deng_runtime.bin", names)
+        self.assertIn("agent/commands.py", names)
+        for required in _SOURCE_RUNTIME_REQUIRED:
+            self.assertIn(required, names)
         self.assertIn("RELEASE-MANIFEST.json", names)
         self.assertIn("RELEASE-MANIFEST.sig", names)
-        self.assertNotIn("agent/commands.py", names)
         self.assertNotIn("examples/.env.example", names)
         self.assertNotIn(".env", names)
         self.assertNotIn("data/bad.json", names)
@@ -127,7 +155,7 @@ class BuilderFixtureTests(unittest.TestCase):
         self.assertEqual(manifest["min_server_protocol"], 2)
         self.assertTrue(manifest["build_id"])
         mf = {item["path"]: item for item in manifest["files"]}
-        self.assertEqual(set(mf), _ALLOWED_ARTIFACT_PATHS - {"RELEASE-MANIFEST.json", "RELEASE-MANIFEST.sig"})
+        self.assertEqual(set(mf), expected_artifact_paths(client_rels) - {"RELEASE-MANIFEST.json", "RELEASE-MANIFEST.sig"})
         runtime = files["agent/.deng_runtime.bin"]
         self.assertEqual(mf["agent/.deng_runtime.bin"]["sha256"], __import__("hashlib").sha256(runtime).hexdigest())
         sig = json.loads(files["RELEASE-MANIFEST.sig"])
@@ -135,8 +163,7 @@ class BuilderFixtureTests(unittest.TestCase):
         self.assertTrue(sig["signature"])
 
     def test_stable_version_metadata_can_be_embedded(self) -> None:
-        (self.tmp / "agent").mkdir()
-        (self.tmp / "agent" / "commands.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self._seed_minimal_repo()
         out = self.tmp / "releases" / "v1.0.0" / "deng-tool-rejoin-v1.0.0.tar.gz"
 
         build_internal_test_tarball(

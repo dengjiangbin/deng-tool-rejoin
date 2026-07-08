@@ -220,6 +220,9 @@ def wrapper_body_sh(install_api_base: str) -> str:
         "fi\n"
         'case "$_rc" in 134|139)\n'
         '  echo "[!] deng-rejoin crashed during startup." >&2\n'
+        '  echo "[!] Protected runtime module import may have crashed on this device." >&2\n'
+        '  echo "[!] On Termux, run source mode:" >&2\n'
+        '  echo "[!]   DENG_RUNTIME_MODE=source deng-rejoin" >&2\n'
         '  echo "[!] Run: DENG_BOOT_TRACE=1 deng-rejoin" >&2\n'
         '  echo "[!] Run: python3 $DENG_REJOIN_HOME/tools/boot_probe.py" >&2\n'
         "  ;; esac\n"

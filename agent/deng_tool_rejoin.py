@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """DENG Tool: Rejoin CLI entrypoint.
 
-Stdlib-only until argv dispatch completes. Protected runtime and
-``agent.commands`` load only inside :func:`_run_cli` so install-safe
-``version`` and boot tracing never boot the heavy runtime.
+Stdlib-only until argv dispatch completes. Runtime mode (source vs protected)
+is chosen before importing ``agent.commands`` so Termux/Android never boots
+the marshalled protected import hook during normal startup.
 """
 
 from __future__ import annotations
@@ -23,11 +23,7 @@ from pathlib import Path
 
 # [DENG_REJOIN_SEGFAULT_FIX] probe_id=p-3daeae4cbd.  Force plain fork() (not
 # vfork/posix_spawn) for every subprocess spawn BEFORE any agent module — or any
-# Popen — runs.  Start reached 'layout_done' then SIGSEGV'd on the next Popen
-# (the monitor-bridge interpreter spawn), which falls back to fork_exec+vfork;
-# vfork shares the parent address space and corrupts it under Termux/bionic with
-# live watchdog + logcat threads.  Set at the entrypoint so both the parent and
-# the spawned monitor worker (which re-enters here) inherit the safe path.
+# Popen — runs.
 try:  # pragma: no cover - exercised on-device, no-op on Windows
     if hasattr(_subprocess, "_USE_VFORK"):
         _subprocess._USE_VFORK = False  # type: ignore[attr-defined]
@@ -38,8 +34,9 @@ except Exception:  # noqa: BLE001
 
 _ENTRY_ROOT = Path(__file__).resolve().parent
 _INSTALL_ROOT = _ENTRY_ROOT.parent
-_BOOT_TRACE = os.environ.get("DENG_BOOT_TRACE", "").strip() in {"1", "true", "yes", "on"}
+_BOOT_TRACE = os.environ.get("DENG_BOOT_TRACE", "").strip().lower() in {"1", "true", "yes", "on"}
 _BOOT_STEP = 0
+_RUNTIME_MODES = frozenset({"auto", "source", "protected"})
 
 
 def _boot_trace(label: str) -> None:
@@ -56,6 +53,31 @@ def _ensure_install_root_on_path() -> None:
     root = str(_INSTALL_ROOT)
     if root not in sys.path:
         sys.path.insert(0, root)
+
+
+def _detect_termux() -> bool:
+    """Best-effort Termux/Android detection without importing agent modules."""
+    prefix = os.environ.get("PREFIX", "").replace("\\", "/")
+    if "/com.termux/" in prefix:
+        return True
+    if os.environ.get("TERMUX_VERSION", "").strip():
+        return True
+    if Path("/data/data/com.termux/files").is_dir():
+        return True
+    if sys.platform == "linux" and Path("/system/bin/app_process").exists():
+        if Path("/data/data/com.termux/files/usr/bin/python3").exists():
+            return True
+    return False
+
+
+def _resolve_runtime_mode() -> str:
+    """Return ``source`` or ``protected`` after applying auto detection."""
+    requested = os.environ.get("DENG_RUNTIME_MODE", "auto").strip().lower() or "auto"
+    if requested not in _RUNTIME_MODES:
+        requested = "auto"
+    if requested == "auto":
+        return "source" if _detect_termux() else "protected"
+    return requested
 
 
 def _dispatch_install_safe_version(argv: list[str]) -> int | None:
@@ -99,7 +121,7 @@ def _dispatch_install_safe_help(argv: list[str]) -> int | None:
 
 
 def _ensure_agent_package_stub() -> None:
-    """Register a minimal ``agent`` package without booting protected runtime."""
+    """Register a minimal ``agent`` package before protected runtime install."""
     if "agent" in sys.modules:
         return
     import types
@@ -140,6 +162,19 @@ def _install_protected_runtime() -> bool:
     return True
 
 
+def _bootstrap_runtime(mode: str) -> str:
+    """Prepare import path for the selected runtime mode."""
+    _ensure_install_root_on_path()
+    if mode == "source":
+        _boot_trace("using source runtime, protected runtime skipped")
+        return mode
+    _boot_trace("using protected runtime")
+    if not _install_protected_runtime():
+        _boot_trace("protected runtime unavailable; falling back to source runtime")
+        return "source"
+    return "protected"
+
+
 def _import_commands_main():
     _boot_trace("before import agent.commands")
     if __package__ in (None, ""):
@@ -170,7 +205,6 @@ def _try_dispatch_lime_argv(argv: list[str]) -> int | None:
 def _run_cli(argv: list[str]) -> int:
     _boot_trace("entrypoint entered")
     _boot_trace(f"parsed argv={argv!r}")
-    _ensure_install_root_on_path()
 
     version_rc = _dispatch_install_safe_version(argv)
     if version_rc is not None:
@@ -180,9 +214,15 @@ def _run_cli(argv: list[str]) -> int:
     if help_rc is not None:
         return help_rc
 
-    _boot_trace("before protected runtime bootstrap")
-    _install_protected_runtime()
-    _boot_trace("runtime bootstrap complete")
+    requested_mode = os.environ.get("DENG_RUNTIME_MODE", "auto").strip().lower() or "auto"
+    if requested_mode not in _RUNTIME_MODES:
+        requested_mode = "auto"
+    _boot_trace(f"runtime mode {requested_mode}")
+    if _detect_termux():
+        _boot_trace("termux detected")
+
+    mode = _resolve_runtime_mode()
+    active_mode = _bootstrap_runtime(mode)
 
     main = _import_commands_main()
 
@@ -193,6 +233,8 @@ def _run_cli(argv: list[str]) -> int:
     _boot_trace("before agent.commands.main()")
     rc = main(argv)
     _boot_trace(f"after agent.commands.main() rc={rc}")
+    if active_mode == "protected" and _detect_termux():
+        _boot_trace("warning: protected runtime used on termux")
     return rc
 
 
