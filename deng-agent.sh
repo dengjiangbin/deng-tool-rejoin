@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.27-7"
+AGENT_VERSION="2026.11.27-8"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -431,8 +431,8 @@ worker(){
 }
 
 # ---------- self-update ----------
-# Every 10 minutes: fetch the latest agent; if it is a valid, different script, replace
-# this file and restart in place (same PID), so users never have to update by hand.
+# Runs only when the website's Update button asks: fetch the latest agent; if it is a
+# valid, newer script, replace this file and restart in place (same PID).
 self_update(){
   local tmp="$BASE/.agent.new"
   curl -fsSL -m 30 "$SELF_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
@@ -462,7 +462,6 @@ loop(){
     load_apps
     if [ -f "$BASE/.rescan" ]; then rm -f "$BASE/.rescan"; scan_key; fi
     if [ -f "$BASE/.update" ]; then rm -f "$BASE/.update"; self_update || say "Agent is up to date ($AGENT_VERSION)."; fi
-    [ $((tick % 120)) = 60 ] && self_update
     if [ $((tick % 6)) = 0 ]; then
       scan_key; scan_users
       [ -s "$REMOTE" ] && sync_now "$(cat "$REMOTE")"
