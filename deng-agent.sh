@@ -105,7 +105,24 @@ probe_status(){
     list+=$(jq -nc --arg pkg "$p" --arg name "${p##*.}" --argjson run "$r" '{pkg:$pkg,name:$name,running:$run}')','
   done
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    --argjson list "[${list%,}]" '{clones:$c,running:$r,dead:$d,list:$list}'
+    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys}'
+}
+# CPU % (1-second sample of /proc/stat), RAM and /data storage in MB. Any value that
+# can't be read is sent as null so the site shows "—" instead of a wrong number.
+probe_sys(){
+  local a b cpu=null cores ram_t=null ram_a=null dk=null
+  a=$(root 'head -1 /proc/stat' 2>/dev/null); sleep 1; b=$(root 'head -1 /proc/stat' 2>/dev/null)
+  if [ -n "$a" ] && [ -n "$b" ]; then
+    cpu=$(printf '%s\n%s\n' "$a" "$b" | awk '{i=$5+$6; t=0; for(k=2;k<=NF;k++) t+=$k; if(NR==1){i1=i;t1=t}else{dt=t-t1; if(dt>0) printf "%d", (dt-(i-i1))*100/dt; else print "null"}}')
+    [ -n "$cpu" ] || cpu=null
+  fi
+  cores=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null); [ "${cores:-0}" -gt 0 ] 2>/dev/null || cores=null
+  ram_t=$(awk '/^MemTotal:/{print int($2/1024)}' /proc/meminfo 2>/dev/null); [ -n "$ram_t" ] || ram_t=null
+  ram_a=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo 2>/dev/null); [ -n "$ram_a" ] || ram_a=null
+  dk=$(root 'df -kP /data 2>/dev/null || df -k /data' 2>/dev/null | awk 'NR>1 && $2 ~ /^[0-9]+$/ {printf "[%d,%d]", $2/1024, $3/1024; exit}'); [ -n "$dk" ] || dk='[null,null]'
+  jq -nc --argjson cpu "$cpu" --argjson cores "$cores" --argjson rt "$ram_t" --argjson ra "$ram_a" --argjson dk "$dk" \
+    '{cpu:$cpu,cores:$cores,ram_total:$rt,ram_used:(if $rt!=null and $ra!=null then $rt-$ra else null end),disk_total:$dk[0],disk_used:$dk[1]}' 2>/dev/null \
+    || printf '{}'
 }
 
 # ---------- command execution ----------
