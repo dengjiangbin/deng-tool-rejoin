@@ -99,6 +99,25 @@ update_tools(){
   [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616"
 }
 
+# ---- open DENG automatically when Termux starts ----
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+AUTOSH="$PREFIX/etc/profile.d/deng-auto.sh"; NOAUTO="$DENG/noauto"
+autostart_install(){
+  mkdir -p "${AUTOSH%/*}"
+  cat > "$AUTOSH" <<'EOS'
+# DENG: open the DENG menu when Termux starts (turn off in the DENG menu)
+if [ -z "${DENG_AUTO_DONE:-}" ] && [ -t 0 ] && [ ! -f "$HOME/.deng/noauto" ] && command -v start >/dev/null 2>&1; then
+  export DENG_AUTO_DONE=1
+  start deng
+fi
+EOS
+  # non-login shells read ~/.bashrc instead
+  grep -q 'deng-auto.sh' "$HOME/.bashrc" 2>/dev/null || printf '\n[ -f "%s" ] && . "%s"\n' "$AUTOSH" "$AUTOSH" >> "$HOME/.bashrc"
+}
+autostart_on(){ [ -f "$AUTOSH" ] && [ ! -f "$NOAUTO" ]; }
+autostart_toggle(){ if autostart_on; then : > "$NOAUTO"; say 'Auto-start OFF.'; else rm -f "$NOAUTO"; autostart_install; say 'Auto-start ON.'; fi; sleep 1; }
+if [ "${1:-}" = --autostart-install ]; then autostart_install; exit 0; fi
+
 # ---- menu ----
 menu(){
   while true; do
@@ -111,19 +130,22 @@ menu(){
     say '========================'
     say '[1] Rejoin Tool'
     say '[2] Log out'
+    say "[3] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
     say '[0] Exit'
     say '------------------------'
-    printf 'Select [0-2]: '; IFS= read -r c
+    printf 'Select [0-3]: '; IFS= read -r c
     case "$c" in
       1) [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _; continue; }
          bash "$CODE616" ;;
       2) logout; gate; agent_start ;;
+      3) autostart_toggle ;;
       0) exit 0 ;;
-      *) say 'Pick 0-2.'; sleep 1 ;;
+      *) say 'Pick 0-3.'; sleep 1 ;;
     esac
   done
 }
 gate
 update_tools
+[ -f "$NOAUTO" ] || autostart_on || autostart_install   # older installs get auto-start too
 agent_start
 menu

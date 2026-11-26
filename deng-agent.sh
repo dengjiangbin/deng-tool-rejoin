@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.27-5"
+AGENT_VERSION="2026.11.27-6"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -404,6 +404,9 @@ worker(){
 self_update(){
   local tmp="$BASE/.agent.new"
   curl -fsSL -m 30 "$SELF_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  local nv; nv=$(sed -n 's/^AGENT_VERSION="\([0-9.]*-[0-9]*\)"$/\1/p' "$tmp" | head -1)
+  # only move forward: GitHub's cache can briefly serve an older copy
+  if [ -z "$nv" ] || [ "$nv" = "$AGENT_VERSION" ] || [ "$(printf '%s\n%s\n' "$AGENT_VERSION" "$nv" | sort -V | tail -1)" != "$nv" ]; then rm -f "$tmp"; return 1; fi
   if head -1 "$tmp" | grep -q '^#!/data/data/com.termux' && bash -n "$tmp" 2>/dev/null && ! cmp -s "$tmp" "$SELF"; then
     chmod 700 "$tmp" && mv -f "$tmp" "$SELF" || return 1
     say "Updating agent…"
