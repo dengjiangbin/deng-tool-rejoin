@@ -11,7 +11,7 @@ REPO="https://github.com/dengjiangbin/deng-tool-rejoin"
 echo "== 1/6 base packages =="
 sudo apt-get update -y
 command -v node >/dev/null 2>&1 || { curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -; sudo apt-get install -y nodejs; }
-sudo apt-get install -y git build-essential debian-keyring debian-archive-keyring apt-transport-https curl
+sudo apt-get install -y git build-essential debian-keyring debian-archive-keyring apt-transport-https curl rsync
 # Caddy (automatic HTTPS reverse proxy)
 if ! command -v caddy >/dev/null 2>&1; then
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
