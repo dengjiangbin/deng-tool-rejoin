@@ -90,14 +90,14 @@
   if(localStorage.getItem('deng_token')) location.replace('index.html');
   async function submitForm(e){
     e.preventDefault();
-    const u=document.getElementById('u').value.trim(), p=document.getElementById('p').value, e=document.getElementById('e').value.trim();
+    const u=document.getElementById('u').value.trim(), p=document.getElementById('p').value, em=document.getElementById('e').value.trim();
     const btn=document.getElementById('go'), msg=document.getElementById('msg');
     msg.className='msg'; msg.textContent='';
     if(!u||!p){msg.className='msg err';msg.textContent='Enter a username and password.';return false}
-    if(mode==='register'&&!e){msg.className='msg err';msg.textContent='Enter an email for password resets.';return false}
+    if(mode==='register'&&!em){msg.className='msg err';msg.textContent='Enter an email for password resets.';return false}
     btn.disabled=true;
     try{
-      const body=mode==='login'?{username:u,password:p}:{username:u,password:p,email:e};
+      const body=mode==='login'?{username:u,password:p}:{username:u,password:p,email:em};
       const r=await fetch('/api/'+(mode==='login'?'login':'register'),{method:'POST',
         headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const d=await r.json();
