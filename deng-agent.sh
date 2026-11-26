@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.27-6"
+AGENT_VERSION="2026.11.27-7"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -151,13 +151,28 @@ ensure_linked(){
 
 # ---------- status ----------
 # Reports phone totals AND a per-clone list so the site can control each clone.
+# Per clone: off / loading / ingame / dc / running. "ingame" comes from the heartbeat file
+# the code616 Lua writes every 5s while the clone is really inside a server.
+HB_REL='files/gloop/external/Workspace/code616_hb.txt'
 probe_status(){
   load_apps
-  local total=${#APPS[@]} run=0 p r list=''
-  for p in "${APPS[@]}"; do
-    if root "pidof '$p'" >/dev/null 2>&1; then r=true; run=$((run+1)); else r=false; fi
-    list+=$(jq -nc --arg pkg "$p" --arg name "${p##*.}" --argjson run "$r" '{pkg:$pkg,name:$name,running:$run}')','
-  done
+  local total=${#APPS[@]} run=0 list='' now pkg r mt w x st age raw
+  now=$(date +%s)
+  raw=$(root "for p in ${APPS[*]}; do f=/storage/emulated/0/Android/data/\$p/$HB_REL; r=0; pidof \$p >/dev/null 2>&1 && r=1
+          if [ -f \$f ]; then echo \"\$p \$r \$(stat -c %Y \$f) \$(head -c 60 \$f | tr -d '\n')\"; else echo \"\$p \$r - -\"; fi; done" 2>/dev/null)
+  while read -r pkg r mt w _t x _; do   # file: '<ok|dc> <time> [start]'
+    [ -n "$pkg" ] || continue
+    if [ "$r" != 1 ]; then st=off
+    else run=$((run+1)); st=running
+      if [[ "$mt" =~ ^[0-9]+$ ]]; then age=$((now-mt))
+        if [ "$w" = dc ]; then st=dc
+        elif [ "${x:-}" = start ]; then [ $age -lt 600 ] && st=loading
+        elif [ "$w" = ok ] && [ $age -le 120 ]; then st=ingame
+        elif [ "$w" = ok ]; then st=stuck; fi
+      fi
+    fi
+    list+=$(jq -nc --arg pkg "$pkg" --arg name "${pkg##*.}" --arg user "${RBX[$pkg]:-}" --argjson run "$([ "$r" = 1 ] && echo true || echo false)" --arg st "$st" '{pkg:$pkg,name:$name,user:$user,running:$run,state:$st}')','
+  done <<< "$raw"
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
     --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver}'
 }
@@ -184,8 +199,13 @@ probe_sys(){
 # code616 Start All), so a clone the user resized doesn't come back at that size.
 grid_slot(){ [ -f "$HOME/code616.sh" ] || return 0; root "pidof '$1'" >/dev/null 2>&1 && return 0
   timeout 20 bash "$HOME/code616.sh" --grid-slot "$1" </dev/null >/dev/null 2>&1 || true; }
-open_one(){ allowed "$1" || return 1; grid_slot "$1"; root "monkey -p '$1' -c android.intent.category.LAUNCHER 1" 2>&1 | grep -q 'Events injected: 1'; }
-rejoin_one(){ allowed "$1" || return 1; local url="$2"; grid_slot "$1"; root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
+# Fresh "starting" heartbeat: code616's auto-rejoin would otherwise read the previous
+# session's file (old/"dc") and kill the clone while it is still loading. Keeps the
+# file's owner so the game can keep writing it.
+mark_starting(){ local f="$EXT_ROOT/$1/$HB_REL" d; d="${f%/*}"
+  root "[ -d '$d' ] || exit 0; if [ -f '$f' ]; then printf 'ok %s start' \$(date +%s) > '$f'; else printf 'ok %s start' \$(date +%s) > '$f' && chown \$(stat -c %u:%g '$d') '$f'; fi" >/dev/null 2>&1; }
+open_one(){ allowed "$1" || return 1; grid_slot "$1"; mark_starting "$1"; root "monkey -p '$1' -c android.intent.category.LAUNCHER 1" 2>&1 | grep -q 'Events injected: 1'; }
+rejoin_one(){ allowed "$1" || return 1; local url="$2"; grid_slot "$1"; mark_starting "$1"; root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
 target_url(){ local t; t=$(local_target)
   case "$t" in ps\|*) printf '%s' "${t#ps|}";; pj\|*) local r=${t#pj|}; printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s' "${r%%|*}" "${r#*|}";; esac; }
 # ---------- scripts (synced with the code616 Script menu) ----------
@@ -330,6 +350,18 @@ scan_key(){
        tails: ($list|map(.tail)|map(select(.))|unique|.[:3]), same: (($list|map(.tail)|map(select(.))|unique|length) <= 1)}' 2>/dev/null) || KEYINFO='{}'
 }
 
+# ---------- Roblox account per clone ----------
+# The Roblox app keeps the signed-in username in its shared_prefs. Read-only; cookies
+# and tokens are never touched. Empty when no account is signed in.
+declare -A RBX=()
+scan_users(){ local raw pkg u
+  RBX=(); [ ${#APPS[@]} -gt 0 ] || return 0
+  raw=$(root "for p in ${APPS[*]}; do d=/data/data/\$p/shared_prefs; [ -d \$d ] || continue
+      u=\$(grep -hoE '<string name=\"(username|userName|UserName|user_name|LastUsername|lastLoggedInUsername)\">[^<]{3,20}<' \$d/*.xml 2>/dev/null | head -1 | sed -E 's/.*\">([^<]*)<$/\\1/')
+      [ -n \"\$u\" ] && echo \"\$p \$u\"; done" 2>/dev/null)
+  while read -r pkg u; do [[ -n "$pkg" && "$u" =~ ^[A-Za-z0-9_]{3,20}$ ]] && RBX[$pkg]=$u; done <<< "$raw"
+}
+
 # ---------- settings sync: website <-> Termux menu (3-way merge) ----------
 # Last agreed state lives in sync.state. If only one side changed since then, that side
 # wins; if both changed, the website wins. Runs when the website's rev changes and
@@ -432,7 +464,7 @@ loop(){
     if [ -f "$BASE/.update" ]; then rm -f "$BASE/.update"; self_update || say "Agent is up to date ($AGENT_VERSION)."; fi
     [ $((tick % 120)) = 60 ] && self_update
     if [ $((tick % 6)) = 0 ]; then
-      scan_key
+      scan_key; scan_users
       [ -s "$REMOTE" ] && sync_now "$(cat "$REMOTE")"
     fi
     tick=$((tick+1))
