@@ -1,4 +1,5 @@
 'use strict';
+try { require('dotenv').config(); } catch { /* dotenv optional (e.g. VPS uses --env-file) */ }
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
