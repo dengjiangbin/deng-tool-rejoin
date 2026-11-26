@@ -61,7 +61,37 @@ gate(){
   login || exit 1
   verify || { say 'Could not verify account. Try again later.'; exit 1; }
 }
-logout(){ rm -f "$AUTH"; TOKEN=""; say 'Logged out.'; }
+# ---- website agent (background, joins this account automatically) ----
+AGDIR="$HOME/.deng-rejoin"; AGPID="$AGDIR/agent.pid"; AGLOG="$AGDIR/agent.log"; AGCONF="$AGDIR/agent.conf"
+agent_pid(){ local p; [ -f "$AGPID" ] && p=$(cat "$AGPID" 2>/dev/null) && kill -0 "$p" 2>/dev/null && printf '%s' "$p"; }
+agent_start(){
+  agent_pid >/dev/null && return 0
+  [ -f "$AGENT" ] || getfile "$RAW/deng-agent.sh" "$AGENT" || { say 'Agent download failed.'; return 1; }
+  mkdir -p "$AGDIR"; chmod 700 "$AGDIR"
+  [ -f "$AGLOG" ] && [ "$(wc -c < "$AGLOG")" -gt 1000000 ] && tail -c 200000 "$AGLOG" > "$AGLOG.tmp" && mv "$AGLOG.tmp" "$AGLOG"
+  nohup bash "$AGENT" >> "$AGLOG" 2>&1 < /dev/null &
+  sleep 3
+}
+agent_stop(){ local p; p=$(agent_pid) && kill "$p" 2>/dev/null; rm -f "$AGPID"; }
+agent_name(){ [ -f "$AGCONF" ] && ( NAME=''; . "$AGCONF" 2>/dev/null; printf '%s' "$NAME" ); }
+agent_status(){
+  if agent_pid >/dev/null; then printf 'online as %s' "$(agent_name)"; else printf 'offline'; fi
+}
+agent_menu(){
+  say ''; say "Website: $(agent_status)"
+  say "This phone joins $USERNAME automatically and shows up in Fleet on the website."
+  say '[1] Restart connection   [2] Show recent log   [Enter] Back'
+  printf 'Select: '; IFS= read -r c
+  case "$c" in
+    1) agent_stop; agent_start; say "Website: $(agent_status)"; read -r -p 'Enter to continue... ' _ ;;
+    2) tail -n 15 "$AGLOG" 2>/dev/null || say 'No log yet.'; read -r -p 'Enter to continue... ' _ ;;
+  esac
+}
+logout(){
+  agent_stop
+  [ -f "$AGCONF" ] && sed -i "s/^DEVICE_TOKEN=.*/DEVICE_TOKEN=''/" "$AGCONF"
+  rm -f "$AUTH"; TOKEN=""; say 'Logged out. This phone left the website.'
+}
 
 # ---- menu ----
 menu(){
@@ -73,7 +103,7 @@ menu(){
     say "   signed in: $USERNAME"
     say '========================'
     say '[1] Rejoin Tool (local menu)'
-    say '[2] Website Agent (link to site)'
+    say "[2] Website ($(agent_status))"
     say '[3] Update tools'
     say '[4] Log out'
     say '[0] Exit'
@@ -82,17 +112,17 @@ menu(){
     case "$c" in
       1) [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _; continue; }
          bash "$CODE616" ;;
-      2) [ -f "$AGENT" ] || getfile "$RAW/deng-agent.sh" "$AGENT" || { say 'Download failed'; read -r _; continue; }
-         bash "$AGENT" ;;
+      2) agent_menu ;;
       3) getfile "$RAW/code616.sh" "$CODE616" && say 'code616 updated.' || say 'code616 update failed.'
-         getfile "$RAW/deng-agent.sh" "$AGENT" && say 'agent updated.' || say 'agent update failed.'
+         getfile "$RAW/deng-agent.sh" "$AGENT" && { say 'agent updated.'; agent_stop; agent_start; } || say 'agent update failed.'
          getfile "$RAW/deng-launch.sh" "$DENG/deng-launch.sh" && say 'launcher updated (restart start deng).' || true
          read -r -p 'Enter to continue... ' _ ;;
-      4) logout; gate ;;
+      4) logout; gate; agent_start ;;
       0) exit 0 ;;
       *) say 'Pick 0-4.'; sleep 1 ;;
     esac
   done
 }
 gate
+agent_start
 menu

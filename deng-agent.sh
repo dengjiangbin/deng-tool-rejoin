@@ -1,14 +1,18 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# DENG Rejoin — phone agent. Links this cloud phone to your rejoin.deng.my.id account,
+# DENG Rejoin — phone agent. Joins this cloud phone to the account you signed in with
+# in `start deng` (no extra login, no prompts), names the phone from the device itself,
 # reports clone status, and runs commands from the website (start / rejoin / scripts /
-# target / Delta key). Saved login persists; you only re-enter it if the account
-# password changes. Needs: root (su), curl, jq.
+# target / Delta key). Started in the background by `start deng`. Needs: root (su), curl, jq.
 set -u
 
 BASE="$HOME/.deng-rejoin"
 CONF="$BASE/agent.conf"
 mkdir -p "$BASE"; chmod 700 "$BASE"
-DEFAULT_SERVER="https://rejoin.deng.my.id"
+LAUNCH_DIR="$HOME/.deng"
+LAUNCH_AUTH="$LAUNCH_DIR/auth"
+DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
+launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
+PIDFILE="$BASE/agent.pid"
 POLL=5
 
 SERVER=""; DEVICE_TOKEN=""; DEVICE_ID=""; NAME=""
@@ -51,28 +55,44 @@ api(){ # api METHOD PATH [json]  -> sets globals RESP (body) and HTTP (status)
   local out; out=$(curl "${a[@]}" "$SERVER$path" 2>/dev/null) || out=$'\n000'
   HTTP=${out##*$'\n'}; RESP=${out%$'\n'*}
 }
-first_setup(){
-  say ''; say '=== DENG Rejoin — link this phone ==='
-  read -r -p "Server [$DEFAULT_SERVER]: " SERVER; [ -n "$SERVER" ] || SERVER="$DEFAULT_SERVER"
-  SERVER="${SERVER%/}"
-  read -r -p "Device name [$(getprop ro.product.model 2>/dev/null || echo phone)]: " NAME
-  [ -n "$NAME" ] || NAME="$(getprop ro.product.model 2>/dev/null || echo phone)"
-  say ''; say 'Log in with your DENG Rejoin account (saved on this phone).'
-  local u p; read -r -p 'Username: ' u; read -r -s -p 'Password: ' p; say ''
-  api POST /api/device/login "$(jq -nc --arg u "$u" --arg p "$p" --arg n "$NAME" '{username:$u,password:$p,name:$n}')"
-  finish_link "$RESP"
+# Phone name from the device itself (root): cloud-phone ID if the provider sets one,
+# else the device name, else model; plus 4 chars of android_id so phones never collide.
+device_name(){
+  local cand id4 n
+  cand=$(root "getprop" 2>/dev/null | grep -iE '\[[^]]*(pad[._]?code|padcode|instance[._]?id|cloud[._]?(phone|id)|vm[._]?id)[^]]*\]: \[[^]]+\]' \
+         | head -1 | sed -E 's/.*\]: \[([^]]*)\].*/\1/')
+  [ -n "$cand" ] || cand=$(root "settings get global device_name" 2>/dev/null | tr -d '\r')
+  [ "$cand" = null ] && cand=''
+  [ -n "$cand" ] || cand=$(getprop ro.product.model 2>/dev/null)
+  [ -n "$cand" ] || cand=phone
+  id4=$(root "settings get secure android_id" 2>/dev/null | tr -d '\r' | tail -c 5)
+  n=$(printf '%s' "$cand" | tr -c 'A-Za-z0-9._:-' '-' | sed -E 's/-+/-/g; s/^-|-$//g' | cut -c1-30)
+  [ -n "$id4" ] && [ "$id4" != null ] && n="$n-$id4"
+  printf '%s' "${n:-phone}"
 }
-finish_link(){
-  local b="$1"
-  if [ "$HTTP" = 200 ]; then
+# Join the account signed in via `start deng`. No prompts.
+auto_link(){
+  local tok out code b
+  [ -f "$LAUNCH_AUTH" ] && tok=$(cat "$LAUNCH_AUTH" 2>/dev/null) || tok=''
+  if [ -z "$tok" ]; then say 'Not signed in. Run: start deng'; return 1; fi
+  [ -n "$NAME" ] || NAME=$(device_name)
+  out=$(curl -sS -m 20 -w '\n%{http_code}' -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+        --data-binary "$(jq -nc --arg n "$NAME" '{name:$n}')" "$SERVER/api/device/claim" 2>/dev/null) || out=$'\n000'
+  code=${out##*$'\n'}; b=${out%$'\n'*}
+  if [ "$code" = 200 ]; then
     DEVICE_TOKEN=$(printf '%s' "$b" | jq -r '.device_token'); DEVICE_ID=$(printf '%s' "$b" | jq -r '.device_id')
-    save_conf; say "Linked as $(printf '%s' "$b" | jq -r '.name'). Saved — no need to log in again."
+    NAME=$(printf '%s' "$b" | jq -r '.name'); save_conf; say "Phone joined the account as $NAME."
     return 0
   fi
-  say "Link failed: $(printf '%s' "$b" | jq -r '.error // "error"') (HTTP $HTTP)"; return 1
+  case "$code" in
+    000) say 'Cannot reach the server; retrying.';;
+    401) say 'Account session ended. Run: start deng and sign in again.';;
+    *)   say "Could not join the account (HTTP $code).";;
+  esac
+  return 1
 }
 ensure_linked(){
-  while [ -z "$DEVICE_TOKEN" ]; do first_setup || sleep 2; done
+  while [ -z "$DEVICE_TOKEN" ]; do auto_link || sleep 30; done
 }
 
 # ---------- status ----------
@@ -89,8 +109,12 @@ probe_status(){
 }
 
 # ---------- command execution ----------
-open_one(){ allowed "$1" || return 1; root "monkey -p '$1' -c android.intent.category.LAUNCHER 1" 2>&1 | grep -q 'Events injected: 1'; }
-rejoin_one(){ allowed "$1" || return 1; local url="$2"; root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
+# Before a stopped clone is (re)launched, put it back in its grid slot (same math as
+# code616 Start All), so a clone the user resized doesn't come back at that size.
+grid_slot(){ [ -f "$HOME/code616.sh" ] || return 0; root "pidof '$1'" >/dev/null 2>&1 && return 0
+  bash "$HOME/code616.sh" --grid-slot "$1" >/dev/null 2>&1 || true; }
+open_one(){ allowed "$1" || return 1; grid_slot "$1"; root "monkey -p '$1' -c android.intent.category.LAUNCHER 1" 2>&1 | grep -q 'Events injected: 1'; }
+rejoin_one(){ allowed "$1" || return 1; local url="$2"; grid_slot "$1"; root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
 target_url(){
   if [ -n "$TARGET_URL" ]; then printf '%s' "$TARGET_URL"
   elif [ -n "$TARGET_PLACE" ] && [ -n "$TARGET_JOB" ]; then printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s' "$TARGET_PLACE" "$TARGET_JOB"
@@ -163,7 +187,7 @@ loop(){
     st=$(probe_status)
     api POST /api/device/heartbeat "$(jq -nc --argjson s "$st" '{status:$s}')"; body=$RESP
     if [ "$HTTP" = 401 ]; then
-      say 'Session ended (password changed?). Please link again.'
+      say 'Phone session ended (password changed?). Re-joining with the start deng login...'
       DEVICE_TOKEN=''; save_conf; ensure_linked; continue
     fi
     if [ "$HTTP" = 200 ]; then
@@ -186,8 +210,13 @@ loop(){
 
 main(){
   load_conf
-  [ -n "$SERVER" ] || SERVER="$DEFAULT_SERVER"
+  SERVER=$(launcher_server)          # always the same server as `start deng`
   need_root || exit 1
+  # one agent per phone
+  if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null && [ "$(cat "$PIDFILE")" != "$$" ]; then
+    say "Agent already running (PID $(cat "$PIDFILE"))."; exit 0
+  fi
+  echo $$ > "$PIDFILE"; trap 'rm -f "$PIDFILE"' EXIT
   ensure_linked
   loop
 }
