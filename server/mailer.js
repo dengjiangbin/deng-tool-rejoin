@@ -19,7 +19,8 @@ async function sendResetMail(to, link) {
   const subject = 'Reset your DENG Rejoin password';
   const text = `Someone asked to reset your DENG Rejoin password.\n\nReset link (valid 30 min):\n${link}\n\nIf this wasn't you, ignore this email.`;
   if (!tx) {
-    console.log('[mailer] (no SMTP configured) reset link for ' + to + ': ' + link);
+    // Do not log the reset link/token (sensitive). Configure SMTP to deliver resets.
+    console.log('[mailer] password reset requested but no SMTP configured — email not sent');
     return { delivered: false };
   }
   await tx.sendMail({ from, to, subject, text });
