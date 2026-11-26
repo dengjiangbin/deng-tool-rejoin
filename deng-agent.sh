@@ -215,21 +215,57 @@ local_script_file(){ # name outfile
   while IFS= read -r dir; do [ -n "$dir" ] || continue
     root "test -f '$dir/$name.lua' && cat '$dir/$name.lua'" > "$out" 2>/dev/null && return 0; done < <(script_dirs); return 1; }
 
+# Same safe method as the code616 Delta Key menu: stop the clones (a running Delta keeps
+# its old key and can write it back), replace every key file that clone uses while
+# keeping the file's owner/permissions, read it back to verify, then start the clones
+# that were running again.
+key_files(){ # pkg -> plain/JSON key files Delta already uses for this clone (besides our cache file)
+  root "find '$EXT_ROOT/$1/files' '/data/data/$1/files' -maxdepth 6 -type f \( -name license -o -name .license -o -name 'license.*' \) 2>/dev/null | head -10" 2>/dev/null; }
+put_key_file(){ # path keyfile key [create]
+  local f="$1" kt="$2" key="$3" create="${4:-}" old new t="$1.deng.$$.tmp" check
+  if root "test -f '$f' && test ! -L '$f'" >/dev/null 2>&1; then
+    old=$(root "head -c 4096 '$f'" 2>/dev/null)
+    if [[ "$old" =~ ^[A-Za-z0-9._=-]*$ ]]; then new=''                       # plain key file: replace whole content
+    elif [[ "$old" =~ ([\"\']?(license|key)[\"\']?[[:space:]]*[:=>][[:space:]]*[\"\']?)([A-Za-z0-9._=-]{8,512}) ]]; then
+      new=${old/"${BASH_REMATCH[0]}"/"${BASH_REMATCH[1]}$key"}                # JSON/XML: swap only the key value
+    else return 1; fi
+    if [ -n "$new" ]; then printf '%s' "$new" > "$kt.j"; else cp "$kt" "$kt.j"; fi
+    root "(cp -p '$f' '$t' 2>/dev/null || cp '$f' '$t') && cat '$kt.j' > '$t' && mv -f '$t' '$f'" >/dev/null 2>&1
+    root "rm -f '$t'" >/dev/null 2>&1; check=$(root "cat '$f'" 2>/dev/null); rm -f "$kt.j"
+    [ -n "$new" ] && [ "$check" = "$new" ] && return 0
+    [ "$check" = "$key" ]
+  elif [ -n "$create" ]; then
+    root "mkdir -p '${f%/*}' && test ! -L '${f%/*}' && cat '$kt' > '$f'" >/dev/null 2>&1
+    [ "$(root "cat '$f'" 2>/dev/null)" = "$key" ]
+  else return 1; fi
+}
 write_key(){ # key mode [pkg]
-  local key="$1" mode="$2" only="${3:-}" p path n=0 dir
-  [[ "$key" =~ ^[A-Za-z0-9._=-]{1,512}$ ]] || return 1
+  local key="$1" mode="$2" only="${3:-}" p f kt ok=0 bad=0 okc
+  local -a targets=() was=()
+  [[ "$key" =~ ^[A-Za-z0-9._=-]{1,512}$ ]] || { echo 'invalid key'; return 1; }
+  for p in "${APPS[@]}"; do [ -z "$only" ] || [ "$p" = "$only" ] && targets+=("$p"); done
+  [ ${#targets[@]} -gt 0 ] || { echo 'no clones'; return 1; }
+  kt="$BASE/.key.$$"; ( umask 077; printf '%s' "$key" > "$kt" )
+  for p in "${targets[@]}"; do root "pidof '$p'" >/dev/null 2>&1 && { root "am force-stop '$p'" >/dev/null 2>&1; was+=("$p"); }; done
+  [ ${#was[@]} -gt 0 ] && sleep 2
   if [ "$mode" = shared ] && [ -z "$only" ]; then
-    path='/storage/emulated/0/Delta/Internals/Cache/license'; dir="${path%/*}"
-    root "mkdir -p '$dir' && test ! -L '$dir' && printf %s '$key' > '$path'" >/dev/null 2>&1 && n=1
+    put_key_file /storage/emulated/0/Delta/Internals/Cache/license "$kt" "$key" create && ok=1 || bad=1
   else
-    for p in "${APPS[@]}"; do
-      [ -n "$only" ] && [ "$p" != "$only" ] && continue
-      dir="$EXT_ROOT/$p/files/gloop/external/Internals/cache"
-      root "mkdir -p '$dir' && test ! -L '$dir' && printf %s '$key' > '$dir/license'" >/dev/null 2>&1 && n=$((n+1))
+    for p in "${targets[@]}"; do okc=0
+      put_key_file "$EXT_ROOT/$p/files/gloop/external/Internals/cache/license" "$kt" "$key" create && okc=1
+      while IFS= read -r f; do [ -n "$f" ] || continue
+        [ "$f" = "$EXT_ROOT/$p/files/gloop/external/Internals/cache/license" ] && continue
+        put_key_file "$f" "$kt" "$key" && okc=1
+      done < <(key_files "$p")
+      [ $okc = 1 ] && ok=$((ok+1)) || bad=$((bad+1))
     done
   fi
-  [ "$n" -gt 0 ] && scan_key
-  [ "$n" -gt 0 ]
+  rm -f "$kt"; root sync >/dev/null 2>&1
+  DELAY=$(clone_delay)
+  for p in "${was[@]}"; do open_one "$p"; [ "$p" = "${was[-1]}" ] || sleep "$DELAY"; done
+  scan_key
+  echo "key saved on $ok clone(s)$([ $bad -gt 0 ] && echo ", failed on $bad")$([ ${#was[@]} -gt 0 ] && echo ", restarted ${#was[@]}")"
+  [ $ok -gt 0 ] && [ $bad = 0 ]
 }
 one_pkg(){ # validate payload.pkg is one of our clones; echoes it or fails
   local want; want=$(jq -r '.pkg // empty' <<<"$1"); [ -n "$want" ] || return 1
@@ -254,7 +290,7 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
     set_target) local t; t=$(remote_target "$(jq -c '{target:.}' <<<"$pl")"); apply_target "$t"; echo 'target saved';;
     set_settings) local d; d=$(jq -r '.delay // empty' <<<"$pl"); [[ "$d" =~ ^[0-9]{1,3}$ ]] && cfg_set DELAY "$d"; echo 'settings saved';;
     set_key) local only=''; only=$(jq -r '.pkg // empty' <<<"$pl"); [ -n "$only" ] && { allowed "$only" || { echo 'unknown clone'; return 1; }; }
-             write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" "$only" && echo 'key written' || { echo 'key failed'; return 1; };;
+             write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" "$only";;
     *) echo "unknown action"; return 1;;
   esac
   [ "$ok" = 1 ]
@@ -353,6 +389,7 @@ worker(){
     id=$(jq -r '.id' <<<"$c"); act=$(jq -r '.action' <<<"$c"); pl=$(jq -c '.payload' <<<"$c")
     say "→ $act (#$id)"
     res=$(run_command "$act" "$pl"); rc=$?
+    [ "$act" = set_key ] && : > "$BASE/.rescan"      # main loop re-reads key status right away
     api POST /api/device/ack "$(jq -nc --argjson id "$id" --argjson ok $([ $rc = 0 ] && echo true || echo false) --arg r "$res" '{id:$id,ok:$ok,result:$r}')"
   done
 }
@@ -369,6 +406,7 @@ loop(){
   local tick=0 st body rev c id
   while true; do
     load_apps
+    if [ -f "$BASE/.rescan" ]; then rm -f "$BASE/.rescan"; scan_key; fi
     if [ $((tick % 6)) = 0 ]; then
       scan_key
       [ -s "$REMOTE" ] && sync_now "$(cat "$REMOTE")"
