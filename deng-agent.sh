@@ -83,12 +83,16 @@ ensure_linked(){
 }
 
 # ---------- status ----------
+# Reports phone totals AND a per-clone list so the site can control each clone.
 probe_status(){
   load_apps
-  local total=${#APPS[@]} run=0 p
-  for p in "${APPS[@]}"; do root "pidof '$p'" >/dev/null 2>&1 && run=$((run+1)); done
+  local total=${#APPS[@]} run=0 p r list=''
+  for p in "${APPS[@]}"; do
+    if root "pidof '$p'" >/dev/null 2>&1; then r=true; run=$((run+1)); else r=false; fi
+    list+=$(jq -nc --arg pkg "$p" --arg name "${p##*.}" --argjson run "$r" '{pkg:$pkg,name:$name,running:$run}')','
+  done
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    '{clones:$c,running:$r,dead:$d}'
+    --argjson list "[${list%,}]" '{clones:$c,running:$r,dead:$d,list:$list}'
 }
 
 # ---------- command execution ----------
@@ -128,13 +132,24 @@ write_key(){ # key mode
   fi
   [ "$n" -gt 0 ]
 }
+one_pkg(){ # validate payload.pkg is one of our clones; echoes it or fails
+  local want; want=$(jq -r '.pkg // empty' <<<"$1"); [ -n "$want" ] || return 1
+  allowed "$want" || return 1
+  local p; for p in "${APPS[@]}"; do [ "$p" = "$want" ] && { printf '%s' "$want"; return 0; }; done
+  return 1
+}
 run_command(){ # action payload_json  -> echoes result, returns 0/1
-  local action="$1" pl="$2" p ok=1 url
+  local action="$1" pl="$2" p ok=1 url pkg
   case "$action" in
     start_all) for p in "${APPS[@]}"; do open_one "$p" || ok=0; sleep "$DELAY"; done; echo "opened ${#APPS[@]}";;
     stop_all)  for p in "${APPS[@]}"; do root "am force-stop '$p'" >/dev/null 2>&1; done; echo "stopped ${#APPS[@]}";;
     rejoin_all) url=$(target_url); [ -n "$url" ] || { echo 'no target set'; return 1; }
                for p in "${APPS[@]}"; do rejoin_one "$p" "$url" || ok=0; sleep "$DELAY"; done; echo "rejoined ${#APPS[@]}";;
+    start_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; open_one "$pkg" && echo "started $pkg" || { echo 'failed'; return 1; };;
+    stop_clone)  pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; root "am force-stop '$pkg'" >/dev/null 2>&1; echo "stopped $pkg";;
+    rejoin_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; url=$(target_url); [ -n "$url" ] || { echo 'no target set'; return 1; }
+               rejoin_one "$pkg" "$url" && echo "rejoined $pkg" || { echo 'failed'; return 1; };;
+    set_clone_auto) echo 'noted';;  # per-clone auto handled by on-phone monitor; acked for now
     push_script) write_script "$(jq -r '.name' <<<"$pl")" "$(jq -r '.body' <<<"$pl")" && echo pushed || { echo 'push failed'; return 1; };;
     remove_script) remove_script "$(jq -r '.name' <<<"$pl")"; echo removed;;
     set_target) TARGET_URL=$(jq -r '.url // ""' <<<"$pl"); TARGET_PLACE=$(jq -r '.place // ""' <<<"$pl"); TARGET_JOB=$(jq -r '.job // ""' <<<"$pl"); save_conf; echo 'target saved';;
