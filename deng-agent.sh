@@ -57,17 +57,10 @@ first_setup(){
   SERVER="${SERVER%/}"
   read -r -p "Device name [$(getprop ro.product.model 2>/dev/null || echo phone)]: " NAME
   [ -n "$NAME" ] || NAME="$(getprop ro.product.model 2>/dev/null || echo phone)"
-  say ''; say 'Link by:  [1] Pairing code (from the website)   [2] Username + password'
-  local mode; read -r -p 'Choose [1/2]: ' mode
-  if [ "$mode" = 2 ]; then
-    local u p; read -r -p 'Username: ' u; read -r -s -p 'Password: ' p; say ''
-    api POST /api/device/login "$(jq -nc --arg u "$u" --arg p "$p" --arg n "$NAME" '{username:$u,password:$p,name:$n}')"
-    finish_link "$RESP"
-  else
-    local c; read -r -p 'Pairing code: ' c
-    api POST /api/device/pair "$(jq -nc --arg c "$c" --arg n "$NAME" '{code:$c,name:$n}')"
-    finish_link "$RESP"
-  fi
+  say ''; say 'Log in with your DENG Rejoin account (saved on this phone).'
+  local u p; read -r -p 'Username: ' u; read -r -s -p 'Password: ' p; say ''
+  api POST /api/device/login "$(jq -nc --arg u "$u" --arg p "$p" --arg n "$NAME" '{username:$u,password:$p,name:$n}')"
+  finish_link "$RESP"
 }
 finish_link(){
   local b="$1"
