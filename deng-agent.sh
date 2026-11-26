@@ -13,6 +13,9 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
+AGENT_VERSION="2026.11.27-5"
+SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
+SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
 
 SERVER=""; DEVICE_TOKEN=""; DEVICE_ID=""; NAME=""
@@ -156,7 +159,7 @@ probe_status(){
     list+=$(jq -nc --arg pkg "$p" --arg name "${p##*.}" --argjson run "$r" '{pkg:$pkg,name:$name,running:$run}')','
   done
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key}'
+    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver}'
 }
 # CPU % (1-second sample of /proc/stat), RAM and /data storage in MB. Any value that
 # can't be read is sent as null so the site shows "—" instead of a wrong number.
@@ -291,6 +294,7 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
     set_settings) local d; d=$(jq -r '.delay // empty' <<<"$pl"); [[ "$d" =~ ^[0-9]{1,3}$ ]] && cfg_set DELAY "$d"; echo 'settings saved';;
     set_key) local only=''; only=$(jq -r '.pkg // empty' <<<"$pl"); [ -n "$only" ] && { allowed "$only" || { echo 'unknown clone'; return 1; }; }
              write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" "$only";;
+    update_agent) : > "$BASE/.update"; echo "update requested (running $AGENT_VERSION)";;
     *) echo "unknown action"; return 1;;
   esac
   [ "$ok" = 1 ]
@@ -394,6 +398,21 @@ worker(){
   done
 }
 
+# ---------- self-update ----------
+# Every 10 minutes: fetch the latest agent; if it is a valid, different script, replace
+# this file and restart in place (same PID), so users never have to update by hand.
+self_update(){
+  local tmp="$BASE/.agent.new"
+  curl -fsSL -m 30 "$SELF_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  if head -1 "$tmp" | grep -q '^#!/data/data/com.termux' && bash -n "$tmp" 2>/dev/null && ! cmp -s "$tmp" "$SELF"; then
+    chmod 700 "$tmp" && mv -f "$tmp" "$SELF" || return 1
+    say "Updating agent…"
+    kill "$WORKER" 2>/dev/null; exec 3>&-; rm -f "$BASE/cmd.fifo"; trap - EXIT
+    exec bash "$SELF"
+  fi
+  rm -f "$tmp"; return 1
+}
+
 # ---------- main loop ----------
 loop(){
   say "Agent online → $SERVER  (device $DEVICE_ID). Ctrl+C to stop."
@@ -407,6 +426,8 @@ loop(){
   while true; do
     load_apps
     if [ -f "$BASE/.rescan" ]; then rm -f "$BASE/.rescan"; scan_key; fi
+    if [ -f "$BASE/.update" ]; then rm -f "$BASE/.update"; self_update || say "Agent is up to date ($AGENT_VERSION)."; fi
+    [ $((tick % 120)) = 60 ] && self_update
     if [ $((tick % 6)) = 0 ]; then
       scan_key
       [ -s "$REMOTE" ] && sync_now "$(cat "$REMOTE")"
