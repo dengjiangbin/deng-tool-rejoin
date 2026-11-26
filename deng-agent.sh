@@ -37,6 +37,57 @@ save_conf(){
 }
 
 allowed(){ [[ "$1" =~ ^com\.(moons|luarm)(\.[A-Za-z0-9_]+)*$ ]]; }
+
+# ---------- shared settings with the code616 Termux menu ----------
+# The private link and delay live in code616's own config, so the Termux menu, the
+# code616 monitor and this agent always use the same values.
+C616_CFG="$HOME/.code616/config"
+cfg_get(){ [ -f "$C616_CFG" ] && sed -n "s/^$1=//p" "$C616_CFG" | tail -1; }
+cfg_set(){ # KEY VALUE ...   (rewrites only these keys, keeps everything else)
+  mkdir -p "${C616_CFG%/*}"; chmod 700 "${C616_CFG%/*}" 2>/dev/null
+  local tmp="$C616_CFG.agent.$$" k v
+  if [ -f "$C616_CFG" ]; then cp "$C616_CFG" "$tmp"; else printf 'CONFIG_SCHEMA=2\n' > "$tmp"; fi
+  while [ $# -ge 2 ]; do k=$1 v=$2; shift 2
+    if grep -q "^$k=" "$tmp"; then awk -v k="$k" -v v="$v" 'BEGIN{FS=OFS="="} $1==k{print k"="v; next} {print}' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+    else printf '%s=%s\n' "$k" "$v" >> "$tmp"; fi
+  done
+  chmod 600 "$tmp"; mv "$tmp" "$C616_CFG"
+}
+ps_valid(){ [[ "$1" =~ ^roblox://placeId=[0-9]{1,20}\&linkCode=[A-Za-z0-9_-]{1,128}$ ||
+               "$1" =~ ^roblox://navigation/share_links\?code=[A-Za-z0-9_-]{1,128}\&type=Server$ ]]; }
+# Any Roblox private-server link (old or new style, or an app deep link) -> deep link.
+to_deeplink(){ local in="$1" id code
+  if ps_valid "$in"; then printf '%s' "$in"; return 0; fi
+  if [[ "$in" =~ privateServerLinkCode=([A-Za-z0-9_-]{1,128}) ]]; then code=${BASH_REMATCH[1]}
+    [[ "$in" =~ /games/([0-9]{1,20}) || "$in" =~ [?\&]placeId=([0-9]{1,20}) ]] || return 1
+    printf 'roblox://placeId=%s&linkCode=%s' "${BASH_REMATCH[1]}" "$code"; return 0; fi
+  if [[ "$in" =~ [?\&]code=([A-Za-z0-9_-]{1,128}) && "$in" =~ type=Server ]]; then
+    [[ "$in" =~ [?\&]code=([A-Za-z0-9_-]{1,128}) ]]; printf 'roblox://navigation/share_links?code=%s&type=Server' "${BASH_REMATCH[1]}"; return 0; fi
+  return 1
+}
+# Deep link -> normal https link for the website.
+to_weblink(){
+  if [[ "$1" =~ ^roblox://placeId=([0-9]+)\&linkCode=(.+)$ ]]; then printf 'https://www.roblox.com/games/%s?privateServerLinkCode=%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+  elif [[ "$1" =~ ^roblox://navigation/share_links\?code=([^&]+) ]]; then printf 'https://www.roblox.com/share?code=%s&type=Server' "${BASH_REMATCH[1]}"; fi
+}
+# Canonical form: "ps|<deeplink>", "pj|<place>|<job>" or "" (not set).
+local_target(){ local u p j; u=$(cfg_get PS_URL); p=$(cfg_get PLACE_ID); j=$(cfg_get JOB_ID)
+  if ps_valid "$u"; then printf 'ps|%s' "$u"
+  elif [[ "$p" =~ ^[0-9]{1,20}$ && "$j" =~ ^[a-fA-F0-9-]{8,64}$ ]]; then printf 'pj|%s|%s' "$p" "$j"; fi; }
+remote_target(){ local u p j d; u=$(jq -r '.target.url // empty' <<<"$1"); p=$(jq -r '.target.place // empty' <<<"$1"); j=$(jq -r '.target.job // empty' <<<"$1")
+  if [ -n "$u" ]; then d=$(to_deeplink "$u") && printf 'ps|%s' "$d"
+  elif [ -n "$p" ] && [ -n "$j" ]; then printf 'pj|%s|%s' "$p" "$j"; fi; }
+apply_target(){ case "$1" in
+    ps\|*) cfg_set PS_URL "${1#ps|}";;
+    pj\|*) local r=${1#pj|}; cfg_set PS_URL '' PLACE_ID "${r%%|*}" JOB_ID "${r#*|}";;
+    *) cfg_set PS_URL '' PLACE_ID '' JOB_ID '';;
+  esac; }
+target_json(){ case "$1" in
+    ps\|*) jq -nc --arg u "$(to_weblink "${1#ps|}")" '{url:$u}';;
+    pj\|*) local r=${1#pj|}; jq -nc --arg p "${r%%|*}" --arg j "${r#*|}" '{place:$p,job:$j}';;
+    *) printf '{}';;
+  esac; }
+clone_delay(){ local d; d=$(cfg_get DELAY); [[ "$d" =~ ^[0-9]{1,3}$ ]] && printf '%s' "$((10#$d))" || printf '25'; }
 root(){ su -c "$1"; }
 need_root(){ root id 2>/dev/null | grep -q 'uid=0' || { say 'Root not active — allow Termux in Magisk/SU.'; return 1; }; }
 
@@ -105,7 +156,7 @@ probe_status(){
     list+=$(jq -nc --arg pkg "$p" --arg name "${p##*.}" --argjson run "$r" '{pkg:$pkg,name:$name,running:$run}')','
   done
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys}'
+    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key}'
 }
 # CPU % (1-second sample of /proc/stat), RAM and /data storage in MB. Any value that
 # can't be read is sent as null so the site shows "—" instead of a wrong number.
@@ -129,29 +180,41 @@ probe_sys(){
 # Before a stopped clone is (re)launched, put it back in its grid slot (same math as
 # code616 Start All), so a clone the user resized doesn't come back at that size.
 grid_slot(){ [ -f "$HOME/code616.sh" ] || return 0; root "pidof '$1'" >/dev/null 2>&1 && return 0
-  bash "$HOME/code616.sh" --grid-slot "$1" >/dev/null 2>&1 || true; }
+  timeout 20 bash "$HOME/code616.sh" --grid-slot "$1" </dev/null >/dev/null 2>&1 || true; }
 open_one(){ allowed "$1" || return 1; grid_slot "$1"; root "monkey -p '$1' -c android.intent.category.LAUNCHER 1" 2>&1 | grep -q 'Events injected: 1'; }
 rejoin_one(){ allowed "$1" || return 1; local url="$2"; grid_slot "$1"; root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
-target_url(){
-  if [ -n "$TARGET_URL" ]; then printf '%s' "$TARGET_URL"
-  elif [ -n "$TARGET_PLACE" ] && [ -n "$TARGET_JOB" ]; then printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s' "$TARGET_PLACE" "$TARGET_JOB"
-  fi
+target_url(){ local t; t=$(local_target)
+  case "$t" in ps\|*) printf '%s' "${t#ps|}";; pj\|*) local r=${t#pj|}; printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s' "${r%%|*}" "${r#*|}";; esac; }
+# ---------- scripts (synced with the code616 Script menu) ----------
+EXT_ROOT=/storage/emulated/0/Android/data
+script_dirs(){ # prints each clone's script folder, creating it once Delta has run
+  local p ext dir owner
+  for p in "${APPS[@]}"; do ext="$EXT_ROOT/$p/files/gloop/external"; dir="$ext/Autoexecute"
+    if root "test -d '$dir' && test ! -L '$dir'" >/dev/null 2>&1; then printf '%s\n' "$dir"
+    elif root "test -d '$ext' && test ! -L '$ext' && mkdir '$dir'" >/dev/null 2>&1; then
+      owner=$(root "stat -c '%u:%g' '$ext'" 2>/dev/null); [[ "$owner" =~ ^[0-9]+:[0-9]+$ ]] && root "chown '$owner' '$dir'" >/dev/null 2>&1
+      printf '%s\n' "$dir"; fi
+  done; }
+script_ok(){ [[ "$1" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,39}$ && "$1" != code616_hb ]]; }
+write_script_file(){ # name file   (byte-exact copy into every clone)
+  local name="${1%.lua}" src="$2" dir n=0
+  script_ok "$name" || return 1
+  while IFS= read -r dir; do [ -n "$dir" ] || continue
+    root "cat > '$dir/$name.lua'" < "$src" >/dev/null 2>&1 && n=$((n+1)); done < <(script_dirs)
+  [ "$n" -gt 0 ]
 }
-write_script(){ # name body  -> each clone's Autoexecute
-  local name="$1" body="$2" p dir tmp n=0
-  [[ "$name" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]] || return 1
-  [[ "$name" == *.lua ]] || name="$name.lua"
-  tmp="$BASE/.push.$$.$RANDOM"; printf '%s' "$body" > "$tmp"
-  for p in "${APPS[@]}"; do
-    dir="/storage/emulated/0/Android/data/$p/files/gloop/external/Autoexecute"
-    root "mkdir -p '$dir' && test ! -L '$dir' && cat > '$dir/$name'" < "$tmp" >/dev/null 2>&1 && n=$((n+1))
-  done
-  rm -f "$tmp"; [ "$n" -gt 0 ]
-}
-remove_script(){ local name="$1" p n=0; [[ "$name" == *.lua ]] || name="$name.lua"
-  [[ "$name" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*\.lua$ ]] || return 1
-  for p in "${APPS[@]}"; do root "rm -f '/storage/emulated/0/Android/data/$p/files/gloop/external/Autoexecute/$name'" >/dev/null 2>&1 && n=$((n+1)); done; true
-}
+write_script(){ local tmp="$BASE/.push.$$.$RANDOM" rc; printf '%s' "$2" > "$tmp"; write_script_file "$1" "$tmp"; rc=$?; rm -f "$tmp"; return $rc; }
+remove_script(){ local name="${1%.lua}" dir; script_ok "$name" || return 1
+  while IFS= read -r dir; do [ -n "$dir" ] && root "rm -f '$dir/$name.lua'" >/dev/null 2>&1; done < <(script_dirs); true; }
+# "name md5" for every script on this cloud phone (union of all clones).
+local_scripts(){ local dirs; dirs=$(script_dirs | tr '\n' ' '); [ -n "${dirs// /}" ] || return 0
+  root "for d in $dirs; do cd \"\$d\" 2>/dev/null && md5sum *.lua 2>/dev/null; done" 2>/dev/null \
+    | awk '{f=$2; sub(/^\*/,"",f); sub(/\.lua$/,"",f); if(f=="code616_hb") next; c[f]++; if(!(f in s)) s[f]=$1} END{for(f in s) print f, s[f], c[f]}'; }
+local_script_file(){ # name outfile
+  local name="$1" out="$2" dir
+  while IFS= read -r dir; do [ -n "$dir" ] || continue
+    root "test -f '$dir/$name.lua' && cat '$dir/$name.lua'" > "$out" 2>/dev/null && return 0; done < <(script_dirs); return 1; }
+
 write_key(){ # key mode
   local key="$1" mode="$2" p path n=0 dir
   [[ "$key" =~ ^[A-Za-z0-9._-]{1,512}$ ]] || return 1
@@ -175,10 +238,10 @@ one_pkg(){ # validate payload.pkg is one of our clones; echoes it or fails
 run_command(){ # action payload_json  -> echoes result, returns 0/1
   local action="$1" pl="$2" p ok=1 url pkg
   case "$action" in
-    start_all) for p in "${APPS[@]}"; do open_one "$p" || ok=0; sleep "$DELAY"; done; echo "opened ${#APPS[@]}";;
+    start_all) DELAY=$(clone_delay); for p in "${APPS[@]}"; do root "pidof '$p'" >/dev/null 2>&1 && continue; open_one "$p" || ok=0; sleep "$DELAY"; done; echo "opened ${#APPS[@]}";;
     stop_all)  for p in "${APPS[@]}"; do root "am force-stop '$p'" >/dev/null 2>&1; done; echo "stopped ${#APPS[@]}";;
     rejoin_all) url=$(target_url); [ -n "$url" ] || { echo 'no target set'; return 1; }
-               for p in "${APPS[@]}"; do rejoin_one "$p" "$url" || ok=0; sleep "$DELAY"; done; echo "rejoined ${#APPS[@]}";;
+               DELAY=$(clone_delay); for p in "${APPS[@]}"; do rejoin_one "$p" "$url" || ok=0; sleep "$DELAY"; done; echo "rejoined ${#APPS[@]}";;
     start_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; open_one "$pkg" && echo "started $pkg" || { echo 'failed'; return 1; };;
     stop_clone)  pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; root "am force-stop '$pkg'" >/dev/null 2>&1; echo "stopped $pkg";;
     rejoin_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; url=$(target_url); [ -n "$url" ] || { echo 'no target set'; return 1; }
@@ -186,21 +249,111 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
     set_clone_auto) echo 'noted';;  # per-clone auto handled by on-phone monitor; acked for now
     push_script) write_script "$(jq -r '.name' <<<"$pl")" "$(jq -r '.body' <<<"$pl")" && echo pushed || { echo 'push failed'; return 1; };;
     remove_script) remove_script "$(jq -r '.name' <<<"$pl")"; echo removed;;
-    set_target) TARGET_URL=$(jq -r '.url // ""' <<<"$pl"); TARGET_PLACE=$(jq -r '.place // ""' <<<"$pl"); TARGET_JOB=$(jq -r '.job // ""' <<<"$pl"); save_conf; echo 'target saved';;
-    set_settings) local d; d=$(jq -r '.delay // empty' <<<"$pl"); [[ "$d" =~ ^[0-9]+$ ]] && DELAY=$d && save_conf; echo 'settings saved';;
+    set_target) local t; t=$(remote_target "$(jq -c '{target:.}' <<<"$pl")"); apply_target "$t"; echo 'target saved';;
+    set_settings) local d; d=$(jq -r '.delay // empty' <<<"$pl"); [[ "$d" =~ ^[0-9]{1,3}$ ]] && cfg_set DELAY "$d"; echo 'settings saved';;
     set_key) write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" && echo 'key written' || { echo 'key failed'; return 1; };;
     *) echo "unknown action"; return 1;;
   esac
   [ "$ok" = 1 ]
 }
 
+# ---------- Delta key status (shown on the website; the key itself never leaves) ----------
+KEYINFO='{}'
+scan_key(){ local p shared tails='' n=0 t
+  shared=$(root "cat /storage/emulated/0/Delta/Internals/Cache/license" 2>/dev/null | tr -d '\r\n')
+  for p in "${APPS[@]}"; do
+    t=$(root "cat '$EXT_ROOT/$p/files/gloop/external/Internals/cache/license'" 2>/dev/null | tr -d '\r\n')
+    [[ "$t" =~ ^[A-Za-z0-9._-]{4,512}$ ]] && { n=$((n+1)); tails+="${t: -4}"$'\n'; }
+  done
+  [[ "$shared" =~ ^[A-Za-z0-9._-]{4,512}$ ]] && shared=${shared: -4} || shared=''
+  KEYINFO=$(printf '%s' "$tails" | jq -Rsc --arg sh "$shared" --argjson n "$n" --argjson tot "${#APPS[@]}" \
+    '(split("\n")|map(select(length>0))|unique) as $u | {shared:($sh|if .=="" then null else . end), clones:$n, total:$tot, tails:$u[:3], same:($u|length<=1)}')
+}
+
+# ---------- settings sync: website <-> Termux menu (3-way merge) ----------
+# Last agreed state lives in sync.state. If only one side changed since then, that side
+# wins; if both changed, the website wins. Runs when the website's rev changes and
+# every 30 seconds to catch edits made in the Termux menu.
+STATE="$BASE/sync.state"; REMOTE="$BASE/remote.json"; LAST_REV=-1
+md5(){ md5sum | cut -d' ' -f1; }
+sync_now(){
+  local cfg="$1" lt rt bt nt push='{}' name l r b
+  [ -n "$cfg" ] || return 0
+  lt=$(local_target); rt=$(remote_target "$cfg"); bt=$(sed -n 's/^T //p' "$STATE" 2>/dev/null)
+  if [ "$lt" = "$rt" ]; then nt=$lt
+  elif [ "$lt" = "$bt" ]; then apply_target "$rt"; nt=$rt; say "↓ private link from website"
+  elif [ "$rt" = "$bt" ]; then push=$(jq -c --argjson t "$(target_json "$lt")" '.target=$t' <<<"$push"); nt=$lt; say "↑ private link to website"
+  else apply_target "$rt"; nt=$rt; fi
+
+  declare -A L=() R=() B=() N=() C=()
+  local ndirs cn; ndirs=$(script_dirs | grep -c .)
+  while read -r name l cn; do [ -n "$name" ] && { L[$name]=$l; C[$name]=$cn; }; done < <(local_scripts)
+  local rdir="$BASE/rs"; rm -rf "$rdir"; mkdir -p "$rdir"; local i cnt
+  cnt=$(jq '.scripts|length' <<<"$cfg" 2>/dev/null || echo 0)
+  for ((i=0;i<cnt;i++)); do name=$(jq -r ".scripts[$i].name" <<<"$cfg"); script_ok "$name" || continue
+    jq -j ".scripts[$i].body" <<<"$cfg" > "$rdir/$name"; R[$name]=$(md5 < "$rdir/$name"); done
+  while read -r name b; do [ -n "$name" ] && B[$name]=$b; done < <(sed -n 's/^S //p' "$STATE" 2>/dev/null)
+  local -a puts=() dels=()
+  for name in $(printf '%s\n' "${!L[@]}" "${!R[@]}" "${!B[@]}" | sort -u); do
+    l=${L[$name]:-}; r=${R[$name]:-}; b=${B[$name]:-}
+    if [ "$l" = "$r" ]; then [ -n "$l" ] && N[$name]=$l
+      # same everywhere it exists, but some clones are missing it: copy it over
+      if [ -n "$l" ] && [ "${C[$name]:-0}" -lt "$ndirs" ]; then write_script_file "$name" "$rdir/$name"; fi
+    elif [ "$l" = "$b" ] || { [ "$r" != "$b" ] && [ -n "$r" ]; }; then   # take the website's version
+      if [ -n "$r" ]; then write_script_file "$name" "$rdir/$name" && N[$name]=$r; else remove_script "$name"; fi
+      say "↓ script $name"
+    else                                                                  # take the cloud phone's version
+      if [ -n "$l" ]; then puts+=("$name"); N[$name]=$l; else dels+=("$name"); fi
+      say "↑ script $name"
+    fi
+  done
+  if [ ${#puts[@]} -gt 0 ] || [ ${#dels[@]} -gt 0 ]; then
+    local pj='[]' f="$BASE/.up.$$"
+    for name in "${puts[@]}"; do local_script_file "$name" "$f" || continue
+      pj=$(jq -c --arg n "$name" --rawfile b "$f" '.+[{name:$n,body:$b}]' <<<"$pj"); done; rm -f "$f"
+    push=$(jq -c --argjson p "$pj" --argjson d "$(printf '%s\n' "${dels[@]}" | jq -Rsc 'split("\n")|map(select(length>0))')" '.scripts_put=$p|.scripts_del=$d' <<<"$push")
+  fi
+  if [ "$push" != '{}' ]; then
+    api POST /api/device/sync "$push"
+    [ "$HTTP" = 200 ] && { printf '%s' "$RESP" > "$REMOTE"; LAST_REV=$(jq -r '.rev // -1' <<<"$RESP"); } || return 1
+  fi
+  { printf 'T %s\n' "$nt"; for name in "${!N[@]}"; do printf 'S %s %s\n' "$name" "${N[$name]}"; done; } > "$STATE.n" && mv "$STATE.n" "$STATE"
+}
+pull_and_sync(){ api GET /api/device/config; [ "$HTTP" = 200 ] || return 1
+  printf '%s' "$RESP" > "$REMOTE"; LAST_REV=$(jq -r '.rev // -1' <<<"$RESP"); sync_now "$RESP"; }
+
+# ---------- command worker ----------
+# Commands run here, one after another, so a long Start All never stops the heartbeat
+# (the website would otherwise show the cloud phone as offline mid-command).
+worker(){
+  local c id act pl res rc
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    load_conf; load_apps
+    id=$(jq -r '.id' <<<"$c"); act=$(jq -r '.action' <<<"$c"); pl=$(jq -c '.payload' <<<"$c")
+    say "→ $act (#$id)"
+    res=$(run_command "$act" "$pl"); rc=$?
+    api POST /api/device/ack "$(jq -nc --argjson id "$id" --argjson ok $([ $rc = 0 ] && echo true || echo false) --arg r "$res" '{id:$id,ok:$ok,result:$r}')"
+  done
+}
+
 # ---------- main loop ----------
 loop(){
   say "Agent online → $SERVER  (device $DEVICE_ID). Ctrl+C to stop."
   command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null || true
+  local FIFO="$BASE/cmd.fifo"; rm -f "$FIFO"; mkfifo -m 600 "$FIFO"
+  worker < "$FIFO" & WORKER=$!
+  exec 3>"$FIFO"
+  trap 'kill $WORKER 2>/dev/null; rm -f "$PIDFILE" "$FIFO"' EXIT
+  declare -A SENT=()
+  local tick=0 st body rev c id
   while true; do
-    local st body cmds n
-    load_apps                     # populate APPS in this shell (not a subshell) so commands can act on it
+    load_apps
+    if [ $((tick % 6)) = 0 ]; then
+      scan_key
+      [ -s "$REMOTE" ] && sync_now "$(cat "$REMOTE")"
+    fi
+    tick=$((tick+1))
     st=$(probe_status)
     api POST /api/device/heartbeat "$(jq -nc --argjson s "$st" '{status:$s}')"; body=$RESP
     if [ "$HTTP" = 401 ]; then
@@ -208,18 +361,13 @@ loop(){
       DEVICE_TOKEN=''; save_conf; ensure_linked; continue
     fi
     if [ "$HTTP" = 200 ]; then
-      # apply current config (target) so rejoins use the latest
-      local turl; turl=$(jq -r '.config.target.url // empty' <<<"$body")
-      [ -n "$turl" ] && TARGET_URL="$turl"
-      cmds=$(jq -c '.commands[]?' <<<"$body")
+      rev=$(jq -r '.config.rev // -1' <<<"$body")
+      [ "$rev" != "$LAST_REV" ] && pull_and_sync
       while IFS= read -r c; do
         [ -n "$c" ] || continue
-        local id act pl res rc
-        id=$(jq -r '.id' <<<"$c"); act=$(jq -r '.action' <<<"$c"); pl=$(jq -c '.payload' <<<"$c")
-        say "→ $act (#$id)"
-        res=$(run_command "$act" "$pl"); rc=$?
-        api POST /api/device/ack "$(jq -nc --argjson id "$id" --argjson ok $([ $rc = 0 ] && echo true || echo false) --arg r "$res" '{id:$id,ok:$ok,result:$r}')" >/dev/null
-      done <<< "$cmds"
+        id=$(jq -r '.id' <<<"$c"); [ -n "${SENT[$id]:-}" ] && continue
+        SENT[$id]=1; printf '%s\n' "$c" >&3
+      done < <(jq -c '.commands[]?' <<<"$body")
     fi
     sleep "$POLL"
   done
@@ -234,6 +382,7 @@ main(){
     say "Agent already running (PID $(cat "$PIDFILE"))."; exit 0
   fi
   echo $$ > "$PIDFILE"; trap 'rm -f "$PIDFILE"' EXIT
+  need timeout coreutils; need md5sum coreutils; need mkfifo coreutils
   ensure_linked
   loop
 }
