@@ -77,20 +77,26 @@ agent_name(){ [ -f "$AGCONF" ] && ( NAME=''; . "$AGCONF" 2>/dev/null; printf '%s
 agent_status(){
   if agent_pid >/dev/null; then printf 'online as %s' "$(agent_name)"; else printf 'offline'; fi
 }
-agent_menu(){
-  say ''; say "Website: $(agent_status)"
-  say "This phone joins $USERNAME automatically and shows up in Fleet on the website."
-  say '[1] Restart connection   [2] Show recent log   [Enter] Back'
-  printf 'Select: '; IFS= read -r c
-  case "$c" in
-    1) agent_stop; agent_start; say "Website: $(agent_status)"; read -r -p 'Enter to continue... ' _ ;;
-    2) tail -n 15 "$AGLOG" 2>/dev/null || say 'No log yet.'; read -r -p 'Enter to continue... ' _ ;;
-  esac
-}
 logout(){
   agent_stop
   [ -f "$AGCONF" ] && sed -i "s/^DEVICE_TOKEN=.*/DEVICE_TOKEN=''/" "$AGCONF"
   rm -f "$AUTH"; TOKEN=""; say 'Logged out. This phone left the website.'
+}
+
+# ---- silent update of agent + launcher on every launch (code616 updates itself) ----
+fresh(){ # url dest -> 0 if dest was replaced with a newer valid copy
+  local tmp; tmp=$(mktemp "$DENG/.upd.XXXXXX") || return 1
+  if getfile "$1" "$tmp" && head -1 "$tmp" | grep -q '^#!/data/data/com.termux' && bash -n "$tmp" 2>/dev/null && ! cmp -s "$tmp" "$2"; then
+    chmod 700 "$tmp" && mv -f "$tmp" "$2" && return 0
+  fi
+  rm -f "$tmp"; return 1
+}
+update_tools(){
+  if fresh "$RAW/deng-launch.sh" "$DENG/deng-launch.sh" && [ -z "${DENG_UPDATED:-}" ]; then
+    DENG_UPDATED=1 exec bash "$DENG/deng-launch.sh"
+  fi
+  if fresh "$RAW/deng-agent.sh" "$AGENT"; then agent_stop; fi
+  [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616"
 }
 
 # ---- menu ----
@@ -101,28 +107,23 @@ menu(){
     say '        D E N G'
     say '     rejoin.deng.my.id'
     say "   signed in: $USERNAME"
+    say "   website: $(agent_status)"
     say '========================'
-    say '[1] Rejoin Tool (local menu)'
-    say "[2] Website ($(agent_status))"
-    say '[3] Update tools'
-    say '[4] Log out'
+    say '[1] Rejoin Tool'
+    say '[2] Log out'
     say '[0] Exit'
     say '------------------------'
-    printf 'Select [0-4]: '; IFS= read -r c
+    printf 'Select [0-2]: '; IFS= read -r c
     case "$c" in
       1) [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _; continue; }
          bash "$CODE616" ;;
-      2) agent_menu ;;
-      3) getfile "$RAW/code616.sh" "$CODE616" && say 'code616 updated.' || say 'code616 update failed.'
-         getfile "$RAW/deng-agent.sh" "$AGENT" && { say 'agent updated.'; agent_stop; agent_start; } || say 'agent update failed.'
-         getfile "$RAW/deng-launch.sh" "$DENG/deng-launch.sh" && say 'launcher updated (restart start deng).' || true
-         read -r -p 'Enter to continue... ' _ ;;
-      4) logout; gate; agent_start ;;
+      2) logout; gate; agent_start ;;
       0) exit 0 ;;
-      *) say 'Pick 0-4.'; sleep 1 ;;
+      *) say 'Pick 0-2.'; sleep 1 ;;
     esac
   done
 }
 gate
+update_tools
 agent_start
 menu
