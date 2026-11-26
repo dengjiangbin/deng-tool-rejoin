@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0e1a">
+<title>DENG Rejoin — Fleet Control</title>
+<link rel="icon" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0e1a;--bg2:#070a14;--panel:#121829;--panel2:#0e1322;--panelhi:#1a2238;
+    --bd:rgba(255,255,255,.12);--bdlt:#f1f4fb;--hard:#04060d;
+    --tx:#eef1fa;--tx2:#9aa2c0;--tx3:#616a8c;
+    --blue:#2f6bff;--gold:#ffc531;--green:#17d39b;--red:#f5495f;--disc:#5865f2;
+    --sans:'DM Sans',system-ui,sans-serif;--head:'Bricolage Grotesque',var(--sans);--mono:'JetBrains Mono',ui-monospace,monospace;
+    --sh:4px 4px 0 0 var(--hard);--sh-sm:3px 3px 0 0 var(--hard);--sh-lg:6px 6px 0 0 rgba(4,6,13,.65);--r:15px;--r2:11px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:radial-gradient(900px 440px at 78% -8%,rgba(47,107,255,.22),transparent 60%),radial-gradient(700px 380px at 10% 0%,rgba(23,211,155,.1),transparent 55%),var(--bg);
+    color:var(--tx);font-family:var(--sans);font-size:14px;line-height:1.5;min-height:100vh;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 15px 70px}
+  h1,h2,h3,.head{font-family:var(--head)} .mono{font-family:var(--mono)}
+  header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;padding:12px 15px;margin:0 -15px;
+    background:rgba(10,14,26,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--bd)}
+  .brand{display:flex;align-items:center;gap:9px;font-family:var(--head);font-weight:800;font-size:17px}
+  .brand img{width:32px;height:32px}
+  .spacer{flex:1}
+  .userchip{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--tx2);
+    padding:6px 11px;border-radius:999px;border:1.5px solid var(--bd);background:var(--panel)}
+  .chipbtn{width:38px;height:38px;border-radius:11px;border:2px solid var(--bdlt);box-shadow:var(--sh-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;flex:0 0 auto;transition:.12s;background:var(--panelhi)}
+  .chipbtn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 0 var(--hard)}
+  .cta{font-family:var(--head);font-weight:800;font-size:14px;padding:9px 15px;border-radius:12px;background:var(--gold);color:#121018;border:2px solid var(--bdlt);box-shadow:var(--sh);cursor:pointer;transition:.12s}
+  .cta:active{transform:translate(3px,3px);box-shadow:1px 1px 0 0 var(--hard)}
+  .ticker{background:var(--bg2);border-bottom:1px solid var(--bd);overflow:hidden;white-space:nowrap;margin:0 -15px}
+  .ticker div{display:inline-block;padding:7px 0;animation:tick 22s linear infinite;color:var(--tx2);font-size:12.5px;font-weight:600}
+  .ticker b{color:var(--gold)}.ticker .g{color:var(--green)}
+  @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  nav{display:flex;gap:7px;padding:16px 0 8px;flex-wrap:wrap}
+  nav a{font-family:var(--head);font-weight:700;font-size:13px;padding:8px 15px;border-radius:11px;color:var(--tx2);cursor:pointer;border:2px solid transparent;transition:.12s}
+  nav a:hover{color:var(--tx)} nav a.on{color:var(--tx);background:var(--panel);border-color:var(--bd);box-shadow:var(--sh-sm)}
+  .pagehead{display:flex;align-items:flex-end;gap:12px;margin:10px 0 4px;flex-wrap:wrap}
+  h1{font-size:26px;font-weight:800;letter-spacing:-.3px} .sub{color:var(--tx3);font-size:13px}
+  .pill{display:inline-flex;align-items:center;gap:7px;font-family:var(--head);font-weight:700;font-size:12px;padding:6px 12px;border-radius:999px;border:2px solid var(--bdlt);box-shadow:var(--sh-sm)}
+  .pill.live{background:rgba(23,211,155,.14);color:var(--green);border-color:rgba(23,211,155,.6)}
+  .pill.gold{background:rgba(255,197,49,.14);color:var(--gold);border-color:rgba(255,197,49,.6)}
+  .dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 9px currentColor;animation:pulse 1.8s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 6px}
+  .num .v{font-family:var(--mono);font-weight:700;font-size:30px;letter-spacing:-1px}
+  .num .v.g{color:var(--green)}.num .v.gold{color:var(--gold)}.num .v.b{color:var(--blue)}
+  .num .k{font-family:var(--head);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--tx3);margin-top:2px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1.5px solid var(--bd);border-radius:var(--r);box-shadow:var(--sh-lg);overflow:hidden}
+  .card .inner{padding:15px}
+  .card h3{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:12px}
+  .card h3 .c{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--tx3);font-weight:500}
+  .fleet{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:13px;margin-top:14px}
+  .ph{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1.5px solid var(--bd);border-radius:var(--r);box-shadow:var(--sh-lg);overflow:hidden}
+  .ph .hd{padding:10px 13px;display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-weight:600;border-bottom:1.5px solid rgba(0,0,0,.3)}
+  .ph.on .hd{background:linear-gradient(90deg,rgba(23,211,155,.22),rgba(23,211,155,.05))}
+  .ph.warn .hd{background:linear-gradient(90deg,rgba(255,197,49,.2),rgba(255,197,49,.04))}
+  .ph.off .hd{background:linear-gradient(90deg,rgba(245,73,95,.2),rgba(245,73,95,.04))}
+  .ph .hd .id{font-size:11px;color:var(--tx3)} .ph .bd{padding:13px}
+  .ph .cnt{display:flex;gap:18px;align-items:baseline}
+  .ph .cnt .big{font-family:var(--mono);font-weight:700;font-size:26px;line-height:1}
+  .ph .cnt .big.g{color:var(--green)}.ph .cnt .big.r{color:var(--red)}
+  .ph .cnt .lab{font-family:var(--head);font-weight:700;font-size:10px;letter-spacing:.7px;color:var(--tx3);text-transform:uppercase;margin-top:4px}
+  .segs{display:flex;gap:4px;margin:13px 0;flex-wrap:wrap}
+  .seg{height:8px;flex:1;min-width:10px;border-radius:3px;background:rgba(255,255,255,.08)}
+  .seg.on{background:var(--green);box-shadow:0 0 7px rgba(23,211,155,.5)}
+  .dash{border:0;border-top:1.5px dashed var(--bd);margin:11px 0}
+  .togrow{display:flex;align-items:center;justify-content:space-between}
+  .togrow span{font-family:var(--head);font-weight:700;font-size:13px}
+  .tog{width:46px;height:26px;border-radius:999px;background:#2a3250;border:1.5px solid var(--bd);position:relative;cursor:pointer;transition:.15s;flex:0 0 auto}
+  .tog:after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#fff;transition:.15s}
+  .tog.on{background:var(--green)}.tog.on:after{left:23px}
+  .ph .meta{font-family:var(--mono);font-size:11px;color:var(--tx3);margin-top:3px}
+  .clones{margin:10px 0 2px;border-top:1.5px dashed var(--bd);padding-top:8px}
+  .clone{display:flex;align-items:center;gap:8px;padding:5px 0}
+  .cdot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .cdot.on{background:var(--green);box-shadow:0 0 7px var(--green)} .cdot.off{background:var(--red)}
+  .cnm{font-family:var(--mono);font-size:12px;color:var(--tx)}
+  .btn.xs{padding:4px 9px;font-size:12px;border-radius:8px;border-width:1.5px;box-shadow:2px 2px 0 0 var(--hard)}
+  .btn{font-family:var(--head);font-weight:700;font-size:13px;padding:9px 15px;border-radius:11px;cursor:pointer;background:var(--blue);color:#fff;border:2px solid var(--bdlt);box-shadow:var(--sh-sm);transition:.12s}
+  .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 0 var(--hard)}
+  .btn.gold{background:var(--gold);color:#121018}.btn.green{background:var(--green);color:#04120c}.btn.ghost{background:var(--panelhi);color:var(--tx)}
+  .btn.sm{padding:6px 11px;font-size:12px}
+  .row{display:flex;gap:9px;flex-wrap:wrap}
+  input,textarea{width:100%;background:var(--bg2);border:1.5px solid var(--bd);border-radius:10px;color:var(--tx);padding:11px 12px;font-family:var(--sans);font-size:13px;outline:none}
+  input:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,107,255,.18)}
+  textarea{font-family:var(--mono);font-size:12.5px;min-height:150px;resize:vertical}
+  label{font-family:var(--head);font-size:12px;color:var(--tx2);font-weight:700;display:block;margin:13px 0 6px}
+  .grid2{display:grid;grid-template-columns:1.5fr 1fr;gap:14px;align-items:start;margin-top:14px}
+  .scrit{display:flex;align-items:center;gap:11px;padding:11px;border-radius:var(--r2);background:var(--bg2);border:1.5px solid var(--bd);margin-bottom:9px}
+  .scrit .ic{width:36px;height:36px;border-radius:9px;background:rgba(47,107,255,.15);display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 auto}
+  .scrit .nm{font-family:var(--mono);font-weight:600;font-size:13px} .scrit .mt{font-size:11px;color:var(--tx3);margin-top:1px}
+  .code{font-family:var(--mono);font-weight:700;font-size:38px;letter-spacing:8px;color:var(--gold);text-align:center;padding:14px;background:var(--bg2);border:1.5px dashed var(--bd);border-radius:12px}
+  .msg{font-size:12.5px;margin-top:10px;min-height:16px}.msg.ok{color:var(--green)}.msg.err{color:var(--red)}
+  .empty{text-align:center;padding:40px 20px;color:var(--tx3)}
+  .tabpane{display:none;animation:fade .2s}.tabpane.on{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .foot{margin-top:28px;padding-top:16px;border-top:1px solid var(--bd);color:var(--tx3);font-size:12px;text-align:center;font-family:var(--mono)}
+  @media(max-width:760px){.nums{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}.brand span{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><img src="logo.svg" alt=""><span>DENG&nbsp;Rejoin</span></div>
+  <div class="spacer"></div>
+  <div class="userchip" id="userchip">demo</div>
+  <div class="cta" onclick="broadcast('start_all')">Start all</div>
+  <div class="chipbtn" title="Log out" onclick="logout()">⎋</div>
+</header>
+<div class="ticker"><div id="tk"></div></div>
+
+<div class="wrap">
+  <nav>
+    <a class="on" data-tab="fleet">Fleet</a>
+    <a data-tab="scripts">Scripts</a>
+    <a data-tab="key">Delta Key</a>
+    <a data-tab="servers">Rejoin Target</a>
+    <a data-tab="pair">Pair phone</a>
+    <a data-tab="account">Account</a>
+  </nav>
+
+  <!-- FLEET -->
+  <section class="tabpane on" id="fleet">
+    <div class="pagehead"><h1>The fleet keeps running.</h1><span class="pill live"><span class="dot"></span>LIVE</span></div>
+    <div class="sub">Every phone pulls its own clones back into the server — your screen can be off.</div>
+    <div class="nums">
+      <div class="num"><div class="v g" id="n-ph">—</div><div class="k">Phones online</div></div>
+      <div class="num"><div class="v b" id="n-cl">—</div><div class="k">Clones running</div></div>
+      <div class="num"><div class="v gold" id="n-re">—</div><div class="k">Rejoins today</div></div>
+      <div class="num"><div class="v" id="n-av">—</div><div class="k">Avg rejoin time</div></div>
+    </div>
+    <div class="pagehead" style="margin-top:20px">
+      <span class="pill gold"><span id="phcount">0</span>&nbsp;phones&nbsp;·&nbsp;<span id="slotcount">0</span>&nbsp;clones ready</span>
+      <div class="spacer"></div>
+      <div class="row">
+        <button class="btn green sm" onclick="broadcast('start_all')">▶ Start all</button>
+        <button class="btn sm" onclick="broadcast('rejoin_all')">⟳ Rejoin all</button>
+      </div>
+    </div>
+    <div class="fleet" id="fleet-grid"></div>
+  </section>
+
+  <!-- SCRIPTS -->
+  <section class="tabpane" id="scripts">
+    <div class="pagehead"><h1>Scripts</h1></div>
+    <div class="sub">Push a Lua script to the Autoexecute folder of every clone, fleet-wide.</div>
+    <div class="grid2">
+      <div class="card"><div class="inner">
+        <h3>Push new script <span class="c">→ all clones</span></h3>
+        <label>Script name</label><input id="scrname" value="Script4" class="mono">
+        <label>Lua source</label><textarea id="scrbody" placeholder="loadstring(game:HttpGet('https://...'))()"></textarea>
+        <div class="row" style="margin-top:13px"><button class="btn green" onclick="pushScript()">Push to fleet</button><button class="btn ghost" onclick="scrbody.value=''">Clear</button></div>
+        <div class="msg" id="scrmsg"></div>
+      </div></div>
+      <div class="card"><div class="inner"><h3>Active scripts <span class="c" id="scrcount">0 files</span></h3><div id="scrlist"></div></div></div>
+    </div>
+  </section>
+
+  <!-- DELTA KEY -->
+  <section class="tabpane" id="key">
+    <div class="pagehead"><h1>Delta Key</h1></div>
+    <div class="sub">Push a license key to every clone's Delta cache, fleet-wide. The key is sent to your phones and not stored on the server.</div>
+    <div class="grid2">
+      <div class="card"><div class="inner">
+        <h3>Push key</h3>
+        <label>Delta key</label><input id="dkey" type="password" class="mono" placeholder="your Delta key">
+        <label>Cache mode</label>
+        <div class="row"><button class="btn green sm" id="mode-sep" onclick="setKeyMode('separate')">Separate (per clone)</button><button class="btn ghost sm" id="mode-shared" onclick="setKeyMode('shared')">Shared (one cache)</button></div>
+        <div class="row" style="margin-top:14px"><button class="btn gold" onclick="pushKey()">Push key to fleet</button></div>
+        <div class="msg" id="keymsg"></div>
+      </div></div>
+      <div class="card"><div class="inner">
+        <h3>How it works</h3>
+        <div class="sub" style="line-height:1.7">
+          <b>Separate</b> writes to each clone's own cache:<br>
+          <code class="mono" style="color:var(--green);font-size:11px">…/Android/data/&lt;pkg&gt;/files/gloop/external/Internals/cache/license</code><br><br>
+          <b>Shared</b> writes to one location all clones read:<br>
+          <code class="mono" style="color:var(--green);font-size:11px">/sdcard/Delta/Internals/Cache/license</code><br><br>
+          Delta still validates the key itself — this only places it.
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- SERVERS -->
+  <section class="tabpane" id="servers">
+    <div class="pagehead"><h1>Rejoin target</h1></div>
+    <div class="sub">Where every clone lands after a disconnect or kick.</div>
+    <div class="grid2">
+      <div class="card"><div class="inner">
+        <h3>Private server link</h3>
+        <label>Paste Roblox private server link</label><input id="pslink" placeholder="roblox.com/share?code=…&type=Server">
+        <label>Or Place ID + Job ID</label>
+        <div class="row"><input id="pid" placeholder="Place ID" class="mono" style="flex:1"><input id="jid" placeholder="Job ID (UUID)" class="mono" style="flex:2"></div>
+        <div class="row" style="margin-top:13px"><button class="btn gold" onclick="setTarget()">Save target → fleet</button></div>
+        <div class="msg" id="tgtmsg"></div>
+      </div></div>
+      <div class="card"><div class="inner">
+        <h3>Current target</h3>
+        <div class="scrit"><div class="ic">🎯</div><div><div class="nm" id="tgtname">—</div><div class="mt mono" id="tgtmeta">not set</div></div></div>
+        <div class="row" style="margin-top:12px"><span class="pill live" style="font-size:11px">Auto-rejoin ON</span></div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- PAIR -->
+  <section class="tabpane" id="pair">
+    <div class="pagehead"><h1>Pair a phone</h1></div>
+    <div class="sub">Link a cloud phone's Termux agent to your account — no password typed on the phone.</div>
+    <div class="grid2">
+      <div class="card"><div class="inner">
+        <h3>Pairing code</h3>
+        <div class="code" id="paircode">· · · · · ·</div>
+        <div class="msg" id="pairmsg">Tap “Generate code”, then run the agent on the phone and enter it.</div>
+        <div class="row" style="margin-top:12px"><button class="btn gold" onclick="genCode()">Generate code</button></div>
+      </div></div>
+      <div class="card"><div class="inner">
+        <h3>On the phone</h3>
+        <div class="sub" style="line-height:1.7">
+          1. Install &amp; run the agent in Termux:<br>
+          <code class="mono" style="color:var(--green);font-size:12px">bash rejoin-agent.sh</code><br>
+          2. Choose <b>Pair with code</b>.<br>
+          3. Enter the 6-digit code.<br>
+          The phone appears in your Fleet within seconds. Or the agent can log in with your username &amp; password instead.
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ACCOUNT -->
+  <section class="tabpane" id="account">
+    <div class="pagehead"><h1>Account</h1></div>
+    <div class="grid2">
+      <div class="card"><div class="inner">
+        <h3>Change password</h3>
+        <label>Current password</label><input id="oldpw" type="password" autocomplete="current-password">
+        <label>New password</label><input id="newpw" type="password" autocomplete="new-password">
+        <div class="row" style="margin-top:13px"><button class="btn gold" onclick="changePw()">Update password</button></div>
+        <div class="msg" id="pwmsg"></div>
+      </div></div>
+      <div class="card"><div class="inner">
+        <h3>Email</h3>
+        <label>Recovery email</label><input id="email" type="email" autocomplete="email">
+        <div class="row" style="margin-top:13px"><button class="btn" onclick="changeEmail()">Save email</button></div>
+        <div class="msg" id="emailmsg"></div>
+      </div></div>
+    </div>
+  </section>
+
+  <div class="foot" id="foot">rejoin.deng.my.id</div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let MODE='mock', TOKEN=localStorage.getItem('deng_token'), phones=[], scripts=[];
+const auth=()=>({'Content-Type':'application/json',...(TOKEN?{Authorization:'Bearer '+TOKEN}:{})});
+function logout(){localStorage.removeItem('deng_token');localStorage.removeItem('deng_user');if(MODE==='live')location.replace('login.html');else alert('(demo) logout')}
+
+async function boot(){
+  let backend=false;
+  try{const h=await fetch('/api/health',{cache:'no-store'});backend=h.ok;}catch{}
+  if(backend){
+    if(!TOKEN){location.replace('login.html');return;}
+    const me=await fetch('/api/me',{headers:auth()});
+    if(!me.ok){localStorage.removeItem('deng_token');location.replace('login.html');return;}
+    const u=(await me.json()).user; MODE='live';
+    $('userchip').textContent='@'+u.username; if(u.email)$('email').value=u.email;
+    await loadFleet(); await loadConfig();
+    setInterval(loadFleet,5000);
+  }else{
+    MODE='mock'; $('userchip').textContent='demo mode'; buildMock(); renderFleet(); renderScr();
+    $('foot').textContent='rejoin.deng.my.id · demo preview · not connected to a backend';
+  }
+  $('tk').innerHTML=('<b>DENG REJOIN</b> &nbsp;·&nbsp; <span class="g">auto-rejoin armed</span> &nbsp;·&nbsp; disconnect detection ON &nbsp;·&nbsp; <b>rejoin.deng.my.id</b> &nbsp;·&nbsp; ').repeat(4);
+}
+
+/* ---------- LIVE ---------- */
+async function loadFleet(){
+  if(MODE!=='live')return;
+  try{
+    const r=await fetch('/api/fleet',{headers:auth()}); if(!r.ok)return;
+    const d=await r.json();
+    phones=d.devices.map(dev=>{
+      const s=dev.status||{}; const clones=s.clones||0, run=s.running||0;
+      return {id:dev.id,name:dev.name,p:(dev.id||'').slice(4,10),clones,dead:Math.max(0,clones-run),
+        st:!dev.online?'off':(s.dead>0?'warn':'on'),auto:s.auto!==false,last:dev.last_seen,
+        list:(s.list||[])};
+    });
+    renderFleet();
+  }catch{}
+}
+async function loadConfig(){
+  if(MODE!=='live')return;
+  try{const r=await fetch('/api/config',{headers:auth()});if(!r.ok)return;const c=await r.json();
+    scripts=(c.scripts||[]).map(s=>({n:s.name,d:((s.size/1024)||0).toFixed(1)+' KB'}));renderScr();
+    if(c.target){$('tgtname').textContent=c.target.url?'Private server':'Place / Job ID';
+      $('tgtmeta').textContent=c.target.url?String(c.target.url).slice(0,40):(c.target.place?('place '+c.target.place):'not set');}
+  }catch{}
+}
+async function api(path,body){const r=await fetch(path,{method:'POST',headers:auth(),body:JSON.stringify(body||{})});return r.ok?r.json():Promise.reject(await r.json().catch(()=>({})))}
+
+/* ---------- MOCK (artifact preview) ---------- */
+function buildMock(){
+  phones=[];const C=8;
+  for(let i=0;i<100;i++){const roll=Math.random();const st=roll<.78?'on':roll<.93?'warn':'off';
+    const dead=st=='on'?(Math.random()<.5?0:1):st=='warn'?(2+Math.floor(Math.random()*3)):C;
+    const run=C-dead;
+    const list=Array.from({length:C},(_,k)=>({pkg:'com.moons.lite'+String.fromCharCode(97+k),name:'lite'+String.fromCharCode(97+k),running:k<run}));
+    phones.push({id:'rejoin-'+String(i+1).padStart(3,'0'),name:'rejoin-'+String(i+1).padStart(3,'0'),p:'P-'+(200+i),clones:C,dead,st,auto:st!='off',list});}
+  scripts=[{n:'Script1',d:'2.1 KB'},{n:'Script2',d:'0.4 KB'},{n:'Script3',d:'1.3 KB'}];
+}
+
+/* ---------- RENDER ---------- */
+function renderFleet(){
+  const g=$('fleet-grid');
+  if(!phones.length){g.innerHTML='<div class="empty card"><div class="inner">No phones yet. Open <b>Pair phone</b> to link your first cloud phone.</div></div>';}
+  else g.innerHTML=phones.map((p,i)=>{
+    const run=Math.max(0,p.clones-p.dead);
+    const segs=p.clones?Array.from({length:p.clones},(_,k)=>`<div class="seg ${k<run?'on':''}"></div>`).join(''):'<div class="seg"></div>';
+    const open=expanded.has(p.id);
+    const clones=(p.list&&p.list.length)?p.list:Array.from({length:p.clones},(_,k)=>({name:'clone '+(k+1),pkg:'',running:k<run}));
+    const cloneRows=clones.map(cl=>`<div class="clone">
+        <span class="cdot ${cl.running?'on':'off'}"></span>
+        <span class="cnm">${cl.name}</span>
+        <span style="flex:1"></span>
+        <button class="btn ghost xs" onclick="event.stopPropagation();cloneAct('${p.id}','${cl.pkg}','rejoin_clone')">⟳</button>
+        <button class="btn ghost xs" onclick="event.stopPropagation();cloneAct('${p.id}','${cl.pkg}','${cl.running?'stop_clone':'start_clone'}')">${cl.running?'■':'▶'}</button>
+      </div>`).join('');
+    return `<div class="ph ${p.st}">
+      <div class="hd" onclick="toggleExp('${p.id}')" style="cursor:pointer">
+        <span>${p.name}</span><span class="id">${p.p} ${open?'▲':'▼'}</span></div>
+      <div class="bd">
+        <div class="cnt"><div><div class="big g">${run}</div><div class="lab">Running</div></div><div><div class="big r">${p.dead}</div><div class="lab">Dead</div></div></div>
+        <div class="segs">${segs}</div>
+        ${open?`<div class="clones">${cloneRows}</div>`:''}
+        <hr class="dash">
+        <div class="togrow"><span>Auto-Rejoin${open?' (phone)':''}</span><div class="tog ${p.auto?'on':''}" onclick="togAuto(${i})"></div></div>
+        ${open?`<div class="row" style="margin-top:10px"><button class="btn green sm" onclick="phoneAct('${p.id}','start_all')">▶ Start phone</button><button class="btn sm" onclick="phoneAct('${p.id}','rejoin_all')">⟳ Rejoin phone</button></div>`:''}
+        <div class="meta">${p.st=='off'?'offline':'last seen '+timeAgo(p.last)} · tap header for clones</div>
+      </div></div>`;
+  }).join('');
+  const online=phones.filter(p=>p.st!='off').length, run=phones.reduce((a,p)=>a+Math.max(0,p.clones-p.dead),0);
+  $('n-ph').textContent=online;$('n-cl').textContent=run;$('phcount').textContent=online;$('slotcount').textContent=run;
+  if($('n-re').textContent==='—'){$('n-re').textContent=MODE==='mock'?127:0;$('n-av').innerHTML=(MODE==='mock'?'31.4':'—')+'<span style="font-size:16px">s</span>';}
+}
+function timeAgo(ts){if(!ts)return'—';const s=Math.floor((Date.now()-ts)/1000);return s<60?s+'s ago':Math.floor(s/60)+'m ago'}
+function renderScr(){
+  $('scrlist').innerHTML=scripts.length?scripts.map(s=>`<div class="scrit"><div class="ic">📜</div><div style="flex:1"><div class="nm">${s.n}.lua</div><div class="mt">${s.d}</div></div><button class="btn ghost sm" onclick="rmScript('${s.n}')">Remove</button></div>`).join(''):'<div class="sub">No scripts pushed yet.</div>';
+  $('scrcount').textContent=scripts.length+' files';
+}
+
+/* ---------- ACTIONS ---------- */
+async function broadcast(action){
+  if(MODE==='live'){try{const r=await api('/api/command',{action});flash('n-re',null);}catch(e){}
+    if(action==='start_all')phones.forEach(p=>{if(p.st!='off')p.dead=0});renderFleet();}
+  else{if(action==='start_all')phones.forEach(p=>{if(p.st!='off')p.dead=0});renderFleet();}
+}
+let expanded=new Set();
+function toggleExp(id){expanded.has(id)?expanded.delete(id):expanded.add(id);renderFleet();}
+function togAuto(i){phones[i].auto=!phones[i].auto;renderFleet();
+  if(MODE==='live'&&phones[i].id)api('/api/command',{action:'set_settings',device_ids:[phones[i].id],payload:{auto:phones[i].auto}}).catch(()=>{});}
+function phoneAct(id,action){
+  if(MODE==='live')api('/api/command',{action,device_ids:[id]}).catch(()=>{});
+  const ph=phones.find(p=>p.id===id); if(ph&&action==='start_all'){ph.dead=0;if(ph.list)ph.list.forEach(c=>c.running=true);renderFleet();}
+}
+function cloneAct(id,pkg,action){
+  if(MODE==='live')api('/api/command',{action,device_ids:[id],payload:{pkg}}).catch(()=>{});
+  const ph=phones.find(p=>p.id===id); const cl=ph&&ph.list&&ph.list.find(c=>c.pkg===pkg||c.name===pkg);
+  if(cl){if(action==='stop_clone')cl.running=false;else cl.running=true;ph.dead=ph.list.filter(c=>!c.running).length;renderFleet();}
+}
+async function pushScript(){const nm=$('scrname').value||('Script'+(scripts.length+1)),b=$('scrbody').value.trim();
+  if(!b){msg('scrmsg','Script is empty.','err');return}
+  if(MODE==='live'){try{await api('/api/scripts',{op:'add',name:nm,body:b});$('scrbody').value='';await loadConfig();msg('scrmsg',nm+'.lua pushed to fleet.','ok')}catch(e){msg('scrmsg',e.error||'Failed','err')}}
+  else{scripts.push({n:nm,d:(b.length/1024).toFixed(1)+' KB'});renderScr();$('scrbody').value='';msg('scrmsg','(demo) pushed','ok')}}
+async function rmScript(n){
+  if(MODE==='live'){try{await api('/api/scripts',{op:'remove',name:n});await loadConfig()}catch(e){}}
+  else{scripts=scripts.filter(s=>s.n!==n);renderScr()}}
+async function setTarget(){const l=$('pslink').value.trim(),pid=$('pid').value.trim(),jid=$('jid').value.trim();
+  const body=l?{url:l}:{place:pid,job:jid};
+  if(MODE==='live'){try{await api('/api/target',body);await loadConfig();msg('tgtmsg','Target saved and pushed to fleet.','ok')}catch(e){msg('tgtmsg',e.error||'Failed','err')}}
+  else{$('tgtname').textContent=l?'Private server':'Place / Job ID';$('tgtmeta').textContent=l?l.slice(0,40):'manual';msg('tgtmsg','(demo) saved','ok')}}
+async function genCode(){
+  if(MODE!=='live'){$('paircode').textContent='482913';msg('pairmsg','(demo) code — deploy the backend to pair real phones.','ok');return}
+  try{const d=await api('/api/pair/start',{});$('paircode').textContent=d.code;msg('pairmsg','Code valid 10 min. Enter it in the phone agent.','ok')}catch(e){msg('pairmsg',e.error||'Failed','err')}}
+async function changePw(){const o=$('oldpw').value,nw=$('newpw').value;
+  if(nw.length<6){msg('pwmsg','New password must be at least 6 characters.','err');return}
+  if(MODE!=='live'){msg('pwmsg','(demo) connect backend to change password.','err');return}
+  try{await api('/api/account/password',{old_password:o,new_password:nw});$('oldpw').value='';$('newpw').value='';msg('pwmsg','Password updated.','ok')}catch(e){msg('pwmsg',e.error||'Failed','err')}}
+async function changeEmail(){const e=$('email').value.trim();
+  if(MODE!=='live'){msg('emailmsg','(demo) connect backend to update email.','err');return}
+  try{await api('/api/account/email',{email:e});msg('emailmsg','Email saved.','ok')}catch(err){msg('emailmsg',err.error||'Failed','err')}}
+let keyMode='separate';
+function setKeyMode(m){keyMode=m;$('mode-sep').className='btn sm '+(m==='separate'?'green':'ghost');$('mode-shared').className='btn sm '+(m==='shared'?'green':'ghost')}
+async function pushKey(){const k=$('dkey').value.trim();
+  if(!/^[A-Za-z0-9._-]{1,512}$/.test(k)){msg('keymsg','Key must be 1-512 chars (letters, numbers, . _ -).','err');return}
+  if(MODE!=='live'){msg('keymsg','(demo) connect backend to push keys.','err');return}
+  try{const d=await api('/api/key',{key:k,mode:keyMode});$('dkey').value='';msg('keymsg','Key pushed to '+d.queued+' phones ('+keyMode+').','ok')}catch(e){msg('keymsg',e.error||'Failed','err')}}
+function msg(id,t,c){const el=$(id);el.className='msg '+(c||'');el.textContent=t}
+function flash(){}
+
+document.querySelectorAll('nav a').forEach(a=>a.onclick=()=>{
+  document.querySelectorAll('nav a').forEach(x=>x.classList.remove('on'));a.classList.add('on');
+  document.querySelectorAll('.tabpane').forEach(p=>p.classList.remove('on'));$(a.dataset.tab).classList.add('on');
+});
+boot();
+</script>
+</body>
+</html>
