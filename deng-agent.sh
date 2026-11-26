@@ -215,18 +215,20 @@ local_script_file(){ # name outfile
   while IFS= read -r dir; do [ -n "$dir" ] || continue
     root "test -f '$dir/$name.lua' && cat '$dir/$name.lua'" > "$out" 2>/dev/null && return 0; done < <(script_dirs); return 1; }
 
-write_key(){ # key mode
-  local key="$1" mode="$2" p path n=0 dir
-  [[ "$key" =~ ^[A-Za-z0-9._-]{1,512}$ ]] || return 1
-  if [ "$mode" = shared ]; then
+write_key(){ # key mode [pkg]
+  local key="$1" mode="$2" only="${3:-}" p path n=0 dir
+  [[ "$key" =~ ^[A-Za-z0-9._=-]{1,512}$ ]] || return 1
+  if [ "$mode" = shared ] && [ -z "$only" ]; then
     path='/storage/emulated/0/Delta/Internals/Cache/license'; dir="${path%/*}"
     root "mkdir -p '$dir' && test ! -L '$dir' && printf %s '$key' > '$path'" >/dev/null 2>&1 && n=1
   else
     for p in "${APPS[@]}"; do
-      dir="/storage/emulated/0/Android/data/$p/files/gloop/external/Internals/cache"
+      [ -n "$only" ] && [ "$p" != "$only" ] && continue
+      dir="$EXT_ROOT/$p/files/gloop/external/Internals/cache"
       root "mkdir -p '$dir' && test ! -L '$dir' && printf %s '$key' > '$dir/license'" >/dev/null 2>&1 && n=$((n+1))
     done
   fi
+  [ "$n" -gt 0 ] && scan_key
   [ "$n" -gt 0 ]
 }
 one_pkg(){ # validate payload.pkg is one of our clones; echoes it or fails
@@ -251,7 +253,8 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
     remove_script) remove_script "$(jq -r '.name' <<<"$pl")"; echo removed;;
     set_target) local t; t=$(remote_target "$(jq -c '{target:.}' <<<"$pl")"); apply_target "$t"; echo 'target saved';;
     set_settings) local d; d=$(jq -r '.delay // empty' <<<"$pl"); [[ "$d" =~ ^[0-9]{1,3}$ ]] && cfg_set DELAY "$d"; echo 'settings saved';;
-    set_key) write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" && echo 'key written' || { echo 'key failed'; return 1; };;
+    set_key) local only=''; only=$(jq -r '.pkg // empty' <<<"$pl"); [ -n "$only" ] && { allowed "$only" || { echo 'unknown clone'; return 1; }; }
+             write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" "$only" && echo 'key written' || { echo 'key failed'; return 1; };;
     *) echo "unknown action"; return 1;;
   esac
   [ "$ok" = 1 ]
@@ -259,15 +262,32 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
 
 # ---------- Delta key status (shown on the website; the key itself never leaves) ----------
 KEYINFO='{}'
-scan_key(){ local p shared tails='' n=0 t
-  shared=$(root "cat /storage/emulated/0/Delta/Internals/Cache/license" 2>/dev/null | tr -d '\r\n')
-  for p in "${APPS[@]}"; do
-    t=$(root "cat '$EXT_ROOT/$p/files/gloop/external/Internals/cache/license'" 2>/dev/null | tr -d '\r\n')
-    [[ "$t" =~ ^[A-Za-z0-9._-]{4,512}$ ]] && { n=$((n+1)); tails+="${t: -4}"$'\n'; }
-  done
-  [[ "$shared" =~ ^[A-Za-z0-9._-]{4,512}$ ]] && shared=${shared: -4} || shared=''
-  KEYINFO=$(printf '%s' "$tails" | jq -Rsc --arg sh "$shared" --argjson n "$n" --argjson tot "${#APPS[@]}" \
-    '(split("\n")|map(select(length>0))|unique) as $u | {shared:($sh|if .=="" then null else . end), clones:$n, total:$tot, tails:$u[:3], same:($u|length<=1)}')
+# One key per clone, wherever Delta keeps it: the cache file our tools write, any
+# license/.license file Delta itself saved (key typed in the Delta app), or the shared
+# file all clones read. Only the last 4 characters are reported.
+scan_key(){
+  local pkgs="${APPS[*]}" raw shared
+  [ -n "$pkgs" ] || { KEYINFO='{}'; return; }
+  raw=$(root "for p in $pkgs; do
+      for f in \$(find /storage/emulated/0/Android/data/\$p/files /data/data/\$p/files /data/data/\$p/shared_prefs -maxdepth 6 -type f \\( -name license -o -name .license -o -name 'license.*' -o -name '*license*.xml' \\) 2>/dev/null | head -20); do
+        printf '%s\t%s\t' \"\$p\" \"\$f\"; head -c 2048 \"\$f\" 2>/dev/null | tr -d '\r\n\t'; echo
+      done
+    done" 2>/dev/null)
+  shared=$(root "head -c 2048 /storage/emulated/0/Delta/Internals/Cache/license" 2>/dev/null | tr -d '\r\n\t')
+  KEYINFO=$(jq -Rnc --arg raw "$raw" --arg shared "$shared" --arg pkgs "$pkgs" '
+    def keyof: if test("^[A-Za-z0-9._=-]{4,512}$") then .
+               else ((capture("(?i)\"?(license|key)\"?\\s*[:=>]\\s*\"?(?<k>[A-Za-z0-9._=-]{8,512})") // {}).k) end;
+    def tail4: if . == null then null else .[-4:] end;
+    def rank: if test("/gloop/external/Internals/cache/license$") then 0 elif startswith("/storage") then 1 else 2 end;
+    ($shared | keyof) as $sk
+    | ($raw | split("\n") | map(select(length>0) | split("\t") | {pkg:.[0], path:.[1], k:((.[2] // "") | keyof)}) | map(select(.k != null))) as $found
+    | ($pkgs | split(" ") | map(select(length>0))) as $all
+    | [ $all[] as $p | ($found | map(select(.pkg == $p)) | sort_by(.path|rank) | first) as $f
+        | {name: ($p | split(".") | last), pkg: $p,
+           tail: (if $f then ($f.k|tail4) elif $sk then ($sk|tail4) else null end),
+           src: (if $f then (if ($f.path|rank) == 0 then "cache" else "delta" end) elif $sk then "shared" else null end)} ] as $list
+    | {shared: ($sk|tail4), list: $list, clones: ($list|map(select(.tail))|length), total: ($list|length),
+       tails: ($list|map(.tail)|map(select(.))|unique|.[:3]), same: (($list|map(.tail)|map(select(.))|unique|length) <= 1)}' 2>/dev/null) || KEYINFO='{}'
 }
 
 # ---------- settings sync: website <-> Termux menu (3-way merge) ----------
