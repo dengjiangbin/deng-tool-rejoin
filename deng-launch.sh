@@ -20,13 +20,19 @@ if [ -t 1 ]; then R=$'\033[1;31m'; DIM=$'\033[2m'; Z=$'\033[0m'; else R=; DIM=; 
 su(){ command su "$@" </dev/null; }
 tty_fix(){ stty sane </dev/tty 2>/dev/null || true; }
 clear_screen(){ printf '\033[2J\033[H'; }   # ANSI clear (works without the `clear` package)
-logo(){ printf '\033[1m%s' "$R"; cat <<'EOA'
-   ___  ___ _  _  ___
-  |   \| __| \| |/ __|
-  | |) | _|| .` | (_ |
-  |___/|___|_|\_|\___|
-EOA
-printf '      R E J O I N%s\n' "$Z"; }
+logo(){
+  printf '%b\n' ' \033[1;91m██████\033[0;31m╗ \033[1;91m███████\033[0;31m╗\033[1;91m███\033[0;31m╗   \033[1;91m██\033[0;31m╗ \033[1;91m██████\033[0;31m╗\033[0m'
+  printf '%b\n' ' \033[1;91m██\033[0;31m╔══\033[1;91m██\033[0;31m╗\033[1;91m██\033[0;31m╔════╝\033[1;91m████\033[0;31m╗  \033[1;91m██\033[0;31m║\033[1;91m██\033[0;31m╔════╝\033[0m'
+  printf '%b\n' ' \033[1;91m██\033[0;31m║  \033[1;91m██\033[0;31m║\033[1;91m█████\033[0;31m╗  \033[1;91m██\033[0;31m╔\033[1;91m██\033[0;31m╗ \033[1;91m██\033[0;31m║\033[1;91m██\033[0;31m║  \033[1;91m███\033[0;31m╗\033[0m'
+  printf '%b\n' ' \033[1;91m██\033[0;31m║  \033[1;91m██\033[0;31m║\033[1;91m██\033[0;31m╔══╝  \033[1;91m██\033[0;31m║╚\033[1;91m██\033[0;31m╗\033[1;91m██\033[0;31m║\033[1;91m██\033[0;31m║   \033[1;91m██\033[0;31m║\033[0m'
+  printf '%b\n' ' \033[1;91m██████\033[0;31m╔╝\033[1;91m███████\033[0;31m╗\033[1;91m██\033[0;31m║ ╚\033[1;91m████\033[0;31m║╚\033[1;91m██████\033[0;31m╔╝\033[0m'
+  printf '%b\n' ' \033[0;31m╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝\033[0m'
+  printf '%b\n' '\033[1;91m        R  E  J  O  I  N\033[0m'
+}
+C=$'\033[1;96m'; G=$'\033[1;92m'; Y=$'\033[1;93m'; W=$'\033[1;97m'; RB=$'\033[1;91m'
+opt(){ local n=$1; shift; local c=$Y; [ "$n" = 0 ] && c=$RB; printf '%s[%s%s%s]%s %s%s\n' "$DIM" "$c" "$n" "$DIM" "$W" "$*" "$Z"; }
+rule(){ printf '%s--------------------------------%s\n' "$DIM" "$Z"; }
+info(){ printf '  %s%-9s%s %s%s\n' "$C" "$1" "$Z" "$2" "$Z"; }
 need(){ command -v "$1" >/dev/null 2>&1 || { say "Missing $1 — run: pkg install $2"; exit 1; }; }
 need curl curl; need jq jq
 getfile(){ curl -fsSL "$1" -o "$2" 2>/dev/null && [ -s "$2" ]; }
@@ -213,20 +219,21 @@ menu(){
     tty_fix
     clear_screen
     logo
-    say "  ${DIM}rejoin.deng.my.id${Z}"
-    say "  signed in: ${R}$USERNAME${Z}"
-    say "  website: $(agent_status)"
-    say "  key: $([ -n "$KEY_LEFT" ] && echo "active, $KEY_LEFT left" || echo 'none (bind in Key Panel)')"
-    say '  --------------------------'
+    say "        ${DIM}rejoin.deng.my.id${Z}"
+    rule
+    info 'Account' "${W}$USERNAME"
+    info 'Website' "$(agent_pid >/dev/null && printf '%s' "${G}online${Z} as $(agent_name)" || printf '%s' "${RB}offline")"
+    info 'Key' "$([ -n "$KEY_LEFT" ] && printf '%s' "${G}active${Z}, $KEY_LEFT left" || printf '%s' "${Y}none${Z} (use Bind key)")"
+    rule
     if [ "$new" = 1 ]; then
-      say '[1] Configuration'
-      say '[2] Start'
-      say '[3] Bind key'
-      say '[4] Update'
-      say "[5] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
-      say '[0] Exit'
-      say '------------------------'
-      tty_fix; printf 'Select [0-5]: '; IFS= read -r c </dev/tty || exit 0
+      opt 1 'Configuration'
+      opt 2 'Start'
+      opt 3 'Bind key'
+      opt 4 'Update'
+      opt 5 "Open DENG when Termux starts: $(autostart_on && printf '%s' "${G}ON" || printf '%s' "${RB}OFF")"
+      opt 0 'Exit'
+      rule
+      tty_fix; printf '%sSelect [0-5]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
       case "$c" in
         1) key_wall || continue; DENG_TOP=1 bash "$CODE616" --config ;;
         2) key_wall || continue; DENG_TOP=1 bash "$CODE616" --start ;;
@@ -237,12 +244,12 @@ menu(){
         *) say 'Pick 0-5.'; sleep 1 ;;
       esac
     else
-      say '[1] Rejoin Tool'
-      say '[2] Bind key'
-      say "[3] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
-      say '[0] Exit'
-      say '------------------------'
-      tty_fix; printf 'Select [0-3]: '; IFS= read -r c </dev/tty || exit 0
+      opt 1 'Rejoin Tool'
+      opt 2 'Bind key'
+      opt 3 "Open DENG when Termux starts: $(autostart_on && printf '%s' "${G}ON" || printf '%s' "${RB}OFF")"
+      opt 0 'Exit'
+      rule
+      tty_fix; printf '%sSelect [0-3]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
       case "$c" in
         1) key_wall || continue; tool_ready || continue; bash "$CODE616" ;;
         2) bind_key ;;
