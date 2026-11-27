@@ -16,7 +16,13 @@ if [ -t 1 ]; then Y=$'\033[33m'; G=$'\033[32m'; R=$'\033[31m'; D=$'\033[2m'; B=$
 
 RED=$'\033[1;31m'
 banner(){
-  printf '\n  %s-=[ %sDENG REJOIN%s%s ]=-%s\n' "$D" "$RED" "$Z" "$D" "$Z"
+  printf '\n\033[1m%s' "$RED"; cat <<'EOA'
+   ___  ___ _  _  ___
+  |   \| __| \| |/ __|
+  | |) | _|| .` | (_ |
+  |___/|___|_|\_|\___|
+EOA
+  printf '      R E J O I N%s\n' "$Z"
   printf '  %sMenyiapkan cloud phone kamu…%s\n\n' "$D" "$Z"
 }
 

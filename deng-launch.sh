@@ -20,7 +20,13 @@ if [ -t 1 ]; then R=$'\033[1;31m'; DIM=$'\033[2m'; Z=$'\033[0m'; else R=; DIM=; 
 su(){ command su "$@" </dev/null; }
 tty_fix(){ stty sane </dev/tty 2>/dev/null || true; }
 clear_screen(){ printf '\033[2J\033[H'; }   # ANSI clear (works without the `clear` package)
-logo(){ printf '  %s-=[ %sDENG REJOIN%s%s ]=-%s\n' "$DIM" "$R" "$Z" "$DIM" "$Z"; }
+logo(){ printf '\033[1m%s' "$R"; cat <<'EOA'
+   ___  ___ _  _  ___
+  |   \| __| \| |/ __|
+  | |) | _|| .` | (_ |
+  |___/|___|_|\_|\___|
+EOA
+printf '      R E J O I N%s\n' "$Z"; }
 need(){ command -v "$1" >/dev/null 2>&1 || { say "Missing $1 — run: pkg install $2"; exit 1; }; }
 need curl curl; need jq jq
 getfile(){ curl -fsSL "$1" -o "$2" 2>/dev/null && [ -s "$2" ]; }
