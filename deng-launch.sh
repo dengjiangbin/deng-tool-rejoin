@@ -15,6 +15,10 @@ RAW="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main"
 
 say(){ printf '%s\n' "$*"; }
 if [ -t 1 ]; then R=$'\033[1;31m'; DIM=$'\033[2m'; Z=$'\033[0m'; else R=; DIM=; Z=; fi
+# Root calls must never hold the terminal: some root managers switch it to raw mode and leave it
+# that way, which breaks the menu layout and stops typing. Detach them from the keyboard.
+su(){ command su "$@" </dev/null; }
+tty_fix(){ stty sane </dev/tty 2>/dev/null || true; }
 clear_screen(){ printf '\033[2J\033[H'; }   # ANSI clear (works without the `clear` package)
 logo(){ printf '  %s-=[ %sDENG REJOIN%s%s ]=-%s\n' "$DIM" "$R" "$Z" "$DIM" "$Z"; }
 need(){ command -v "$1" >/dev/null 2>&1 || { say "Missing $1 — run: pkg install $2"; exit 1; }; }
@@ -37,6 +41,7 @@ login(){
   say ''; say 'Sign in to your DENG Rejoin account.'
   say "(No account? Create one at $SERVER)"
   while true; do
+    tty_fix
     printf 'Username: '; IFS= read -r u </dev/tty
     printf 'Password: '; stty -echo 2>/dev/null </dev/tty; IFS= read -r p </dev/tty; stty echo 2>/dev/null </dev/tty; printf '\n'
     [ -n "$u" ] && [ -n "$p" ] || { say 'Enter username and password.'; continue; }
@@ -160,7 +165,7 @@ if [ "${1:-}" = --autostart-install ]; then autostart_install; exit 0; fi
 bind_key(){
   local h out code body k
   h=$(deng_hwid) || { say 'Root diperlukan.'; sleep 1; return; }
-  printf 'Tempel DENG key (atau Enter batal): '; IFS= read -r k </dev/tty
+  tty_fix; printf 'Tempel DENG key (atau Enter batal): '; IFS= read -r k </dev/tty
   k=$(printf '%s' "$k" | tr -d ' \t' | tr a-z A-Z)
   [ -n "$k" ] || return
   out=$(curl -sS -m 20 -w '\n%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -177,8 +182,8 @@ kb_fix(){ local f="$HOME/.termux/termux.properties"
   command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings >/dev/null 2>&1; return 0; }
 menu(){
   while true; do
-    stty sane </dev/tty 2>/dev/null || true
-    key_check >/dev/null 2>&1
+    key_check >/dev/null 2>&1 </dev/null
+    tty_fix
     clear_screen
     logo
     say "  ${DIM}rejoin.deng.my.id${Z}"
@@ -191,7 +196,7 @@ menu(){
     say "[3] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
     say '[0] Exit'
     say '------------------------'
-    printf 'Select [0-3]: '; IFS= read -r c </dev/tty || exit 0
+    tty_fix; printf 'Select [0-3]: '; IFS= read -r c </dev/tty || exit 0
     case "$c" in
       1) key_wall || continue
          [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _ </dev/tty; continue; }
