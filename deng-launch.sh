@@ -14,6 +14,15 @@ AGENT="$HOME/deng-agent.sh"
 RAW="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main"
 
 say(){ printf '%s\n' "$*"; }
+if [ -t 1 ]; then R=$'\033[1;31m'; DIM=$'\033[2m'; Z=$'\033[0m'; else R=; DIM=; Z=; fi
+clear_screen(){ printf '\033[2J\033[3J\033[H'; }   # ANSI clear (works without the `clear` package)
+logo(){ printf '%s' "$R"; cat <<'EOA'
+   ___  ___ _  _  ___
+  |   \| __| \| |/ __|
+  | |) | _|| .` | (_ |
+  |___/|___|_|\_|\___|
+EOA
+printf '%s      R E J O I N%s\n' "$DIM" "$Z"; }
 need(){ command -v "$1" >/dev/null 2>&1 || { say "Missing $1 — run: pkg install $2"; exit 1; }; }
 need curl curl; need jq jq
 getfile(){ curl -fsSL "$1" -o "$2" 2>/dev/null && [ -s "$2" ]; }
@@ -157,14 +166,13 @@ if [ "${1:-}" = --autostart-install ]; then autostart_install; exit 0; fi
 menu(){
   while true; do
     key_check >/dev/null 2>&1
-    clear 2>/dev/null || true
-    say '========================'
-    say '        D E N G'
-    say '     rejoin.deng.my.id'
-    say "   signed in: $USERNAME"
-    say "   website: $(agent_status)"
-    say "   key: $([ -n "$KEY_LEFT" ] && echo "active, $KEY_LEFT left" || echo 'none (bind in Key Panel)')"
-    say '========================'
+    clear_screen
+    logo
+    say "  ${DIM}rejoin.deng.my.id${Z}"
+    say "  signed in: ${R}$USERNAME${Z}"
+    say "  website: $(agent_status)"
+    say "  key: $([ -n "$KEY_LEFT" ] && echo "active, $KEY_LEFT left" || echo 'none (bind in Key Panel)')"
+    say '  --------------------------'
     say '[1] Rejoin Tool'
     say '[2] Log out'
     say "[3] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"

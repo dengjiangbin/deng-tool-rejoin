@@ -14,11 +14,16 @@ mkdir -p "$DENG"
 # colors only on a real terminal
 if [ -t 1 ]; then Y=$'\033[33m'; G=$'\033[32m'; R=$'\033[31m'; D=$'\033[2m'; B=$'\033[1m'; Z=$'\033[0m'; else Y=; G=; R=; D=; B=; Z=; fi
 
+RED=$'\033[1;31m'
 banner(){
-  printf '\n'
-  printf '  %s%s╔══════════════════════════════╗%s\n' "$B" "$Y" "$Z"
-  printf '  %s%s║      D E N G   R E J O I N    ║%s\n' "$B" "$Y" "$Z"
-  printf '  %s%s╚══════════════════════════════╝%s\n' "$B" "$Y" "$Z"
+  printf '\n%s' "$RED"
+  cat <<'EOA'
+   ___  ___ _  _  ___
+  |   \| __| \| |/ __|
+  | |) | _|| .` | (_ |
+  |___/|___|_|\_|\___|
+EOA
+  printf '%s      R E J O I N%s\n' "$D" "$Z"
   printf '  %sMenyiapkan cloud phone kamu…%s\n\n' "$D" "$Z"
 }
 
