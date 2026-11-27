@@ -186,9 +186,30 @@ kb_fix(){ local f="$HOME/.termux/termux.properties"
   grep -q '^[[:space:]]*enforce-char-based-input' "$f" 2>/dev/null && return 0
   mkdir -p "$HOME/.termux"; printf '\n# DENG: make typing reach the terminal on Samsung-type keyboards\nenforce-char-based-input = true\n' >> "$f"
   command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings >/dev/null 2>&1; return 0; }
+tool_ready(){ [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _ </dev/tty; return 1; }; }
+# Does the installed rejoin tool have the Configuration / Start screens? (checked once per tool version)
+CAPF="$DENG/.toolcaps"
+tool_new(){
+  [ -f "$CODE616" ] || return 1
+  local sum; sum=$(cksum < "$CODE616" 2>/dev/null)
+  if [ "$(sed -n 1p "$CAPF" 2>/dev/null)" != "$sum" ]; then
+    local ok=0
+    timeout 10 bash "$CODE616" --caps </dev/null 2>/dev/null | grep -q '^caps:2' && ok=1
+    printf '%s\n%s\n' "$sum" "$ok" > "$CAPF"
+  fi
+  [ "$(sed -n 2p "$CAPF" 2>/dev/null)" = 1 ]
+}
+update_all(){
+  say 'Checking for updates...'
+  tool_ready && DENG_TOP=1 bash "$CODE616" --update
+  unset DENG_UPDATED; update_tools
+  agent_start
+}
 menu(){
+  local new
   while true; do
     key_check >/dev/null 2>&1 </dev/null
+    tool_ready >/dev/null 2>&1 </dev/null; new=0; tool_new && new=1
     tty_fix
     clear_screen
     logo
@@ -197,21 +218,39 @@ menu(){
     say "  website: $(agent_status)"
     say "  key: $([ -n "$KEY_LEFT" ] && echo "active, $KEY_LEFT left" || echo 'none (bind in Key Panel)')"
     say '  --------------------------'
-    say '[1] Rejoin Tool'
-    say '[2] Bind key'
-    say "[3] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
-    say '[0] Exit'
-    say '------------------------'
-    tty_fix; printf 'Select [0-3]: '; IFS= read -r c </dev/tty || exit 0
-    case "$c" in
-      1) key_wall || continue
-         [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _ </dev/tty; continue; }
-         bash "$CODE616" ;;
-      2) bind_key ;;
-      3) autostart_toggle ;;
-      0) exit 0 ;;
-      *) say 'Pick 0-3.'; sleep 1 ;;
-    esac
+    if [ "$new" = 1 ]; then
+      say '[1] Configuration'
+      say '[2] Start'
+      say '[3] Bind key'
+      say '[4] Update'
+      say "[5] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
+      say '[0] Exit'
+      say '------------------------'
+      tty_fix; printf 'Select [0-5]: '; IFS= read -r c </dev/tty || exit 0
+      case "$c" in
+        1) key_wall || continue; DENG_TOP=1 bash "$CODE616" --config ;;
+        2) key_wall || continue; DENG_TOP=1 bash "$CODE616" --start ;;
+        3) bind_key ;;
+        4) update_all ;;
+        5) autostart_toggle ;;
+        0) exit 0 ;;
+        *) say 'Pick 0-5.'; sleep 1 ;;
+      esac
+    else
+      say '[1] Rejoin Tool'
+      say '[2] Bind key'
+      say "[3] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
+      say '[0] Exit'
+      say '------------------------'
+      tty_fix; printf 'Select [0-3]: '; IFS= read -r c </dev/tty || exit 0
+      case "$c" in
+        1) key_wall || continue; tool_ready || continue; bash "$CODE616" ;;
+        2) bind_key ;;
+        3) autostart_toggle ;;
+        0) exit 0 ;;
+        *) say 'Pick 0-3.'; sleep 1 ;;
+      esac
+    fi
   done
 }
 gate
