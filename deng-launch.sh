@@ -37,8 +37,8 @@ login(){
   say ''; say 'Sign in to your DENG Rejoin account.'
   say "(No account? Create one at $SERVER)"
   while true; do
-    printf 'Username: '; IFS= read -r u
-    printf 'Password: '; stty -echo 2>/dev/null; IFS= read -r p; stty echo 2>/dev/null; printf '\n'
+    printf 'Username: '; IFS= read -r u </dev/tty
+    printf 'Password: '; stty -echo 2>/dev/null </dev/tty; IFS= read -r p </dev/tty; stty echo 2>/dev/null </dev/tty; printf '\n'
     [ -n "$u" ] && [ -n "$p" ] || { say 'Enter username and password.'; continue; }
     out=$(curl -sS -m 15 -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
           --data-binary "$(jq -nc --arg u "$u" --arg p "$p" '{username:$u,password:$p}')" "$SERVER/api/login" 2>/dev/null)
@@ -97,7 +97,7 @@ key_wall(){
     1) say ''; say 'No active key on this cloud phone.'; say 'Open the website > Key Panel, pick a key and bind it to this cloud phone,'; say 'then choose this menu again.';;
     *) say 'Cannot check the key right now (no internet or server busy). Try again.';;
   esac
-  printf 'Press Enter...'; read -r _; return 1
+  printf 'Press Enter...'; read -r _ </dev/tty; return 1
 }
 # ---- website agent (background, joins this account automatically) ----
 AGDIR="$HOME/.deng-rejoin"; AGPID="$AGDIR/agent.pid"; AGLOG="$AGDIR/agent.log"; AGCONF="$AGDIR/agent.conf"
@@ -160,7 +160,7 @@ if [ "${1:-}" = --autostart-install ]; then autostart_install; exit 0; fi
 bind_key(){
   local h out code body k
   h=$(deng_hwid) || { say 'Root diperlukan.'; sleep 1; return; }
-  printf 'Tempel DENG key (atau Enter batal): '; IFS= read -r k
+  printf 'Tempel DENG key (atau Enter batal): '; IFS= read -r k </dev/tty
   k=$(printf '%s' "$k" | tr -d ' \t' | tr a-z A-Z)
   [ -n "$k" ] || return
   out=$(curl -sS -m 20 -w '\n%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -168,10 +168,16 @@ bind_key(){
   code=${out##*$'\n'}; body=${out%$'\n'*}
   if [ "$code" = 200 ]; then say ''; say 'Key aktif untuk cloud phone ini.'; key_check >/dev/null 2>&1
   else say ''; say "Gagal: $(printf '%s' "$body" | jq -r '.error // "server tidak terjangkau"' 2>/dev/null)"; fi
-  printf 'Enter untuk lanjut...'; read -r _
+  printf 'Enter untuk lanjut...'; read -r _ </dev/tty
 }
+# Samsung-type keyboards may not deliver typing to Termux; this documented Termux setting fixes it.
+kb_fix(){ local f="$HOME/.termux/termux.properties"
+  grep -q '^[[:space:]]*enforce-char-based-input' "$f" 2>/dev/null && return 0
+  mkdir -p "$HOME/.termux"; printf '\n# DENG: make typing reach the terminal on Samsung-type keyboards\nenforce-char-based-input = true\n' >> "$f"
+  command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings >/dev/null 2>&1; return 0; }
 menu(){
   while true; do
+    stty sane </dev/tty 2>/dev/null || true
     key_check >/dev/null 2>&1
     clear_screen
     logo
@@ -185,10 +191,10 @@ menu(){
     say "[3] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
     say '[0] Exit'
     say '------------------------'
-    printf 'Select [0-3]: '; IFS= read -r c
+    printf 'Select [0-3]: '; IFS= read -r c </dev/tty || exit 0
     case "$c" in
       1) key_wall || continue
-         [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _; continue; }
+         [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _ </dev/tty; continue; }
          bash "$CODE616" ;;
       2) bind_key ;;
       3) autostart_toggle ;;
@@ -201,4 +207,5 @@ gate
 update_tools
 [ -f "$NOAUTO" ] || autostart_on || autostart_install   # older installs get auto-start too
 agent_start
+kb_fix
 menu

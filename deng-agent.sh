@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.27-9"
+AGENT_VERSION="2026.11.27-10"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -232,7 +232,7 @@ script_dirs(){ # prints each clone's script folder, creating it once Delta has r
       owner=$(root "stat -c '%u:%g' '$ext'" 2>/dev/null); [[ "$owner" =~ ^[0-9]+:[0-9]+$ ]] && root "chown '$owner' '$dir'" >/dev/null 2>&1
       printf '%s\n' "$dir"; fi
   done; }
-script_ok(){ [[ "$1" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,39}$ && "$1" != code616_hb ]]; }
+script_ok(){ [[ "$1" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,39}$ && "$1" != code616_hb && "$1" != deng_srv ]]; }
 write_script_file(){ # name file   (byte-exact copy into every clone)
   local name="${1%.lua}" src="$2" dir n=0
   script_ok "$name" || return 1
@@ -246,7 +246,7 @@ remove_script(){ local name="${1%.lua}" dir; script_ok "$name" || return 1
 # "name md5" for every script on this cloud phone (union of all clones).
 local_scripts(){ local dirs; dirs=$(script_dirs | tr '\n' ' '); [ -n "${dirs// /}" ] || return 0
   root "for d in $dirs; do cd \"\$d\" 2>/dev/null && md5sum *.lua 2>/dev/null; done" 2>/dev/null \
-    | awk '{f=$2; sub(/^\*/,"",f); sub(/\.lua$/,"",f); if(f=="code616_hb") next; c[f]++; if(!(f in s)) s[f]=$1} END{for(f in s) print f, s[f], c[f]}'; }
+    | awk '{f=$2; sub(/^\*/,"",f); sub(/\.lua$/,"",f); if(f=="code616_hb"||f=="deng_srv") next; c[f]++; if(!(f in s)) s[f]=$1} END{for(f in s) print f, s[f], c[f]}'; }
 local_script_file(){ # name outfile
   local name="$1" out="$2" dir
   while IFS= read -r dir; do [ -n "$dir" ] || continue
@@ -376,6 +376,57 @@ scan_users(){ local raw pkg u
   while read -r pkg u; do [[ -n "$pkg" && "$u" =~ ^[A-Za-z0-9_]{3,20}$ ]] && RBX[$pkg]=$u; done <<< "$raw"
 }
 
+# ---------- server check: rejoin a clone that sits in a different server than the target ----------
+# A tiny reporter in each clone writes "<placeId> <jobId> <private 0|1> <time>" every 10s.
+# Rules: Place ID + Job ID target -> both must match. Private link with a place -> same place and a
+# private server. Share link -> must be a private server.
+# Safety: the mismatch must be seen twice in a row, at most one rejoin per clone every 3 minutes,
+# and after 3 tries that never match it stops until the target changes.
+SRV_REL='files/gloop/external/Workspace/deng_srv.txt'
+SRV_LUA='task.spawn(function()
+  if not game:IsLoaded() then game.Loaded:Wait() end
+  while true do
+    pcall(function()
+      writefile("deng_srv.txt", tostring(game.PlaceId).." "..tostring(game.JobId).." "..((game.PrivateServerId ~= "" and "1") or "0").." "..tostring(os.time()))
+    end)
+    task.wait(10)
+  end
+end)'
+ensure_reporter(){ local dir tmp="$BASE/.srv.lua"; printf '%s\n' "$SRV_LUA" > "$tmp"
+  while IFS= read -r dir; do [ -n "$dir" ] || continue
+    root "cmp -s '$dir/deng_srv.lua' -" < "$tmp" >/dev/null 2>&1 || root "cat > '$dir/deng_srv.lua'" < "$tmp" >/dev/null 2>&1
+  done < <(script_dirs); rm -f "$tmp"; }
+declare -A SRV_BAD=() SRV_LAST=() SRV_TRIES=()
+SRV_T=''
+server_check(){
+  local t wp='' wj='' wpriv=0 r now raw pkg place job priv ts bad
+  t=$(local_target); [ -n "$t" ] || return 0
+  if [ "$t" != "$SRV_T" ]; then SRV_T=$t; SRV_BAD=(); SRV_TRIES=(); SRV_LAST=(); fi
+  case "$t" in
+    pj\|*) r=${t#pj|}; wp=${r%%|*}; wj=${r#*|} ;;
+    ps\|*) wpriv=1; [[ "$t" =~ placeId=([0-9]+) ]] && wp=${BASH_REMATCH[1]} ;;
+  esac
+  now=$(date +%s)
+  raw=$(root "for p in ${APPS[*]}; do pidof \$p >/dev/null 2>&1 || continue; f=$EXT_ROOT/\$p/$SRV_REL; [ -f \$f ] && echo \"\$p \$(head -c 120 \$f | tr -d '\n')\"; done" 2>/dev/null)
+  while read -r pkg place job priv ts _; do
+    [[ -n "$pkg" && "$ts" =~ ^[0-9]+$ ]] || continue
+    (( now - ts <= 45 )) || continue            # only trust a fresh report (the clone is in game right now)
+    bad=0
+    [ -n "$wp" ] && [ "$place" != "$wp" ] && bad=1
+    [ -n "$wj" ] && [ "${job,,}" != "${wj,,}" ] && bad=1
+    [ "$wpriv" = 1 ] && [ "$priv" != 1 ] && bad=1
+    if [ "$bad" = 0 ]; then SRV_BAD[$pkg]=0; SRV_TRIES[$pkg]=0; continue; fi
+    SRV_BAD[$pkg]=$(( ${SRV_BAD[$pkg]:-0} + 1 ))
+    (( ${SRV_BAD[$pkg]} >= 2 )) || continue
+    (( now - ${SRV_LAST[$pkg]:-0} >= 180 )) || continue
+    (( ${SRV_TRIES[$pkg]:-0} < 3 )) || continue
+    say "↻ ${pkg##*.} is in a different server than the target, rejoining"
+    rejoin_one "$pkg" "$(target_url)"
+    SRV_LAST[$pkg]=$now; SRV_TRIES[$pkg]=$(( ${SRV_TRIES[$pkg]:-0} + 1 )); SRV_BAD[$pkg]=0
+    root "rm -f '$EXT_ROOT/$pkg/$SRV_REL'" >/dev/null 2>&1
+  done <<< "$raw"
+}
+
 # ---------- settings sync: website <-> Termux menu (3-way merge) ----------
 # Last agreed state lives in sync.state. If only one side changed since then, that side
 # wins; if both changed, the website wins. Runs when the website's rev changes and
@@ -492,6 +543,7 @@ loop(){
       NOKEY=1; LAST_REV=-1; sleep "$POLL"; continue
     fi
     NOKEY=0
+    if [ $((tick % 6)) = 1 ]; then ensure_reporter; server_check; fi
     if [ "$HTTP" = 200 ]; then
       rev=$(jq -r '.config.rev // -1' <<<"$body")
       [ "$rev" != "$LAST_REV" ] && pull_and_sync
