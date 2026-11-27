@@ -15,14 +15,8 @@ RAW="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main"
 
 say(){ printf '%s\n' "$*"; }
 if [ -t 1 ]; then R=$'\033[1;31m'; DIM=$'\033[2m'; Z=$'\033[0m'; else R=; DIM=; Z=; fi
-clear_screen(){ printf '\033[2J\033[3J\033[H'; }   # ANSI clear (works without the `clear` package)
-logo(){ printf '%s' "$R"; cat <<'EOA'
-   ___  ___ _  _  ___
-  |   \| __| \| |/ __|
-  | |) | _|| .` | (_ |
-  |___/|___|_|\_|\___|
-EOA
-printf '%s      R E J O I N%s\n' "$DIM" "$Z"; }
+clear_screen(){ printf '\033[2J\033[H'; }   # ANSI clear (works without the `clear` package)
+logo(){ printf '  %s-=[ %sDENG REJOIN%s%s ]=-%s\n' "$DIM" "$R" "$Z" "$DIM" "$Z"; }
 need(){ command -v "$1" >/dev/null 2>&1 || { say "Missing $1 — run: pkg install $2"; exit 1; }; }
 need curl curl; need jq jq
 getfile(){ curl -fsSL "$1" -o "$2" 2>/dev/null && [ -s "$2" ]; }
@@ -163,6 +157,19 @@ autostart_toggle(){ if autostart_on; then : > "$NOAUTO"; say 'Auto-start OFF.'; 
 if [ "${1:-}" = --autostart-install ]; then autostart_install; exit 0; fi
 
 # ---- menu ----
+bind_key(){
+  local h out code body k
+  h=$(deng_hwid) || { say 'Root diperlukan.'; sleep 1; return; }
+  printf 'Tempel DENG key (atau Enter batal): '; IFS= read -r k
+  k=$(printf '%s' "$k" | tr -d ' \t' | tr a-z A-Z)
+  [ -n "$k" ] || return
+  out=$(curl -sS -m 20 -w '\n%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+        --data-binary "$(jq -nc --arg c "$k" --arg h "$h" '{code:$c,hwid:$h}')" "$SERVER/api/keys/bind-here" 2>/dev/null) || out=$'\n000'
+  code=${out##*$'\n'}; body=${out%$'\n'*}
+  if [ "$code" = 200 ]; then say ''; say 'Key aktif untuk cloud phone ini.'; key_check >/dev/null 2>&1
+  else say ''; say "Gagal: $(printf '%s' "$body" | jq -r '.error // "server tidak terjangkau"' 2>/dev/null)"; fi
+  printf 'Enter untuk lanjut...'; read -r _
+}
 menu(){
   while true; do
     key_check >/dev/null 2>&1
@@ -174,7 +181,7 @@ menu(){
     say "  key: $([ -n "$KEY_LEFT" ] && echo "active, $KEY_LEFT left" || echo 'none (bind in Key Panel)')"
     say '  --------------------------'
     say '[1] Rejoin Tool'
-    say '[2] Log out'
+    say '[2] Bind key'
     say "[3] Open DENG when Termux starts: $(autostart_on && echo ON || echo OFF)"
     say '[0] Exit'
     say '------------------------'
@@ -183,7 +190,7 @@ menu(){
       1) key_wall || continue
          [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _; continue; }
          bash "$CODE616" ;;
-      2) logout; gate; agent_start ;;
+      2) bind_key ;;
       3) autostart_toggle ;;
       0) exit 0 ;;
       *) say 'Pick 0-3.'; sleep 1 ;;
