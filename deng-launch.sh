@@ -192,6 +192,49 @@ kb_fix(){ local f="$HOME/.termux/termux.properties"
   grep -q '^[[:space:]]*enforce-char-based-input' "$f" 2>/dev/null && return 0
   mkdir -p "$HOME/.termux"; printf '\n# DENG: make typing reach the terminal on Samsung-type keyboards\nenforce-char-based-input = true\n' >> "$f"
   command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings >/dev/null 2>&1; return 0; }
+# ---- export / import: reuse one cloud phone's configuration on another (synced with the website) ----
+call(){ # method path [json] -> sets CODE, BODY
+  local out
+  if [ -n "${3:-}" ]; then out=$(curl -sS -m 20 -w '\n%{http_code}' -X "$1" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary "$3" "$SERVER$2" 2>/dev/null </dev/null) || out=$'\n000'
+  else out=$(curl -sS -m 20 -w '\n%{http_code}' -X "$1" -H "Authorization: Bearer $TOKEN" "$SERVER$2" 2>/dev/null </dev/null) || out=$'\n000'; fi
+  CODE=${out##*$'\n'}; BODY=${out%$'\n'*}
+}
+fail(){ say "${RB}Gagal:${Z} $(printf '%s' "$BODY" | jq -r '.error // "server tidak terjangkau"' 2>/dev/null || echo 'server tidak terjangkau')"; }
+wait_enter(){ printf '%sEnter untuk lanjut...%s' "$DIM" "$Z"; read -r _ </dev/tty; }
+export_cfg(){
+  local h n
+  h=$(deng_hwid) || { say 'Root diperlukan.'; sleep 1; return; }
+  clear_screen; say "${C}=========== EXPORT ===========${Z}"
+  say 'Simpan private link + script cloud phone ini'
+  say 'ke akun kamu, untuk dipakai di cloud phone lain.'
+  say "${DIM}(Delta key tidak ikut.)${Z}"; rule
+  tty_fix; printf '%sNama (Enter = nama cloud phone ini):%s ' "$C" "$Z"; IFS= read -r n </dev/tty
+  call POST /api/presets/export "$(jq -nc --arg h "$h" --arg n "$n" '{hwid:$h,name:$n}')"
+  if [ "$CODE" = 200 ]; then say "${G}Tersimpan:${Z} $(jq -r '"\(.name) (\(.scripts) script, \(if .target then "ada private link" else "tanpa link" end))"' <<<"$BODY")"
+  else fail; fi
+  wait_enter
+}
+import_cfg(){
+  local h list n i pick arg
+  h=$(deng_hwid) || { say 'Root diperlukan.'; sleep 1; return; }
+  call GET "/api/presets?hwid=$h"
+  [ "$CODE" = 200 ] || { fail; wait_enter; return; }
+  list=$(jq -r '(.presets[] | "p\t\(.id)\tTersimpan: \(.name)\t\(.scripts)\t\(.target)"), (.devices[] | select(.me|not) | "d\t\(.id)\tCloud phone: \(.name)\t\(.scripts)\t\(.target)")' <<<"$BODY")
+  clear_screen; say "${C}=========== IMPORT ===========${Z}"
+  if [ -z "$list" ]; then say 'Belum ada konfigurasi. Export dulu dari cloud phone lain.'; wait_enter; return; fi
+  i=0; while IFS=$'\t' read -r _ _ nm sc tg; do i=$((i+1)); opt "$i" "$nm ${DIM}($sc script, $([ "$tg" = true ] && echo 'ada link' || echo 'tanpa link'))"; done <<<"$list"
+  opt 0 'Back'; rule
+  tty_fix; printf '%sPilih [0-%s]:%s ' "$C" "$i" "$Z"; IFS= read -r n </dev/tty
+  [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le "$i" ] || return
+  pick=$(sed -n "${n}p" <<<"$list")
+  say "${Y}Private link + script cloud phone ini akan diganti.${Z}"
+  tty_fix; printf '%sLanjut? [y/N]:%s ' "$C" "$Z"; IFS= read -r arg </dev/tty; [[ "$arg" =~ ^[yY] ]] || return
+  if [ "$(cut -f1 <<<"$pick")" = p ]; then arg=$(jq -nc --arg h "$h" --argjson id "$(cut -f2 <<<"$pick")" '{hwid:$h,preset_id:$id}')
+  else arg=$(jq -nc --arg h "$h" --arg id "$(cut -f2 <<<"$pick")" '{hwid:$h,from_device:$id}'); fi
+  call POST /api/presets/import "$arg"
+  if [ "$CODE" = 200 ]; then say "${G}Diterapkan.${Z} Cloud phone ini menyesuaikan dalam ±1 menit."; else fail; fi
+  wait_enter
+}
 tool_ready(){ [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _ </dev/tty; return 1; }; }
 # Does the installed rejoin tool have the Configuration / Start screens? (checked once per tool version)
 CAPF="$DENG/.toolcaps"
@@ -229,33 +272,41 @@ menu(){
       opt 1 'Configuration'
       opt 2 'Start'
       opt 3 'Bind key'
-      opt 4 'Update'
+      opt 4 'Export'
+      opt 5 'Import'
+      opt 6 'Update'
+      opt 7 "Open DENG when Termux starts: $(autostart_on && printf '%s' "${G}ON" || printf '%s' "${RB}OFF")"
+      opt 0 'Exit'
+      rule
+      tty_fix; printf '%sSelect [0-7]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
+      case "$c" in
+        1) key_wall || continue; DENG_TOP=1 bash "$CODE616" --config ;;
+        2) key_wall || continue; DENG_TOP=1 bash "$CODE616" --start ;;
+        3) bind_key ;;
+        4) export_cfg ;;
+        5) import_cfg ;;
+        6) update_all ;;
+        7) autostart_toggle ;;
+        0) exit 0 ;;
+        *) say 'Pick 0-7.'; sleep 1 ;;
+      esac
+    else
+      opt 1 'Rejoin Tool'
+      opt 2 'Bind key'
+      opt 3 'Export'
+      opt 4 'Import'
       opt 5 "Open DENG when Termux starts: $(autostart_on && printf '%s' "${G}ON" || printf '%s' "${RB}OFF")"
       opt 0 'Exit'
       rule
       tty_fix; printf '%sSelect [0-5]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
       case "$c" in
-        1) key_wall || continue; DENG_TOP=1 bash "$CODE616" --config ;;
-        2) key_wall || continue; DENG_TOP=1 bash "$CODE616" --start ;;
-        3) bind_key ;;
-        4) update_all ;;
+        1) key_wall || continue; tool_ready || continue; bash "$CODE616" ;;
+        2) bind_key ;;
+        3) export_cfg ;;
+        4) import_cfg ;;
         5) autostart_toggle ;;
         0) exit 0 ;;
         *) say 'Pick 0-5.'; sleep 1 ;;
-      esac
-    else
-      opt 1 'Rejoin Tool'
-      opt 2 'Bind key'
-      opt 3 "Open DENG when Termux starts: $(autostart_on && printf '%s' "${G}ON" || printf '%s' "${RB}OFF")"
-      opt 0 'Exit'
-      rule
-      tty_fix; printf '%sSelect [0-3]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
-      case "$c" in
-        1) key_wall || continue; tool_ready || continue; bash "$CODE616" ;;
-        2) bind_key ;;
-        3) autostart_toggle ;;
-        0) exit 0 ;;
-        *) say 'Pick 0-3.'; sleep 1 ;;
       esac
     fi
   done
