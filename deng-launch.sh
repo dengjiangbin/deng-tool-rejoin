@@ -61,6 +61,41 @@ gate(){
   login || exit 1
   verify || { say 'Could not verify account. Try again later.'; exit 1; }
 }
+# Hardware ID of this cloud phone (needs root). A hash of identifiers that stay the same
+# across reboots and Termux reinstalls; the raw values never leave the device.
+deng_hwid(){
+  local idf=/data/local/.deng_hwid seed parts
+  seed=$(su -c "cat $idf 2>/dev/null" 2>/dev/null | tr -cd 'a-f0-9' | head -c 32)
+  if [ ${#seed} -ne 32 ]; then
+    seed=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    su -c "printf %s $seed > $idf && chmod 600 $idf" >/dev/null 2>&1
+    seed=$(su -c "cat $idf 2>/dev/null" 2>/dev/null | tr -cd 'a-f0-9' | head -c 32)
+  fi
+  [ ${#seed} -eq 32 ] || return 1
+  parts=$(su -c "settings get secure android_id; getprop ro.serialno; getprop ro.boot.serialno; getprop ro.product.model; getprop ro.build.fingerprint; getprop | grep -iE 'pad[._]?code|instance[._]?id|vm[._]?id' | sort" 2>/dev/null | tr -d '\r')
+  printf 'deng1|%s|%s' "$seed" "$parts" | sha256sum | cut -c1-64
+}
+# ---- key check: this cloud phone needs an active key bound on the website ----
+KEY_LEFT=''
+key_check(){ # 0 = active key, 1 = no key, 2 = cannot check
+  local h out code body exp nowms left
+  h=$(deng_hwid) || { say 'Root is needed to identify this cloud phone.'; return 2; }
+  out=$(curl -sS -m 15 -w '\n%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+        --data-binary "{\"hwid\":\"$h\"}" "$SERVER/api/license/check" 2>/dev/null) || out=$'\n000'
+  code=${out##*$'\n'}; body=${out%$'\n'*}
+  [ "$code" = 200 ] || return 2
+  [ "$(printf '%s' "$body" | jq -r '.licensed')" = true ] || { KEY_LEFT=''; return 1; }
+  exp=$(printf '%s' "$body" | jq -r '.expires_at'); nowms=$(printf '%s' "$body" | jq -r '.now'); left=$(( (exp-nowms)/1000 ))
+  KEY_LEFT="$((left/86400))d $((left%86400/3600))h"; return 0
+}
+key_wall(){
+  key_check; case $? in
+    0) return 0;;
+    1) say ''; say 'No active key on this cloud phone.'; say 'Open the website > Key Panel, pick a key and bind it to this cloud phone,'; say 'then choose this menu again.';;
+    *) say 'Cannot check the key right now (no internet or server busy). Try again.';;
+  esac
+  printf 'Press Enter...'; read -r _; return 1
+}
 # ---- website agent (background, joins this account automatically) ----
 AGDIR="$HOME/.deng-rejoin"; AGPID="$AGDIR/agent.pid"; AGLOG="$AGDIR/agent.log"; AGCONF="$AGDIR/agent.conf"
 agent_pid(){ local p; [ -f "$AGPID" ] && p=$(cat "$AGPID" 2>/dev/null) && kill -0 "$p" 2>/dev/null && printf '%s' "$p"; }
@@ -121,12 +156,14 @@ if [ "${1:-}" = --autostart-install ]; then autostart_install; exit 0; fi
 # ---- menu ----
 menu(){
   while true; do
+    key_check >/dev/null 2>&1
     clear 2>/dev/null || true
     say '========================'
     say '        D E N G'
     say '     rejoin.deng.my.id'
     say "   signed in: $USERNAME"
     say "   website: $(agent_status)"
+    say "   key: $([ -n "$KEY_LEFT" ] && echo "active, $KEY_LEFT left" || echo 'none (bind in Key Panel)')"
     say '========================'
     say '[1] Rejoin Tool'
     say '[2] Log out'
@@ -135,7 +172,8 @@ menu(){
     say '------------------------'
     printf 'Select [0-3]: '; IFS= read -r c
     case "$c" in
-      1) [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _; continue; }
+      1) key_wall || continue
+         [ -f "$CODE616" ] || getfile "$RAW/code616.sh" "$CODE616" || { say 'Download failed'; read -r _; continue; }
          bash "$CODE616" ;;
       2) logout; gate; agent_start ;;
       3) autostart_toggle ;;

@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.27-8"
+AGENT_VERSION="2026.11.27-9"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -111,6 +111,20 @@ api(){ # api METHOD PATH [json]  -> sets globals RESP (body) and HTTP (status)
 }
 # Phone name from the device itself (root): cloud-phone ID if the provider sets one,
 # else the device name, else model; plus 4 chars of android_id so phones never collide.
+# Hardware ID of this cloud phone (needs root). A hash of identifiers that stay the same
+# across reboots and Termux reinstalls; the raw values never leave the device.
+deng_hwid(){
+  local idf=/data/local/.deng_hwid seed parts
+  seed=$(su -c "cat $idf 2>/dev/null" 2>/dev/null | tr -cd 'a-f0-9' | head -c 32)
+  if [ ${#seed} -ne 32 ]; then
+    seed=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    su -c "printf %s $seed > $idf && chmod 600 $idf" >/dev/null 2>&1
+    seed=$(su -c "cat $idf 2>/dev/null" 2>/dev/null | tr -cd 'a-f0-9' | head -c 32)
+  fi
+  [ ${#seed} -eq 32 ] || return 1
+  parts=$(su -c "settings get secure android_id; getprop ro.serialno; getprop ro.boot.serialno; getprop ro.product.model; getprop ro.build.fingerprint; getprop | grep -iE 'pad[._]?code|instance[._]?id|vm[._]?id' | sort" 2>/dev/null | tr -d '\r')
+  printf 'deng1|%s|%s' "$seed" "$parts" | sha256sum | cut -c1-64
+}
 device_name(){
   local cand id4 n
   cand=$(root "getprop" 2>/dev/null | grep -iE '\[[^]]*(pad[._]?code|padcode|instance[._]?id|cloud[._]?(phone|id)|vm[._]?id)[^]]*\]: \[[^]]+\]' \
@@ -131,7 +145,7 @@ auto_link(){
   if [ -z "$tok" ]; then say 'Not signed in. Run: start deng'; return 1; fi
   [ -n "$NAME" ] || NAME=$(device_name)
   out=$(curl -sS -m 20 -w '\n%{http_code}' -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
-        --data-binary "$(jq -nc --arg n "$NAME" '{name:$n}')" "$SERVER/api/device/claim" 2>/dev/null) || out=$'\n000'
+        --data-binary "$(jq -nc --arg n "$NAME" --arg h "$(deng_hwid)" '{name:$n,hwid:$h}')" "$SERVER/api/device/claim" 2>/dev/null) || out=$'\n000'
   code=${out##*$'\n'}; b=${out%$'\n'*}
   if [ "$code" = 200 ]; then
     DEVICE_TOKEN=$(printf '%s' "$b" | jq -r '.device_token'); DEVICE_ID=$(printf '%s' "$b" | jq -r '.device_id')
@@ -473,6 +487,11 @@ loop(){
       say 'Phone session ended (password changed?). Re-joining with the start deng login...'
       DEVICE_TOKEN=''; save_conf; ensure_linked; continue
     fi
+    if [ "$HTTP" = 200 ] && [ "$(jq -r '.licensed' <<<"$body")" = false ]; then
+      [ "${NOKEY:-0}" = 1 ] || say 'No active key on this cloud phone. Bind a key on the website (Key Panel).'
+      NOKEY=1; LAST_REV=-1; sleep "$POLL"; continue
+    fi
+    NOKEY=0
     if [ "$HTTP" = 200 ]; then
       rev=$(jq -r '.config.rev // -1' <<<"$body")
       [ "$rev" != "$LAST_REV" ] && pull_and_sync
