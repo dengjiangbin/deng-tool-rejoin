@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.27-10"
+AGENT_VERSION="2026.11.27-11"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -168,6 +168,12 @@ ensure_linked(){
 # Per clone: off / loading / ingame / dc / running. "ingame" comes from the heartbeat file
 # the code616 Lua writes every 5s while the clone is really inside a server.
 HB_REL='files/gloop/external/Workspace/code616_hb.txt'
+# Timing settings as they are on this cloud phone right now (shown and edited on the website too).
+cfg_num(){ local v; v=$(cfg_get "$1"); [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v" || printf '%s' "$2"; }
+probe_cfg(){ printf '{"delay":%s,"interval":%s,"cols":%s,"key_wait":%s,"hb":%s,"hb_stale":%s,"mindp":%s}' \
+  "$(cfg_num DELAY 25)" "$(cfg_num INTERVAL 20)" "$(cfg_num COLS 0)" "$(cfg_num KEY_WAIT 20)" "$(cfg_num HB 1)" "$(cfg_num HB_STALE 120)" "$(cfg_num MINDP 96)"; }
+set_num(){ # payload key CFGKEY min max
+  local v; v=$(jq -r --arg k "$2" '.[$k] // empty' <<<"$1"); [[ "$v" =~ ^[0-9]{1,4}$ ]] && [ "$v" -ge "$4" ] && [ "$v" -le "$5" ] && cfg_set "$3" "$v"; return 0; }
 probe_status(){
   load_apps
   local total=${#APPS[@]} run=0 list='' now pkg r mt w x st age raw
@@ -188,7 +194,7 @@ probe_status(){
     list+=$(jq -nc --arg pkg "$pkg" --arg name "${pkg##*.}" --arg user "${RBX[$pkg]:-}" --argjson run "$([ "$r" = 1 ] && echo true || echo false)" --arg st "$st" '{pkg:$pkg,name:$name,user:$user,running:$run,state:$st}')','
   done <<< "$raw"
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver}'
+    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,cfg:$cfg}'
 }
 # CPU % (1-second sample of /proc/stat), RAM and /data storage in MB. Any value that
 # can't be read is sent as null so the site shows "—" instead of a wrong number.
@@ -325,7 +331,9 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
     push_script) write_script "$(jq -r '.name' <<<"$pl")" "$(jq -r '.body' <<<"$pl")" && echo pushed || { echo 'push failed'; return 1; };;
     remove_script) remove_script "$(jq -r '.name' <<<"$pl")"; echo removed;;
     set_target) local t; t=$(remote_target "$(jq -c '{target:.}' <<<"$pl")"); apply_target "$t"; echo 'target saved';;
-    set_settings) local d; d=$(jq -r '.delay // empty' <<<"$pl"); [[ "$d" =~ ^[0-9]{1,3}$ ]] && cfg_set DELAY "$d"; echo 'settings saved';;
+    set_settings) set_num "$pl" delay DELAY 0 300; set_num "$pl" interval INTERVAL 1 3600; set_num "$pl" cols COLS 0 8
+                  set_num "$pl" key_wait KEY_WAIT 1 180; set_num "$pl" hb HB 0 1; set_num "$pl" hb_stale HB_STALE 30 3600; set_num "$pl" mindp MINDP 40 400
+                  echo 'settings saved';;
     set_key) local only=''; only=$(jq -r '.pkg // empty' <<<"$pl"); [ -n "$only" ] && { allowed "$only" || { echo 'unknown clone'; return 1; }; }
              write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" "$only";;
     update_agent) : > "$BASE/.update"; echo "update requested (running $AGENT_VERSION)";;

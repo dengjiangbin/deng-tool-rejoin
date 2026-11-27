@@ -205,7 +205,7 @@ export_cfg(){
   local h n
   h=$(deng_hwid) || { say 'Root diperlukan.'; sleep 1; return; }
   clear_screen; say "${C}=========== EXPORT ===========${Z}"
-  say 'Simpan private link + script cloud phone ini'
+  say 'Simpan private link, script + settings cloud phone ini'
   say 'ke akun kamu, untuk dipakai di cloud phone lain.'
   say "${DIM}(Delta key tidak ikut.)${Z}"; rule
   tty_fix; printf '%sNama (Enter = nama cloud phone ini):%s ' "$C" "$Z"; IFS= read -r n </dev/tty
@@ -237,7 +237,7 @@ import_cfg(){
   fi
   [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le "$i" ] || return
   pick=$(sed -n "${n}p" <<<"$list")
-  say "${Y}Private link + script cloud phone ini akan diganti.${Z}"
+  say "${Y}Private link, script + settings cloud phone ini akan diganti.${Z}"
   tty_fix; printf '%sLanjut? [y/N]:%s ' "$C" "$Z"; IFS= read -r arg </dev/tty; [[ "$arg" =~ ^[yY] ]] || return
   if [ "$(cut -f1 <<<"$pick")" = p ]; then arg=$(jq -nc --arg h "$h" --argjson id "$(cut -f2 <<<"$pick")" '{hwid:$h,preset_id:$id}')
   else arg=$(jq -nc --arg h "$h" --arg id "$(cut -f2 <<<"$pick")" '{hwid:$h,from_device:$id}'); fi
