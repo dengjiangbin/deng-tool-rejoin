@@ -224,7 +224,17 @@ import_cfg(){
   if [ -z "$list" ]; then say 'Belum ada konfigurasi. Export dulu dari cloud phone lain.'; wait_enter; return; fi
   i=0; while IFS=$'\t' read -r _ _ nm sc tg; do i=$((i+1)); opt "$i" "$nm ${DIM}($sc script, $([ "$tg" = true ] && echo 'ada link' || echo 'tanpa link'))"; done <<<"$list"
   opt 0 'Back'; rule
+  say "${DIM}Hapus yang tersimpan: ketik d + nomor (contoh: d1)${Z}"
   tty_fix; printf '%sPilih [0-%s]:%s ' "$C" "$i" "$Z"; IFS= read -r n </dev/tty
+  if [[ "$n" =~ ^[dD]\ *([0-9]+)$ ]]; then
+    n=${BASH_REMATCH[1]}; [ "$n" -ge 1 ] && [ "$n" -le "$i" ] || return
+    pick=$(sed -n "${n}p" <<<"$list")
+    if [ "$(cut -f1 <<<"$pick")" != p ]; then say 'Itu cloud phone, bukan konfigurasi tersimpan.'; wait_enter; return; fi
+    tty_fix; printf '%sHapus "%s"? [y/N]:%s ' "$C" "$(cut -f3 <<<"$pick" | sed 's/^Tersimpan: //')" "$Z"; IFS= read -r arg </dev/tty; [[ "$arg" =~ ^[yY] ]] || return
+    call POST /api/presets/delete "$(jq -nc --argjson id "$(cut -f2 <<<"$pick")" '{id:$id}')"
+    if [ "$CODE" = 200 ]; then say "${G}Dihapus.${Z}"; else fail; fi
+    wait_enter; return
+  fi
   [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le "$i" ] || return
   pick=$(sed -n "${n}p" <<<"$list")
   say "${Y}Private link + script cloud phone ini akan diganti.${Z}"
