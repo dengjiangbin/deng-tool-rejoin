@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.29-5"
+AGENT_VERSION="2026.11.29-6"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -205,8 +205,10 @@ ensure_linked(){
 HB_REL='files/gloop/external/Workspace/code616_hb.txt'
 # Timing settings as they are on this cloud phone right now (shown and edited on the website too).
 cfg_num(){ local v; v=$(cfg_get "$1"); [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v" || printf '%s' "$2"; }
-probe_cfg(){ printf '{"delay":%s,"interval":%s,"cols":%s,"key_wait":%s,"hb":%s,"hb_stale":%s,"mindp":%s,"autostart":%s}' \
-  "$(cfg_num DELAY 25)" "$(cfg_num INTERVAL 20)" "$(cfg_num COLS 0)" "$(cfg_num KEY_WAIT 20)" "$(cfg_num HB 1)" "$(cfg_num HB_STALE 120)" "$(cfg_num MINDP 96)" "$(cfg_num AUTOSTART 0)"; }
+# "Open DENG when Termux opens": the Termux hook is installed and not switched off (same switch as in the DENG menu)
+open_deng_on(){ [ -f "${PREFIX:-/data/data/com.termux/files/usr}/etc/profile.d/deng-auto.sh" ] && [ ! -f "$HOME/.deng/noauto" ] && echo 1 || echo 0; }
+probe_cfg(){ printf '{"delay":%s,"interval":%s,"cols":%s,"key_wait":%s,"hb":%s,"hb_stale":%s,"mindp":%s,"autostart":%s,"opendeng":%s}' \
+  "$(cfg_num DELAY 25)" "$(cfg_num INTERVAL 20)" "$(cfg_num COLS 0)" "$(cfg_num KEY_WAIT 20)" "$(cfg_num HB 1)" "$(cfg_num HB_STALE 120)" "$(cfg_num MINDP 96)" "$(cfg_num AUTOSTART 0)" "$(open_deng_on)"; }
 set_num(){ # payload key CFGKEY min max
   local v; v=$(jq -r --arg k "$2" '.[$k] // empty' <<<"$1"); [[ "$v" =~ ^[0-9]{1,4}$ ]] && [ "$v" -ge "$4" ] && [ "$v" -le "$5" ] && cfg_set "$3" "$v"; return 0; }
 probe_status(){
@@ -398,7 +400,7 @@ one_pkg(){ # validate payload.pkg is one of our clones; echoes it or fails
   return 1
 }
 run_command(){ # action payload_json  -> echoes result, returns 0/1
-  local action="$1" pl="$2" p ok=1 url pkg out n
+  local action="$1" pl="$2" p ok=1 url pkg out n od
   case "$action" in
     start_all) # the same Start as the Termux menu: grid for every clone, each opened into its private server, monitor on
                if [ -f "$HOME/code616.sh" ] && timeout 20 bash "$HOME/code616.sh" --caps 2>/dev/null </dev/null | grep -q '^start:1'; then
@@ -425,7 +427,9 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
     set_settings) set_num "$pl" delay DELAY 0 300; set_num "$pl" interval INTERVAL 1 3600; set_num "$pl" cols COLS 0 8
                   set_num "$pl" key_wait KEY_WAIT 1 180; set_num "$pl" hb HB 0 1; set_num "$pl" hb_stale HB_STALE 30 3600; set_num "$pl" mindp MINDP 40 400; set_num "$pl" autostart AUTOSTART 0 1
                   # Auto Start needs DENG to open with Termux: make sure that is on as well
-                  if [ "$(cfg_num AUTOSTART 0)" = 1 ]; then rm -f "$HOME/.deng/noauto"; [ -f "$HOME/.deng/deng-launch.sh" ] && bash "$HOME/.deng/deng-launch.sh" --autostart-install >/dev/null 2>&1 </dev/null; fi
+                  od=$(jq -r '.opendeng // empty' <<<"$pl"); [ "$(cfg_num AUTOSTART 0)" = 1 ] && od=1
+                  if [ "$od" = 1 ]; then rm -f "$HOME/.deng/noauto"; [ -f "$HOME/.deng/deng-launch.sh" ] && bash "$HOME/.deng/deng-launch.sh" --autostart-install >/dev/null 2>&1 </dev/null
+                  elif [ "$od" = 0 ]; then mkdir -p "$HOME/.deng"; : > "$HOME/.deng/noauto"; fi
                   echo 'settings saved';;
     set_key) local only=''; only=$(jq -r '.pkg // empty' <<<"$pl"); [ -n "$only" ] && { allowed "$only" || { echo 'unknown clone'; return 1; }; }
              write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" "$only";;
