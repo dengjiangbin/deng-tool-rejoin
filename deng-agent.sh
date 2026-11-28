@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.28-2"
+AGENT_VERSION="2026.11.28-3"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -105,7 +105,7 @@ load_apps(){ APPS=(); ALLPK=(); PICKED=(); local p w
   if [ -f "$PKGF" ]; then while IFS= read -r p; do p=${p//$'\r'/}; allowed "$p" && PICKED+=("$p"); done < "$PKGF"; fi
   for p in "${ALLPK[@]}"; do
     if [ ${#PICKED[@]} -gt 0 ]; then for w in "${PICKED[@]}"; do [ "$w" = "$p" ] && { APPS+=("$p"); break; }; done
-    elif [[ "$p" =~ ^com\.(moons|luarm)(\.|$) ]]; then APPS+=("$p"); fi
+    elif [[ "$p" =~ ^com\.(moons|luarm|roblox)(\.|$) ]]; then APPS+=("$p"); fi
   done
 }
 pk_json(){ local a='[]' s='[]'
