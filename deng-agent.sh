@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.29-7"
+AGENT_VERSION="2026.11.29-8"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -211,20 +211,17 @@ probe_cfg(){ printf '{"delay":%s,"interval":%s,"cols":%s,"key_wait":%s,"hb":%s,"
   "$(cfg_num DELAY 25)" "$(cfg_num INTERVAL 20)" "$(cfg_num COLS 0)" "$(cfg_num KEY_WAIT 20)" "$(cfg_num HB 1)" "$(cfg_num HB_STALE 120)" "$(cfg_num MINDP 96)" "$(cfg_num AUTOSTART 0)" "$(open_deng_on)"; }
 set_num(){ # payload key CFGKEY min max
   local v; v=$(jq -r --arg k "$2" '.[$k] // empty' <<<"$1"); [[ "$v" =~ ^[0-9]{1,4}$ ]] && [ "$v" -ge "$4" ] && [ "$v" -le "$5" ] && cfg_set "$3" "$v"; return 0; }
-# Apps that have a screen open. After a reboot Android may start an app's process in the background
-# (Arceus X does), so a process alone does not mean the clone is open. Empty if this cannot be read.
-ui_pkgs(){ root "dumpsys activity activities 2>/dev/null" 2>/dev/null | grep -oE 'ActivityRecord\{[^ ]+ u[0-9]+ [^/ ]+' | awk '{print $3}' | sort -u; }
 probe_status(){
   load_apps; exec_map
   local total=${#APPS[@]} run=0 list='' now pkg r mt w x st age raw ui
-  now=$(date +%s); ui=$(ui_pkgs)
-  # trust the screen list only when it shows at least one clone (so a phone that lists them differently is never misread)
-  [ -n "$ui" ] && ! printf '%s\n' "${APPS[@]}" | grep -qxFf <(printf '%s\n' "$ui") && ui=''
+  # when the phone last started: a clone whose last sign of life is older than that was never opened since,
+  # even if Android started its process in the background after the reboot
+  now=$(date +%s); ui=$(( now - $(cut -d. -f1 /proc/uptime 2>/dev/null || echo "$now") ))
   raw=$(root "for p in ${APPS[*]}; do f=/storage/emulated/0/Android/data/\$p/$HB_REL; r=0; pidof \$p >/dev/null 2>&1 && r=1
           if [ -f \$f ]; then echo \"\$p \$r \$(stat -c %Y \$f) \$(head -c 60 \$f | tr -d '\n')\"; else echo \"\$p \$r - -\"; fi; done" 2>/dev/null)
   while read -r pkg r mt w _t x _; do   # file: '<ok|dc> <time> [start]'
     [ -n "$pkg" ] || continue
-    [ "$r" = 1 ] && [ -n "$ui" ] && ! grep -qxF "$pkg" <<<"$ui" && r=0   # a process with no screen is not an open clone
+    [ "$r" = 1 ] && [[ "$mt" =~ ^[0-9]+$ ]] && [ "$mt" -lt "$ui" ] && r=0   # last sign of life is from before the reboot
     if [ "$r" != 1 ]; then st=off
     else run=$((run+1)); st=running
       if [[ "$mt" =~ ^[0-9]+$ ]]; then age=$((now-mt))
