@@ -182,6 +182,9 @@ auto_run(){
 }
 if [ "${1:-}" = --autostart-install ]; then autostart_install; exit 0; fi
 
+# Log out: this cloud phone leaves the account (rejoin already running keeps going until it is stopped).
+logout_ask(){ local a; tty_fix; printf 'Log out dari akun %s di cloud phone ini? [y/N]: ' "$USERNAME"; IFS= read -r a </dev/tty || return
+  case "$a" in y|Y) logout; sleep 1; exit 0 ;; *) say 'Batal.'; sleep 1 ;; esac; }
 # ---- menu ----
 bind_key(){
   local h out code body k
@@ -295,9 +298,10 @@ menu(){
       opt 5 'Import'
       opt 6 'Update'
       opt 7 "Open DENG when Termux starts: $(autostart_on && printf '%s' "${G}ON" || printf '%s' "${RB}OFF")"
+      opt 8 'Log out'
       opt 0 'Exit'
       rule
-      tty_fix; printf '%sSelect [0-7]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
+      tty_fix; printf '%sSelect [0-8]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
       case "$c" in
         1) key_wall || continue; DENG_TOP=1 bash "$CODE616" --config ;;
         2) key_wall || continue; DENG_TOP=1 bash "$CODE616" --start ;;
@@ -306,8 +310,9 @@ menu(){
         5) import_cfg ;;
         6) update_all ;;
         7) autostart_toggle ;;
+        8) logout_ask ;;
         0) exit 0 ;;
-        *) say 'Pick 0-7.'; sleep 1 ;;
+        *) say 'Pick 0-8.'; sleep 1 ;;
       esac
     else
       opt 1 'Rejoin Tool'
@@ -315,17 +320,19 @@ menu(){
       opt 3 'Export'
       opt 4 'Import'
       opt 5 "Open DENG when Termux starts: $(autostart_on && printf '%s' "${G}ON" || printf '%s' "${RB}OFF")"
+      opt 6 'Log out'
       opt 0 'Exit'
       rule
-      tty_fix; printf '%sSelect [0-5]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
+      tty_fix; printf '%sSelect [0-6]:%s ' "$C" "$Z"; IFS= read -r c </dev/tty || exit 0
       case "$c" in
         1) key_wall || continue; tool_ready || continue; bash "$CODE616" ;;
         2) bind_key ;;
         3) export_cfg ;;
         4) import_cfg ;;
         5) autostart_toggle ;;
+        6) logout_ask ;;
         0) exit 0 ;;
-        *) say 'Pick 0-5.'; sleep 1 ;;
+        *) say 'Pick 0-6.'; sleep 1 ;;
       esac
     fi
   done
