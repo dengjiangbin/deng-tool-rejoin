@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.28-3"
+AGENT_VERSION="2026.11.28-4"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -39,7 +39,7 @@ save_conf(){
   } > "$CONF"; chmod 600 "$CONF"
 }
 
-allowed(){ [[ "$1" =~ ^com\.(moons|luarm|roblox)(\.[A-Za-z0-9_]+)*$ ]]; }
+allowed(){ [ ${#1} -le 100 ] && [[ "$1" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$ ]]; }
 
 # ---------- shared settings with the code616 Termux menu ----------
 # The private link and delay live in code616's own config, so the Termux menu, the
@@ -98,14 +98,26 @@ declare -a APPS=()
 # Packages: with no selection every com.moons / com.luarm clone is used (automatic). A selection made in
 # Configuration > Package (Termux or website) lives in ~/.code616/packages, one package per line.
 PKGF="$HOME/.code616/packages"
-declare -a ALLPK=() PICKED=()
-load_apps(){ APPS=(); ALLPK=(); PICKED=(); local p w
-  while IFS= read -r p; do p=${p//$'\r'/}; allowed "$p" && ALLPK+=("$p"); done \
-    < <(root 'pm list packages' | sed -n 's/^package://p' | grep -E '^com\.(moons|luarm|roblox)(\.|$)' | LC_ALL=C sort -u)
+declare -a ALLPK=() PICKED=() INST=() HANDLERS=()
+HAND_AT=0
+# Every Roblox package on this cloud phone, whatever it is called: known names plus any app that can
+# open a roblox:// link. The link check is repeated at most every 5 minutes.
+load_apps(){ APPS=(); ALLPK=(); PICKED=(); INST=(); local p w now
+  while IFS= read -r p; do p=${p//$'\r'/}; allowed "$p" && INST+=("$p"); done \
+    < <(root 'pm list packages' | sed -n 's/^package://p' | LC_ALL=C sort -u)
+  now=$(date +%s)
+  if [ $((now-HAND_AT)) -ge 300 ]; then HAND_AT=$now; HANDLERS=()
+    while IFS= read -r p; do allowed "$p" && HANDLERS+=("$p"); done \
+      < <(root "cmd package query-activities --brief -a android.intent.action.VIEW -d 'roblox://navigation' 2>/dev/null" | tr -d '\r' | sed -n 's#^[[:space:]]*\([A-Za-z][A-Za-z0-9_.]*\)/.*#\1#p' | LC_ALL=C sort -u)
+  fi
+  for p in "${INST[@]}"; do
+    if [[ "$p" =~ ^com\.(moons|luarm|roblox)(\.|$) ]]; then ALLPK+=("$p"); continue; fi
+    for w in "${HANDLERS[@]}"; do [ "$w" = "$p" ] && { ALLPK+=("$p"); break; }; done
+  done
   if [ -f "$PKGF" ]; then while IFS= read -r p; do p=${p//$'\r'/}; allowed "$p" && PICKED+=("$p"); done < "$PKGF"; fi
-  for p in "${ALLPK[@]}"; do
+  for p in "${INST[@]}"; do
     if [ ${#PICKED[@]} -gt 0 ]; then for w in "${PICKED[@]}"; do [ "$w" = "$p" ] && { APPS+=("$p"); break; }; done
-    elif [[ "$p" =~ ^com\.(moons|luarm|roblox)(\.|$) ]]; then APPS+=("$p"); fi
+    elif [[ "$p" =~ ^com\.(moons|luarm)(\.|$) ]]; then APPS+=("$p"); fi
   done
 }
 pk_json(){ local a='[]' s='[]'
@@ -116,7 +128,7 @@ pk_json(){ local a='[]' s='[]'
 set_packages(){ local p n=0 tmp="$PKGF.tmp"; mkdir -p "${PKGF%/*}"; : > "$tmp"
   load_apps
   while IFS= read -r p; do allowed "$p" || continue
-    local q; for q in "${ALLPK[@]}"; do [ "$q" = "$p" ] && { printf '%s\n' "$p" >> "$tmp"; n=$((n+1)); break; }; done
+    local q; for q in "${ALLPK[@]}" "${APPS[@]}"; do [ "$q" = "$p" ] && { printf '%s\n' "$p" >> "$tmp"; n=$((n+1)); break; }; done   # only Roblox packages found here, or ones already chosen in Termux
   done < <(jq -r '.pkgs[]? // empty' <<<"$1" 2>/dev/null | head -100)
   if [ "$n" -gt 0 ]; then LC_ALL=C sort -u "$tmp" > "$PKGF"; chmod 600 "$PKGF"; rm -f "$tmp"; echo "$n packages selected"
   else rm -f "$tmp" "$PKGF"; echo 'automatic'; fi
