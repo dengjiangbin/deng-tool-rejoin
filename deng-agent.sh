@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.28-8"
+AGENT_VERSION="2026.11.28-9"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -574,14 +574,14 @@ worker(){
 TOOL="$HOME/code616.sh"; TOOL_URL="${SELF_URL%/*}/code616.sh"
 tool_ver(){ sed -n 's/^CODE616_VERSION="\([A-Za-z0-9._-]*\)"$/\1/p' "$TOOL" 2>/dev/null | head -1; }
 update_tool(){ local tmp="$BASE/.tool.new" nv ov; ov=$(tool_ver)
-  curl -fsSL -m 30 "$TOOL_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  curl -fsSL -m 60 "$TOOL_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || curl -fsSL -m 60 "https://rejoin.deng.my.id/dl/code616.sh" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   nv=$(sed -n 's/^CODE616_VERSION="\([A-Za-z0-9._-]*\)"$/\1/p' "$tmp" | head -1)
   if [ -z "$nv" ] || ! grep -q '__C616_PACKED__' "$tmp" || ! bash -n "$tmp" 2>/dev/null; then rm -f "$tmp"; return 1; fi
   if [ -n "$ov" ] && { [ "$nv" = "$ov" ] || [ "$(printf '%s\n%s\n' "$ov" "$nv" | sort -V | tail -1)" != "$nv" ]; }; then rm -f "$tmp"; return 1; fi
   chmod 700 "$tmp" && mv -f "$tmp" "$TOOL" && say "Tool updated to $nv"; }
 self_update(){
   local tmp="$BASE/.agent.new"
-  curl -fsSL -m 30 "$SELF_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  curl -fsSL -m 60 "$SELF_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || curl -fsSL -m 60 "https://rejoin.deng.my.id/dl/deng-agent.sh" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   local nv; nv=$(sed -n 's/^AGENT_VERSION="\([0-9.]*-[0-9]*\)"$/\1/p' "$tmp" | head -1)
   # only move forward: GitHub's cache can briefly serve an older copy
   if [ -z "$nv" ] || [ "$nv" = "$AGENT_VERSION" ] || [ "$(printf '%s\n%s\n' "$AGENT_VERSION" "$nv" | sort -V | tail -1)" != "$nv" ]; then rm -f "$tmp"; return 1; fi

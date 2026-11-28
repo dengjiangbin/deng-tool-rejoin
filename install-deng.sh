@@ -58,11 +58,19 @@ install_pkgs(){ # fresh phones need repos updated first; retry each tool that is
   done
   [ "$ok" = 1 ]
 }
-get_tools(){
-  curl -fsSL "$RAW/deng-launch.sh" -o "$DENG/deng-launch.sh" && chmod +x "$DENG/deng-launch.sh" || return 1
-  curl -fsSL "$RAW/code616.sh"    -o "$HOME/code616.sh"    && chmod +x "$HOME/code616.sh"    || return 1
-  curl -fsSL "$RAW/deng-agent.sh" -o "$HOME/deng-agent.sh" && chmod +x "$HOME/deng-agent.sh" || return 1
-}
+# Each file: GitHub first, then the same file served by the website, a few tries each.
+# Only a real script is kept (never an error page); the last error is kept to show the user.
+MIRROR="https://rejoin.deng.my.id/dl"
+fetch(){ local u t
+  for u in "$RAW/$1" "$MIRROR/$1"; do
+    for t in 1 2 3; do
+      if curl -fsSL --connect-timeout 15 -m 90 "$u?t=$(date +%s)" -o "$2.tmp" 2>"$DENG/.dlerr" && [ -s "$2.tmp" ] && head -c 2 "$2.tmp" | grep -q '#!'; then
+        mv -f "$2.tmp" "$2" && chmod +x "$2" && return 0; fi
+      sleep $((t*2))
+    done
+  done
+  rm -f "$2.tmp"; return 1; }
+get_tools(){ fetch deng-launch.sh "$DENG/deng-launch.sh" && fetch code616.sh "$HOME/code616.sh" && fetch deng-agent.sh "$HOME/deng-agent.sh"; }
 
 banner
 step 'Memperbarui repositori' update_repos
@@ -71,7 +79,14 @@ if ! step 'Memasang paket' install_pkgs; then
   printf '    %spkg update && pkg install curl jq coreutils openssl-tool gzip%s\n\n' "$B" "$Z"
   exit 1
 fi
-step 'Mengunduh DENG tools' get_tools || { printf '\n  %sGagal mengunduh. Cek koneksi internet lalu ulangi.%s\n' "$R" "$Z"; exit 1; }
+if ! step 'Mengunduh DENG tools' get_tools; then
+  why=$(tail -1 "$DENG/.dlerr" 2>/dev/null)
+  printf '\n  %sGagal mengunduh DENG tools.%s\n' "$R" "$Z"
+  [ -n "$why" ] && printf '  %s%s%s\n' "$D" "$why" "$Z"
+  if ! curl --version >/dev/null 2>&1; then printf '  curl rusak setelah update. Jalankan: %spkg upgrade -y curl openssl%s lalu ulangi.\n\n' "$B" "$Z"
+  else printf '  Cek internet cloud phone ini, lalu jalankan perintah pasang sekali lagi.\n\n'; fi
+  exit 1
+fi
 
 # install the `start` command so `start deng` works
 cat > "$BIN/start" <<EOF

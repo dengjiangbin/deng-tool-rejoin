@@ -35,7 +35,9 @@ rule(){ printf '%s--------------------------------%s\n' "$DIM" "$Z"; }
 info(){ printf '  %s%-9s%s %s%s\n' "$C" "$1" "$Z" "$2" "$Z"; }
 need(){ command -v "$1" >/dev/null 2>&1 || { say "Missing $1 — run: pkg install $2"; exit 1; }; }
 need curl curl; need jq jq
-getfile(){ curl -fsSL "$1" -o "$2" 2>/dev/null && [ -s "$2" ]; }
+getfile(){ local u t; for u in "$1" "https://rejoin.deng.my.id/dl/${1##*/}"; do for t in 1 2; do   # GitHub, then the website's copy
+    curl -fsSL --connect-timeout 15 -m 90 "$u" -o "$2.tmp" 2>/dev/null && [ -s "$2.tmp" ] && head -c 2 "$2.tmp" | grep -q '#!' && { mv -f "$2.tmp" "$2"; return 0; }
+    sleep 2; done; done; rm -f "$2.tmp"; return 1; }
 
 # ---- account gate ----
 TOKEN=""; USERNAME=""
