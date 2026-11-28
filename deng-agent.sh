@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.27-11"
+AGENT_VERSION="2026.11.28-1"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -39,7 +39,7 @@ save_conf(){
   } > "$CONF"; chmod 600 "$CONF"
 }
 
-allowed(){ [[ "$1" =~ ^com\.(moons|luarm)(\.[A-Za-z0-9_]+)*$ ]]; }
+allowed(){ [[ "$1" =~ ^com\.(moons|luarm|roblox)(\.[A-Za-z0-9_]+)*$ ]]; }
 
 # ---------- shared settings with the code616 Termux menu ----------
 # The private link and delay live in code616's own config, so the Termux menu, the
@@ -95,10 +95,32 @@ root(){ su -c "$1"; }
 need_root(){ root id 2>/dev/null | grep -q 'uid=0' || { say 'Root not active — allow Termux in Magisk/SU.'; return 1; }; }
 
 declare -a APPS=()
-load_apps(){ APPS=(); local p
-  while IFS= read -r p; do p=${p//$'\r'/}; allowed "$p" && APPS+=("$p"); done \
-    < <(root 'pm list packages' | sed -n 's/^package://p' | grep -E '^com\.(moons|luarm)(\.|$)' | LC_ALL=C sort -u)
+# Packages: with no selection every com.moons / com.luarm clone is used (automatic). A selection made in
+# Configuration > Package (Termux or website) lives in ~/.code616/packages, one package per line.
+PKGF="$HOME/.code616/packages"
+declare -a ALLPK=() PICKED=()
+load_apps(){ APPS=(); ALLPK=(); PICKED=(); local p w
+  while IFS= read -r p; do p=${p//$'\r'/}; allowed "$p" && ALLPK+=("$p"); done \
+    < <(root 'pm list packages' | sed -n 's/^package://p' | grep -E '^com\.(moons|luarm|roblox)(\.|$)' | LC_ALL=C sort -u)
+  if [ -f "$PKGF" ]; then while IFS= read -r p; do p=${p//$'\r'/}; allowed "$p" && PICKED+=("$p"); done < "$PKGF"; fi
+  for p in "${ALLPK[@]}"; do
+    if [ ${#PICKED[@]} -gt 0 ]; then for w in "${PICKED[@]}"; do [ "$w" = "$p" ] && { APPS+=("$p"); break; }; done
+    elif [[ "$p" =~ ^com\.(moons|luarm)(\.|$) ]]; then APPS+=("$p"); fi
+  done
 }
+pk_json(){ local a='[]' s='[]'
+  [ ${#ALLPK[@]} -gt 0 ] && a=$(printf '%s\n' "${ALLPK[@]}" | jq -Rnc '[inputs]')
+  [ ${#PICKED[@]} -gt 0 ] && s=$(printf '%s\n' "${PICKED[@]}" | jq -Rnc '[inputs]')
+  printf '{"all":%s,"sel":%s}' "$a" "$s"; }
+# Save the selection sent by the website. Only installed, supported packages are kept; none = automatic again.
+set_packages(){ local p n=0 tmp="$PKGF.tmp"; mkdir -p "${PKGF%/*}"; : > "$tmp"
+  load_apps
+  while IFS= read -r p; do allowed "$p" || continue
+    local q; for q in "${ALLPK[@]}"; do [ "$q" = "$p" ] && { printf '%s\n' "$p" >> "$tmp"; n=$((n+1)); break; }; done
+  done < <(jq -r '.pkgs[]? // empty' <<<"$1" 2>/dev/null | head -100)
+  if [ "$n" -gt 0 ]; then LC_ALL=C sort -u "$tmp" > "$PKGF"; chmod 600 "$PKGF"; rm -f "$tmp"; echo "$n packages selected"
+  else rm -f "$tmp" "$PKGF"; echo 'automatic'; fi
+  load_apps; }
 
 # ---------- auth ----------
 HTTP=0; RESP=""
@@ -194,7 +216,7 @@ probe_status(){
     list+=$(jq -nc --arg pkg "$pkg" --arg name "${pkg##*.}" --arg user "${RBX[$pkg]:-}" --argjson run "$([ "$r" = 1 ] && echo true || echo false)" --arg st "$st" '{pkg:$pkg,name:$name,user:$user,running:$run,state:$st}')','
   done <<< "$raw"
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,cfg:$cfg}'
+    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" --argjson pk "$(pk_json)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,cfg:$cfg,pk:$pk}'
 }
 # CPU % (1-second sample of /proc/stat), RAM and /data storage in MB. Any value that
 # can't be read is sent as null so the site shows "—" instead of a wrong number.
@@ -336,6 +358,7 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
                   echo 'settings saved';;
     set_key) local only=''; only=$(jq -r '.pkg // empty' <<<"$pl"); [ -n "$only" ] && { allowed "$only" || { echo 'unknown clone'; return 1; }; }
              write_key "$(jq -r '.key' <<<"$pl")" "$(jq -r '.mode' <<<"$pl")" "$only";;
+    set_packages) set_packages "$pl";;
     update_agent) : > "$BASE/.update"; echo "update requested (running $AGENT_VERSION)";;
     *) echo "unknown action"; return 1;;
   esac
