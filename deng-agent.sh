@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.29-4"
+AGENT_VERSION="2026.11.29-5"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -266,7 +266,11 @@ open_one(){ allowed "$1" || return 1; busy_mark "$1"; grid_slot "$1"; mark_start
 busy_mark(){ mkdir -p "${C616_CFG%/*}/busy" && : > "${C616_CFG%/*}/busy/$1"; }
 rejoin_one(){ allowed "$1" || return 1; local url="$2"; busy_mark "$1"
   root "am force-stop '$1'" >/dev/null 2>&1; sleep 2
-  grid_slot "$1"; mark_starting "$1"; root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
+  grid_slot "$1"; mark_starting "$1"
+  # open it the normal way first so it takes its grid slot (a link launch skips the window settings), then hand it the link
+  root "monkey -p '$1' -c android.intent.category.LAUNCHER 1" >/dev/null 2>&1 || return 1
+  local i; for i in $(seq 1 20); do root "pidof '$1'" >/dev/null 2>&1 && break; sleep 1; done; sleep 5
+  root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
 canon_url(){ case "$1" in ps\|*) printf '%s' "${1#ps|}";; pj\|*) local r=${1#pj|}; printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s' "${r%%|*}" "${r#*|}";; esac; }
 target_url(){ canon_url "$(local_target)"; }
 # Links set per package on the website ("<pkg> <canonical target>" per line), shared with code616.
