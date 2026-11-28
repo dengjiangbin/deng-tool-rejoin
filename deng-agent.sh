@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.28-7"
+AGENT_VERSION="2026.11.28-8"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -229,7 +229,7 @@ probe_status(){
     list+=$(jq -nc --arg pkg "$pkg" --arg name "${pkg##*.}" --arg user "${RBX[$pkg]:-}" --argjson run "$([ "$r" = 1 ] && echo true || echo false)" --arg st "$st" --arg ex "${EXE[$pkg]:-}" '{pkg:$pkg,name:$name,user:$user,running:$run,state:$st,ex:$ex}')','
   done <<< "$raw"
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" --argjson pk "$(pk_json)" --argjson scr "$SCRX" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,cfg:$cfg,pk:$pk,scr:$scr}'
+    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" --argjson pk "$(pk_json)" --argjson scr "$SCRX" --arg tool "$(tool_ver)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,tool:$tool,cfg:$cfg,pk:$pk,scr:$scr}'
 }
 # CPU % (1-second sample of /proc/stat), RAM and /data storage in MB. Any value that
 # can't be read is sent as null so the site shows "—" instead of a wrong number.
@@ -569,6 +569,16 @@ worker(){
 # ---------- self-update ----------
 # Runs only when the website's Update button asks: fetch the latest agent; if it is a
 # valid, newer script, replace this file and restart in place (same PID).
+# The Termux tool (code616.sh) updates together with the agent. A running tool keeps going on
+# the old copy; the new one is used the next time it starts.
+TOOL="$HOME/code616.sh"; TOOL_URL="${SELF_URL%/*}/code616.sh"
+tool_ver(){ sed -n 's/^CODE616_VERSION="\([A-Za-z0-9._-]*\)"$/\1/p' "$TOOL" 2>/dev/null | head -1; }
+update_tool(){ local tmp="$BASE/.tool.new" nv ov; ov=$(tool_ver)
+  curl -fsSL -m 30 "$TOOL_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  nv=$(sed -n 's/^CODE616_VERSION="\([A-Za-z0-9._-]*\)"$/\1/p' "$tmp" | head -1)
+  if [ -z "$nv" ] || ! grep -q '__C616_PACKED__' "$tmp" || ! bash -n "$tmp" 2>/dev/null; then rm -f "$tmp"; return 1; fi
+  if [ -n "$ov" ] && { [ "$nv" = "$ov" ] || [ "$(printf '%s\n%s\n' "$ov" "$nv" | sort -V | tail -1)" != "$nv" ]; }; then rm -f "$tmp"; return 1; fi
+  chmod 700 "$tmp" && mv -f "$tmp" "$TOOL" && say "Tool updated to $nv"; }
 self_update(){
   local tmp="$BASE/.agent.new"
   curl -fsSL -m 30 "$SELF_URL?t=$(date +%s)" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
@@ -597,7 +607,7 @@ loop(){
   while true; do
     load_apps
     if [ -f "$BASE/.rescan" ]; then rm -f "$BASE/.rescan"; scan_key; fi
-    if [ -f "$BASE/.update" ]; then rm -f "$BASE/.update"; self_update || say "Agent is up to date ($AGENT_VERSION)."; fi
+    if [ -f "$BASE/.update" ]; then rm -f "$BASE/.update"; update_tool; self_update || say "Agent is up to date ($AGENT_VERSION)."; fi
     if [ $((tick % 6)) = 0 ]; then
       scan_key; scan_users
       [ -s "$REMOTE" ] && sync_now "$(cat "$REMOTE")"
