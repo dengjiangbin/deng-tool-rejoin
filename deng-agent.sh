@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.28-5"
+AGENT_VERSION="2026.11.28-6"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -125,14 +125,15 @@ pk_json(){ local a='[]' s='[]'
   [ ${#PICKED[@]} -gt 0 ] && s=$(printf '%s\n' "${PICKED[@]}" | jq -Rnc '[inputs]')
   printf '{"all":%s,"sel":%s}' "$a" "$s"; }
 # Save the selection sent by the website. Only installed, supported packages are kept; none = automatic again.
-set_packages(){ local p n=0 tmp="$PKGF.tmp"; mkdir -p "${PKGF%/*}"; : > "$tmp"
-  load_apps
-  while IFS= read -r p; do allowed "$p" || continue
-    local q; for q in "${ALLPK[@]}" "${APPS[@]}"; do [ "$q" = "$p" ] && { printf '%s\n' "$p" >> "$tmp"; n=$((n+1)); break; }; done   # only Roblox packages found here, or ones already chosen in Termux
+set_packages(){ local p n=0 asked=0 miss='' tmp="$PKGF.tmp"; mkdir -p "${PKGF%/*}"; : > "$tmp"
+  HAND_AT=0; load_apps                     # fresh scan, so an app installed a moment ago is known
+  while IFS= read -r p; do allowed "$p" || continue; asked=$((asked+1))
+    local q ok=0; for q in "${ALLPK[@]}" "${APPS[@]}" "${INST[@]}"; do [ "$q" = "$p" ] && { printf '%s\n' "$p" >> "$tmp"; n=$((n+1)); ok=1; break; }; done   # installed on this phone
+    [ $ok = 1 ] || miss+="$p "
   done < <(jq -r '.pkgs[]? // empty' <<<"$1" 2>/dev/null | head -100)
-  if [ "$n" -gt 0 ]; then LC_ALL=C sort -u "$tmp" > "$PKGF"; chmod 600 "$PKGF"; rm -f "$tmp"; echo "$n packages selected"
-  else rm -f "$tmp" "$PKGF"; echo 'automatic'; fi
-  load_apps; }
+  if [ "$asked" -gt 0 ] && [ "$n" = 0 ]; then rm -f "$tmp"; echo "not installed on this phone: ${miss% }"; return 1; fi
+  if [ "$n" -gt 0 ]; then LC_ALL=C sort -u "$tmp" > "$PKGF"; chmod 600 "$PKGF"; rm -f "$tmp"; load_apps; echo "$n package$([ $n = 1 ] || echo s) on${miss:+, not installed: ${miss% }}"
+  else rm -f "$tmp" "$PKGF"; load_apps; echo 'back to automatic'; fi; }
 
 # ---------- auth ----------
 HTTP=0; RESP=""
