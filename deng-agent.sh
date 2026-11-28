@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.28-9"
+AGENT_VERSION="2026.11.29-1"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -259,10 +259,33 @@ grid_slot(){ [ -f "$HOME/code616.sh" ] || return 0; root "pidof '$1'" >/dev/null
 # file's owner so the game can keep writing it.
 mark_starting(){ local f="$EXT_ROOT/$1/$HB_REL" d; d="${f%/*}"
   root "[ -d '$d' ] || exit 0; if [ -f '$f' ]; then printf 'ok %s start' \$(date +%s) > '$f'; else printf 'ok %s start' \$(date +%s) > '$f' && chown \$(stat -c %u:%g '$d') '$f'; fi" >/dev/null 2>&1; }
-open_one(){ allowed "$1" || return 1; grid_slot "$1"; mark_starting "$1"; root "monkey -p '$1' -c android.intent.category.LAUNCHER 1" 2>&1 | grep -q 'Events injected: 1'; }
-rejoin_one(){ allowed "$1" || return 1; local url="$2"; grid_slot "$1"; mark_starting "$1"; root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
-target_url(){ local t; t=$(local_target)
-  case "$t" in ps\|*) printf '%s' "${t#ps|}";; pj\|*) local r=${t#pj|}; printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s' "${r%%|*}" "${r#*|}";; esac; }
+open_one(){ allowed "$1" || return 1; busy_mark "$1"; grid_slot "$1"; mark_starting "$1"; root "monkey -p '$1' -c android.intent.category.LAUNCHER 1" 2>&1 | grep -q 'Events injected: 1'; }
+# Rejoin = close the clone, put it back in its grid slot, then open it into the server.
+# Opening a link in a clone that is still running skips the grid and the window lands anywhere.
+# The busy mark tells code616's monitor to leave this clone alone meanwhile (no double launch).
+busy_mark(){ mkdir -p "${C616_CFG%/*}/busy" && : > "${C616_CFG%/*}/busy/$1"; }
+rejoin_one(){ allowed "$1" || return 1; local url="$2"; busy_mark "$1"
+  root "am force-stop '$1'" >/dev/null 2>&1; sleep 2
+  grid_slot "$1"; mark_starting "$1"; root "am start -a android.intent.action.VIEW -d '$url' -p '$1'" >/dev/null 2>&1; }
+canon_url(){ case "$1" in ps\|*) printf '%s' "${1#ps|}";; pj\|*) local r=${1#pj|}; printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s' "${r%%|*}" "${r#*|}";; esac; }
+target_url(){ canon_url "$(local_target)"; }
+# Links set per package on the website ("<pkg> <canonical target>" per line), shared with code616.
+PKG_LINKS="${C616_CFG%/*}/pkg_links"
+pkg_target(){ [ -f "$PKG_LINKS" ] && awk -v p="$1" '$1==p{print $2; exit}' "$PKG_LINKS"; }
+want_target(){ local t; t=$(pkg_target "$1"); [ -n "$t" ] && printf '%s' "$t" || local_target; }   # package link, else the phone's link
+want_url(){ canon_url "$(want_target "$1")"; }
+write_pkg_links(){ local cfg="$1" tmp="$PKG_LINKS.agent.$$" n=0 p one t
+  mkdir -p "${PKG_LINKS%/*}"; : > "$tmp"
+  while IFS= read -r p; do allowed "$p" || continue
+    one=$(jq -c --arg p "$p" '{target:.pkg_targets[$p]}' <<<"$cfg"); t=$(remote_target "$one")
+    [ -n "$t" ] && { printf '%s %s\n' "$p" "$t" >> "$tmp"; n=$((n+1)); }
+  done < <(jq -r '.pkg_targets // {} | keys[]' <<<"$cfg" 2>/dev/null)
+  if [ "$n" = 0 ]; then rm -f "$tmp" "$PKG_LINKS"; else chmod 600 "$tmp"; cmp -s "$tmp" "$PKG_LINKS" && rm -f "$tmp" || mv "$tmp" "$PKG_LINKS"; fi
+  # the saved link bank, so the Termux menu can pick one: "<canonical target> <name>" per line
+  local bk="${C616_CFG%/*}/link_bank" i cnt nm; : > "$bk.$$"; cnt=$(jq '.links // [] | length' <<<"$cfg" 2>/dev/null || echo 0)
+  for ((i=0;i<cnt;i++)); do nm=$(jq -r ".links[$i].name" <<<"$cfg" | tr -cd 'A-Za-z0-9 _.-' | cut -c1-24); t=$(remote_target "$(jq -c ".links[$i]" <<<"$cfg")")
+    [ -n "$t" ] && [ -n "$nm" ] && printf '%s %s\n' "$t" "$nm" >> "$bk.$$"; done
+  chmod 600 "$bk.$$"; mv "$bk.$$" "$bk"; }
 # ---------- scripts (synced with the code616 Script menu) ----------
 EXT_ROOT=/storage/emulated/0/Android/data
 # Executors. Delta keeps its files inside each clone's own folder (files/gloop/external).
@@ -375,11 +398,12 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
   case "$action" in
     start_all) DELAY=$(clone_delay); for p in "${APPS[@]}"; do root "pidof '$p'" >/dev/null 2>&1 && continue; open_one "$p" || ok=0; sleep "$DELAY"; done; echo "opened ${#APPS[@]}";;
     stop_all)  for p in "${APPS[@]}"; do root "am force-stop '$p'" >/dev/null 2>&1; done; echo "stopped ${#APPS[@]}";;
-    rejoin_all) url=$(target_url); [ -n "$url" ] || { echo 'no target set'; return 1; }
-               DELAY=$(clone_delay); for p in "${APPS[@]}"; do rejoin_one "$p" "$url" || ok=0; sleep "$DELAY"; done; echo "rejoined ${#APPS[@]}";;
+    rejoin_all) DELAY=$(clone_delay); local n=0
+               for p in "${APPS[@]}"; do url=$(want_url "$p"); [ -n "$url" ] || continue; rejoin_one "$p" "$url" || ok=0; n=$((n+1)); sleep "$DELAY"; done
+               [ "$n" -gt 0 ] || { echo 'no target set'; return 1; }; echo "rejoined $n";;
     start_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; open_one "$pkg" && echo "started $pkg" || { echo 'failed'; return 1; };;
     stop_clone)  pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; root "am force-stop '$pkg'" >/dev/null 2>&1; echo "stopped $pkg";;
-    rejoin_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; url=$(target_url); [ -n "$url" ] || { echo 'no target set'; return 1; }
+    rejoin_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; url=$(want_url "$pkg"); [ -n "$url" ] || { echo 'no target set'; return 1; }
                rejoin_one "$pkg" "$url" && echo "rejoined $pkg" || { echo 'failed'; return 1; };;
     set_clone_auto) echo 'noted';;  # per-clone auto handled by on-phone monitor; acked for now
     push_script) write_script "$(jq -r '.name' <<<"$pl")" "$(jq -r '.body' <<<"$pl")" "$(jq -r '.ex // empty' <<<"$pl")" && echo pushed || { echo 'push failed'; return 1; };;
@@ -444,58 +468,12 @@ scan_users(){ local raw pkg u
   while read -r pkg u; do [[ -n "$pkg" && "$u" =~ ^[A-Za-z0-9_]{3,20}$ ]] && RBX[$pkg]=$u; done <<< "$raw"
 }
 
-# ---------- server check: rejoin a clone that sits in a different server than the target ----------
-# A tiny reporter in each clone writes "<placeId> <jobId> <private 0|1> <time>" every 10s.
-# Rules: Place ID + Job ID target -> both must match. Private link with a place -> same place and a
-# private server. Share link -> must be a private server.
-# Safety: the mismatch must be seen twice in a row, at most one rejoin per clone every 3 minutes,
-# and after 3 tries that never match it stops until the target changes.
-SRV_REL='files/gloop/external/Workspace/deng_srv.txt'
-SRV_LUA='task.spawn(function()
-  if not game:IsLoaded() then game.Loaded:Wait() end
-  while true do
-    pcall(function()
-      writefile("deng_srv.txt", tostring(game.PlaceId).." "..tostring(game.JobId).." "..((game.PrivateServerId ~= "" and "1") or "0").." "..tostring(os.time()))
-    end)
-    task.wait(10)
-  end
-end)'
-ensure_reporter(){ local dir tmp="$BASE/.srv.lua"; printf '%s\n' "$SRV_LUA" > "$tmp"
-  while IFS= read -r dir; do [ -n "$dir" ] && [ "$dir" != "$ARX_AUTO" ] || continue
-    root "cmp -s '$dir/deng_srv.lua' -" < "$tmp" >/dev/null 2>&1 || root "cat > '$dir/deng_srv.lua'" < "$tmp" >/dev/null 2>&1
-  done < <(script_dirs); rm -f "$tmp"; }
-declare -A SRV_BAD=() SRV_LAST=() SRV_TRIES=()
+# The "different server" auto-rejoin was removed (it caused chaos). Clean up what it left in each clone.
+remove_reporter(){ [ -f "$BASE/.srv_gone" ] && return 0; local dir
+  while IFS= read -r dir; do [ -n "$dir" ] && root "rm -f '$dir/deng_srv.lua' '${dir%/Autoexecute}/Workspace/deng_srv.txt'" >/dev/null 2>&1; done < <(script_dirs)
+  : > "$BASE/.srv_gone"; }
 SCRX='{}'
 scan_scripts(){ SCRX=$(local_scripts | awk '{printf "%s\t%s\n", $1, $4}' | jq -Rnc '[inputs | split("\t") | {(.[0]): .[1]}] | add // {}' 2>/dev/null) || SCRX='{}'; [ -n "$SCRX" ] || SCRX='{}'; }
-SRV_T=''
-server_check(){
-  local t wp='' wj='' wpriv=0 r now raw pkg place job priv ts bad
-  t=$(local_target); [ -n "$t" ] || return 0
-  if [ "$t" != "$SRV_T" ]; then SRV_T=$t; SRV_BAD=(); SRV_TRIES=(); SRV_LAST=(); fi
-  case "$t" in
-    pj\|*) r=${t#pj|}; wp=${r%%|*}; wj=${r#*|} ;;
-    ps\|*) wpriv=1; [[ "$t" =~ placeId=([0-9]+) ]] && wp=${BASH_REMATCH[1]} ;;
-  esac
-  now=$(date +%s)
-  raw=$(root "for p in ${APPS[*]}; do pidof \$p >/dev/null 2>&1 || continue; f=$EXT_ROOT/\$p/$SRV_REL; [ -f \$f ] && echo \"\$p \$(head -c 120 \$f | tr -d '\n')\"; done" 2>/dev/null)
-  while read -r pkg place job priv ts _; do
-    [[ -n "$pkg" && "$ts" =~ ^[0-9]+$ ]] || continue
-    (( now - ts <= 45 )) || continue            # only trust a fresh report (the clone is in game right now)
-    bad=0
-    [ -n "$wp" ] && [ "$place" != "$wp" ] && bad=1
-    [ -n "$wj" ] && [ "${job,,}" != "${wj,,}" ] && bad=1
-    [ "$wpriv" = 1 ] && [ "$priv" != 1 ] && bad=1
-    if [ "$bad" = 0 ]; then SRV_BAD[$pkg]=0; SRV_TRIES[$pkg]=0; continue; fi
-    SRV_BAD[$pkg]=$(( ${SRV_BAD[$pkg]:-0} + 1 ))
-    (( ${SRV_BAD[$pkg]} >= 2 )) || continue
-    (( now - ${SRV_LAST[$pkg]:-0} >= 180 )) || continue
-    (( ${SRV_TRIES[$pkg]:-0} < 3 )) || continue
-    say "↻ ${pkg##*.} is in a different server than the target, rejoining"
-    rejoin_one "$pkg" "$(target_url)"
-    SRV_LAST[$pkg]=$now; SRV_TRIES[$pkg]=$(( ${SRV_TRIES[$pkg]:-0} + 1 )); SRV_BAD[$pkg]=0
-    root "rm -f '$EXT_ROOT/$pkg/$SRV_REL'" >/dev/null 2>&1
-  done <<< "$raw"
-}
 
 # ---------- settings sync: website <-> Termux menu (3-way merge) ----------
 # Last agreed state lives in sync.state. If only one side changed since then, that side
@@ -506,6 +484,7 @@ md5(){ md5sum | cut -d' ' -f1; }
 sync_now(){
   local cfg="$1" lt rt bt nt push='{}' name l r b
   [ -n "$cfg" ] || return 0
+  write_pkg_links "$cfg"   # per-package links come from the website only
   lt=$(local_target); rt=$(remote_target "$cfg"); bt=$(sed -n 's/^T //p' "$STATE" 2>/dev/null)
   if [ "$lt" = "$rt" ]; then nt=$lt
   elif [ "$lt" = "$bt" ]; then apply_target "$rt"; nt=$rt; say "↓ private link from website"
@@ -625,7 +604,7 @@ loop(){
       NOKEY=1; LAST_REV=-1; sleep "$POLL"; continue
     fi
     NOKEY=0
-    if [ $((tick % 6)) = 1 ]; then ensure_reporter; server_check; fi
+    if [ $((tick % 6)) = 1 ]; then remove_reporter; fi
     if [ "$HTTP" = 200 ]; then
       rev=$(jq -r '.config.rev // -1' <<<"$body")
       [ "$rev" != "$LAST_REV" ] && pull_and_sync
