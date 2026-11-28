@@ -56,8 +56,16 @@ install_pkgs(){ # fresh phones need repos updated first; retry each tool that is
     pkg install -y $CONF "${p##*:}" >/dev/null 2>&1
     command -v "${p%%:*}" >/dev/null 2>&1 || ok=0
   done
+  curl_ok || ok=0
   [ "$ok" = 1 ]
 }
+# Old Termux: installing curl can update curl but leave its libraries (libssh2, openssl…) old,
+# so curl stops running ("cannot locate symbol"). Bring those libraries up too, then the rest if needed.
+curl_ok(){ curl --version >/dev/null 2>&1 && return 0
+  yes | pkg install -y $CONF curl libcurl libssh2 openssl libnghttp2 libnghttp3 c-ares zlib ca-certificates >/dev/null 2>&1
+  curl --version >/dev/null 2>&1 && return 0
+  yes | pkg upgrade -y $CONF >/dev/null 2>&1
+  curl --version >/dev/null 2>&1; }
 # Each file: GitHub first, then the same file served by the website, a few tries each.
 # Only a real script is kept (never an error page); the last error is kept to show the user.
 MIRROR="https://rejoin.deng.my.id/dl"
@@ -76,14 +84,14 @@ banner
 step 'Memperbarui repositori' update_repos
 if ! step 'Memasang paket' install_pkgs; then
   printf '\n  %sBeberapa paket gagal dipasang.%s Jalankan ini lalu ulangi:\n' "$R" "$Z"
-  printf '    %spkg update && pkg install curl jq coreutils openssl-tool gzip%s\n\n' "$B" "$Z"
+  printf '    %spkg update && pkg upgrade -y && pkg install curl jq coreutils openssl-tool gzip%s\n\n' "$B" "$Z"
   exit 1
 fi
 if ! step 'Mengunduh DENG tools' get_tools; then
   why=$(tail -1 "$DENG/.dlerr" 2>/dev/null)
   printf '\n  %sGagal mengunduh DENG tools.%s\n' "$R" "$Z"
   [ -n "$why" ] && printf '  %s%s%s\n' "$D" "$why" "$Z"
-  if ! curl --version >/dev/null 2>&1; then printf '  curl rusak setelah update. Jalankan: %spkg upgrade -y curl openssl%s lalu ulangi.\n\n' "$B" "$Z"
+  if ! curl --version >/dev/null 2>&1; then printf '  curl rusak setelah update. Jalankan: %spkg upgrade -y%s lalu ulangi.\n\n' "$B" "$Z"
   else printf '  Cek internet cloud phone ini, lalu jalankan perintah pasang sekali lagi.\n\n'; fi
   exit 1
 fi
