@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.29-1"
+AGENT_VERSION="2026.11.29-2"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -229,7 +229,7 @@ probe_status(){
     list+=$(jq -nc --arg pkg "$pkg" --arg name "${pkg##*.}" --arg user "${RBX[$pkg]:-}" --argjson run "$([ "$r" = 1 ] && echo true || echo false)" --arg st "$st" --arg ex "${EXE[$pkg]:-}" '{pkg:$pkg,name:$name,user:$user,running:$run,state:$st,ex:$ex}')','
   done <<< "$raw"
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" --argjson pk "$(pk_json)" --argjson scr "$SCRX" --arg tool "$(tool_ver)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,tool:$tool,cfg:$cfg,pk:$pk,scr:$scr}'
+    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" --argjson pk "$(pk_json)" --argjson scr "$SCRX" --arg tool "$(tool_ver)" --argjson arev "${APPLIED_REV:--1}" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,tool:$tool,cfg:$cfg,pk:$pk,scr:$scr,arev:$arev}'
 }
 # CPU % (1-second sample of /proc/stat), RAM and /data storage in MB. Any value that
 # can't be read is sent as null so the site shows "—" instead of a wrong number.
@@ -527,7 +527,10 @@ sync_now(){
   { printf 'T %s\n' "$nt"; for name in "${!N[@]}"; do printf 'S %s %s\n' "$name" "${N[$name]}"; done; } > "$STATE.n" && mv "$STATE.n" "$STATE"
 }
 pull_and_sync(){ api GET /api/device/config; [ "$HTTP" = 200 ] || return 1
-  printf '%s' "$RESP" > "$REMOTE"; LAST_REV=$(jq -r '.rev // -1' <<<"$RESP"); sync_now "$RESP"; scan_scripts; }
+  printf '%s' "$RESP" > "$REMOTE"; LAST_REV=$(jq -r '.rev // -1' <<<"$RESP"); sync_now "$RESP"; scan_scripts
+  APPLIED_REV=$LAST_REV
+  # tell the website right away that this change is in place (its progress bar waits for this)
+  api POST /api/device/heartbeat "$(jq -nc --argjson s "$(probe_status)" '{status:$s}')" >/dev/null 2>&1 || true; }
 
 # ---------- command worker ----------
 # Commands run here, one after another, so a long Start All never stops the heartbeat
