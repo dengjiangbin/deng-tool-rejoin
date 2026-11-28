@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.29-2"
+AGENT_VERSION="2026.11.29-3"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -394,14 +394,23 @@ one_pkg(){ # validate payload.pkg is one of our clones; echoes it or fails
   return 1
 }
 run_command(){ # action payload_json  -> echoes result, returns 0/1
-  local action="$1" pl="$2" p ok=1 url pkg
+  local action="$1" pl="$2" p ok=1 url pkg out n
   case "$action" in
-    start_all) DELAY=$(clone_delay); for p in "${APPS[@]}"; do root "pidof '$p'" >/dev/null 2>&1 && continue; open_one "$p" || ok=0; sleep "$DELAY"; done; echo "opened ${#APPS[@]}";;
+    start_all) # the same Start as the Termux menu: grid for every clone, each opened into its private server, monitor on
+               if [ -f "$HOME/code616.sh" ] && timeout 20 bash "$HOME/code616.sh" --caps 2>/dev/null </dev/null | grep -q '^start:1'; then
+                 for p in "${APPS[@]}"; do busy_mark "$p"; done
+                 out=$(timeout 900 bash "$HOME/code616.sh" --start-quiet </dev/null 2>&1 | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | tr -d '\r')
+                 n=$(grep -c 'Dibuka' <<<"$out"); [ "$n" -gt 0 ] && { echo "started $n clone$([ "$n" = 1 ] || echo s)"; return 0; }
+                 echo "$(grep -v '^ *$' <<<"$out" | tail -1)"; return 1
+               fi
+               DELAY=$(clone_delay); for p in "${APPS[@]}"; do root "pidof '$p'" >/dev/null 2>&1 && continue
+                 url=$(want_url "$p"); if [ -n "$url" ]; then rejoin_one "$p" "$url" || ok=0; else open_one "$p" || ok=0; fi; sleep "$DELAY"; done; echo "opened ${#APPS[@]}";;
     stop_all)  for p in "${APPS[@]}"; do root "am force-stop '$p'" >/dev/null 2>&1; done; echo "stopped ${#APPS[@]}";;
     rejoin_all) DELAY=$(clone_delay); local n=0
                for p in "${APPS[@]}"; do url=$(want_url "$p"); [ -n "$url" ] || continue; rejoin_one "$p" "$url" || ok=0; n=$((n+1)); sleep "$DELAY"; done
                [ "$n" -gt 0 ] || { echo 'no target set'; return 1; }; echo "rejoined $n";;
-    start_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; open_one "$pkg" && echo "started $pkg" || { echo 'failed'; return 1; };;
+    start_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; url=$(want_url "$pkg")
+               if [ -n "$url" ]; then rejoin_one "$pkg" "$url"; else open_one "$pkg"; fi && echo "started $pkg" || { echo 'failed'; return 1; };;
     stop_clone)  pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; root "am force-stop '$pkg'" >/dev/null 2>&1; echo "stopped $pkg";;
     rejoin_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; url=$(want_url "$pkg"); [ -n "$url" ] || { echo 'no target set'; return 1; }
                rejoin_one "$pkg" "$url" && echo "rejoined $pkg" || { echo 'failed'; return 1; };;
