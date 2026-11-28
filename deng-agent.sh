@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.28-6"
+AGENT_VERSION="2026.11.28-7"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -229,7 +229,7 @@ probe_status(){
     list+=$(jq -nc --arg pkg "$pkg" --arg name "${pkg##*.}" --arg user "${RBX[$pkg]:-}" --argjson run "$([ "$r" = 1 ] && echo true || echo false)" --arg st "$st" --arg ex "${EXE[$pkg]:-}" '{pkg:$pkg,name:$name,user:$user,running:$run,state:$st,ex:$ex}')','
   done <<< "$raw"
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
-    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" --argjson pk "$(pk_json)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,cfg:$cfg,pk:$pk}'
+    --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" --argjson pk "$(pk_json)" --argjson scr "$SCRX" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,cfg:$cfg,pk:$pk,scr:$scr}'
 }
 # CPU % (1-second sample of /proc/stat), RAM and /data storage in MB. Any value that
 # can't be read is sent as null so the site shows "—" instead of a wrong number.
@@ -283,22 +283,29 @@ script_dirs(){ # prints every script folder: one per Delta clone, plus the share
   done
   [ "$arx" = 1 ] && root "test -d '$ARX_AUTO' || mkdir '$ARX_AUTO'" >/dev/null 2>&1 && printf '%s\n' "$ARX_AUTO"
   return 0; }
+script_dirs_ex(){ local d; while IFS= read -r d; do [ -n "$d" ] || continue
+    case "${1:-}" in delta) [ "$d" = "$ARX_AUTO" ] || printf '%s\n' "$d";; arceus) [ "$d" = "$ARX_AUTO" ] && printf '%s\n' "$d";; *) printf '%s\n' "$d";; esac
+  done < <(script_dirs); }
+# where a script lives on this phone -> executor: d = Delta only, a = Arceus X only, da = both
+ex_of_groups(){ case "$1" in d) echo delta;; a) echo arceus;; *) echo '';; esac; }
 script_ok(){ [[ "$1" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,39}$ && "$1" != code616_hb && "$1" != deng_srv ]]; }
-write_script_file(){ # name file   (byte-exact copy into every clone)
+write_script_file(){ # name file [delta|arceus|'']   (byte-exact copy into that executor's folders)
   local name="${1%.lua}" src="$2" dir n=0
   script_ok "$name" || return 1
   while IFS= read -r dir; do [ -n "$dir" ] || continue
-    root "cat > '$dir/$name.lua'" < "$src" >/dev/null 2>&1 && n=$((n+1)); done < <(script_dirs)
+    root "cat > '$dir/$name.lua'" < "$src" >/dev/null 2>&1 && n=$((n+1)); done < <(script_dirs_ex "${3:-}")
   [ "$n" -gt 0 ]
 }
-write_script(){ local tmp="$BASE/.push.$$.$RANDOM" rc; printf '%s' "$2" > "$tmp"; write_script_file "$1" "$tmp"; rc=$?; rm -f "$tmp"; return $rc; }
+write_script(){ local tmp="$BASE/.push.$$.$RANDOM" rc; printf '%s' "$2" > "$tmp"; write_script_file "$1" "$tmp" "${3:-}"; rc=$?; rm -f "$tmp"; return $rc; }
 remove_script(){ local name="${1%.lua}" dir; script_ok "$name" || return 1
   while IFS= read -r dir; do [ -n "$dir" ] && root "rm -f '$dir/$name.lua'" >/dev/null 2>&1; done < <(script_dirs); true; }
 # "name md5" for every script on this cloud phone (union of all clones).
-local_scripts(){ local cmd='' d   # each folder quoted on its own: "Arceus X" has a space in it
-  while IFS= read -r d; do [ -n "$d" ] && cmd+="(cd '$d' && md5sum *.lua) 2>/dev/null; "; done < <(script_dirs); [ -n "$cmd" ] || return 0
+local_scripts(){ local cmd='' d t   # each folder quoted on its own: "Arceus X" has a space in it
+  while IFS= read -r d; do [ -n "$d" ] || continue; t=d; [ "$d" = "$ARX_AUTO" ] && t=a
+    cmd+="(cd '$d' && md5sum *.lua | sed 's/^/$t /') 2>/dev/null; "; done < <(script_dirs); [ -n "$cmd" ] || return 0
   root "$cmd" 2>/dev/null \
-    | awk '{f=$2; sub(/^\*/,"",f); sub(/\.lua$/,"",f); if(f=="code616_hb"||f=="deng_srv") next; c[f]++; if(!(f in s)) s[f]=$1} END{for(f in s) print f, s[f], c[f]}'; }
+    | awk '{t=$1; f=$3; sub(/^\*/,"",f); sub(/\.lua$/,"",f); if(f=="code616_hb"||f=="deng_srv") next; c[f]++; if(t=="d") nd[f]++; g[f]=g[f] t; if(!(f in s)) s[f]=$2}
+           END{for(f in s){x=""; if(index(g[f],"d")) x=x "d"; if(index(g[f],"a")) x=x "a"; print f, s[f], c[f], x, nd[f]+0}}'; }
 local_script_file(){ # name outfile
   local name="$1" out="$2" dir
   while IFS= read -r dir; do [ -n "$dir" ] || continue
@@ -375,7 +382,7 @@ run_command(){ # action payload_json  -> echoes result, returns 0/1
     rejoin_clone) pkg=$(one_pkg "$pl") || { echo 'unknown clone'; return 1; }; url=$(target_url); [ -n "$url" ] || { echo 'no target set'; return 1; }
                rejoin_one "$pkg" "$url" && echo "rejoined $pkg" || { echo 'failed'; return 1; };;
     set_clone_auto) echo 'noted';;  # per-clone auto handled by on-phone monitor; acked for now
-    push_script) write_script "$(jq -r '.name' <<<"$pl")" "$(jq -r '.body' <<<"$pl")" && echo pushed || { echo 'push failed'; return 1; };;
+    push_script) write_script "$(jq -r '.name' <<<"$pl")" "$(jq -r '.body' <<<"$pl")" "$(jq -r '.ex // empty' <<<"$pl")" && echo pushed || { echo 'push failed'; return 1; };;
     remove_script) remove_script "$(jq -r '.name' <<<"$pl")"; echo removed;;
     set_target) local t; t=$(remote_target "$(jq -c '{target:.}' <<<"$pl")"); apply_target "$t"; echo 'target saved';;
     set_settings) set_num "$pl" delay DELAY 0 300; set_num "$pl" interval INTERVAL 1 3600; set_num "$pl" cols COLS 0 8
@@ -458,6 +465,8 @@ ensure_reporter(){ local dir tmp="$BASE/.srv.lua"; printf '%s\n' "$SRV_LUA" > "$
     root "cmp -s '$dir/deng_srv.lua' -" < "$tmp" >/dev/null 2>&1 || root "cat > '$dir/deng_srv.lua'" < "$tmp" >/dev/null 2>&1
   done < <(script_dirs); rm -f "$tmp"; }
 declare -A SRV_BAD=() SRV_LAST=() SRV_TRIES=()
+SCRX='{}'
+scan_scripts(){ SCRX=$(local_scripts | awk '{printf "%s\t%s\n", $1, $4}' | jq -Rnc '[inputs | split("\t") | {(.[0]): .[1]}] | add // {}' 2>/dev/null) || SCRX='{}'; [ -n "$SCRX" ] || SCRX='{}'; }
 SRV_T=''
 server_check(){
   local t wp='' wj='' wpriv=0 r now raw pkg place job priv ts bad
@@ -504,21 +513,22 @@ sync_now(){
   else apply_target "$rt"; nt=$rt; fi
 
   declare -A L=() R=() B=() N=() C=()
-  local ndirs cn; ndirs=$(script_dirs | grep -c .)
-  while read -r name l cn; do [ -n "$name" ] && { L[$name]=$l; C[$name]=$cn; }; done < <(local_scripts)
+  local ndd cn gx dn; ndd=$(script_dirs_ex delta | grep -c .); declare -A G=() RX=()
+  while read -r name l cn gx dn; do [ -n "$name" ] && { L[$name]=$l; C[$name]=${dn:-0}; G[$name]=$gx; }; done < <(local_scripts)
   local rdir="$BASE/rs"; rm -rf "$rdir"; mkdir -p "$rdir"; local i cnt
   cnt=$(jq '.scripts|length' <<<"$cfg" 2>/dev/null || echo 0)
   for ((i=0;i<cnt;i++)); do name=$(jq -r ".scripts[$i].name" <<<"$cfg"); script_ok "$name" || continue
-    jq -j ".scripts[$i].body" <<<"$cfg" > "$rdir/$name"; R[$name]=$(md5 < "$rdir/$name"); done
+    jq -j ".scripts[$i].body" <<<"$cfg" > "$rdir/$name"; R[$name]=$(md5 < "$rdir/$name"); RX[$name]=$(jq -r ".scripts[$i].ex // empty" <<<"$cfg"); done
   while read -r name b; do [ -n "$name" ] && B[$name]=$b; done < <(sed -n 's/^S //p' "$STATE" 2>/dev/null)
   local -a puts=() dels=()
   for name in $(printf '%s\n' "${!L[@]}" "${!R[@]}" "${!B[@]}" | sort -u); do
     l=${L[$name]:-}; r=${R[$name]:-}; b=${B[$name]:-}
     if [ "$l" = "$r" ]; then [ -n "$l" ] && N[$name]=$l
-      # same everywhere it exists, but some clones are missing it: copy it over
-      if [ -n "$l" ] && [ "${C[$name]:-0}" -lt "$ndirs" ]; then write_script_file "$name" "$rdir/$name"; fi
+      # some Delta clones are missing a Delta script: copy it to them (never across Delta and Arceus X)
+      if [ -n "$l" ] && [[ "${G[$name]:-}" == *d* ]] && [ "${C[$name]:-0}" -lt "$ndd" ] && [ -f "$rdir/$name" ]; then write_script_file "$name" "$rdir/$name" delta; fi
     elif [ "$l" = "$b" ] || { [ "$r" != "$b" ] && [ -n "$r" ]; }; then   # take the website's version
-      if [ -n "$r" ]; then write_script_file "$name" "$rdir/$name" && N[$name]=$r; else remove_script "$name"; fi
+      if [ -n "$r" ]; then local wx; if [ -n "${G[$name]:-}" ]; then wx=$(ex_of_groups "${G[$name]}"); else wx=${RX[$name]:-}; fi
+        write_script_file "$name" "$rdir/$name" "$wx" && N[$name]=$r; else remove_script "$name"; fi
       say "↓ script $name"
     else                                                                  # take the cloud phone's version
       if [ -n "$l" ]; then puts+=("$name"); N[$name]=$l; else dels+=("$name"); fi
@@ -528,7 +538,7 @@ sync_now(){
   if [ ${#puts[@]} -gt 0 ] || [ ${#dels[@]} -gt 0 ]; then
     local pj='[]' f="$BASE/.up.$$"
     for name in "${puts[@]}"; do local_script_file "$name" "$f" || continue
-      pj=$(jq -c --arg n "$name" --rawfile b "$f" '.+[{name:$n,body:$b}]' <<<"$pj"); done; rm -f "$f"
+      pj=$(jq -c --arg n "$name" --rawfile b "$f" --arg x "$(ex_of_groups "${G[$name]:-da}")" '.+[{name:$n,body:$b,ex:$x}]' <<<"$pj"); done; rm -f "$f"
     push=$(jq -c --argjson p "$pj" --argjson d "$(printf '%s\n' "${dels[@]}" | jq -Rsc 'split("\n")|map(select(length>0))')" '.scripts_put=$p|.scripts_del=$d' <<<"$push")
   fi
   if [ "$push" != '{}' ]; then
@@ -538,7 +548,7 @@ sync_now(){
   { printf 'T %s\n' "$nt"; for name in "${!N[@]}"; do printf 'S %s %s\n' "$name" "${N[$name]}"; done; } > "$STATE.n" && mv "$STATE.n" "$STATE"
 }
 pull_and_sync(){ api GET /api/device/config; [ "$HTTP" = 200 ] || return 1
-  printf '%s' "$RESP" > "$REMOTE"; LAST_REV=$(jq -r '.rev // -1' <<<"$RESP"); sync_now "$RESP"; }
+  printf '%s' "$RESP" > "$REMOTE"; LAST_REV=$(jq -r '.rev // -1' <<<"$RESP"); sync_now "$RESP"; scan_scripts; }
 
 # ---------- command worker ----------
 # Commands run here, one after another, so a long Start All never stops the heartbeat
@@ -591,6 +601,7 @@ loop(){
     if [ $((tick % 6)) = 0 ]; then
       scan_key; scan_users
       [ -s "$REMOTE" ] && sync_now "$(cat "$REMOTE")"
+      scan_scripts
     fi
     tick=$((tick+1))
     st=$(probe_status)
