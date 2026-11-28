@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.29-9"
+AGENT_VERSION="2026.11.29-10"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -213,18 +213,21 @@ set_num(){ # payload key CFGKEY min max
   local v; v=$(jq -r --arg k "$2" '.[$k] // empty' <<<"$1"); [[ "$v" =~ ^[0-9]{1,4}$ ]] && [ "$v" -ge "$4" ] && [ "$v" -le "$5" ] && cfg_set "$3" "$v"; return 0; }
 probe_status(){
   load_apps; exec_map
-  local total=${#APPS[@]} run=0 list='' now pkg r mt w x st age raw ui
+  local total=${#APPS[@]} run=0 list='' now pkg r mt w x st age raw ui oom kb of
   # when the phone last started: a clone whose last sign of life is older than that was never opened since,
   # even if Android started its process in the background after the reboot
   now=$(date +%s); ui=$(( now - $(cut -d. -f1 /proc/uptime 2>/dev/null || echo "$now") ))
   # per clone: running? Android's ranking of it (oom_score_adj: 0-200 shown on screen, 900+ cached in the background)
   # and its heartbeat file '<ok|dc> <time> [start]'
-  raw=$(root "for p in ${APPS[*]}; do f=/storage/emulated/0/Android/data/\$p/$HB_REL; r=0; o=-; i=\$(pidof \$p 2>/dev/null | cut -d' ' -f1); [ -n \"\$i\" ] && { r=1; o=\$(cat /proc/\$i/oom_score_adj 2>/dev/null || echo -); }
-          if [ -f \$f ]; then echo \"\$p \$r \$o \$(stat -c %Y \$f) \$(head -c 60 \$f | tr -d '\n')\"; else echo \"\$p \$r \$o - -\"; fi; done" 2>/dev/null)
-  while read -r pkg r oom mt w _t x _; do
+  raw=$(root "for p in ${APPS[*]}; do f=/storage/emulated/0/Android/data/\$p/$HB_REL; r=0; o=-; k=-; i=\$(pidof \$p 2>/dev/null | cut -d' ' -f1); [ -n \"\$i\" ] && { r=1; o=\$(cat /proc/\$i/oom_score_adj 2>/dev/null || echo -); k=\$(sed -n 's/^VmRSS:[^0-9]*\\([0-9]*\\).*/\\1/p' /proc/\$i/status 2>/dev/null); }
+          if [ -f \$f ]; then echo \"\$p \$r \$o \${k:--} \$(stat -c %Y \$f) \$(head -c 60 \$f | tr -d '\n')\"; else echo \"\$p \$r \$o \${k:--} - -\"; fi; done" 2>/dev/null)
+  while read -r pkg r oom kb mt w _t x _; do
     [ -n "$pkg" ] || continue
-    # no heartbeat file to go by: a process Android keeps cached in the background (900+) is not an open clone
-    [ "$r" = 1 ] && [ "$mt" = - ] && [[ "$oom" =~ ^[0-9]+$ ]] && [ "$oom" -ge 900 ] && r=0
+    # no heartbeat file to go by: only a process that is cached in the background (900+), small (Roblox not loaded,
+    # under 250 MB) and not opened by DENG since the phone started counts as closed. A minimized clone stays running.
+    if [ "$r" = 1 ] && [ "$mt" = - ] && [[ "$oom" =~ ^[0-9]+$ && "$kb" =~ ^[0-9]+$ ]] && [ "$oom" -ge 900 ] && [ "$kb" -lt 256000 ]; then
+      of="${C616_CFG%/*}/opened/$pkg"; { [ -f "$of" ] && [ "$(stat -c %Y "$of" 2>/dev/null || echo 0)" -ge "$ui" ]; } || r=0
+    fi
     [ "$r" = 1 ] && [[ "$mt" =~ ^[0-9]+$ ]] && [ "$mt" -lt "$ui" ] && r=0   # last sign of life is from before the reboot
     if [ "$r" != 1 ]; then st=off
     else run=$((run+1)); st=running
@@ -272,7 +275,7 @@ open_one(){ allowed "$1" || return 1; busy_mark "$1"; grid_slot "$1"; mark_start
 # Rejoin = close the clone, put it back in its grid slot, then open it into the server.
 # Opening a link in a clone that is still running skips the grid and the window lands anywhere.
 # The busy mark tells code616's monitor to leave this clone alone meanwhile (no double launch).
-busy_mark(){ mkdir -p "${C616_CFG%/*}/busy" && : > "${C616_CFG%/*}/busy/$1"; }
+busy_mark(){ mkdir -p "${C616_CFG%/*}/busy" "${C616_CFG%/*}/opened" && : > "${C616_CFG%/*}/busy/$1" && : > "${C616_CFG%/*}/opened/$1"; }
 rejoin_one(){ allowed "$1" || return 1; local url="$2"; busy_mark "$1"
   root "am force-stop '$1'" >/dev/null 2>&1; sleep 2
   grid_slot "$1"; mark_starting "$1"
