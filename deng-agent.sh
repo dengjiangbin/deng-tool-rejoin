@@ -13,7 +13,7 @@ LAUNCH_AUTH="$LAUNCH_DIR/auth"
 DEFAULT_SERVER="https://deng-rejoin.discloud.dev"
 launcher_server(){ local s="$DEFAULT_SERVER"; [ -f "$LAUNCH_DIR/server" ] && s="$(cat "$LAUNCH_DIR/server" 2>/dev/null)"; printf '%s' "${s%/}"; }
 PIDFILE="$BASE/agent.pid"
-AGENT_VERSION="2026.11.28-4"
+AGENT_VERSION="2026.11.28-5"
 SELF="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 SELF_URL="https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/deng-agent.sh"
 POLL=5
@@ -209,7 +209,7 @@ probe_cfg(){ printf '{"delay":%s,"interval":%s,"cols":%s,"key_wait":%s,"hb":%s,"
 set_num(){ # payload key CFGKEY min max
   local v; v=$(jq -r --arg k "$2" '.[$k] // empty' <<<"$1"); [[ "$v" =~ ^[0-9]{1,4}$ ]] && [ "$v" -ge "$4" ] && [ "$v" -le "$5" ] && cfg_set "$3" "$v"; return 0; }
 probe_status(){
-  load_apps
+  load_apps; exec_map
   local total=${#APPS[@]} run=0 list='' now pkg r mt w x st age raw
   now=$(date +%s)
   raw=$(root "for p in ${APPS[*]}; do f=/storage/emulated/0/Android/data/\$p/$HB_REL; r=0; pidof \$p >/dev/null 2>&1 && r=1
@@ -225,7 +225,7 @@ probe_status(){
         elif [ "$w" = ok ]; then st=stuck; fi
       fi
     fi
-    list+=$(jq -nc --arg pkg "$pkg" --arg name "${pkg##*.}" --arg user "${RBX[$pkg]:-}" --argjson run "$([ "$r" = 1 ] && echo true || echo false)" --arg st "$st" '{pkg:$pkg,name:$name,user:$user,running:$run,state:$st}')','
+    list+=$(jq -nc --arg pkg "$pkg" --arg name "${pkg##*.}" --arg user "${RBX[$pkg]:-}" --argjson run "$([ "$r" = 1 ] && echo true || echo false)" --arg st "$st" --arg ex "${EXE[$pkg]:-}" '{pkg:$pkg,name:$name,user:$user,running:$run,state:$st,ex:$ex}')','
   done <<< "$raw"
   jq -nc --argjson c "$total" --argjson r "$run" --argjson d "$((total-run))" \
     --argjson list "[${list%,}]" --argjson sys "$(probe_sys)" --argjson key "$KEYINFO" --arg ver "$AGENT_VERSION" --argjson cfg "$(probe_cfg)" --argjson pk "$(pk_json)" '{clones:$c,running:$r,dead:$d,list:$list,sys:$sys,key:$key,ver:$ver,cfg:$cfg,pk:$pk}'
@@ -264,14 +264,24 @@ target_url(){ local t; t=$(local_target)
   case "$t" in ps\|*) printf '%s' "${t#ps|}";; pj\|*) local r=${t#pj|}; printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s' "${r%%|*}" "${r#*|}";; esac; }
 # ---------- scripts (synced with the code616 Script menu) ----------
 EXT_ROOT=/storage/emulated/0/Android/data
-script_dirs(){ # prints each clone's script folder, creating it once Delta has run
-  local p ext dir owner
+# Executors. Delta keeps its files inside each clone's own folder (files/gloop/external).
+# Arceus X leaves that folder empty and keeps one shared folder on the phone for all its clones.
+ARX_DIR='/storage/emulated/0/Arceus X'; ARX_AUTO="$ARX_DIR/Autoexec"
+declare -A EXE=()
+exec_map(){ local raw p e; EXE=(); [ ${#APPS[@]} -gt 0 ] || return 0
+  raw=$(root "a=0; [ -d '$ARX_DIR' ] && a=1; for p in ${APPS[*]}; do if [ -d $EXT_ROOT/\$p/files/gloop/external ]; then echo \"\$p delta\"; elif [ \$a = 1 ]; then echo \"\$p arceus\"; fi; done" 2>/dev/null)
+  while read -r p e; do [ -n "$p" ] && EXE[$p]=$e; done <<< "$raw"; }
+script_dirs(){ # prints every script folder: one per Delta clone, plus the shared Arceus X folder once
+  local p ext dir owner arx=0
   for p in "${APPS[@]}"; do ext="$EXT_ROOT/$p/files/gloop/external"; dir="$ext/Autoexecute"
     if root "test -d '$dir' && test ! -L '$dir'" >/dev/null 2>&1; then printf '%s\n' "$dir"
     elif root "test -d '$ext' && test ! -L '$ext' && mkdir '$dir'" >/dev/null 2>&1; then
       owner=$(root "stat -c '%u:%g' '$ext'" 2>/dev/null); [[ "$owner" =~ ^[0-9]+:[0-9]+$ ]] && root "chown '$owner' '$dir'" >/dev/null 2>&1
-      printf '%s\n' "$dir"; fi
-  done; }
+      printf '%s\n' "$dir"
+    elif root "test -d '$ARX_DIR' && test ! -L '$ARX_DIR'" >/dev/null 2>&1; then arx=1; fi
+  done
+  [ "$arx" = 1 ] && root "test -d '$ARX_AUTO' || mkdir '$ARX_AUTO'" >/dev/null 2>&1 && printf '%s\n' "$ARX_AUTO"
+  return 0; }
 script_ok(){ [[ "$1" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,39}$ && "$1" != code616_hb && "$1" != deng_srv ]]; }
 write_script_file(){ # name file   (byte-exact copy into every clone)
   local name="${1%.lua}" src="$2" dir n=0
@@ -284,8 +294,9 @@ write_script(){ local tmp="$BASE/.push.$$.$RANDOM" rc; printf '%s' "$2" > "$tmp"
 remove_script(){ local name="${1%.lua}" dir; script_ok "$name" || return 1
   while IFS= read -r dir; do [ -n "$dir" ] && root "rm -f '$dir/$name.lua'" >/dev/null 2>&1; done < <(script_dirs); true; }
 # "name md5" for every script on this cloud phone (union of all clones).
-local_scripts(){ local dirs; dirs=$(script_dirs | tr '\n' ' '); [ -n "${dirs// /}" ] || return 0
-  root "for d in $dirs; do cd \"\$d\" 2>/dev/null && md5sum *.lua 2>/dev/null; done" 2>/dev/null \
+local_scripts(){ local cmd='' d   # each folder quoted on its own: "Arceus X" has a space in it
+  while IFS= read -r d; do [ -n "$d" ] && cmd+="(cd '$d' && md5sum *.lua) 2>/dev/null; "; done < <(script_dirs); [ -n "$cmd" ] || return 0
+  root "$cmd" 2>/dev/null \
     | awk '{f=$2; sub(/^\*/,"",f); sub(/\.lua$/,"",f); if(f=="code616_hb"||f=="deng_srv") next; c[f]++; if(!(f in s)) s[f]=$1} END{for(f in s) print f, s[f], c[f]}'; }
 local_script_file(){ # name outfile
   local name="$1" out="$2" dir
@@ -320,8 +331,9 @@ write_key(){ # key mode [pkg]
   local key="$1" mode="$2" only="${3:-}" p f kt ok=0 bad=0 okc
   local -a targets=() was=()
   [[ "$key" =~ ^[A-Za-z0-9._=-]{1,512}$ ]] || { echo 'invalid key'; return 1; }
-  for p in "${APPS[@]}"; do [ -z "$only" ] || [ "$p" = "$only" ] && targets+=("$p"); done
-  [ ${#targets[@]} -gt 0 ] || { echo 'no clones'; return 1; }
+  exec_map
+  for p in "${APPS[@]}"; do [ "${EXE[$p]:-}" = arceus ] && continue; [ -z "$only" ] || [ "$p" = "$only" ] && targets+=("$p"); done
+  [ ${#targets[@]} -gt 0 ] || { echo 'no Delta clones (Arceus X needs no key)'; return 1; }
   kt="$BASE/.key.$$"; ( umask 077; printf '%s' "$key" > "$kt" )
   for p in "${targets[@]}"; do root "pidof '$p'" >/dev/null 2>&1 && { root "am force-stop '$p'" >/dev/null 2>&1; was+=("$p"); }; done
   [ ${#was[@]} -gt 0 ] && sleep 2
@@ -393,19 +405,22 @@ scan_key(){
       done
     done" 2>/dev/null)
   shared=$(root "head -c 2048 /storage/emulated/0/Delta/Internals/Cache/license" 2>/dev/null | tr -d '\r\n\t')
-  KEYINFO=$(jq -Rnc --arg raw "$raw" --arg shared "$shared" --arg pkgs "$pkgs" '
+  exec_map; local arx='' p; for p in "${APPS[@]}"; do [ "${EXE[$p]:-}" = arceus ] && arx+="$p "; done
+  KEYINFO=$(jq -Rnc --arg raw "$raw" --arg shared "$shared" --arg pkgs "$pkgs" --arg arx "$arx" '
     def keyof: if test("^[A-Za-z0-9._=-]{4,512}$") then .
                else ((capture("(?i)\"?(license|key)\"?\\s*[:=>]\\s*\"?(?<k>[A-Za-z0-9._=-]{8,512})") // {}).k) end;
     def tail4: if . == null then null else .[-4:] end;
     def rank: if test("/gloop/external/Internals/cache/license$") then 0 elif startswith("/storage") then 1 else 2 end;
     ($shared | keyof) as $sk
     | ($raw | split("\n") | map(select(length>0) | split("\t") | {pkg:.[0], path:.[1], k:((.[2] // "") | keyof)}) | map(select(.k != null))) as $found
+    | ($arx | split(" ") | map(select(length>0))) as $ax
     | ($pkgs | split(" ") | map(select(length>0))) as $all
-    | [ $all[] as $p | ($found | map(select(.pkg == $p)) | sort_by(.path|rank) | first) as $f
+    | [ $all[] as $p | select(($ax | index([$p])) == null) | ($found | map(select(.pkg == $p)) | sort_by(.path|rank) | first) as $f
         | {name: ($p | split(".") | last), pkg: $p,
            tail: (if $f then ($f.k|tail4) elif $sk then ($sk|tail4) else null end),
            src: (if $f then (if ($f.path|rank) == 0 then "cache" else "delta" end) elif $sk then "shared" else null end)} ] as $list
     | {shared: ($sk|tail4), list: $list, clones: ($list|map(select(.tail))|length), total: ($list|length),
+       arceus: [ $ax[] | {name: (split(".") | last), pkg: .} ],
        tails: ($list|map(.tail)|map(select(.))|unique|.[:3]), same: (($list|map(.tail)|map(select(.))|unique|length) <= 1)}' 2>/dev/null) || KEYINFO='{}'
 }
 
@@ -438,7 +453,7 @@ SRV_LUA='task.spawn(function()
   end
 end)'
 ensure_reporter(){ local dir tmp="$BASE/.srv.lua"; printf '%s\n' "$SRV_LUA" > "$tmp"
-  while IFS= read -r dir; do [ -n "$dir" ] || continue
+  while IFS= read -r dir; do [ -n "$dir" ] && [ "$dir" != "$ARX_AUTO" ] || continue
     root "cmp -s '$dir/deng_srv.lua' -" < "$tmp" >/dev/null 2>&1 || root "cat > '$dir/deng_srv.lua'" < "$tmp" >/dev/null 2>&1
   done < <(script_dirs); rm -f "$tmp"; }
 declare -A SRV_BAD=() SRV_LAST=() SRV_TRIES=()
