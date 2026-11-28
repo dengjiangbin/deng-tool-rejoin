@@ -163,14 +163,23 @@ autostart_install(){
 # DENG: open the DENG menu when Termux starts (turn off in the DENG menu)
 if [ -z "${DENG_AUTO_DONE:-}" ] && [ -t 0 ] && [ ! -f "$HOME/.deng/noauto" ] && command -v start >/dev/null 2>&1; then
   export DENG_AUTO_DONE=1
-  start deng
+  DENG_FROM_AUTO=1 start deng
 fi
 EOS
   # non-login shells read ~/.bashrc instead
   grep -q 'deng-auto.sh' "$HOME/.bashrc" 2>/dev/null || printf '\n[ -f "%s" ] && . "%s"\n' "$AUTOSH" "$AUTOSH" >> "$HOME/.bashrc"
 }
 autostart_on(){ [ -f "$AUTOSH" ] && [ ! -f "$NOAUTO" ]; }
-autostart_toggle(){ if autostart_on; then : > "$NOAUTO"; say 'Auto-start OFF.'; else rm -f "$NOAUTO"; autostart_install; say 'Auto-start ON.'; fi; sleep 1; }
+autostart_toggle(){ if autostart_on; then : > "$NOAUTO"; say 'Auto-start OFF.'; [ "$(tool_cfg AUTOSTART)" = 1 ] && say 'Catatan: Auto Start di Settings juga tidak jalan selama ini OFF.'; else rm -f "$NOAUTO"; autostart_install; say 'Auto-start ON.'; fi; sleep 1; }
+tool_cfg(){ [ -f "$HOME/.code616/config" ] && sed -n "s/^$1=//p" "$HOME/.code616/config" | tail -1; }
+# Settings > Auto Start: when Termux itself opened DENG, open the clones and start rejoin without being asked.
+auto_run(){
+  [ "${DENG_FROM_AUTO:-}" = 1 ] || return 0
+  unset DENG_FROM_AUTO
+  [ "$(tool_cfg AUTOSTART)" = 1 ] && [ -f "$CODE616" ] || return 0
+  timeout 10 bash "$CODE616" --caps </dev/null 2>/dev/null | grep -q '^auto:1' || return 0
+  DENG_TOP=1 bash "$CODE616" --autostart
+}
 if [ "${1:-}" = --autostart-install ]; then autostart_install; exit 0; fi
 
 # ---- menu ----
@@ -323,7 +332,8 @@ menu(){
 }
 gate
 update_tools
-[ -f "$NOAUTO" ] || autostart_on || autostart_install   # older installs get auto-start too
+[ -f "$NOAUTO" ] || autostart_install   # keeps the Termux hook current (it also carries the Auto Start marker)
 agent_start
 kb_fix
+auto_run
 menu
